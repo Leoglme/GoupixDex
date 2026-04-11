@@ -1,0 +1,62 @@
+services:
+  mariadb:
+    container_name: goupixdex-mariadb
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-goupixdex}
+      MYSQL_USER: ${MYSQL_USER:-goupix}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-goupix}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: goupixdex-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # Fixed host "mariadb" (service name). Do not pass ${DATABASE_URL} from host .env here:
+      # that often points to 127.0.0.1 and breaks inside the container.
+      DATABASE_URL: mysql+pymysql://goupix:goupix@mariadb:3306/goupixdex
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      SEED_USER_EMAIL: ${SEED_USER_EMAIL:-}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
+      POKE_WALLET_API_KEY: ${POKE_WALLET_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      VINTED_PUBLISH_STUB: ${VINTED_PUBLISH_STUB:-true}
+    volumes:
+      - .:/app
+      - uploads_data:/app/uploads
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    command: >
+      sh -c "python migrations/run_migrations.py &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+  phpmyadmin:
+    container_name: goupixdex-phpmyadmin
+    image: phpmyadmin:5
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mariadb
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+    ports:
+      - "${PHPMYADMIN_PORT:-8080}:80"
+    depends_on:
+      - mariadb
+
+volumes:
+  mariadb_data:
+  uploads_data:

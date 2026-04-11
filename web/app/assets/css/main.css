@@ -1,0 +1,34 @@
+@import "tailwindcss" theme(static);
+@import "@nuxt/ui";
+
+@theme static {
+  --font-sans: 'Public Sans', sans-serif;
+
+  /* GoupixDex brand — primary #e86112, accent #fdb140 */
+  --color-primary-50: #fff4ec;
+  --color-primary-100: #ffe4d4;
+  --color-primary-200: #ffc9a8;
+  --color-primary-300: #ffa06b;
+  --color-primary-400: #f47a32;
+  --color-primary-500: #e86112;
+  --color-primary-600: #ca4c0d;
+  --color-primary-700: #a73b0f;
+  --color-primary-800: #873212;
+  --color-primary-900: #6f2c12;
+  --color-primary-950: #3c1408;
+
+  --color-secondary-400: #fdb140;
+  --color-secondary-500: #f5a524;
+  --color-secondary-600: #d98716;
+}
+
+/* Curseur main sur les actions cliquables (complète UButton via app.config) */
+@layer base {
+  button:enabled:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+
+  [role='button']:not([aria-disabled='true']):not([data-disabled]) {
+    cursor: pointer;
+  }
+}

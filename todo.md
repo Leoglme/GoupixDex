@@ -1,0 +1,4 @@
+- fix scan card response poke name, title format etc
+- sync vinted
+- graphiques du template dashboard
+- backup api key 

@@ -1,0 +1,7 @@
+.vscode
+.idea
+api/.venv
+api/__pycache__
+api/*.pyc
+api/.env
+web/.env

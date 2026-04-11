@@ -1,0 +1,44 @@
+-- GoupixDex initial schema (MariaDB / MySQL compatible)
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  `password` VARCHAR(255) NOT NULL,
+  vinted_email VARCHAR(255) NULL,
+  `vinted_password` VARCHAR(255) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS settings (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL UNIQUE,
+  margin_percent INT NOT NULL DEFAULT 20,
+  CONSTRAINT fk_settings_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS articles (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(512) NOT NULL,
+  description TEXT NOT NULL,
+  pokemon_name VARCHAR(255) NULL,
+  set_code VARCHAR(64) NULL,
+  card_number VARCHAR(64) NULL,
+  `condition` VARCHAR(64) NOT NULL DEFAULT 'Near Mint',
+  purchase_price DECIMAL(12, 2) NOT NULL,
+  sell_price DECIMAL(12, 2) NULL,
+  is_sold TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  sold_at DATETIME(6) NULL,
+  CONSTRAINT fk_articles_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  INDEX idx_articles_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS images (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  article_id BIGINT NOT NULL,
+  image_url VARCHAR(1024) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_images_article FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE,
+  INDEX idx_images_article (article_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
