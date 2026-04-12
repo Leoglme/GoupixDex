@@ -1,4 +1,9 @@
-"""Execute SQL migration files in order (``001_*.sql``, ``002_*.sql``, ...)."""
+"""Execute SQL migration files in order (``001_*.sql``, ``002_*.sql``, ...).
+
+Chaque fichier n’est exécuté qu’une fois : le nom du fichier est enregistré dans
+``schema_migrations``. Les fichiers SQL doivent rester idempotents lorsque c’est
+possible (ex. ``CREATE TABLE IF NOT EXISTS``, ``ADD COLUMN IF NOT EXISTS``).
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,13 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from sqlalchemy import create_engine, text
+
+_SCHEMA_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  name VARCHAR(255) NOT NULL PRIMARY KEY,
+  applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
 
 
 def _split_statements(sql: str) -> list[str]:
@@ -47,7 +59,19 @@ def main() -> None:
         print("No migration files found.", file=sys.stderr)
         raise SystemExit(1)
 
+    with engine.begin() as conn:
+        conn.execute(text(_SCHEMA_TABLE_DDL))
+
     for path in files:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM schema_migrations WHERE name = :n"),
+                {"n": path.name},
+            ).first()
+        if row is not None:
+            print(f"Skipped (already applied): {path.name}")
+            continue
+
         sql_text = path.read_text(encoding="utf-8")
         with engine.begin() as conn:
             for stmt in _split_statements(sql_text):
@@ -57,6 +81,10 @@ def main() -> None:
                 if not stmt:
                     continue
                 conn.execute(text(stmt))
+            conn.execute(
+                text("INSERT INTO schema_migrations (name) VALUES (:n)"),
+                {"n": path.name},
+            )
         print(f"Applied: {path.name}")
 
 

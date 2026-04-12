@@ -1,11 +1,23 @@
 <script setup lang="ts">
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 
-const props = defineProps<{
-  mode: 'create' | 'edit'
-  article?: Article | null
-  loading?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    mode: 'create' | 'edit'
+    article?: Article | null
+    loading?: boolean
+    /** Texte affiché sous le bouton pendant le chargement (ex. attente Vinted). */
+    loadingHint?: string | null
+    /** Masquer la case « Publier sur Vinted » (ex. création groupée avec option globale). */
+    hideVintedOption?: boolean
+    /** Afficher le bouton d’envoi du formulaire (désactiver si envoi délégué au parent). */
+    showSubmitButton?: boolean
+  }>(),
+  {
+    hideVintedOption: false,
+    showSubmitButton: true
+  }
+)
 
 const emit = defineEmits<{
   submitCreate: [form: FormData]
@@ -17,12 +29,22 @@ const description = ref('')
 const pokemonName = ref('')
 const setCode = ref('')
 const cardNumber = ref('')
+const conditionOptions: { label: string, value: string }[] = [
+  { label: 'Mint', value: 'Mint' },
+  { label: 'Near Mint', value: 'Near Mint' },
+  { label: 'Excellent', value: 'Excellent' },
+  { label: 'Good', value: 'Good' },
+  { label: 'Played', value: 'Played' }
+]
+
 const condition = ref('Near Mint')
 const purchasePrice = ref('')
 const sellPrice = ref('')
 
 const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
+/** Opt-in publication Vinted (création uniquement, désactivé par défaut). */
+const publishToVinted = ref(false)
 
 watch(
   () => props.article,
@@ -35,7 +57,10 @@ watch(
     pokemonName.value = a.pokemon_name ?? ''
     setCode.value = a.set_code ?? ''
     cardNumber.value = a.card_number ?? ''
-    condition.value = a.condition || 'Near Mint'
+    condition.value =
+      a.condition && conditionOptions.some((o) => o.value === a.condition)
+        ? a.condition
+        : 'Near Mint'
     purchasePrice.value = String(a.purchase_price)
     sellPrice.value = a.sell_price != null ? String(a.sell_price) : ''
   },
@@ -87,7 +112,7 @@ function applyScanPrefill(scan: {
   }
 }
 
-defineExpose({ applyScanPrefill, addImageFiles })
+defineExpose({ applyScanPrefill, addImageFiles, buildCreateFormData })
 
 function buildCreateFormData(): FormData {
   const fd = new FormData()
@@ -110,10 +135,18 @@ function buildCreateFormData(): FormData {
   for (const f of imageFiles.value) {
     fd.append('images', f)
   }
+  fd.append('publish_to_vinted', publishToVinted.value ? 'true' : 'false')
   return fd
 }
 
 const config = useRuntimeConfig()
+
+function imageSrc(url: string) {
+  if (url.startsWith('http')) {
+    return url
+  }
+  return `${config.public.apiBase}${url}`
+}
 
 function submit() {
   if (props.mode === 'create') {
@@ -142,7 +175,13 @@ function submit() {
         <UInput v-model="title" class="w-full" />
       </UFormField>
       <UFormField label="État">
-        <UInput v-model="condition" class="w-full" />
+        <USelect
+          v-model="condition"
+          :items="conditionOptions"
+          value-key="value"
+          label-key="label"
+          class="w-full"
+        />
       </UFormField>
     </div>
     <UFormField label="Description" required>
@@ -168,17 +207,28 @@ function submit() {
           class="w-full"
         />
       </UFormField>
-      <UFormField
-        v-if="mode === 'edit'"
-        label="Prix de vente (€)"
-      >
+      <UFormField label="Prix de vente (€)">
         <UInput
           v-model="sellPrice"
           type="text"
           inputmode="decimal"
           class="w-full"
+          :placeholder="mode === 'create' ? 'Optionnel — utilisé pour Vinted' : undefined"
         />
       </UFormField>
+    </div>
+
+    <div
+      v-if="mode === 'create' && !hideVintedOption"
+      class="rounded-lg border border-default p-4 space-y-2"
+    >
+      <UCheckbox
+        v-model="publishToVinted"
+        label="Publier sur Vinted"
+      />
+      <p class="text-sm text-muted">
+        Si coché, l'API tente de créer l'annonce (identifiants Vinted et automation navigateur requis).
+      </p>
     </div>
 
     <div v-if="mode === 'create'" class="space-y-2">
@@ -219,7 +269,7 @@ function submit() {
         <img
           v-for="im in article.images"
           :key="im.id"
-          :src="`${config.public.apiBase}${im.image_url}`"
+          :src="imageSrc(im.image_url)"
           alt=""
           class="size-24 rounded-lg object-cover ring ring-default"
         >
@@ -227,11 +277,19 @@ function submit() {
     </div>
 
     <UButton
+      v-if="showSubmitButton"
       color="primary"
       :loading="loading"
       @click="submit"
     >
-      {{ mode === 'create' ? 'Créer l’article' : 'Enregistrer' }}
+      {{ mode === 'create' ? "Créer l'article" : 'Enregistrer' }}
     </UButton>
+    <p
+      v-if="showSubmitButton && loading && loadingHint"
+      class="text-sm text-muted flex items-center gap-2"
+    >
+      <UIcon name="i-lucide-loader-2" class="size-4 shrink-0 animate-spin" />
+      {{ loadingHint }}
+    </p>
   </div>
 </template>

@@ -20,7 +20,7 @@ def dashboard(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     include_market: bool = Query(
-        True,
+        False,
         description="If true, sums Cardmarket EUR per article via PokéWallet (slower).",
     ),
 ) -> dict[str, Any]:

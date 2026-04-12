@@ -1,8 +1,7 @@
-"""Ensure every user has a margin row (default 20% benefit markup)."""
+"""Ensure every user has a margin row (default 60% benefit markup)."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -19,14 +18,12 @@ def main() -> None:
     if load_dotenv:
         load_dotenv(_ROOT / ".env")
 
-    default_margin = int(os.environ.get("SEED_MARGIN_PERCENT", "20"))
-    if default_margin < 0 or default_margin > 500:
-        print("SEED_MARGIN_PERCENT must be between 0 and 500.", file=sys.stderr)
-        raise SystemExit(1)
-
     from sqlalchemy.orm import Session
 
+    from config import get_settings
     from core.database import SessionLocal
+
+    default_margin = get_settings().seed_margin_percent
     from models.margin_settings import MarginSettings
     from models.user import User
 

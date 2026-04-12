@@ -16,9 +16,43 @@ export interface Article {
   purchase_price: number
   sell_price: number | null
   is_sold: boolean
+  /** Mis à jour côté serveur après une publication Vinted réussie. */
+  published_on_vinted?: boolean
+  vinted_published_at?: string | null
   created_at: string
   sold_at: string | null
   images: ArticleImage[]
+}
+
+export interface CreateArticleVintedResult {
+  published?: boolean
+  skipped?: boolean
+  detail?: string
+  /** Publication lancée en arrière-plan ; suivre ``stream_path`` en SSE. */
+  status?: 'running'
+  stream_path?: string
+}
+
+export interface CreateArticleResponse {
+  article: Article
+  vinted: CreateArticleVintedResult
+}
+
+export interface PublishVintedResponse {
+  vinted: {
+    status: 'running'
+    stream_path: string
+  }
+}
+
+export interface VintedBatchStartResponse {
+  job_id: string
+  stream_path: string
+}
+
+export interface VintedBatchActiveResponse {
+  job_id: string | null
+  stream_path: string | null
 }
 
 export interface ArticleUpdateBody {
@@ -46,10 +80,10 @@ export function useArticles() {
   }
 
   async function createArticle(form: FormData) {
-    const { data } = await $api.post<{ article: Article }>('/articles', form, {
+    const { data } = await $api.post<CreateArticleResponse>('/articles', form, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-    return data.article
+    return data
   }
 
   async function updateArticle(id: number, body: ArticleUpdateBody) {
@@ -61,10 +95,40 @@ export function useArticles() {
     await $api.delete(`/articles/${id}`)
   }
 
+  async function deleteArticlesBulk(ids: number[]) {
+    const { data } = await $api.post<{ deleted: number, requested: number }>(
+      '/articles/bulk-delete',
+      { ids }
+    )
+    return data
+  }
+
   async function markSold(id: number, sellPrice: number) {
     const { data } = await $api.patch<Article>(`/articles/${id}/sold`, {
       sell_price: sellPrice
     })
+    return data
+  }
+
+  async function publishArticleToVinted(id: number) {
+    const { data } = await $api.post<PublishVintedResponse>(
+      `/articles/${id}/publish-vinted`
+    )
+    return data
+  }
+
+  async function startVintedBatch(articleIds: number[]) {
+    const { data } = await $api.post<VintedBatchStartResponse>(
+      '/articles/vinted-batch',
+      { article_ids: articleIds }
+    )
+    return data
+  }
+
+  async function getVintedBatchActive() {
+    const { data } = await $api.get<VintedBatchActiveResponse>(
+      '/articles/vinted-batch/active'
+    )
     return data
   }
 
@@ -74,6 +138,10 @@ export function useArticles() {
     createArticle,
     updateArticle,
     deleteArticle,
-    markSold
+    deleteArticlesBulk,
+    markSold,
+    publishArticleToVinted,
+    startVintedBatch,
+    getVintedBatchActive
   }
 }

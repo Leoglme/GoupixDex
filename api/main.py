@@ -10,13 +10,11 @@ try:
     load_dotenv()
 except ImportError:
     pass
-from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
 from routes import articles as articles_routes
@@ -27,12 +25,14 @@ from routes import settings_route
 from routes import stats_route
 from routes import users as users_routes
 
+from core.win32_asyncio import ensure_proactor_event_loop
+
+ensure_proactor_event_loop()
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("goupixdex")
 
 settings = get_settings()
-upload_path = Path(settings.upload_dir)
-upload_path.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="GoupixDex API",
@@ -91,8 +91,6 @@ async def unhandled_exception_handler(
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
-
-app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
 app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(users_routes.router)

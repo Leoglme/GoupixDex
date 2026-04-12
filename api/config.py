@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TypedDict
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app_types.vinted import VintedPackageSize
@@ -19,7 +20,11 @@ class AppConfig(TypedDict):
 
 
 config: AppConfig = {
-    "category_path": ["Divertissement", "Jeux et puzzles", "Jeux de cartes"],
+    "category_path": [
+        "Loisirs et collections",
+        "Cartes à collectionner",
+        "Cartes à collectionner à l'unité",
+    ],
     "brand": "Pokémon",
     "package_size": "small",
 }
@@ -34,10 +39,13 @@ class AppSettings(BaseSettings):
     jwt_secret: str = "change-me-in-production-use-long-random-string"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 10080
-    upload_dir: str = "uploads"
+    supabase_url: str | None = None
+    supabase_api_key: str | None = None
+    supabase_storage_bucket: str | None = None
     usd_to_eur: float = 0.92
     cors_origins: str = "*"
-    vinted_publish_stub: bool = True
+    #: Marge initiale (table ``settings``) à la création d’un compte et pour le margin_seeder.
+    seed_margin_percent: int = Field(default=60, ge=0, le=500)
 
 
 @lru_cache

@@ -1,4 +1,5 @@
-- fix scan card response poke name, title format etc
-- sync vinted
-- graphiques du template dashboard
-- backup api key 
+=- sync vinted
+
+app.goupixdex
+
+goupixdex à la racine landing qui présente le saas goupix dex avec cta pour faire sa demande d'accès avec un email

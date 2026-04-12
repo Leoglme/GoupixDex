@@ -1,4 +1,9 @@
-"""Run all seeders in order: user → margin → fake articles."""
+"""Force l’exécution de tous les seeders (user → margin → articles dev).
+
+Pour une base déjà peuplée, préférez ``conditional_seed.py`` (CI / premier déploiement)
+qui n’exécute chaque script que si la table correspondante est vide (articles : option
+``SEED_DEV_ARTICLES``).
+"""
 
 from __future__ import annotations
 

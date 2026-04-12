@@ -16,6 +16,11 @@ const links = [[{
   to: '/articles',
   onSelect: () => { open.value = false }
 }, {
+  label: 'Journal Vinted',
+  icon: 'i-lucide-scroll-text',
+  to: '/articles/vinted-logs',
+  onSelect: () => { open.value = false }
+}, {
   label: 'Paramètres',
   icon: 'i-lucide-settings',
   to: '/settings',

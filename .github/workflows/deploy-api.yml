@@ -1,0 +1,168 @@
+# Déploie l’API FastAPI (dossier api/) sur le VPS — venv + systemd + Nginx reload.
+# La base MariaDB peut être distante (ex. o2switch) : DATABASE_URL dans les secrets.
+
+name: Deploy API (FastAPI)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - '.github/workflows/deploy-api.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'api/**'
+  workflow_dispatch:
+
+concurrency:
+  group: goupixdex-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-pr:
+    name: Sanity check (PR — sans déploiement)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            api
+          sparse-checkout-cone: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps & import check
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt
+          cd api && PYTHONPATH=. python -c "import main; print('import ok')"
+
+  deploy:
+    name: Deploy API
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (api only)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            api
+          sparse-checkout-cone: true
+
+      - name: Write api/.env for upload
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SEED_USER_EMAIL: ${{ secrets.SEED_USER_EMAIL }}
+          SEED_USER_PASSWORD: ${{ secrets.SEED_USER_PASSWORD }}
+          SEED_MARGIN_PERCENT: ${{ secrets.SEED_MARGIN_PERCENT }}
+          SEED_DEV_ARTICLES: ${{ secrets.SEED_DEV_ARTICLES }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
+          SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
+          POKE_WALLET_API_KEY: ${{ secrets.POKE_WALLET_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VINTED_EMAIL_OR_USERNAME: ${{ secrets.VINTED_EMAIL_OR_USERNAME }}
+          VINTED_PASSWORD: ${{ secrets.VINTED_PASSWORD }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+        run: |
+          set -euo pipefail
+          f=api/.env
+          {
+            echo "DATABASE_URL=${DATABASE_URL}"
+            echo "JWT_SECRET=${JWT_SECRET}"
+            echo "SEED_USER_EMAIL=${SEED_USER_EMAIL:-}"
+            echo "SEED_USER_PASSWORD=${SEED_USER_PASSWORD:-}"
+            echo "SEED_MARGIN_PERCENT=${SEED_MARGIN_PERCENT:-60}"
+            echo "SEED_DEV_ARTICLES=${SEED_DEV_ARTICLES:-0}"
+            echo "SUPABASE_URL=${SUPABASE_URL:-}"
+            echo "SUPABASE_API_KEY=${SUPABASE_API_KEY:-}"
+            echo "SUPABASE_STORAGE_BUCKET=${SUPABASE_STORAGE_BUCKET:-GoupixDex}"
+            echo "POKE_WALLET_API_KEY=${POKE_WALLET_API_KEY:-}"
+            echo "GROQ_API_KEY=${GROQ_API_KEY:-}"
+            echo "VINTED_EMAIL_OR_USERNAME=${VINTED_EMAIL_OR_USERNAME:-}"
+            echo "VINTED_PASSWORD=${VINTED_PASSWORD:-}"
+            echo "CORS_ORIGINS=${CORS_ORIGINS:-*}"
+          } > "$f"
+
+      - name: Pack api tree
+        run: tar -czf api-bundle.tar.gz api
+
+      - name: Upload to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: api-bundle.tar.gz
+          target: ${{ secrets.DEPLOY_API_DIR }}
+
+      - name: Extract, venv, systemd, nginx
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_API_DIR: ${{ secrets.DEPLOY_API_DIR }}
+          API_SYSTEMD_SERVICE: ${{ secrets.API_SYSTEMD_SERVICE }}
+          API_PORT: ${{ secrets.API_APP_PORT }}
+          DEPLOY_USER: ${{ secrets.SSH_USERNAME }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DEPLOY_API_DIR,API_SYSTEMD_SERVICE,API_PORT,DEPLOY_USER
+          script_stop: true
+          script: |
+            set -euo pipefail
+            TARGET="${DEPLOY_API_DIR%/}"
+            SVC="${API_SYSTEMD_SERVICE:-goupixdex-api.service}"
+            PORT="${API_PORT:-8000}"
+            mkdir -p "$TARGET"
+            rm -rf "$TARGET/api"
+            tar -xzf "$TARGET/api-bundle.tar.gz" -C "$TARGET"
+            rm -f "$TARGET/api-bundle.tar.gz"
+            APP_ROOT="$TARGET/api"
+            sudo chown -R "$USER:$USER" "$APP_ROOT" || true
+            sudo apt-get update -y
+            sudo apt-get install -y python3-venv python3-pip
+            if [ ! -x "$APP_ROOT/.venv/bin/python" ]; then
+              python3 -m venv "$APP_ROOT/.venv"
+            fi
+            . "$APP_ROOT/.venv/bin/activate"
+            python -m pip install --upgrade pip wheel
+            pip install -r "$APP_ROOT/requirements.txt" --no-cache-dir
+            deactivate
+            # Migrations SQL (fichiers non déjà enregistrés dans schema_migrations)
+            "$APP_ROOT/.venv/bin/python" "$APP_ROOT/migrations/run_migrations.py"
+            # Bootstrap DB si tables vides (user / marges ; articles seulement si SEED_DEV_ARTICLES=1 sur le VPS)
+            "$APP_ROOT/.venv/bin/python" "$APP_ROOT/seeders/conditional_seed.py"
+            sudo tee "/etc/systemd/system/${SVC}" > /dev/null <<EOF
+            [Unit]
+            Description=GoupixDex FastAPI (Uvicorn)
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=${DEPLOY_USER}
+            WorkingDirectory=${APP_ROOT}
+            EnvironmentFile=${APP_ROOT}/.env
+            ExecStart=${APP_ROOT}/.venv/bin/uvicorn main:app --host 127.0.0.1 --port ${PORT} --workers 2 --proxy-headers
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            sudo systemctl daemon-reload
+            sudo systemctl enable "$SVC"
+            sudo systemctl restart "$SVC"
+            sudo systemctl --no-pager --full status "$SVC" || true
+            sudo nginx -t
+            sudo systemctl reload nginx

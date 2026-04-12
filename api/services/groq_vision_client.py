@@ -16,7 +16,7 @@ from PIL import Image, ImageOps
 from app_types.groq_vision import GroqVisionCardCollectorResult, GroqVisionExtractOptions
 from app_types.groq_vision import GroqVisionImageMimeType
 from app_types.pokewallet import PokeWalletCard
-from services.pokeapi_species_locale import fetch_french_species_name
+from services.pokeapi_species_locale import fetch_species_locale_names
 from services.pokewallet_client import PokeWalletClient
 
 DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
@@ -37,6 +37,7 @@ class GroqVisionClient:
     Extracts Pokémon TCG **set code**, **collector number**, **fraction parts**, and **Pokémon names**
     from card photos via OCR-style prompts. Optional PokéWallet lookup can enrich English names,
     ``set_name_english``, and ``rarity_english`` when ``resolve_english_name_from_poke_wallet`` is true.
+    PokéAPI then supplies canonical French and (when missing) Japanese species names from English.
     Loads ``GROQ_API_KEY`` from the environment unless an explicit key is passed.
     """
 
@@ -128,10 +129,13 @@ class GroqVisionClient:
         )
         refined_value = refined_raw.strip() if refined_raw else None
         cur_code = collector.get("set_code")
+        cur_trim = (cur_code or "").strip()
+        # Only fill from the tight bottom-left crop when the primary pass did not yield a set code.
+        # Replacing a non-empty primary value often regresses (e.g. misreading SV5a as SV4K on tiny glyphs).
         needs_refresh = (
             refined_value is not None
             and refined_value != ""
-            and refined_raw != cur_code
+            and cur_trim == ""
             and self._should_override_set_code(cur_code, refined_value)
         )
         if not needs_refresh:
@@ -140,7 +144,7 @@ class GroqVisionClient:
         out["set_code"] = refined_value
         merged = cast(GroqVisionCardCollectorResult, out)
         merged = self._apply_poke_wallet_enrichment(merged, options)
-        return self._apply_poke_api_french_species_name(merged, options)
+        return self._apply_pokeapi_species_locale_names(merged, options)
 
     def extract_card_collector_from_data_url(
         self,
@@ -201,7 +205,7 @@ class GroqVisionClient:
 
         collector = self._parse_collector_result_json(content)
         collector = self._apply_poke_wallet_enrichment(collector, options)
-        collector = self._apply_poke_api_french_species_name(collector, options)
+        collector = self._apply_pokeapi_species_locale_names(collector, options)
         if include_raw:
             out = dict(collector)
             out["raw_assistant_json"] = content
@@ -344,22 +348,27 @@ class GroqVisionClient:
             },
         )
 
-    def _apply_poke_api_french_species_name(
+    def _apply_pokeapi_species_locale_names(
         self,
         collector: GroqVisionCardCollectorResult,
         options: GroqVisionExtractOptions | None,
     ) -> GroqVisionCardCollectorResult:
+        """Overwrite French with PokéAPI when possible; fill Japanese ``pokemon_name`` when still empty."""
         opts = options or {}
         if opts.get("resolve_english_name_from_poke_wallet") is not True:
             return collector
         english_raw = (collector.get("pokemon_name_english") or "").strip()
         if not english_raw:
             return collector
-        fr = fetch_french_species_name(english_raw)
-        if fr is None:
+        loc = fetch_species_locale_names(english_raw)
+        if loc.french is None and loc.japanese is None:
             return collector
         out = dict(collector)
-        out["pokemon_name_french"] = fr
+        if loc.french is not None:
+            out["pokemon_name_french"] = loc.french
+        printed = (out.get("pokemon_name") or "").strip()
+        if loc.japanese is not None and printed == "":
+            out["pokemon_name"] = loc.japanese
         return cast(GroqVisionCardCollectorResult, out)
 
     def _strip_leading_set_code_prefix_from_set_name(self, raw_set_name: str, set_code: str) -> str:
@@ -445,6 +454,8 @@ class GroqVisionClient:
                             "bottom-left collector row, immediately left of the collector fraction. Prefer "
                             "literal transcription from that box over inferred set family. If a clear "
                             "3-char letter-digit-letter code is visible (e.g. M1L, M1S), output it exactly. "
+                            "Scarlet/Violet Japanese subsets use SV + digit + suffix (e.g. SV5a, SV4K): read each "
+                            "glyph carefully — digit 5 vs 4 and last letter **a** vs **K** are different sets. "
                             "Never output regulation letters (H, D, E) as set code. Use null only if illegible."
                         ),
                     },
@@ -453,7 +464,11 @@ class GroqVisionClient:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Transcribe setCode from the first dark box on the bottom-left collector row.",
+                                "text": (
+                                    "Transcribe setCode from the first dark box on the bottom-left collector row, "
+                                    "immediately left of the fraction. For SV* codes, copy every character exactly "
+                                    "(e.g. SV5a is not SV4K)."
+                                ),
                             },
                             {"type": "image_url", "image_url": {"url": data_url}},
                         ],
@@ -490,12 +505,19 @@ class GroqVisionClient:
         if w == 0 or h == 0:
             return source
         left = 0
-        top = max(0, int(h * 0.74))
-        crop_w = max(1, int(w * 0.46))
+        # Tighter band on the bottom edge so the collector row (set box + fraction) fills more of the crop.
+        top = max(0, int(h * 0.80))
+        crop_w = max(1, int(w * 0.42))
         crop_h = max(1, h - top)
         cropped = img.crop((left, top, left + crop_w, top + crop_h))
+        cw, ch = cropped.size
+        if cw < 880 and cw > 0:
+            scale = min(2.5, 880 / cw)
+            new_w = max(1, int(cw * scale))
+            new_h = max(1, int(ch * scale))
+            cropped = cropped.resize((new_w, new_h), Image.Resampling.LANCZOS)
         out = io.BytesIO()
-        cropped.convert("RGB").save(out, format="JPEG", quality=86, optimize=True)
+        cropped.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
         return out.getvalue()
 
     @staticmethod
@@ -537,16 +559,21 @@ class GroqVisionClient:
             "(white or silver). It sits **immediately left of** the card number / fraction; do not confuse it with "
             "a regulation letter in a tiny box farther left (e.g. H, D) — that is not the set code. "
             "Do not use the big Pokémon name at the top.",
-            "setCode — WHAT IT LOOKS LIKE: Short alphanumeric (M1L, M1S, SV7, SV2a, SWSH12, SM-P, etc.). "
-            "Transcribe **exactly** what is inside that first dark box; normalize Latin to uppercase. "
+            "setCode — WHAT IT LOOKS LIKE: Short alphanumeric (M1L, M1S, SV7, SV2a, SV5a, SV4K, SWSH12, SM-P, etc.). "
+            "Japanese Scarlet/Violet subsets often use **SV + one digit + suffix letter** (e.g. SV5a Triplet Beat); "
+            "**SV5a and SV4K are different products** — read digit-by-digit (5 vs 4) and the last character (**a** vs **K**) "
+            "from the box; do not guess from memory. "
+            "Transcribe **exactly** what is inside that first dark box; normalize Latin letters in setCode to uppercase. "
             "If that box is readable, you **must** output setCode — unfamiliar patterns like M1L are still valid. "
             "null **only** if that specific box is cropped, blurred, or truly illegible.",
             "cardNumber: the **collector fraction or index** printed **just right of** the set-code box on the same "
             "bottom row (e.g. 063/065, 009/106). Exactly as printed.",
-            "pokemonName: species name as printed (any script). null if unreadable.",
+            "pokemonName: **Large species title** near the top of the artwork (Japanese / katakana as printed on JP cards). "
+            "Transcribe it faithfully; null only if that text is cropped or illegible.",
             "pokemonNameEnglish: official English species name only (e.g. Gulpin, Rabsca). null if unsure.",
-            "pokemonNameFrench: official French Pokédex species name (e.g. Gloupti for Gulpin, Mangriff for Mightyena). "
-            "If you output pokemonNameEnglish or clearly identify the species, output the matching French name; "
+            "pokemonNameFrench: **exact** French Pokédex species name for that same species (e.g. Gloupti for Gulpin, "
+            "Herbizarre for Ivysaur). Never use a descriptive French word or translation of a type — use the "
+            "official name only. If you output pokemonNameEnglish, output the matching French dex name; "
             "null only if the species is unknown.",
             "cardVariantLabel: short subtype/rarity **as printed** on the card — e.g. ex, V, VMAX, AR, SAR, SR, RR, IR, "
             "Common/C, promo, ACE SPEC. Combine nearby symbols if needed. null if standard with no extra mark.",
@@ -561,7 +588,8 @@ class GroqVisionClient:
     def _build_user_prompt() -> str:
         return (
             "Extract all fields. Focus on the **bottom edge, left side**: find the **first small dark rectangular box** "
-            "with light text on the same line as the card number — that text is **setCode** (e.g. M1L, SV7). "
+            "with light text on the same line as the card number — that text is **setCode** (e.g. M1L, SV7, SV5a). "
+            "On SV* Japanese cards, transcribe the full code from the box character-by-character (5≠4, a≠K). "
             "The **cardNumber** is the fraction or number **to the right** of that box. Return JSON only."
         )
 

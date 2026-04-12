@@ -45,12 +45,21 @@ const eur = new Intl.NumberFormat('fr-FR', {
         </p>
         <div class="flex flex-wrap gap-2 text-xs">
           <UBadge
-            :color="article.is_sold ? 'neutral' : 'primary'"
+            :color="article.is_sold ? 'success' : 'error'"
             variant="subtle"
           >
             {{ article.is_sold ? 'Vendu' : 'En stock' }}
           </UBadge>
+          <UBadge
+            :color="(article.published_on_vinted ?? false) ? 'success' : 'neutral'"
+            variant="subtle"
+          >
+            Vinted {{ (article.published_on_vinted ?? false) ? 'oui' : 'non' }}
+          </UBadge>
           <span class="text-muted">Achat {{ eur.format(article.purchase_price) }}</span>
+          <span class="text-muted">
+            Vente {{ article.sell_price != null ? eur.format(article.sell_price) : '—' }}
+          </span>
           <span
             v-if="pricing?.cardmarket_eur != null"
             class="text-muted"

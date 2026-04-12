@@ -1,3 +1,5 @@
+name: goupixdex
+
 services:
   mariadb:
     container_name: goupixdex-mariadb
@@ -20,6 +22,7 @@ services:
 
   api:
     build: .
+    image: goupixdex-api:latest
     container_name: goupixdex-api
     restart: unless-stopped
     ports:
@@ -33,15 +36,14 @@ services:
       SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
       POKE_WALLET_API_KEY: ${POKE_WALLET_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      VINTED_PUBLISH_STUB: ${VINTED_PUBLISH_STUB:-true}
     volumes:
       - .:/app
-      - uploads_data:/app/uploads
     depends_on:
       mariadb:
         condition: service_healthy
     command: >
       sh -c "python migrations/run_migrations.py &&
+      python seeders/conditional_seed.py &&
       uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
   phpmyadmin:
@@ -59,4 +61,3 @@ services:
 
 volumes:
   mariadb_data:
-  uploads_data:

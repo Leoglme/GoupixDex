@@ -8,9 +8,12 @@ import nodriver as uc
 
 from app_types.payload import ItemPayload
 from config import config
+from core.win32_asyncio import ensure_proactor_event_loop
 from services.os_service import get_project_root
 from services.timer_service import TimerService
 from services.vinted_service import VintedService
+
+ensure_proactor_event_loop()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -56,7 +59,7 @@ async def main() -> None:
 
     for vinted_item in vinted_items:
         await VintedService.open_sell_item_page()
-        await TimerService.wait(2500)
+        await VintedService.wait_for_listing_form()
         await VintedService.fill_item_details(
             vinted_item,
             config["category_path"],

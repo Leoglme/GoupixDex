@@ -37,7 +37,6 @@ api/
     … (pokewallet, groq_vision_client, vinted_service, …)
   migrations/
   seeders/
-  uploads/                # Local image storage (created at runtime)
 ```
 
 ## Requirements
@@ -97,9 +96,21 @@ python migrations/run_migrations.py
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+Sous **Windows**, si vous utilisez **`--reload`** et la publication **Vinted** (nodriver / Chrome), uvicorn choisit une boucle sans support des sous-processus → erreur `NotImplementedError` dans nodriver. Utilisez plutôt :
+
+```bash
+python run_dev.py
+```
+
+ou explicitement (Windows uniquement — la classe stdlib `ProactorEventLoop`) :
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 --loop asyncio.windows_events:ProactorEventLoop
+```
+
 - Swagger UI: http://127.0.0.1:8000/docs  
 - Health: `GET /health`  
-- Uploaded files are served under `/uploads/...`
+- Article images are stored in **Supabase Storage** (public URLs in DB).
 
 ### Main endpoints
 
@@ -113,7 +124,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | PATCH | `/articles/{id}/sold` | Mark sold + `sell_price` |
 | GET/PUT | `/settings` | Margin % (default 20) |
 
-**Vinted:** set `VINTED_PUBLISH_STUB=true` in dev to skip browser automation. On `POST /articles`, publication uses the authenticated user’s `vinted_email` and **encrypted** `vinted_password` (Fernet, key derived from `JWT_SECRET`). Legacy rows still holding a bcrypt hash cannot be decrypted—re-save the Vinted password via user settings or the seeder, or set `VINTED_EMAIL_OR_USERNAME` / `VINTED_PASSWORD` in the environment as fallback.
+**Vinted:** on `POST /articles`, publication uses the authenticated user's `vinted_email` and **encrypted** `vinted_password` (Fernet, key derived from `JWT_SECRET`). Legacy rows still holding a bcrypt hash cannot be decrypted—re-save the Vinted password via user settings or the seeder, or set `VINTED_EMAIL_OR_USERNAME` / `VINTED_PASSWORD` in the environment as fallback.
 
 ### Legacy Vinted CLI (batch `items.json`)
 
@@ -139,5 +150,5 @@ Create a user after startup: `docker compose exec api python seeders/user_seeder
 
 ## Limitations
 
-- Vinted UI and anti-bot policies may break automation; use stub mode when developing.
+- Vinted UI and anti-bot policies may break automation; local runs that trigger publication need valid Vinted credentials.
 - Average price mixes Cardmarket (EUR) and TCGPlayer (USD) using `USD_TO_EUR` in `config` (`AppSettings.usd_to_eur`).

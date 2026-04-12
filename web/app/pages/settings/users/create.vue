@@ -77,7 +77,7 @@ async function onSubmit() {
 
       <div class="flex items-center gap-3">
         <UButton type="submit" color="primary" variant="solid" :loading="submitting">
-          Créer l’utilisateur
+          Créer l'utilisateur
         </UButton>
         <UButton color="neutral" variant="ghost" to="/settings/users">
           Annuler

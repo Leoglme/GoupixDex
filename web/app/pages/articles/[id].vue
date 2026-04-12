@@ -44,7 +44,7 @@ async function onSubmitEdit(body: ArticleUpdateBody) {
 <template>
   <UDashboardPanel :id="`article-${id}`">
     <template #header>
-      <UDashboardNavbar title="Modifier l’article">
+      <UDashboardNavbar title="Modifier l'article">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
@@ -61,13 +61,23 @@ async function onSubmitEdit(body: ArticleUpdateBody) {
         <div v-if="loading" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="size-8 animate-spin text-primary" />
         </div>
-        <ArticleForm
-          v-else-if="article"
-          mode="edit"
-          :article="article"
-          :loading="submitting"
-          @submit-edit="onSubmitEdit"
-        />
+        <div v-else-if="article" class="space-y-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm text-muted">Publication Vinted</span>
+            <UBadge
+              :color="(article.published_on_vinted ?? false) ? 'success' : 'neutral'"
+              variant="subtle"
+            >
+              {{ (article.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
+            </UBadge>
+          </div>
+          <ArticleForm
+            mode="edit"
+            :article="article"
+            :loading="submitting"
+            @submit-edit="onSubmitEdit"
+          />
+        </div>
       </div>
     </template>
   </UDashboardPanel>

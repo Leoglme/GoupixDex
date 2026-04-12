@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session, joinedload
 
+from core.database import SessionLocal
 from models.article import Article
-from models.image import Image
 
 
 def list_articles_for_user(db: Session, user_id: int) -> list[Article]:
@@ -43,10 +43,44 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "purchase_price": float(article.purchase_price),
         "sell_price": float(article.sell_price) if article.sell_price is not None else None,
         "is_sold": article.is_sold,
+        "published_on_vinted": bool(article.published_on_vinted),
+        "vinted_published_at": article.vinted_published_at.isoformat()
+        if article.vinted_published_at
+        else None,
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "images": [{"id": img.id, "image_url": img.image_url, "created_at": img.created_at.isoformat()} for img in article.images],
     }
+
+
+def mark_article_published_on_vinted(article_id: int, user_id: int) -> bool:
+    """
+    Marque l’article comme publié sur Vinted (session DB courte, adaptée aux tâches longues).
+    """
+    db = SessionLocal()
+    try:
+        article = get_article(db, article_id, user_id)
+        if article is None:
+            return False
+        article.published_on_vinted = True
+        article.vinted_published_at = dt.datetime.now(dt.UTC)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def delete_articles_by_ids(db: Session, user_id: int, ids: list[int]) -> int:
+    """
+    Supprime les articles dont l’id est dans ``ids`` et ``user_id`` correspond.
+    Renvoie le nombre de lignes supprimées.
+    """
+    if not ids:
+        return 0
+    q = db.query(Article).filter(Article.user_id == user_id, Article.id.in_(ids))
+    deleted = q.delete(synchronize_session=False)
+    db.commit()
+    return int(deleted)
 
 
 def update_article_fields(

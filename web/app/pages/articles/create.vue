@@ -12,9 +12,16 @@ const { scan } = useScanCard()
 const { createArticle } = useArticles()
 const { getSettings } = useSettings()
 const toast = useToast()
+const {
+  logs: vintedLogs,
+  logEl: vintedLogEl,
+  followStream: followVintedStream,
+  closeStream: closeVintedStream
+} = useVintedPublishStream()
 
 const scanning = ref(false)
 const submitting = ref(false)
+const vintedSubmit = ref(false)
 const scanInputKey = ref(0)
 
 async function onScanFile(e: Event) {
@@ -49,10 +56,37 @@ async function onScanFile(e: Event) {
 }
 
 async function onSubmitCreate(fd: FormData) {
+  vintedSubmit.value = fd.get('publish_to_vinted') === 'true'
   submitting.value = true
+  vintedLogs.value = []
   try {
-    await createArticle(fd)
-    toast.add({ title: 'Article créé', color: 'success' })
+    const { vinted } = await createArticle(fd)
+
+    if (vinted.status === 'running' && vinted.stream_path) {
+      await followVintedStream(vinted.stream_path, 'create')
+      await navigateTo('/articles')
+      return
+    }
+
+    if (vintedSubmit.value) {
+      if (vinted.published) {
+        toast.add({
+          title: 'Article créé et publié sur Vinted',
+          color: 'success'
+        })
+      } else {
+        toast.add({
+          title: 'Article créé',
+          description:
+            vinted.detail === 'missing_vinted_credentials'
+              ? "Identifiants Vinted manquants (profil utilisateur ou variables d'environnement)."
+              : (typeof vinted.detail === 'string' ? vinted.detail : 'Publication Vinted non confirmée.'),
+          color: 'warning'
+        })
+      }
+    } else {
+      toast.add({ title: 'Article créé', color: 'success' })
+    }
     await navigateTo('/articles')
   } catch (err) {
     toast.add({
@@ -62,6 +96,8 @@ async function onSubmitCreate(fd: FormData) {
     })
   } finally {
     submitting.value = false
+    vintedSubmit.value = false
+    closeVintedStream()
   }
 }
 </script>
@@ -116,15 +152,41 @@ async function onSubmitCreate(fd: FormData) {
         <UCard>
           <template #header>
             <p class="font-medium text-highlighted">
-              Détails de l’article
+              Détails de l'article
             </p>
           </template>
           <ArticleForm
             ref="formRef"
             mode="create"
             :loading="submitting"
+            :loading-hint="
+              submitting && vintedSubmit && vintedLogs.length === 0
+                ? 'Création de l\'article… puis connexion au flux Vinted.'
+                : submitting && vintedSubmit && vintedLogs.length > 0
+                  ? 'Suivez les étapes ci-dessous.'
+                  : undefined
+            "
             @submit-create="onSubmitCreate"
           />
+        </UCard>
+
+        <UCard v-if="vintedLogs.length > 0">
+          <template #header>
+            <p class="font-medium text-highlighted">
+              Publication Vinted
+            </p>
+            <p class="text-sm text-muted">
+              Journal en direct (serveur)
+            </p>
+          </template>
+          <ul
+            ref="vintedLogEl"
+            class="max-h-64 overflow-y-auto rounded-lg bg-elevated/50 p-3 text-sm font-mono space-y-1 border border-default"
+          >
+            <li v-for="(line, i) in vintedLogs" :key="i" class="text-muted">
+              {{ line }}
+            </li>
+          </ul>
         </UCard>
       </div>
     </template>

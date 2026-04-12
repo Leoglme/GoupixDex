@@ -17,6 +17,12 @@ from services.scan_service import build_title_and_description
 router = APIRouter(tags=["scan"])
 
 
+def _round_eur(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
 def _margin_for_user(db: Session, user: User | None, form_margin: int) -> int:
     if user is None:
         return form_margin
@@ -52,18 +58,18 @@ async def scan_card(
             card_info = raw_info
 
     margin = _margin_for_user(db, user, margin_percent)
-    avg = pricing.get("average_price")
+    avg = _round_eur(pricing.get("average_price"))
     suggested: float | None = None
     if avg is not None:
-        suggested = float(avg) * (1.0 + margin / 100.0)
+        suggested = _round_eur(float(avg) * (1.0 + margin / 100.0))
 
     title, description = build_title_and_description(ocr, card_info)
 
     return {
         "ocr": dict(ocr),
         "pricing": {
-            "cardmarket_eur": pricing.get("cardmarket_eur"),
-            "tcgplayer_usd": pricing.get("tcgplayer_usd"),
+            "cardmarket_eur": _round_eur(pricing.get("cardmarket_eur")),
+            "tcgplayer_usd": _round_eur(pricing.get("tcgplayer_usd")),
             "average_price": avg,
             "margin_percent_used": margin,
             "suggested_price": suggested,

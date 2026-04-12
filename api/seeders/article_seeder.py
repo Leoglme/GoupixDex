@@ -87,7 +87,7 @@ def main() -> None:
                 "sell_price": None,
                 "is_sold": False,
                 "sold_at": None,
-                "images": ["/uploads/dev/seed-pikachu-front.jpg"],
+                "images": ["https://picsum.photos/seed/goupix-pika/400/560"],
             },
             {
                 "title": f"{_DEV_PREFIX}Mewtwo ex — M1L 131/086",
@@ -101,8 +101,8 @@ def main() -> None:
                 "is_sold": True,
                 "sold_at": now,
                 "images": [
-                    "/uploads/dev/seed-mewtwo-1.jpg",
-                    "/uploads/dev/seed-mewtwo-2.jpg",
+                    "https://picsum.photos/seed/goupix-m2a/400/560",
+                    "https://picsum.photos/seed/goupix-m2b/400/560",
                 ],
             },
             {
@@ -129,7 +129,7 @@ def main() -> None:
                 "sell_price": None,
                 "is_sold": False,
                 "sold_at": None,
-                "images": ["/uploads/dev/seed-eevee.jpg"],
+                "images": ["https://picsum.photos/seed/goupix-eevee/400/560"],
             },
         ]
 

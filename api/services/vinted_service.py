@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Optional
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Optional
 
 import nodriver as uc
 from nodriver import Element
@@ -21,6 +22,50 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Callback SSE : dict avec au moins ``type``, ``message`` ; champs optionnels ``form_step``, ``detail``.
+FormProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+def _parse_eval_dict_result(raw: Any, *, context: str = "") -> dict[str, Any]:
+    """
+    nodriver renvoie souvent un ``RemoteObject`` pour les objets JS au lieu d'un dict.
+    Préférer ``return JSON.stringify({...})`` côté page ; ce helper accepte dict, str JSON,
+    ou une reconstruction minimale depuis ``RemoteObject.deep_serialized_value``.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+        raise TypeError(f"JSON root is not an object (context={context})")
+    ds = getattr(raw, "deep_serialized_value", None)
+    val = getattr(ds, "value", None) if ds is not None else None
+    if isinstance(val, list):
+        try:
+            return _remote_deep_value_to_dict(val)
+        except Exception:  # noqa: BLE001
+            pass
+    logger.error("Évaluation JS inutilisable (%s): %r", context, raw)
+    raise TypeError(f"Unexpected evaluate result: {type(raw).__name__}")
+
+
+def _remote_deep_value_to_dict(val: Any) -> dict[str, Any]:
+    """Reconstruit un dict depuis la structure ``DeepSerializedValue.value`` (liste de paires)."""
+    if isinstance(val, dict):
+        return val
+    if not isinstance(val, list):
+        raise TypeError("expected list of pairs")
+    out: dict[str, Any] = {}
+    for pair in val:
+        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            continue
+        key, typed = pair[0], pair[1]
+        if not isinstance(typed, dict) or "value" not in typed:
+            continue
+        out[str(key)] = typed["value"]
+    return out
+
 # Auth entry (same path as header "S'inscrire | Se connecter"); Vinted may not redirect from home anymore.
 VINTED_MEMBER_AUTH_URL = "https://www.vinted.fr/member/signup/select_type?ref_url=%2F"
 
@@ -31,6 +76,17 @@ _AUTH_FLOW_URL_MARKERS: tuple[str, ...] = (
     "/member/session",
     "/member/login",
 )
+
+def _normalize_vinted_label(text: str) -> str:
+    """Aligne apostrophes typographiques / ASCII pour matcher le DOM Vinted."""
+    return (
+        (text or "")
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("`", "'")
+        .strip()
+    )
+
 
 _DEFAULT_BROWSER_ARGS: list[str] = [
     "--no-sandbox",
@@ -50,7 +106,7 @@ class VintedService:
 
     _browser: Optional[Browser] = None
     _tab: Optional[Tab] = None
-    _VINTED_TIMEOUT_MS: int = 500
+    _VINTED_TIMEOUT_MS: int = 350
 
     @classmethod
     async def init_browser(cls) -> None:
@@ -85,6 +141,23 @@ class VintedService:
         if cls._browser is None:
             raise RuntimeError("Call init_browser() before init_page()")
         cls._tab = await cls._browser.get("about:blank")
+
+    @classmethod
+    def close_browser(cls) -> None:
+        """
+        Ferme le processus Chrome lancé par ``init_browser`` et réinitialise l'état du service.
+
+        À appeler en ``finally`` après une session d'automation (succès ou erreur).
+        """
+        if cls._browser is None:
+            return
+        try:
+            cls._browser.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Fermeture du navigateur Vinted : %s", exc)
+        finally:
+            cls._browser = None
+            cls._tab = None
 
     @classmethod
     def _require_tab(cls) -> Tab:
@@ -128,6 +201,157 @@ class VintedService:
             return_by_value=False,
         )
         await tab.sleep(0.05)
+
+    @classmethod
+    async def _scroll_selector_into_view(cls, css_selector: str) -> None:
+        """Centre le formulaire sur un champ pour limiter les clics hors cible après reflow."""
+        tab = cls._require_tab()
+        await tab
+        sel_json = json.dumps(css_selector)
+        await tab.evaluate(
+            f"""
+            (() => {{
+                const el = document.querySelector({sel_json});
+                if (el) {{
+                    el.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                }}
+            }})()
+            """,
+            return_by_value=False,
+        )
+        await tab.sleep(0.12)
+
+    @classmethod
+    async def _catalog_debug_probe(cls) -> None:
+        """Logs JSON décrivant le DOM catalogue (panneaux, titres, URL) pour diagnostiquer les échecs."""
+        tab = cls._require_tab()
+        await tab
+        probe = await tab.evaluate(
+            """
+            (() => {
+                const mark = (p) => {
+                    let s = 0;
+                    if (p.querySelector('#catalog-search-input')) s += 25;
+                    s += p.querySelectorAll('[id^="catalog-"]').length * 2;
+                    if (p.querySelector('[data-testid="catalog-navigation"]')) s += 8;
+                    s += p.querySelectorAll('li.web_ui__Item__item').length;
+                    return s;
+                };
+                const panels = Array.from(document.querySelectorAll('.input-dropdown__content'));
+                const panelInfo = panels.map((p, i) => {
+                    const r = p.getBoundingClientRect();
+                    return {
+                        index: i,
+                        mark: mark(p),
+                        w: Math.round(r.width),
+                        h: Math.round(r.height),
+                        titles: Array.from(p.querySelectorAll('li .web_ui__Cell__title'))
+                            .slice(0, 12)
+                            .map((e) => (e.textContent || '').trim()),
+                    };
+                });
+                const inp = document.querySelector('[data-testid="catalog-select-dropdown-input"]');
+                let inputRect = null;
+                if (inp) {
+                    const r = inp.getBoundingClientRect();
+                    inputRect = { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top) };
+                }
+                const chevron = document.querySelector('[data-testid="catalog-select-dropdown-chevron-down"]');
+                return JSON.stringify({
+                    href: String(location.href || ''),
+                    inputDropdownContentCount: panels.length,
+                    panels: panelInfo,
+                    catalogInputFound: !!inp,
+                    catalogInputRect: inputRect,
+                    chevronFound: !!chevron,
+                    legacyContent: !!document.querySelector('[data-testid="catalog-select-dropdown-content"]'),
+                });
+            })()
+            """,
+            return_by_value=True,
+        )
+        try:
+            parsed = _parse_eval_dict_result(probe, context="catalog_probe")
+            logger.warning("Vinted catalog DOM probe: %s", json.dumps(parsed, ensure_ascii=False, default=str))
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.warning("Vinted catalog DOM probe (raw): %r err=%s", probe, exc)
+
+    @classmethod
+    async def _ensure_catalog_dropdown_open(cls) -> bool:
+        """
+        Ouvre le sélecteur catégorie (input puis chevron si besoin).
+        Retourne True si un panneau catalogue plausible est détecté.
+        """
+        tab = cls._require_tab()
+        await tab
+        await cls._scroll_selector_into_view('[data-testid="catalog-select-dropdown-input"]')
+        inp = await tab.select('[data-testid="catalog-select-dropdown-input"]', timeout=15)
+        if inp is None:
+            logger.error("catalog-select-dropdown-input introuvable.")
+            return False
+        try:
+            await inp.click()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Clic input catégorie: %s", exc)
+        await tab.sleep(0.35)
+
+        def _panel_ready_js() -> str:
+            return """
+            (() => {
+                const mark = (p) => {
+                    let s = 0;
+                    if (p.querySelector('#catalog-search-input')) s += 25;
+                    s += p.querySelectorAll('[id^="catalog-"]').length * 2;
+                    if (p.querySelector('[data-testid="catalog-navigation"]')) s += 8;
+                    s += p.querySelectorAll('li.web_ui__Item__item').length;
+                    return s;
+                };
+                const panels = Array.from(document.querySelectorAll('.input-dropdown__content'));
+                for (const p of panels) {
+                    if (mark(p) <= 0) continue;
+                    const n = p.querySelectorAll(
+                        'li.web_ui__Item__item .web_ui__Cell__title, [id^="catalog-"] .web_ui__Cell__title'
+                    ).length;
+                    if (n > 0) return true;
+                }
+                const legacy = document.querySelector('[data-testid="catalog-select-dropdown-content"]');
+                return !!(legacy && legacy.querySelector('li.web_ui__Item__item .web_ui__Cell__title'));
+            })()
+            """
+
+        for _ in range(120):
+            await tab
+            ready = await tab.evaluate(_panel_ready_js(), return_by_value=True)
+            if ready is True:
+                return True
+            await asyncio.sleep(0.08)
+
+        logger.info("Panneau catégorie pas prêt après clic input — tentative chevron.")
+        clicked = await tab.evaluate(
+            """
+            (() => {
+                const sp = document.querySelector('[data-testid="catalog-select-dropdown-chevron-down"]');
+                if (!sp) return false;
+                const btn = sp.closest('[role="button"]') || sp.closest('.c-input__icon') || sp.parentElement;
+                if (btn && typeof btn.click === 'function') {
+                    btn.click();
+                    return true;
+                }
+                return false;
+            })()
+            """,
+            return_by_value=True,
+        )
+        if clicked is True:
+            await tab.sleep(0.4)
+            for _ in range(80):
+                await tab
+                ready = await tab.evaluate(_panel_ready_js(), return_by_value=True)
+                if ready is True:
+                    return True
+                await asyncio.sleep(0.08)
+
+        return False
 
     @classmethod
     async def _set_input_value_for_react(cls, tab: Tab, css_selector: str, value: str) -> bool:
@@ -585,6 +809,29 @@ class VintedService:
         await cls._accept_onetrust_cookies(tab)
 
     @classmethod
+    async def wait_for_listing_form(cls, timeout_sec: float = 25.0) -> None:
+        """Attend que le formulaire d'annonce (upload photos / catalogue) soit prêt."""
+        tab = cls._require_tab()
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            await tab
+            ok = await tab.evaluate(
+                """
+                (() => {
+                    return !!(
+                        document.querySelector('[data-testid="add-photos-input"]')
+                        || document.querySelector('[data-testid="catalog-select-dropdown-input"]')
+                    );
+                })()
+                """,
+                return_by_value=True,
+            )
+            if ok is True:
+                return
+            await asyncio.sleep(0.04)
+        logger.warning("Formulaire vendre : timeout après %ss (photos/catalogue).", timeout_sec)
+
+    @classmethod
     async def add_photos_to_item(cls, photo_names: list[str]) -> None:
         """
         Upload local image files to the listing photo input.
@@ -622,12 +869,21 @@ class VintedService:
         raise RuntimeError("Timeout waiting for photo thumbnails to match upload count")
 
     @classmethod
-    async def select_category(cls, category_path: list[str]) -> None:
+    async def select_category(
+        cls,
+        category_path: list[str],
+        *,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         Walk the category dropdown using the given label path.
 
+        Feuilles (ex. « Cartes à collectionner à l'unité ») peuvent exposer un ``radio`` :
+        on clique le radio pour éviter les erreurs CDP sur le conteneur.
+
         Args:
             category_path: Ordered list of category titles as shown in the Vinted UI.
+            form_progress: Journalisation optionnelle (SSE) pour chaque sous-étape.
 
         Returns:
             None
@@ -636,29 +892,201 @@ class VintedService:
             RuntimeError: If a label in the path cannot be resolved.
         """
         tab = cls._require_tab()
-        catalog = await tab.select('[data-testid="catalog-select-dropdown-input"]')
-        await catalog.click()
-        await tab.select('[data-testid="catalog-select-dropdown-content"]', timeout=10)
+        await tab
+        if form_progress:
+            await form_progress(
+                {
+                    "type": "log",
+                    "step": "vinted_form",
+                    "form_step": "category_open",
+                    "message": "Ouverture du sélecteur de catégorie…",
+                }
+            )
+        opened = await cls._ensure_catalog_dropdown_open()
+        if not opened:
+            logger.error("Impossible d'ouvrir le panneau catalogue (input + chevron).")
+            await cls._catalog_debug_probe()
+            raise RuntimeError("Catalog dropdown did not open or has no category rows")
+        await TimerService.wait(180)
 
         for category in category_path:
+            want = _normalize_vinted_label(category)
+            if form_progress:
+                await form_progress(
+                    {
+                        "type": "log",
+                        "step": "vinted_form",
+                        "form_step": "category_segment",
+                        "message": f'Recherche du niveau catalogue : « {want} »',
+                        "detail": want,
+                    }
+                )
+            want_js = json.dumps(want)
             expr = f"""
             (() => {{
-                const label = {json.dumps(category)};
-                const items = Array.from(document.querySelectorAll('.web_ui__Cell__cell'));
-                const target = items.find(
-                    (item) =>
-                        item.querySelector('.web_ui__Cell__title')?.textContent?.trim() === label
-                );
-                return target ? target.id : null;
+                try {{
+                const wantRaw = {want_js};
+                const norm = (s) => (String(s || "")
+                    .replace(/\\u2019/g, "'")
+                    .replace(/\\u2018/g, "'")
+                    .trim());
+                const looseKey = (s) => {{
+                    let t = norm(s).toLowerCase().replace(/&/g, ' et ');
+                    return t.split(/\\s+/).join(' ').trim();
+                }};
+                const wantLoose = looseKey(wantRaw);
+                const wantN = norm(wantRaw);
+                const matches = (text) => {{
+                    const t = norm(text);
+                    return t === wantN || looseKey(t) === wantLoose;
+                }};
+
+                const resolveCatalogPanel = () => {{
+                    const mark = (p) => {{
+                        let s = 0;
+                        if (p.querySelector('#catalog-search-input')) s += 25;
+                        s += p.querySelectorAll('[id^="catalog-"]').length * 2;
+                        if (p.querySelector('[data-testid="catalog-navigation"]')) s += 8;
+                        s += p.querySelectorAll('li.web_ui__Item__item').length;
+                        return s;
+                    }};
+                    const panels = Array.from(document.querySelectorAll('.input-dropdown__content'));
+                    let best = null;
+                    let bestM = -1;
+                    for (const p of panels) {{
+                        const m = mark(p);
+                        if (m > bestM) {{
+                            bestM = m;
+                            best = p;
+                        }}
+                    }}
+                    if (best != null && bestM > 0) return best;
+                    const seed = document.querySelector('[id^="catalog-"].web_ui__Cell__cell, li [id^="catalog-"]');
+                    if (seed) {{
+                        const c = seed.closest('.input-dropdown__content');
+                        if (c) return c;
+                    }}
+                    return document.querySelector('[data-testid="catalog-select-dropdown-content"]');
+                }};
+
+                const content = resolveCatalogPanel();
+                if (!content) {{
+                    return JSON.stringify({{ ok: false, titles: [], err: 'no_catalog_panel' }});
+                }}
+
+                const allTitleEls = Array.from(content.querySelectorAll('.web_ui__Cell__title'));
+                const inList = (el) => !!el.closest('li.web_ui__Item__item');
+                const listTitleEls = allTitleEls.filter(inList);
+                const navTitleEls = allTitleEls.filter((el) => !inList(el));
+
+                const listTitles = listTitleEls.map((el) => norm(el.textContent)).filter(Boolean);
+                const navTitles = navTitleEls.map((el) => norm(el.textContent)).filter(Boolean);
+
+                for (const titleEl of listTitleEls) {{
+                    if (!matches(titleEl.textContent)) continue;
+                    let target = titleEl.closest('[id^="catalog-"]');
+                    if (!target) target = titleEl.closest('div[role="button"]');
+                    if (!target) target = titleEl.closest('.web_ui__Cell__cell');
+                    if (!target) continue;
+                    try {{
+                        target.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                    }} catch (e) {{}}
+                    const radio = target.querySelector('input[type="radio"]');
+                    if (radio) {{
+                        radio.click();
+                    }} else {{
+                        target.click();
+                    }}
+                    return JSON.stringify({{ ok: true, id: target.id || '', skipped: false }});
+                }}
+
+                const navBody = content.querySelector('[data-testid="catalog-navigation--body"]');
+                if (navBody && matches(navBody.textContent || '')) {{
+                    return JSON.stringify({{ ok: true, id: 'already_in_panel', skipped: true }});
+                }}
+
+                for (const titleEl of navTitleEls) {{
+                    if (matches(titleEl.textContent)) {{
+                        return JSON.stringify({{ ok: true, id: 'already_in_panel', skipped: true }});
+                    }}
+                }}
+
+                const backBtn = Array.from(content.querySelectorAll('button')).find((b) => {{
+                    const a = (b.getAttribute('aria-label') || '').toLowerCase();
+                    return a.includes('retour') || a.includes('back') || a.includes('précédent')
+                        || a.includes('arrière') || a.includes('revenir');
+                }});
+                if (backBtn) {{
+                    let sib = backBtn.nextElementSibling;
+                    for (let i = 0; i < 4 && sib; i++) {{
+                        const lines = (sib.textContent || '')
+                            .split('\\n')
+                            .map((x) => norm(x.trim()))
+                            .filter(Boolean);
+                        if (lines.some((line) => matches(line))) {{
+                            return JSON.stringify({{ ok: true, id: 'already_in_panel', skipped: true }});
+                        }}
+                        sib = sib.nextElementSibling;
+                    }}
+                }}
+
+                const navBodyText = navBody ? norm(navBody.textContent || '') : '';
+                const debugTitles = [...new Set([...listTitles, ...navTitles, navBodyText].filter(Boolean))].slice(0, 40);
+                return JSON.stringify({{ ok: false, titles: debugTitles }});
+                }} catch (e) {{
+                    return JSON.stringify({{ ok: false, titles: [], err: String(e) }});
+                }}
             }})()
             """
-            category_id = await tab.evaluate(expr, return_by_value=True)
-            if not category_id:
-                raise RuntimeError(f"Category {category!r} not found")
-            logger.info("clicking on category %s", category)
-            el = await tab.select(f"#{category_id}")
-            await el.click()
-            await TimerService.wait(500)
+            raw = await tab.evaluate(expr, return_by_value=True)
+            try:
+                result = _parse_eval_dict_result(raw, context=f"catalog:{want}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                logger.error(
+                    "Catalog evaluate inutilisable pour %r: %s raw=%r",
+                    want,
+                    exc,
+                    raw,
+                )
+                await cls._catalog_debug_probe()
+                raise RuntimeError(f"Category {want!r}: invalid evaluate result") from exc
+            if not result.get("ok"):
+                titles = result.get("titles")
+                err = result.get("err")
+                logger.error(
+                    "Catalog: %r introuvable. Titres visibles (extrait): %s err=%s brut=%s",
+                    want,
+                    titles,
+                    err,
+                    json.dumps(result, ensure_ascii=False, default=str),
+                )
+                await cls._catalog_debug_probe()
+                raise RuntimeError(f"Category {want!r} not found in Vinted catalog UI")
+            if result.get("skipped"):
+                logger.info("Catalog step %r → déjà dans ce niveau (en-tête)", want)
+                if form_progress:
+                    await form_progress(
+                        {
+                            "type": "log",
+                            "step": "vinted_form",
+                            "form_step": "category_skip",
+                            "message": f'Déjà au bon niveau : « {want} »',
+                            "detail": want,
+                        }
+                    )
+            else:
+                logger.info("Catalog step %r → %s", want, result.get("id"))
+                if form_progress:
+                    await form_progress(
+                        {
+                            "type": "log",
+                            "step": "vinted_form",
+                            "form_step": "category_ok",
+                            "message": f'Niveau sélectionné : « {want} »',
+                            "detail": want,
+                        }
+                    )
+            await TimerService.wait(450)
 
     @classmethod
     async def select_brand(cls, brand_name: str) -> None:
@@ -696,36 +1124,193 @@ class VintedService:
             RuntimeError: If the condition text is not found in the menu.
         """
         tab = cls._require_tab()
-        status = await tab.select("#status_id")
-        await status.click()
-        await tab.select(".input-dropdown", timeout=10)
-        selector = ".web_ui__Cell__cell[role='button'] .web_ui__Cell__title"
-        await tab.select(selector, timeout=10)
+        await tab
+
+        trigger_selectors = (
+            '[data-testid="category-condition-single-list-input"]',
+            "#condition",
+            'input[name="condition"]',
+            '[data-testid="status-select-dropdown-input"]',
+            "#status_id",
+            'input#status_id',
+        )
+        trigger = None
+        used_sel = ""
+        for sel in trigger_selectors:
+            try:
+                trigger = await tab.select(sel, timeout=3)
+            except Exception:  # noqa: BLE001
+                trigger = None
+            if trigger is not None:
+                used_sel = sel
+                break
+
+        if trigger is None:
+            trigger = await cls._find_condition_trigger_via_js()
+            used_sel = "js_resolve"
+
+        if trigger is None:
+            raise RuntimeError(
+                "Champ « état » introuvable (attendu: "
+                "[data-testid=category-condition-single-list-input] ou #condition).",
+            )
+
+        if isinstance(trigger, str):
+            await cls._scroll_selector_into_view(trigger)
+            open_ok = await tab.evaluate(
+                f"""
+                (() => {{
+                    const el = document.querySelector({json.dumps(trigger)});
+                    if (!el) return false;
+                    el.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                    el.click();
+                    return true;
+                }})()
+                """,
+                return_by_value=True,
+            )
+            if open_ok is not True:
+                raise RuntimeError("Clic sur le sélecteur d'état (JS) sans effet")
+        else:
+            if used_sel and used_sel != "js_resolve":
+                await cls._scroll_selector_into_view(used_sel)
+            await trigger.click()
+
+        await tab.sleep(0.25)
+        menu_ok = await tab.evaluate(
+            """
+            (() => !!document.querySelector(
+                '[data-testid="category-condition-single-list-content"] .web_ui__Cell__title'
+            ))()
+            """,
+            return_by_value=True,
+        )
+        if menu_ok is not True:
+            await tab.evaluate(
+                """
+                (() => {
+                    const sp = document.querySelector('[data-testid="category-condition-single-list-chevron-down"]');
+                    if (!sp) return false;
+                    const btn = sp.closest('[role="button"]') || sp.closest('.c-input__icon') || sp.parentElement;
+                    if (btn && typeof btn.click === 'function') {
+                        btn.click();
+                        return true;
+                    }
+                    return false;
+                })()
+                """,
+                return_by_value=True,
+            )
+            await tab.sleep(0.35)
+
+        await TimerService.wait(350)
 
         expr = f"""
         (() => {{
             const conditionName = {json.dumps(condition_name)};
-            const sel = {json.dumps(selector)};
-            const options = document.querySelectorAll(sel);
-            const target = Array.from(options).find((opt) =>
-                (opt.textContent || '').includes(conditionName)
-            );
-            if (target) {{
-                target.click();
-                return true;
+            const norm = (s) => (String(s || '')
+                .replace(/\\u2019/g, "'")
+                .replace(/\\u2018/g, "'")
+                .trim());
+            const wrap = document.querySelector('[data-testid="category-condition-single-list-content"]');
+            const inner = wrap && wrap.querySelector('.input-dropdown__content');
+            const roots = [];
+            if (inner) roots.push(inner);
+            if (wrap && !inner) roots.push(wrap);
+            const panels = Array.from(document.querySelectorAll('.input-dropdown__content'));
+            const visible = panels.filter((p) => {{
+                const r = p.getBoundingClientRect();
+                return r.width > 30 && r.height > 30;
+            }});
+            for (const p of (visible.length ? visible : panels)) {{
+                if (p.querySelector('[data-testid^="condition-"]') && !roots.includes(p)) {{
+                    roots.push(p);
+                }}
             }}
-            return false;
+            if (!roots.length) roots.push(document.body);
+            let best = null;
+            for (const root of roots) {{
+                const titles = root.querySelectorAll('.web_ui__Cell__title');
+                for (const el of titles) {{
+                    const t = norm(el.textContent || '');
+                    const want = norm(conditionName);
+                    if (t.includes(want) || want.includes(t)) {{
+                        best = el;
+                        break;
+                    }}
+                }}
+                if (best) break;
+            }}
+            if (!best) return JSON.stringify({{ ok: false }});
+            const cell =
+                best.closest('[data-testid^="condition-"]') ||
+                best.closest('[role="button"]') ||
+                best.closest('.web_ui__Cell__cell');
+            try {{
+                cell && cell.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+            }} catch (e) {{}}
+            const radio = cell && cell.querySelector('input[type="radio"]');
+            if (radio) {{
+                radio.click();
+            }} else if (cell && typeof cell.click === 'function') {{
+                cell.click();
+            }} else {{
+                best.click();
+            }}
+            return JSON.stringify({{ ok: true }});
         }})()
         """
-        ok = await tab.evaluate(expr, return_by_value=True)
+        raw = await tab.evaluate(expr, return_by_value=True)
+        try:
+            parsed = _parse_eval_dict_result(raw, context="select_condition")
+            ok = parsed.get("ok") is True
+        except (TypeError, json.JSONDecodeError):
+            ok = raw is True
+
         if not ok:
-            raise RuntimeError(f"Condition {condition_name!r} not found")
-        logger.info("Condition selected successfully.")
+            raise RuntimeError(f"Condition {condition_name!r} not found in dropdown")
+        logger.info("Condition selected successfully (%s).", condition_name)
+
+    @classmethod
+    async def _find_condition_trigger_via_js(cls) -> Any:
+        """Dernier recours : champ État Vinted (#condition / category-condition-single-list-input)."""
+        tab = cls._require_tab()
+        sel = await tab.evaluate(
+            """
+            (() => {
+                const esc = (id) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/([#.:,[\\]])/g, '\\\\$1'));
+                const direct = document.querySelector('[data-testid="category-condition-single-list-input"]');
+                if (direct && direct.id) return '#' + esc(direct.id);
+                const cond = document.querySelector('#condition[name="condition"]') || document.querySelector('#condition');
+                if (cond) return '#condition';
+                const norm = (s) => (String(s || '').toLowerCase().normalize('NFD').replace(/\\u0300-\\u036f/g, ''));
+                const labels = Array.from(document.querySelectorAll('label.c-input__title, label'));
+                for (const lb of labels) {
+                    const tx = norm(lb.textContent || '');
+                    if (!tx.includes('etat') && !tx.includes('condition')) continue;
+                    const wrap = lb.closest('.c-input, li') || lb.parentElement;
+                    if (!wrap) continue;
+                    const inp = wrap.querySelector(
+                        'input[readonly].c-input__value, [data-testid="category-condition-single-list-input"]'
+                    );
+                    if (!inp || !inp.id) continue;
+                    return '#' + esc(inp.id);
+                }
+                return null;
+            })()
+            """,
+            return_by_value=True,
+        )
+        return sel if isinstance(sel, str) else None
 
     @classmethod
     async def select_package_size(cls, package_size: VintedPackageSize) -> None:
         """
         Click the shipping package size cell (small / medium / large).
+
+        Vinted change parfois les ``data-testid`` (ordre des segments, suffixes). On essaie
+        plusieurs sélecteurs, puis un clic par index sur la rangée de 3 cellules, puis un
+        repli sur le libellé (FR/EN).
 
         Args:
             package_size: One of ``small``, ``medium``, ``large``.
@@ -734,11 +1319,89 @@ class VintedService:
             None
         """
         tab = cls._require_tab()
-        base = '[data-testid$="-package-size--cell"]'
-        await tab.select(base, timeout=15)
-        cell = await tab.select(f'[data-testid="{package_size}-package-size--cell"]')
-        await cell.click()
-        logger.info("Package size %r selected successfully.", package_size)
+        await tab
+        size_json = json.dumps(package_size)
+        expr = f"""
+        (() => {{
+            const size = {size_json};
+            const idx = ({{ small: 0, medium: 1, large: 2 }}[size] ?? 0);
+            const clickEl = (el) => {{
+                if (!el) return false;
+                el.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                el.click();
+                return true;
+            }};
+            const directSels = [
+                `[data-testid="${{size}}-package-size--cell"]`,
+                `[data-testid="package-size-${{size}}--cell"]`,
+                `[data-testid="${{size}}-parcel-size--cell"]`,
+                `[data-testid="parcel-size-${{size}}--cell"]`,
+            ];
+            for (const sel of directSels) {{
+                const el = document.querySelector(sel);
+                if (el && clickEl(el)) return JSON.stringify({{ ok: true, method: 'direct', sel }});
+            }}
+            let row = Array.from(document.querySelectorAll('[data-testid$="-package-size--cell"]'));
+            if (row.length < 2) {{
+                row = Array.from(
+                    document.querySelectorAll('[data-testid*="package-size"][data-testid*="cell"]')
+                );
+            }}
+            if (row.length < 2) {{
+                row = Array.from(
+                    document.querySelectorAll('[data-testid*="parcel"][data-testid*="cell"]')
+                );
+            }}
+            if (row[idx] && row.length >= 2) {{
+                if (clickEl(row[idx]))
+                    return JSON.stringify({{ ok: true, method: 'indexed', idx, n: row.length }});
+            }}
+            const norm = (s) =>
+                String(s || '')
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/\\u0300-\\u036f/g, '');
+            const pat = {{
+                small: /\\bpetit\\b|\\bsmall\\b/,
+                medium: /\\bmoyen\\b|\\bmedium\\b/,
+                large: /\\bgrand\\b|\\blarge\\b/,
+            }};
+            const re = pat[size];
+            if (re) {{
+                const nodes = document.querySelectorAll(
+                    '[data-testid*="package"], [data-testid*="parcel"], [class*="Cell"]'
+                );
+                for (const el of nodes) {{
+                    const t = norm(el.textContent || '');
+                    if (!re.test(t)) continue;
+                    const target =
+                        el.closest('[data-testid*="cell"],[role="button"],button') || el;
+                    if (clickEl(target)) return JSON.stringify({{ ok: true, method: 'text' }});
+                }}
+            }}
+            const sample = Array.from(document.querySelectorAll('[data-testid]'))
+                .map((e) => e.getAttribute('data-testid'))
+                .filter((t) => t && (t.includes('package') || t.includes('parcel') || t.includes('colis')))
+                .slice(0, 30);
+            return JSON.stringify({{ ok: false, sample }});
+        }})()
+        """
+        raw = await tab.evaluate(expr, return_by_value=True)
+        try:
+            parsed = _parse_eval_dict_result(raw, context="select_package_size")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Sélection colis : réponse JS invalide ({raw!r})") from exc
+        if not parsed.get("ok"):
+            raise RuntimeError(
+                f"Impossible de sélectionner la taille de colis ({package_size!r}). "
+                f"Exemples data-testid (package/parcel/colis) : {parsed.get('sample')}"
+            )
+        await tab.sleep(0.15)
+        logger.info(
+            "Package size %r selected (%s).",
+            package_size,
+            parsed.get("method"),
+        )
 
     @classmethod
     async def _fill_item_field(cls, selector: str, value: str) -> None:
@@ -758,53 +1421,100 @@ class VintedService:
         category_path: list[str],
         brand: str,
         package_size: VintedPackageSize = "small",
+        progress: FormProgressFn | None = None,
     ) -> None:
         """
-        Fill category, brand, condition, package size, photos, title, optional description, and price.
+        Ordre aligné sur le formulaire Vinted : photos → titre → description → catégorie →
+        marque → état → prix → colis.
 
         Args:
             vinted_item: Parsed row from ``items.json``.
             category_path: Category breadcrumb labels.
             brand: Brand to select.
             package_size: Parcel size for the listing.
+            progress: Callback optionnel (dict SSE : ``form_step``, ``message``, etc.).
 
         Returns:
             None
         """
-        await TimerService.wait(1000)
-        try:
-            await cls.select_category(category_path)
-            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
-            await cls.select_brand(brand)
-            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
-            await cls.select_condition(vinted_item["condition"])
-            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
-            await cls.select_package_size(package_size)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Error selecting category, brand, condition, or package size: %s", exc)
+        async def emit_step(form_step: str, message: str, **extra: Any) -> None:
+            if not progress:
+                return
+            ev: dict[str, Any] = {
+                "type": "log",
+                "step": "vinted_form",
+                "form_step": form_step,
+                "message": message,
+            }
+            ev.update(extra)
+            await progress(ev)
 
-        await TimerService.wait(cls._VINTED_TIMEOUT_MS)
+        await emit_step("form_ready", "Synchronisation avec le formulaire Vinted…")
+        await cls.wait_for_listing_form()
+        await emit_step("form_ready", "Formulaire prêt — début du remplissage.")
 
         try:
+            await emit_step("photos", "Envoi des photos…")
             await cls.add_photos_to_item(vinted_item["images"])
+            await emit_step("photos_ok", "Photos importées.")
         except Exception as exc:  # noqa: BLE001
             logger.error("Error adding photos: %s", exc)
 
         await TimerService.wait(cls._VINTED_TIMEOUT_MS)
-        logger.info("Filling in the remaining item details")
 
+        await cls._scroll_selector_into_view("#title")
+        await emit_step("title", "Saisie du titre…")
         await cls._fill_item_field("#title", vinted_item["title"])
+        await emit_step("title_ok", "Titre renseigné.")
         await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
-        if vinted_item.get("description"):
-            await cls._fill_item_field(
-                "#description",
-                "Prix négociable si achat de plusieurs articles.",
-            )
+        desc = (vinted_item.get("description") or "").strip()
+        if desc:
+            await cls._scroll_selector_into_view("#description")
+            await emit_step("description", "Saisie de la description…")
+            await cls._fill_item_field("#description", desc)
+            await emit_step("description_ok", "Description renseignée.")
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
-        price = vinted_item["price"]
-        await cls._fill_item_field("#price", str(int(price)) if price == int(price) else str(price))
+        await cls._scroll_selector_into_view('[data-testid="catalog-select-dropdown-input"]')
+        await TimerService.wait(400)
+
+        try:
+            await emit_step("category", "Sélection de la catégorie (plusieurs niveaux)…")
+            await cls.select_category(category_path, form_progress=progress)
+            await emit_step("category_done", "Catégorie validée.")
+            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
+
+            await cls._scroll_selector_into_view('[data-testid="brand-select-dropdown-input"]')
+            await emit_step("brand", "Sélection de la marque…")
+            await cls.select_brand(brand)
+            await emit_step("brand_ok", f'Marque « {brand} » sélectionnée.')
+            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
+
+            await cls._scroll_selector_into_view("#status_id")
+            await emit_step("condition", "Sélection de l'état…")
+            await cls.select_condition(vinted_item["condition"])
+            await emit_step("condition_ok", "État sélectionné.")
+            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
+
+            await cls._scroll_selector_into_view("#price")
+            price = vinted_item["price"]
+            price_str = str(int(price)) if price == int(price) else str(price)
+            await emit_step("price", "Saisie du prix…")
+            await cls._fill_item_field("#price", price_str)
+            await emit_step("price_ok", f"Prix : {price_str} €.")
+            await TimerService.wait(cls._VINTED_TIMEOUT_MS)
+
+            await cls._scroll_selector_into_view('[data-testid$="-package-size--cell"]')
+            await emit_step("package", "Choix de la taille du colis…")
+            await cls.select_package_size(package_size)
+            await emit_step("package_ok", f"Colis : {package_size}.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error during Vinted form (category → colis): %s", exc)
+            await emit_step("form_error", f"Échec sur le formulaire : {exc}", detail=str(exc))
+            raise
+
+        logger.info("Filling in the remaining item details — done")
 
     @classmethod
     async def publish(cls) -> None:
@@ -818,6 +1528,7 @@ class VintedService:
             RuntimeError: If the button is not clickable in time.
         """
         tab = cls._require_tab()
+        await cls._scroll_selector_into_view('[data-testid="upload-form-save-button"]')
         btn = await tab.select('[data-testid="upload-form-save-button"]', timeout=15)
         if btn is None:
             raise RuntimeError("upload-form-save-button not found")

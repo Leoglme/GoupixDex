@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from config import get_settings
 from core.security import hash_password, store_user_vinted_password, verify_password
 from models.margin_settings import MarginSettings
 from models.user import User
@@ -37,7 +38,7 @@ def create_user(
     )
     db.add(u)
     db.flush()
-    db.add(MarginSettings(user_id=u.id, margin_percent=20))
+    db.add(MarginSettings(user_id=u.id, margin_percent=get_settings().seed_margin_percent))
     db.commit()
     db.refresh(u)
     return u

@@ -166,6 +166,7 @@ class PokeWalletClient:
         }
         response = httpx.get(url, headers=headers, timeout=60.0)
         body_text = response.text
+        print(body_text)
         if not response.is_success:
             msg = (
                 f"PokeWallet request failed ({response.status_code} {response.reason_phrase}): "

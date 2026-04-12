@@ -1,0 +1,134 @@
+# Déploie le frontend Nuxt 4 (dossier web/) sur le VPS — Nitro node-server + PM2.
+# Secrets requis : voir README déploiement ou message de configuration du dépôt.
+
+name: Deploy web (Nuxt)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+  workflow_dispatch:
+
+concurrency:
+  group: goupixdex-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pr:
+    name: Build (PR — sans déploiement)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install & build
+        env:
+          NUXT_PUBLIC_API_BASE: https://example.com
+          NUXT_PUBLIC_SITE_URL: https://example.com
+        run: |
+          npm ci
+          npm run build
+
+  deploy:
+    name: Build & deploy
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write production .env (build)
+        env:
+          NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
+          NUXT_PUBLIC_SITE_URL: ${{ secrets.NUXT_PUBLIC_SITE_URL }}
+        run: |
+          {
+            echo "NODE_ENV=production"
+            echo "NUXT_PUBLIC_API_BASE=${NUXT_PUBLIC_API_BASE}"
+            echo "NUXT_PUBLIC_SITE_URL=${NUXT_PUBLIC_SITE_URL}"
+          } > .env
+
+      - name: Build Nuxt (Nitro)
+        env:
+          NUXT_BUILD_COMMIT: ${{ github.sha }}
+        run: npm run build
+
+      - name: Pack .output
+        working-directory: ${{ github.workspace }}
+        run: tar -czf nuxt-output.tar.gz -C web .output
+
+      - name: Upload bundle to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: nuxt-output.tar.gz
+          target: ${{ secrets.DEPLOY_WEB_DIR }}
+
+      - name: Extract, PM2 & Nginx
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_WEB_DIR: ${{ secrets.DEPLOY_WEB_DIR }}
+          WEB_PM2_APP_NAME: ${{ secrets.WEB_PM2_APP_NAME }}
+          WEB_APP_PORT: ${{ secrets.WEB_APP_PORT }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DEPLOY_WEB_DIR,WEB_PM2_APP_NAME,WEB_APP_PORT
+          script_stop: true
+          script: |
+            set -euo pipefail
+            DEPLOY="${DEPLOY_WEB_DIR%/}"
+            APP_NAME="${WEB_PM2_APP_NAME:-goupixdex-web}"
+            WEB_PORT="${WEB_APP_PORT:-3000}"
+            mkdir -p "$DEPLOY"
+            tar -xzf "$DEPLOY/nuxt-output.tar.gz" -C "$DEPLOY"
+            rm -f "$DEPLOY/nuxt-output.tar.gz"
+            if ! command -v node >/dev/null 2>&1; then
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            fi
+            if ! command -v pm2 >/dev/null 2>&1; then
+              sudo npm install -g pm2
+            fi
+            cd "$DEPLOY/.output"
+            pm2 describe "$APP_NAME" >/dev/null 2>&1 && pm2 delete "$APP_NAME" || true
+            PORT="$WEB_PORT" HOST=127.0.0.1 NODE_ENV=production pm2 start server/index.mjs --name "$APP_NAME"
+            pm2 save
+            pm2 list
+            sudo nginx -t
+            sudo systemctl reload nginx

@@ -13,10 +13,34 @@ const emit = defineEmits<{
   edit: [id: number]
   delete: [id: number]
   sold: [article: Article]
+  'publish-vinted': [article: Article]
+  'bulk-delete': [ids: number[]]
 }>()
 
 const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
 const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
+/** Filtre texte : Pokémon, code set, série (nom extension), n°, titre. */
+const searchQuery = ref('')
+
+function normalizeSearch(s: string) {
+  return s
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+}
+
+function articleSearchText(row: Article) {
+  const p = props.pricingById.get(row.id)
+  return [
+    row.pokemon_name,
+    row.set_code,
+    row.card_number,
+    row.title,
+    p?.set_name,
+  ]
+    .filter((x): x is string => Boolean(x && String(x).trim()))
+    .join(' ')
+}
 
 const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -36,6 +60,18 @@ const filtered = computed(() => {
   } else if (filterSold.value === 'unsold') {
     rows = rows.filter(r => !r.is_sold)
   }
+
+  const rawQ = searchQuery.value.trim()
+  if (rawQ) {
+    const tokens = normalizeSearch(rawQ)
+      .split(/\s+/)
+      .filter(Boolean)
+    rows = rows.filter((row) => {
+      const hay = normalizeSearch(articleSearchText(row))
+      return tokens.every(t => hay.includes(t))
+    })
+  }
+
   rows.sort((a, b) => {
     const pa = props.pricingById.get(a.id)
     const pb = props.pricingById.get(b.id)
@@ -59,47 +95,147 @@ const filtered = computed(() => {
   })
   return rows
 })
+
+/** Sélection multi-lignes (ids visibles dans la liste courante) */
+const selectedIds = ref<number[]>([])
+
+watch(
+  () => props.articles.map(a => a.id).sort((a, b) => a - b).join(','),
+  () => {
+    const valid = new Set(props.articles.map(a => a.id))
+    selectedIds.value = selectedIds.value.filter(id => valid.has(id))
+  }
+)
+
+const selectedCount = computed(() => selectedIds.value.length)
+
+const allFilteredSelected = computed(
+  () =>
+    filtered.value.length > 0
+    && filtered.value.every(r => selectedIds.value.includes(r.id))
+)
+
+const someFilteredSelected = computed(() =>
+  filtered.value.some(r => selectedIds.value.includes(r.id))
+)
+
+function isSelected(id: number) {
+  return selectedIds.value.includes(id)
+}
+
+function toggleId(id: number, checked: boolean) {
+  if (checked) {
+    if (!selectedIds.value.includes(id)) {
+      selectedIds.value = [...selectedIds.value, id]
+    }
+  } else {
+    selectedIds.value = selectedIds.value.filter(i => i !== id)
+  }
+}
+
+function toggleSelectAll(checked: boolean) {
+  const fids = filtered.value.map(r => r.id)
+  if (checked) {
+    const s = new Set(selectedIds.value)
+    fids.forEach(id => s.add(id))
+    selectedIds.value = [...s]
+  } else {
+    const rm = new Set(fids)
+    selectedIds.value = selectedIds.value.filter(id => !rm.has(id))
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = []
+}
 </script>
 
 <template>
   <div class="space-y-4">
-    <div class="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-      <div class="flex flex-wrap gap-2">
-        <USelect
-          v-model="filterSold"
-          :items="[
-            { label: 'Tous', value: 'all' },
-            { label: 'En stock', value: 'unsold' },
-            { label: 'Vendus', value: 'sold' }
-          ]"
-          value-key="value"
-          label-key="label"
-          class="w-44"
-        />
-        <USelect
-          v-model="sortKey"
-          :items="[
-            { label: 'Date création ↓', value: 'created_desc' },
-            { label: 'Date vente ↓', value: 'sold_desc' },
-            { label: 'Prix achat ↑', value: 'purchase_asc' },
-            { label: 'Prix achat ↓', value: 'purchase_desc' },
-            { label: 'Cardmarket ↑', value: 'cm_asc' },
-            { label: 'Cardmarket ↓', value: 'cm_desc' }
-          ]"
-          value-key="value"
-          label-key="label"
-          class="w-52"
-        />
+    <!-- Recherche à gauche, filtres à droite (md+) ; colonne sur très petit écran -->
+    <div
+      class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4"
+    >
+      <UInput
+        v-model="searchQuery"
+        icon="i-lucide-search"
+        placeholder="Rechercher : Pokémon, set, série, n°…"
+        class="w-full min-w-0 md:max-w-xl md:flex-1"
+      />
+
+      <div
+        class="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center md:w-auto md:shrink-0 md:justify-end"
+      >
+        <div class="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+          <USelect
+            v-model="filterSold"
+            :items="[
+              { label: 'Tous', value: 'all' },
+              { label: 'En stock', value: 'unsold' },
+              { label: 'Vendus', value: 'sold' }
+            ]"
+            value-key="value"
+            label-key="label"
+            class="min-w-0 flex-1 sm:w-44 sm:flex-none"
+          />
+          <USelect
+            v-model="sortKey"
+            :items="[
+              { label: 'Date création ↓', value: 'created_desc' },
+              { label: 'Date vente ↓', value: 'sold_desc' },
+              { label: 'Prix achat ↑', value: 'purchase_asc' },
+              { label: 'Prix achat ↓', value: 'purchase_desc' },
+              { label: 'Cardmarket ↑', value: 'cm_asc' },
+              { label: 'Cardmarket ↓', value: 'cm_desc' }
+            ]"
+            value-key="value"
+            label-key="label"
+            class="min-w-0 flex-1 sm:w-52 sm:flex-none"
+          />
+        </div>
+        <p
+          v-if="pricingLoading"
+          class="text-sm text-muted sm:ml-auto md:ml-0 md:whitespace-nowrap"
+        >
+          Chargement des prix PokéWallet…
+        </p>
       </div>
-      <p v-if="pricingLoading" class="text-sm text-muted">
-        Chargement des prix PokéWallet…
+    </div>
+
+    <div
+      v-if="selectedCount > 0"
+      class="flex flex-col gap-2 rounded-lg border border-default bg-elevated/60 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
+    >
+      <p class="text-sm text-highlighted">
+        {{ selectedCount }} article{{ selectedCount > 1 ? 's' : '' }} sélectionné{{ selectedCount > 1 ? 's' : '' }}
       </p>
+      <div class="flex flex-wrap gap-2">
+        <UButton size="sm" color="neutral" variant="outline" @click="clearSelection">
+          Tout désélectionner
+        </UButton>
+        <UButton
+          size="sm"
+          color="error"
+          icon="i-lucide-trash-2"
+          @click="emit('bulk-delete', [...selectedIds])"
+        >
+          Supprimer la sélection
+        </UButton>
+      </div>
     </div>
 
     <div class="hidden lg:block overflow-x-auto rounded-lg ring ring-default">
       <table class="min-w-full text-sm">
         <thead class="bg-elevated text-left text-muted uppercase text-xs">
           <tr>
+            <th class="w-10 px-2 py-2 font-medium align-middle">
+              <UCheckbox
+                :model-value="allFilteredSelected"
+                :indeterminate="someFilteredSelected && !allFilteredSelected"
+                aria-label="Tout sélectionner sur cette page"
+                @update:model-value="toggleSelectAll"
+              />
+            </th>
             <th class="px-3 py-2 font-medium">
               Pokémon
             </th>
@@ -113,9 +249,6 @@ const filtered = computed(() => {
               Achat
             </th>
             <th class="px-3 py-2 font-medium">
-              Suggéré (marge)
-            </th>
-            <th class="px-3 py-2 font-medium">
               Cardmarket
             </th>
             <th class="px-3 py-2 font-medium">
@@ -123,6 +256,9 @@ const filtered = computed(() => {
             </th>
             <th class="px-3 py-2 font-medium">
               Vendu
+            </th>
+            <th class="px-3 py-2 font-medium">
+              Vinted
             </th>
             <th class="px-3 py-2 font-medium">
               Vente
@@ -141,6 +277,13 @@ const filtered = computed(() => {
             :key="row.id"
             class="border-t border-default hover:bg-elevated/40"
           >
+            <td class="px-2 py-2 align-middle">
+              <UCheckbox
+                :model-value="isSelected(row.id)"
+                :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
+                @update:model-value="(v: boolean) => toggleId(row.id, v)"
+              />
+            </td>
             <td class="px-3 py-2 font-medium text-highlighted">
               {{ row.pokemon_name || '—' }}
             </td>
@@ -152,12 +295,6 @@ const filtered = computed(() => {
             </td>
             <td class="px-3 py-2">
               {{ eur.format(row.purchase_price) }}
-            </td>
-            <td class="px-3 py-2">
-              <span v-if="pricingById.get(row.id)?.suggested_price_eur != null">
-                {{ eur.format(pricingById.get(row.id)!.suggested_price_eur!) }}
-              </span>
-              <span v-else class="text-muted">—</span>
             </td>
             <td class="px-3 py-2">
               <span v-if="pricingById.get(row.id)?.cardmarket_eur != null">
@@ -173,10 +310,18 @@ const filtered = computed(() => {
             </td>
             <td class="px-3 py-2">
               <UBadge
-                :color="row.is_sold ? 'neutral' : 'primary'"
+                :color="row.is_sold ? 'success' : 'error'"
                 variant="subtle"
               >
                 {{ row.is_sold ? 'Oui' : 'Non' }}
+              </UBadge>
+            </td>
+            <td class="px-3 py-2">
+              <UBadge
+                :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
+                variant="subtle"
+              >
+                {{ (row.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
               </UBadge>
             </td>
             <td class="px-3 py-2">
@@ -192,6 +337,12 @@ const filtered = computed(() => {
               <UDropdownMenu
                 :items="[[
                   { label: 'Modifier', icon: 'i-lucide-pencil', onSelect: () => emit('edit', row.id) },
+                  {
+                    label: 'Mettre en ligne sur Vinted',
+                    icon: 'i-lucide-store',
+                    disabled: row.is_sold || !(row.images?.length),
+                    onSelect: () => emit('publish-vinted', row)
+                  },
                   { label: 'Marquer vendu', icon: 'i-lucide-circle-check', disabled: row.is_sold, onSelect: () => emit('sold', row) },
                   { label: 'Supprimer', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => emit('delete', row.id) }
                 ]]"
@@ -213,15 +364,32 @@ const filtered = computed(() => {
       <div
         v-for="row in filtered"
         :key="row.id"
-        class="space-y-2"
+        class="flex gap-3 items-start space-y-0"
       >
-        <ArticleCard
-          :article="row"
-          :pricing="pricingById.get(row.id)"
-        />
+        <div class="pt-1 shrink-0">
+          <UCheckbox
+            :model-value="isSelected(row.id)"
+            :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
+            @update:model-value="(v: boolean) => toggleId(row.id, v)"
+          />
+        </div>
+        <div class="min-w-0 flex-1 space-y-2">
+          <ArticleCard
+            :article="row"
+            :pricing="pricingById.get(row.id)"
+          />
         <div class="flex flex-wrap gap-2 justify-end">
           <UButton size="sm" variant="outline" @click="emit('edit', row.id)">
             Modifier
+          </UButton>
+          <UButton
+            size="sm"
+            variant="outline"
+            icon="i-lucide-store"
+            :disabled="row.is_sold || !(row.images?.length)"
+            @click="emit('publish-vinted', row)"
+          >
+            Vinted
           </UButton>
           <UButton
             size="sm"
@@ -239,11 +407,16 @@ const filtered = computed(() => {
             Supprimer
           </UButton>
         </div>
+        </div>
       </div>
     </div>
 
     <div v-if="!loading && !filtered.length" class="text-center text-muted py-12">
-      Aucun article.
+      {{
+        searchQuery.trim()
+          ? 'Aucun résultat pour cette recherche.'
+          : 'Aucun article.'
+      }}
     </div>
   </div>
 </template>

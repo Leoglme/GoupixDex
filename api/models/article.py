@@ -31,6 +31,16 @@ class Article(Base):
         default=lambda: dt.datetime.now(dt.UTC),
     )
     sold_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_on_vinted: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    vinted_published_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="articles")
     images: Mapped[list["Image"]] = relationship(back_populates="article", cascade="all, delete-orphan")

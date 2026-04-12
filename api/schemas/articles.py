@@ -16,3 +16,15 @@ class ArticleUpdate(BaseModel):
 
 class SoldPatch(BaseModel):
     sell_price: Decimal = Field(ge=0)
+
+
+class BulkIdsBody(BaseModel):
+    """Suppression groupée d’articles (même utilisateur)."""
+
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class VintedBatchStartBody(BaseModel):
+    """Lancement d’une publication Vinted groupée (une session Chrome)."""
+
+    article_ids: list[int] = Field(min_length=1, max_length=40)
