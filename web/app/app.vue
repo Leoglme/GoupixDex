@@ -19,8 +19,8 @@ useHead({
   }
 })
 
-const title = 'GoupixDex'
-const description = 'GoupixDex automatise votre collection, la mise en ligne Vinted et le suivi des prix : scannez vos cartes Pokémon TCG, le reste s’enchaîne.'
+const title = 'GoupixDex — Automatisation vente cartes Pokémon TCG sur Vinted'
+const description = 'GoupixDex automatise la vente de vos cartes Pokémon TCG : scan, prix Cardmarket & TCGPlayer, publication Vinted et suivi des marges. Scannez vos cartes, le reste s\'enchaîne.'
 
 useSeoMeta({
   title,
@@ -29,7 +29,8 @@ useSeoMeta({
   ogDescription: description,
   ogImage: '/logo-goupix-dev-256x256.png',
   applicationName: 'GoupixDex',
-  twitterCard: 'summary_large_image'
+  twitterCard: 'summary_large_image',
+  keywords: 'pokémon tcg, vinted, automatisation, cardmarket, tcgplayer, vente cartes pokémon, scan carte, goupixdex'
 })
 </script>
 

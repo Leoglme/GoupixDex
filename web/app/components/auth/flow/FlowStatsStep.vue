@@ -5,12 +5,12 @@ defineProps<{
 </script>
 
 <template>
-  <div class="absolute inset-0 flex min-h-0 flex-col justify-center gap-2 p-2 sm:gap-2.5 sm:p-3">
-    <p class="shrink-0 text-center text-base font-medium text-highlighted sm:text-lg">
+  <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-2 sm:gap-2.5 sm:p-3">
+    <p class="shrink-0 text-center text-sm font-medium text-highlighted sm:text-base">
       Tableau de bord
     </p>
     <div
-      class="flex min-h-[10rem] w-full max-w-md flex-1 items-end justify-center gap-3 px-2 sm:min-h-[12rem] sm:max-w-lg sm:gap-4 sm:px-3 lg:min-h-[13.5rem]"
+      class="flex h-[10rem] w-full max-w-[18rem] items-end justify-center gap-3 sm:h-[13rem] sm:max-w-xs sm:gap-4 lg:h-[15rem]"
     >
       <div
         class="w-9 rounded-t-md bg-primary/40 transition-all duration-700 sm:w-11 lg:w-[3.25rem]"
@@ -33,7 +33,7 @@ defineProps<{
         style="animation-delay: 360ms"
       />
     </div>
-    <div class="shrink-0 flex justify-center gap-6 text-sm font-medium text-muted sm:gap-8 sm:text-base">
+    <div class="shrink-0 flex justify-center gap-6 text-xs font-medium text-muted sm:gap-8 sm:text-sm">
       <span>CA</span>
       <span>Marge</span>
       <span>Stock</span>
