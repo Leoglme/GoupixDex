@@ -27,7 +27,7 @@ async function onSubmit() {
 
 <template>
   <form
-    class="flex flex-col gap-5"
+    class="flex flex-col gap-6"
     @submit.prevent="onSubmit"
   >
     <UAlert
@@ -35,13 +35,13 @@ async function onSubmit() {
       color="error"
       variant="subtle"
       :title="errorMsg"
+      icon="i-lucide-circle-alert"
     />
 
     <UFormField
       label="E-mail"
       name="email"
       required
-      size="lg"
     >
       <UInput
         v-model="email"
@@ -50,7 +50,7 @@ async function onSubmit() {
         icon="i-lucide-mail"
         placeholder="vous@exemple.com"
         autocomplete="email"
-        size="lg"
+        size="md"
         class="w-full"
       />
     </UFormField>
@@ -59,7 +59,6 @@ async function onSubmit() {
       label="Mot de passe"
       name="password"
       required
-      size="lg"
     >
       <UInput
         v-model="password"
@@ -67,18 +66,22 @@ async function onSubmit() {
         name="password"
         icon="i-lucide-lock-keyhole"
         autocomplete="current-password"
-        size="lg"
+        size="md"
         class="w-full"
       />
     </UFormField>
 
-    <UButton
-      type="submit"
-      block
-      size="lg"
-      :loading="loading"
-    >
-      Se connecter
-    </UButton>
+    <div class="pt-1">
+      <UButton
+        type="submit"
+        block
+        size="lg"
+        color="primary"
+        :loading="loading"
+        icon="i-lucide-log-in"
+      >
+        Se connecter
+      </UButton>
+    </div>
   </form>
 </template>
