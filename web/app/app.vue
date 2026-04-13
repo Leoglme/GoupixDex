@@ -20,7 +20,7 @@ useHead({
 })
 
 const title = 'GoupixDex'
-const description = 'GoupixDex simplifie la gestion de stock Pokemon TCG, le calcul de marge et le suivi des ventes Vinted.'
+const description = 'GoupixDex automatise votre collection, la mise en ligne Vinted et le suivi des prix : scannez vos cartes Pokémon TCG, le reste s’enchaîne.'
 
 useSeoMeta({
   title,
