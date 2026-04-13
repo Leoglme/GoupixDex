@@ -46,6 +46,11 @@ class AppSettings(BaseSettings):
     cors_origins: str = "*"
     #: Marge initiale (table ``settings``) à la création d’un compte et pour le margin_seeder.
     seed_margin_percent: int = Field(default=60, ge=0, le=500)
+    #: Base PokéWallet ou URL du proxy (ex. https://goupixdex-proxy.dibodev.fr).
+    poke_wallet_base_url: str = "https://api.pokewallet.io"
+    #: Si défini, envoi de ``X-Proxy-Secret`` ; la clé API peut rester uniquement sur le proxy.
+    poke_wallet_proxy_secret: str | None = None
+    poke_wallet_user_agent: str = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
 
 
 @lru_cache

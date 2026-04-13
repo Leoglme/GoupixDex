@@ -239,7 +239,8 @@ class GroqVisionClient:
             return collector
         lookup_numbers = self._build_card_number_lookup_candidates(card_number)
         env_val = os.environ.get(ENV_POKE_WALLET_KEY, "").strip()
-        if env_val == "":
+        proxy_secret = os.environ.get("POKE_WALLET_PROXY_SECRET", "").strip()
+        if env_val == "" and proxy_secret == "":
             return collector
         try:
             wallet = PokeWalletClient()

@@ -35,6 +35,9 @@ services:
       SEED_USER_EMAIL: ${SEED_USER_EMAIL:-}
       SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
       POKE_WALLET_API_KEY: ${POKE_WALLET_API_KEY:-}
+      POKE_WALLET_BASE_URL: ${POKE_WALLET_BASE_URL:-https://api.pokewallet.io}
+      POKE_WALLET_PROXY_SECRET: ${POKE_WALLET_PROXY_SECRET:-}
+      POKE_WALLET_USER_AGENT: "${POKE_WALLET_USER_AGENT:-GoupixDex/1.0 (+https://goupixdex.dibodev.fr)}"
       GROQ_API_KEY: ${GROQ_API_KEY:-}
     volumes:
       - .:/app

@@ -30,7 +30,7 @@ jobs:
         with:
           sparse-checkout: |
             api
-          sparse-checkout-cone: true
+          sparse-checkout-cone-mode: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             api
-          sparse-checkout-cone: true
+          sparse-checkout-cone-mode: true
 
       - name: Write api/.env for upload
         env:
@@ -68,6 +68,8 @@ jobs:
           SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
           SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
           POKE_WALLET_API_KEY: ${{ secrets.POKE_WALLET_API_KEY }}
+          POKE_WALLET_BASE_URL: ${{ secrets.POKE_WALLET_BASE_URL }}
+          POKE_WALLET_PROXY_SECRET: ${{ secrets.POKE_WALLET_PROXY_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           VINTED_EMAIL_OR_USERNAME: ${{ secrets.VINTED_EMAIL_OR_USERNAME }}
           VINTED_PASSWORD: ${{ secrets.VINTED_PASSWORD }}
@@ -86,6 +88,8 @@ jobs:
             echo "SUPABASE_API_KEY=${SUPABASE_API_KEY:-}"
             echo "SUPABASE_STORAGE_BUCKET=${SUPABASE_STORAGE_BUCKET:-GoupixDex}"
             echo "POKE_WALLET_API_KEY=${POKE_WALLET_API_KEY:-}"
+            echo "POKE_WALLET_BASE_URL=${POKE_WALLET_BASE_URL:-https://api.pokewallet.io}"
+            echo "POKE_WALLET_PROXY_SECRET=${POKE_WALLET_PROXY_SECRET:-}"
             echo "GROQ_API_KEY=${GROQ_API_KEY:-}"
             echo "VINTED_EMAIL_OR_USERNAME=${VINTED_EMAIL_OR_USERNAME:-}"
             echo "VINTED_PASSWORD=${VINTED_PASSWORD:-}"

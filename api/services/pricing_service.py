@@ -48,7 +48,7 @@ def fetch_card_prices(
             "tcgplayer_usd": None,
             "average_price": None,
             "card": None,
-            "error": "POKE_WALLET_API_KEY is not configured",
+            "error": str(exc),
         }
 
     opts: dict[str, object] = {"limit": 20, "page": 1}

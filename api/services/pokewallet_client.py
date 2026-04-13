@@ -9,6 +9,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from config import get_settings
 from app_types.pokewallet import (
     PokeWalletCard,
     PokeWalletGetCardOptions,
@@ -18,6 +19,7 @@ from app_types.pokewallet import (
 
 DEFAULT_BASE_URL = "https://api.pokewallet.io"
 ENV_API_KEY = "POKE_WALLET_API_KEY"
+DEFAULT_USER_AGENT = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
 SEARCH_LIMIT_MAX = 100
 SEARCH_LIMIT_MIN = 1
 SEARCH_PAGE_MIN = 1
@@ -30,30 +32,37 @@ class PokeWalletClient:
     unless an explicit key is passed.
     """
 
-    def __init__(self, api_key: str | None = None, base_url: str = DEFAULT_BASE_URL) -> None:
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         """
         Args:
-            api_key: Optional API key. If omitted, uses ``os.environ["POKE_WALLET_API_KEY"]``.
-            base_url: Optional API base URL (defaults to production).
+            api_key: Optional API key (requis sauf si ``POKE_WALLET_PROXY_SECRET`` est défini :
+                la clé peut alors être portée uniquement par le proxy).
+            base_url: URL de base ; si omis, utilise ``poke_wallet_base_url`` dans les settings.
 
         Raises:
-            ValueError: When no API key is available.
+            ValueError: When no API key is available and proxy secret is not configured.
         """
+        settings = get_settings()
+        self._base_url = (base_url if base_url is not None else settings.poke_wallet_base_url).rstrip(
+            "/"
+        )
+        self._proxy_secret = (settings.poke_wallet_proxy_secret or "").strip()
+        self._user_agent = (settings.poke_wallet_user_agent or DEFAULT_USER_AGENT).strip()
+
         env_value = os.environ.get(ENV_API_KEY)
         resolved = api_key if api_key is not None else env_value
-        if resolved is None:
+        trimmed_key = (resolved or "").strip()
+
+        if self._proxy_secret:
+            self._api_key = trimmed_key
+        elif trimmed_key == "":
             msg = (
-                f"Missing API key: set {ENV_API_KEY} in the environment or pass it to the constructor."
+                f"Missing API key: set {ENV_API_KEY} in the environment or pass it to the constructor, "
+                "or set POKE_WALLET_PROXY_SECRET to use a proxy that holds the key."
             )
             raise ValueError(msg)
-        trimmed_key = resolved.strip()
-        if trimmed_key == "":
-            msg = (
-                f"Missing API key: set {ENV_API_KEY} in the environment or pass it to the constructor."
-            )
-            raise ValueError(msg)
-        self._api_key = trimmed_key
-        self._base_url = base_url.rstrip("/")
+        else:
+            self._api_key = trimmed_key
 
     def search(
         self,
@@ -160,13 +169,16 @@ class PokeWalletClient:
     def _fetch_response_body(self, path: str) -> Any:
         normalized_path = path if path.startswith("/") else f"/{path}"
         url = f"{self._base_url}{normalized_path}"
-        headers = {
+        headers: dict[str, str] = {
             "Accept": "application/json",
-            "X-API-Key": self._api_key,
+            "User-Agent": self._user_agent,
         }
+        if self._proxy_secret:
+            headers["X-Proxy-Secret"] = self._proxy_secret
+        else:
+            headers["X-API-Key"] = self._api_key
         response = httpx.get(url, headers=headers, timeout=60.0)
         body_text = response.text
-        print(body_text)
         if not response.is_success:
             msg = (
                 f"PokeWallet request failed ({response.status_code} {response.reason_phrase}): "
