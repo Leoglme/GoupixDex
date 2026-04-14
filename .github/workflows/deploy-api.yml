@@ -74,9 +74,12 @@ jobs:
           VINTED_EMAIL_OR_USERNAME: ${{ secrets.VINTED_EMAIL_OR_USERNAME }}
           VINTED_PASSWORD: ${{ secrets.VINTED_PASSWORD }}
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          # Optionnel : chemin Chrome/Chromium si différent de /usr/bin/chromium
+          VINTED_CHROME_EXECUTABLE: ${{ secrets.VINTED_CHROME_EXECUTABLE }}
         run: |
           set -euo pipefail
           f=api/.env
+          CHROME_PATH="${VINTED_CHROME_EXECUTABLE:-/usr/bin/chromium}"
           {
             echo "DATABASE_URL=${DATABASE_URL}"
             echo "JWT_SECRET=${JWT_SECRET}"
@@ -94,6 +97,8 @@ jobs:
             echo "VINTED_EMAIL_OR_USERNAME=${VINTED_EMAIL_OR_USERNAME:-}"
             echo "VINTED_PASSWORD=${VINTED_PASSWORD:-}"
             echo "CORS_ORIGINS=${CORS_ORIGINS:-*}"
+            echo "VINTED_BROWSER_HEADLESS=true"
+            echo "VINTED_CHROME_EXECUTABLE=${CHROME_PATH}"
           } > "$f"
 
       - name: Pack api tree
@@ -135,7 +140,7 @@ jobs:
             APP_ROOT="$TARGET/api"
             sudo chown -R "$USER:$USER" "$APP_ROOT" || true
             sudo apt-get update -y
-            sudo apt-get install -y python3-venv python3-pip
+            sudo apt-get install -y python3-venv python3-pip chromium fonts-liberation
             if [ ! -x "$APP_ROOT/.venv/bin/python" ]; then
               python3 -m venv "$APP_ROOT/.venv"
             fi

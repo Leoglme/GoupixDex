@@ -14,6 +14,7 @@ from nodriver import Element
 
 from app_types.payload import ItemPayload
 from app_types.vinted import VintedPackageSize
+from config import get_settings
 from services.os_service import get_project_root
 from services.timer_service import TimerService
 
@@ -88,12 +89,23 @@ def _normalize_vinted_label(text: str) -> str:
     )
 
 
-_DEFAULT_BROWSER_ARGS: list[str] = [
-    "--no-sandbox",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--start-maximized",
-]
+def _build_browser_args(*, headless: bool) -> list[str]:
+    """Flags communs ; en headless (prod VPS) on évite --start-maximized et on renforce la stabilité serveur."""
+    base: list[str] = [
+        "--no-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process",
+    ]
+    if headless:
+        base.extend(
+            [
+                "--window-size=1920,1080",
+                "--disable-dev-shm-usage",
+            ]
+        )
+    else:
+        base.append("--start-maximized")
+    return base
 
 
 class VintedService:
@@ -119,11 +131,16 @@ class VintedService:
         Raises:
             RuntimeError: If the browser failed to start.
         """
-        cls._browser = await uc.start(
-            headless=False,
-            browser_args=list(_DEFAULT_BROWSER_ARGS),
-            sandbox=False,
-        )
+        settings = get_settings()
+        headless = settings.vinted_browser_headless
+        start_kw: dict[str, Any] = {
+            "headless": headless,
+            "browser_args": _build_browser_args(headless=headless),
+            "sandbox": False,
+        }
+        if settings.vinted_chrome_executable:
+            start_kw["browser_executable_path"] = settings.vinted_chrome_executable.strip()
+        cls._browser = await uc.start(**start_kw)
         if cls._browser is None:
             raise RuntimeError("nodriver.start() returned no browser instance")
 

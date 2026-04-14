@@ -51,6 +51,10 @@ class AppSettings(BaseSettings):
     #: Si défini, envoi de ``X-Proxy-Secret`` ; la clé API peut rester uniquement sur le proxy.
     poke_wallet_proxy_secret: str | None = None
     poke_wallet_user_agent: str = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
+    #: Sur le VPS : ``true`` (navigateur sans fenêtre). En local : laisser ``false`` ou absent.
+    vinted_browser_headless: bool = False
+    #: Chemin explicite vers Chromium/Chrome (ex. ``/usr/bin/chromium`` sur Debian après ``apt install chromium``).
+    vinted_chrome_executable: str | None = None
 
 
 @lru_cache
