@@ -171,6 +171,7 @@ class GroqVisionClient:
         model = opts.get("model", DEFAULT_MODEL)
         temperature = float(opts.get("temperature", 0))
         include_raw = opts.get("include_raw_assistant_json") is True
+        hint = self._normalize_user_hint(opts.get("user_hint"))
 
         body: dict[str, Any] = {
             "model": model,
@@ -182,7 +183,7 @@ class GroqVisionClient:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self._build_user_prompt()},
+                        {"type": "text", "text": self._build_user_prompt(hint)},
                         {"type": "image_url", "image_url": {"url": trimmed}},
                     ],
                 },
@@ -442,6 +443,17 @@ class GroqVisionClient:
                 return None
             opts = options or {}
             model = opts.get("model", DEFAULT_MODEL)
+            hint = self._normalize_user_hint(opts.get("user_hint"))
+            crop_user_text = (
+                "Transcribe setCode from the first dark box on the bottom-left collector row, "
+                "immediately left of the fraction. For SV* codes, copy every character exactly "
+                "(e.g. SV5a is not SV4K)."
+            )
+            if hint:
+                crop_user_text += (
+                    " Optional hint from the user (use only if it matches the visible box): "
+                    + hint
+                )
             body: dict[str, Any] = {
                 "model": model,
                 "temperature": 0,
@@ -465,11 +477,7 @@ class GroqVisionClient:
                         "content": [
                             {
                                 "type": "text",
-                                "text": (
-                                    "Transcribe setCode from the first dark box on the bottom-left collector row, "
-                                    "immediately left of the fraction. For SV* codes, copy every character exactly "
-                                    "(e.g. SV5a is not SV4K)."
-                                ),
+                                "text": crop_user_text,
                             },
                             {"type": "image_url", "image_url": {"url": data_url}},
                         ],
@@ -586,13 +594,29 @@ class GroqVisionClient:
         return " ".join(parts)
 
     @staticmethod
-    def _build_user_prompt() -> str:
-        return (
+    def _normalize_user_hint(raw: Any) -> str | None:
+        if not isinstance(raw, str):
+            return None
+        t = " ".join(raw.strip().split())
+        if not t:
+            return None
+        return t[:500]
+
+    @staticmethod
+    def _build_user_prompt(hint: str | None = None) -> str:
+        base = (
             "Extract all fields. Focus on the **bottom edge, left side**: find the **first small dark rectangular box** "
             "with light text on the same line as the card number — that text is **setCode** (e.g. M1L, SV7, SV5a). "
             "On SV* Japanese cards, transcribe the full code from the box character-by-character (5≠4, a≠K). "
             "The **cardNumber** is the fraction or number **to the right** of that box. Return JSON only."
         )
+        if hint:
+            base += (
+                " The user provided an optional hint (Pokémon name, set code, expansion, or number—use only if "
+                "consistent with what you see on the card, never override a clear reading of the image): "
+                + hint
+            )
+        return base
 
     @staticmethod
     def _parse_json_body(body_text: str) -> Any:

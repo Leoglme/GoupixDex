@@ -1,6 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Paramètres — nouvel utilisateur',
+  'Ajoutez un utilisateur GoupixDex avec ses identifiants de connexion et, si besoin, ses identifiants Vinted.'
+)
+
 const toast = useToast()
 const { createUser } = useUsers()
 

@@ -234,18 +234,22 @@ function submit() {
     </div>
     <UAlert
       v-else-if="mode === 'create' && !hideVintedOption"
-      color="neutral"
+      color="info"
       variant="subtle"
-      icon="i-lucide-monitor-smartphone"
+      icon="i-lucide-sparkles"
       title="Publication Vinted disponible uniquement dans l’app desktop"
     >
       <template #description>
-        <span class="text-sm text-muted">
-          Téléchargez l’app depuis
-          <NuxtLink to="/downloads" class="underline underline-offset-2">
-            la page de téléchargement
-          </NuxtLink>.
-        </span>
+        <p class="text-sm leading-relaxed">
+          Installez la version Windows ou macOS depuis
+          <NuxtLink
+            to="/downloads"
+            class="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+          >
+            Télécharger l’app
+          </NuxtLink>
+          pour activer la case « Publier sur Vinted ».
+        </p>
       </template>
     </UAlert>
 

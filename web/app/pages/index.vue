@@ -5,15 +5,16 @@ definePageMeta({
   layout: 'auth'
 })
 
+useGoupixPageSeo(
+  'Automatisez vos ventes de cartes Pokémon TCG sur Vinted',
+  'Scannez vos cartes Pokémon TCG, récupérez les prix Cardmarket et TCGPlayer, générez vos annonces et publiez sur Vinted. GoupixDex couvre scan, pricing, stock, marges et suivi des ventes.'
+)
+
 useSeoMeta({
-  title: 'GoupixDex — Automatisez vos ventes de cartes Pokémon TCG sur Vinted',
-  description: 'GoupixDex scanne vos cartes Pokémon TCG, récupère les prix Cardmarket et TCGPlayer, génère les annonces et publie automatiquement sur Vinted. Automatisation complète : scan, pricing, publication et suivi des ventes.',
-  ogTitle: 'GoupixDex — Vente automatisée de cartes Pokémon TCG',
-  ogDescription: 'Scannez vos cartes Pokémon, récupérez les prix Cardmarket / TCGPlayer et publiez sur Vinted automatiquement. Gestion du stock, marges et analytics inclus.',
   keywords: 'pokémon tcg, vinted, automatisation, cardmarket, tcgplayer, vente cartes pokémon, scan carte pokémon, prix pokémon, annonce vinted automatique, goupixdex'
 })
 
-const { isLoggedIn } = useAuth()
+const { isLoggedIn, authResolved } = useAuth()
 
 const reduceMotion = ref(false)
 const formFill = ref(0)
@@ -221,14 +222,29 @@ const steps = [
 
         <!-- Desktop nav -->
         <div class="hidden items-center gap-3 sm:flex">
-          <UButton
-            :to="isLoggedIn ? '/dashboard' : '/login'"
-            variant="ghost"
-            color="neutral"
-            size="md"
-          >
-            {{ isLoggedIn ? 'Dashboard' : 'Connexion' }}
-          </UButton>
+          <span v-show="!authResolved" class="inline-flex">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              size="md"
+              disabled
+              class="min-w-[8.75rem] justify-center pointer-events-none select-none"
+              aria-busy="true"
+              aria-label="Chargement de la session"
+            >
+              <span class="block h-4 w-[5.25rem] max-w-full rounded bg-current/15 animate-pulse" />
+            </UButton>
+          </span>
+          <span v-show="authResolved" class="inline-flex">
+            <UButton
+              :to="isLoggedIn ? '/dashboard' : '/login'"
+              variant="ghost"
+              color="neutral"
+              size="md"
+            >
+              {{ isLoggedIn ? 'Dashboard' : 'Connexion' }}
+            </UButton>
+          </span>
           <UButton
             to="/request"
             color="primary"
@@ -264,16 +280,32 @@ const steps = [
           class="border-t border-default/40 bg-default/95 px-5 py-4 backdrop-blur-xl sm:hidden"
         >
           <div class="flex flex-col gap-2">
-            <UButton
-              :to="isLoggedIn ? '/dashboard' : '/login'"
-              variant="ghost"
-              color="neutral"
-              size="lg"
-              block
-              @click="mobileMenuOpen = false"
-            >
-              {{ isLoggedIn ? 'Dashboard' : 'Connexion' }}
-            </UButton>
+            <span v-show="!authResolved" class="flex w-full">
+              <UButton
+                variant="ghost"
+                color="neutral"
+                size="lg"
+                block
+                disabled
+                class="pointer-events-none select-none justify-center"
+                aria-busy="true"
+                aria-label="Chargement de la session"
+              >
+                <span class="mx-auto block h-5 w-28 rounded bg-current/15 animate-pulse" />
+              </UButton>
+            </span>
+            <span v-show="authResolved" class="flex w-full">
+              <UButton
+                :to="isLoggedIn ? '/dashboard' : '/login'"
+                variant="ghost"
+                color="neutral"
+                size="lg"
+                block
+                @click="mobileMenuOpen = false"
+              >
+                {{ isLoggedIn ? 'Dashboard' : 'Connexion' }}
+              </UButton>
+            </span>
             <UButton
               to="/request"
               color="primary"
@@ -324,17 +356,16 @@ const steps = [
 
         <h1
           data-gsap="hero"
-          class="text-3xl font-extrabold leading-[1.1] tracking-tight text-highlighted sm:text-4xl lg:text-5xl"
+          class="text-[32px] font-extrabold leading-[1.28] tracking-tight text-highlighted sm:text-4xl sm:leading-[1.1] lg:text-5xl"
         >
-          Scannez vos cartes Pokémon,<br>
-          <span class="bg-linear-to-r from-primary via-secondary-500 to-primary bg-[length:200%_auto] bg-clip-text text-transparent">
+          Scannez vos cartes Pokémon,<br class="hidden sm:block" aria-hidden="true"><span class="sm:hidden"> </span><span class="bg-linear-to-r from-primary via-secondary-500 to-primary bg-[length:200%_auto] bg-clip-text text-transparent">
             vendez sur Vinted automatiquement
           </span>
         </h1>
 
         <p
           data-gsap="hero"
-          class="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted sm:text-lg"
+          class="mx-auto mt-9 max-w-2xl text-base leading-relaxed text-muted sm:mt-6 sm:text-lg"
         >
           GoupixDex automatise tout le processus : scan de vos cartes TCG, récupération des prix
           <strong class="text-highlighted">Cardmarket</strong> et <strong class="text-highlighted">TCGPlayer</strong>,
@@ -359,7 +390,7 @@ const steps = [
 
         <p
           data-gsap="hero"
-          class="mt-6 flex items-center justify-center gap-4 text-sm text-muted/60"
+          class="mt-6 hidden items-center justify-center gap-4 text-sm text-muted/60 sm:flex"
         >
           <span class="flex items-center gap-1.5">
             <UIcon name="i-lucide-shield-check" class="size-4" />

@@ -5,32 +5,54 @@ useDashboard()
 
 const open = ref(false)
 const { isDesktopApp } = useDesktopRuntime()
-const links = computed<NavigationMenuItem[][]>(() => [[{
-  label: 'Tableau de bord',
-  icon: 'i-lucide-layout-dashboard',
-  to: '/dashboard',
-  onSelect: () => { open.value = false }
-}, {
-  label: 'Articles',
-  icon: 'i-lucide-layers',
-  to: '/articles',
-  onSelect: () => { open.value = false }
-}, {
-  label: 'Journal Vinted',
-  icon: 'i-lucide-scroll-text',
-  to: isDesktopApp.value ? '/articles/vinted-logs' : '/downloads',
-  onSelect: () => { open.value = false }
-}, {
-  label: 'Télécharger l’app',
-  icon: 'i-lucide-download',
-  to: '/downloads',
-  onSelect: () => { open.value = false }
-}, {
-  label: 'Paramètres',
-  icon: 'i-lucide-settings',
-  to: '/settings',
-  onSelect: () => { open.value = false }
-}]])
+
+/**
+ * Journal Vinted : desktop uniquement.
+ * Télécharger l’app : web uniquement (sur l’exe, /downloads redirige vers le dashboard).
+ */
+const links = computed<NavigationMenuItem[][]>(() => {
+  const items: NavigationMenuItem[] = [
+    {
+      label: 'Tableau de bord',
+      icon: 'i-lucide-layout-dashboard',
+      to: '/dashboard',
+      onSelect: () => { open.value = false }
+    },
+    {
+      label: 'Articles',
+      icon: 'i-lucide-layers',
+      to: '/articles',
+      onSelect: () => { open.value = false }
+    }
+  ]
+
+  if (isDesktopApp.value) {
+    items.push({
+      label: 'Journal Vinted',
+      icon: 'i-lucide-scroll-text',
+      to: '/articles/vinted-logs',
+      onSelect: () => { open.value = false }
+    })
+  }
+
+  if (!isDesktopApp.value) {
+    items.push({
+      label: 'Télécharger l’app',
+      icon: 'i-lucide-download',
+      to: '/downloads',
+      onSelect: () => { open.value = false }
+    })
+  }
+
+  items.push({
+    label: 'Paramètres',
+    icon: 'i-lucide-settings',
+    to: '/settings',
+    onSelect: () => { open.value = false }
+  })
+
+  return [items]
+})
 
 const groups = computed(() => [{
   id: 'links',

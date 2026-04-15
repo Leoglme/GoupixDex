@@ -1,6 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Paramètres — configuration',
+  'Réglages GoupixDex : marge appliquée aux prix et préférences liées à votre compte marchand.'
+)
+
 const { getSettings, updateSettings } = useSettings()
 const toast = useToast()
 

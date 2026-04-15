@@ -3,6 +3,11 @@ import type { DashboardStats } from '~/composables/useStats'
 
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Tableau de bord',
+  'Vue d’ensemble GoupixDex : stock, chiffre d’affaires, marges et répartition des ventes pour vos cartes Pokémon TCG.'
+)
+
 const { fetchDashboard } = useStats()
 
 const stats = ref<DashboardStats | null>(null)

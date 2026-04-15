@@ -15,6 +15,11 @@ export function useAuth() {
     'goupix_me_refresh_inflight',
     () => null
   )
+  /**
+   * Client uniquement : `true` dès que l’état « token présent ou non » est connu (lecture synchrone `localStorage`),
+   * sans attendre `/users/me` — sinon le CTA reste bloqué sur le skeleton si l’API est lent ou bloquée.
+   */
+  const authResolved = useState<boolean>('goupix_auth_resolved', () => false)
 
   function persistToken(accessToken: string | null) {
     token.value = accessToken
@@ -48,10 +53,19 @@ export function useAuth() {
     }
     if (!token.value) {
       me.value = null
+      if (import.meta.client) {
+        authResolved.value = true
+      }
       return
     }
+
+    if (import.meta.client) {
+      authResolved.value = true
+    }
+
     if (meRefreshInflight.value) {
-      return meRefreshInflight.value
+      await meRefreshInflight.value
+      return
     }
     meRefreshInflight.value = (async () => {
       try {
@@ -63,7 +77,7 @@ export function useAuth() {
         meRefreshInflight.value = null
       }
     })()
-    return meRefreshInflight.value
+    await meRefreshInflight.value
   }
 
   const isLoggedIn = computed(() => Boolean(token.value))
@@ -72,6 +86,7 @@ export function useAuth() {
     token,
     me,
     isLoggedIn,
+    authResolved,
     login,
     logout,
     persistToken,

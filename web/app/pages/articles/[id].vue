@@ -39,6 +39,38 @@ async function onSubmitEdit(body: ArticleUpdateBody) {
     submitting.value = false
   }
 }
+
+function articleTitleForSeo(a: Article) {
+  const t = a.title
+  return t.length > 42 ? `${t.slice(0, 39)}…` : t
+}
+
+useSeoMeta({
+  title: computed(() => {
+    if (!article.value) {
+      return 'Article · GoupixDex'
+    }
+    return `${articleTitleForSeo(article.value)} — modification · GoupixDex`
+  }),
+  ogTitle: computed(() => {
+    if (!article.value) {
+      return 'Article · GoupixDex'
+    }
+    return `${articleTitleForSeo(article.value)} — modification · GoupixDex`
+  }),
+  description: computed(() => {
+    if (!article.value) {
+      return 'Modifiez une fiche carte ou annonce dans GoupixDex.'
+    }
+    return `Éditez « ${article.value.title} » dans GoupixDex : prix, état, photos, description et statut Vinted.`
+  }),
+  ogDescription: computed(() => {
+    if (!article.value) {
+      return 'Modifiez une fiche carte ou annonce dans GoupixDex.'
+    }
+    return `Éditez « ${article.value.title} » dans GoupixDex : prix, état, photos, description et statut Vinted.`
+  })
+})
 </script>
 
 <template>

@@ -159,6 +159,27 @@ function clearSelection() {
 
 <template>
   <div class="space-y-4">
+    <UAlert
+      v-if="!isDesktopApp"
+      color="info"
+      variant="subtle"
+      icon="i-lucide-sparkles"
+      title="Mise en ligne Vinted disponible uniquement dans l’app desktop"
+    >
+      <template #description>
+        <p class="text-sm leading-relaxed">
+          Installez GoupixDex sur Windows ou macOS pour publier depuis votre connexion, comme sur la page
+          <NuxtLink
+            to="/downloads"
+            class="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+          >
+            Télécharger l’app
+          </NuxtLink>
+          (installateurs et conseils pour choisir le bon fichier).
+        </p>
+      </template>
+    </UAlert>
+
     <!-- Recherche à gauche, filtres à droite (md+) ; colonne sur très petit écran -->
     <div
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4"
@@ -425,13 +446,5 @@ function clearSelection() {
           : 'Aucun article.'
       }}
     </div>
-    <UAlert
-      v-if="!isDesktopApp"
-      color="neutral"
-      variant="subtle"
-      icon="i-lucide-monitor-smartphone"
-      title="Mise en ligne Vinted disponible uniquement dans l’app desktop"
-      description="Utilisez la page « Télécharger l’app » pour installer la version Windows/macOS."
-    />
   </div>
 </template>

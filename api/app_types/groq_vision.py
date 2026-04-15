@@ -12,6 +12,8 @@ class GroqVisionExtractOptions(TypedDict, total=False):
     model: str
     include_raw_assistant_json: bool
     resolve_english_name_from_poke_wallet: bool
+    # Optional free text (Pokémon, set code, expansion…) to help OCR when the photo is hard to read.
+    user_hint: str
 
 
 class GroqVisionCardCollectorResult(TypedDict, total=False):

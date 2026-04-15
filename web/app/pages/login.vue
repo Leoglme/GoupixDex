@@ -5,6 +5,11 @@ definePageMeta({
   layout: 'auth',
   middleware: 'guest'
 })
+
+useGoupixPageSeo(
+  'Connexion',
+  'Connectez-vous à GoupixDex pour gérer vos articles, votre stock Pokémon TCG et vos publications.'
+)
 </script>
 
 <template>

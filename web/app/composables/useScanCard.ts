@@ -18,10 +18,14 @@ export interface ScanCardResponse {
 export function useScanCard() {
   const { $api } = useNuxtApp()
 
-  async function scan(file: File, marginPercent = 20) {
+  async function scan(file: File, marginPercent = 20, ocrHint?: string) {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('margin_percent', String(marginPercent))
+    const hint = ocrHint?.trim()
+    if (hint) {
+      fd.append('ocr_hint', hint)
+    }
     const { data } = await $api.post<ScanCardResponse>('/scan-card', fd, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })

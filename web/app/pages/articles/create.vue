@@ -3,6 +3,11 @@ import type { ScanCardResponse } from '~/composables/useScanCard'
 
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Nouvel article',
+  'Créez une fiche article dans GoupixDex : scan, photos, prix Cardmarket, description et option de publication Vinted (application desktop).'
+)
+
 const formRef = ref<{
   applyScanPrefill: (s: ScanCardResponse) => void
   addImageFiles: (files: File[]) => void
@@ -18,6 +23,8 @@ const scanning = ref(false)
 const submitting = ref(false)
 const vintedSubmit = ref(false)
 const scanInputKey = ref(0)
+/** Texte optionnel pour aider l’OCR (nom, set, code, n°…). */
+const scanOcrHint = ref('')
 
 async function onScanFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -34,7 +41,7 @@ async function onScanFile(e: Event) {
     } catch {
       /* ignore */
     }
-    const res = await scan(file, margin)
+    const res = await scan(file, margin, scanOcrHint.value)
     formRef.value?.applyScanPrefill(res)
     formRef.value?.addImageFiles([file])
     toast.add({ title: 'Carte scannée — vérifiez les champs', color: 'success' })
@@ -128,22 +135,36 @@ async function onSubmitCreate(fd: FormData) {
               </p>
             </div>
           </template>
-          <div class="flex flex-wrap items-center gap-3">
-            <UInput
-              :key="scanInputKey"
-              type="file"
-              accept="image/*"
-              :disabled="scanning"
-              :ui="{
-                base: 'cursor-pointer file:cursor-pointer disabled:cursor-not-allowed'
-              }"
-              @change="onScanFile"
-            />
-            <UIcon
-              v-if="scanning"
-              name="i-lucide-loader-2"
-              class="size-5 animate-spin text-primary"
-            />
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-3">
+              <UInput
+                :key="scanInputKey"
+                type="file"
+                accept="image/*"
+                :disabled="scanning"
+                :ui="{
+                  base: 'cursor-pointer file:cursor-pointer disabled:cursor-not-allowed'
+                }"
+                @change="onScanFile"
+              />
+              <UIcon
+                v-if="scanning"
+                name="i-lucide-loader-2"
+                class="size-5 animate-spin text-primary"
+              />
+            </div>
+            <UFormField
+              label="Indice pour l’OCR (optionnel)"
+              description="Si la photo est floue ou difficile, indiquez par ex. le Pokémon, l’extension, le code set (SV5a…) ou le n° de carte pour aider la reconnaissance."
+              class="w-full max-w-xl"
+            >
+              <UInput
+                v-model="scanOcrHint"
+                placeholder="Ex. Pikachu SV5a 063/065, ou Gloupti M1L…"
+                :disabled="scanning"
+                class="mt-4 w-full sm:mt-5"
+              />
+            </UFormField>
           </div>
         </UCard>
 

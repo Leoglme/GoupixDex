@@ -1,4 +1,9 @@
 <script setup lang="ts">
+useGoupixPageSeo(
+  'Paramètres — notifications',
+  'Choisissez comment GoupixDex peut vous prévenir : e-mail, bureau et types de mises à jour produit.'
+)
+
 const state = reactive<{ [key: string]: boolean }>({
   email: true,
   desktop: false,

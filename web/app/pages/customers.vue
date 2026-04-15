@@ -1,4 +1,9 @@
 <script setup lang="ts">
+useGoupixPageSeo(
+  'Clients',
+  'Annuaire clients GoupixDex : e-mails, statut et actions rapides pour suivre vos contacts marchands.'
+)
+
 import type { TableColumn } from '@nuxt/ui'
 import { upperFirst } from 'scule'
 import { getPaginationRowModel } from '@tanstack/table-core'

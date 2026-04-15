@@ -15,6 +15,9 @@ concurrency:
 jobs:
   build-desktop:
     name: Build desktop (${{ matrix.platform }})
+    # Évite l’avertissement « actions JS sur Node 20 » (passage Node 24 côté runner GitHub).
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
     strategy:
@@ -35,17 +38,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
 
@@ -69,9 +72,12 @@ jobs:
           NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
         with:
           projectPath: web
-          tagName: desktop-nightly
-          releaseName: "Desktop nightly"
-          releaseBody: "Build automatique Windows/macOS de GoupixDex Desktop."
+          tagName: desktop
+          releaseName: "GoupixDex Desktop"
+          releaseBody: |
+            Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).
+
+            Installeurs : voir les assets ci-dessous (.exe, .msi, .dmg).
           releaseDraft: false
-          prerelease: true
+          prerelease: false
           args: ${{ matrix.args }}

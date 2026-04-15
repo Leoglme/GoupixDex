@@ -5,6 +5,11 @@ definePageMeta({
   layout: 'auth'
 })
 
+useGoupixPageSeo(
+  'Demander un accès',
+  'Rejoignez la liste d’attente GoupixDex pour automatiser vos ventes de cartes Pokémon TCG sur Vinted dès l’ouverture.'
+)
+
 const email = ref('')
 const message = ref('')
 const submitted = ref(false)

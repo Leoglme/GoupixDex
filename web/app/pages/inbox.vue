@@ -1,4 +1,9 @@
 <script setup lang="ts">
+useGoupixPageSeo(
+  'Boîte de réception',
+  'Consultez vos messages et notifications GoupixDex : filtre lu / non lu et accès rapide au détail.'
+)
+
 import { computed, ref, watch } from 'vue'
 import { breakpointsTailwind } from '@vueuse/core'
 import type { Mail } from '~/types'

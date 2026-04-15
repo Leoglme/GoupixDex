@@ -1,6 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Journal publication Vinted',
+  'Suivez en direct les étapes de connexion et de publication Vinted dans GoupixDex : logs détaillés et captures d’écran (application desktop).'
+)
+
 const route = useRoute()
 const { getVintedBatchActive } = useArticles()
 const batchStream = useVintedBatchStream()

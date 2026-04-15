@@ -4,11 +4,15 @@ import type { PricingLookup } from '~/composables/usePricing'
 
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Articles',
+  'Liste de vos annonces et cartes Pokémon TCG dans GoupixDex : recherche, édition, vente et mise en ligne Vinted depuis l’app desktop.'
+)
+
 const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted } = useArticles()
 const { lookupMany } = usePricing()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
-const vintedLogsLink = computed(() => (isDesktopApp.value ? '/articles/vinted-logs' : '/downloads'))
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
@@ -169,9 +173,6 @@ async function onPublishVinted(a: Article) {
             >
               Création groupée
             </UButton>
-            <UButton :to="vintedLogsLink" color="neutral" variant="ghost" icon="i-lucide-scroll-text">
-              {{ isDesktopApp ? 'Journal Vinted' : 'Télécharger l’app' }}
-            </UButton>
             <UButton to="/articles/create" icon="i-lucide-plus">
               Nouvel article
             </UButton>
@@ -181,8 +182,8 @@ async function onPublishVinted(a: Article) {
     </template>
 
     <template #body>
-      <div class="p-4 sm:p-6 space-y-4">
-        <div class="flex flex-wrap items-center gap-3">
+      <div class="p-4 sm:p-6">
+        <div class="flex flex-wrap items-center gap-3 mb-8 sm:mb-10">
           <USwitch v-model="fetchMarketData" />
           <span class="text-sm text-muted">
             Récupérer les prix Cardmarket / PokéWallet (plus lent)

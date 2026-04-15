@@ -1,6 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
+useGoupixPageSeo(
+  'Création groupée d’articles',
+  'Ajoutez plusieurs cartes Pokémon TCG en une session GoupixDex et lancez éventuellement une publication Vinted groupée depuis l’app desktop.'
+)
+
 type ArticleFormExpose = {
   buildCreateFormData: () => FormData
 }

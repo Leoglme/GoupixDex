@@ -88,4 +88,4 @@ La commande génère d’abord le frontend Nuxt en mode desktop (`NUXT_DESKTOP_B
 ## CI/CD
 
 - `deploy-web.yml` : build + déploiement web (Nitro + PM2).
-- `desktop-release.yml` : build desktop Windows/macOS et publication des artefacts sur GitHub Release (`desktop-nightly`).
+- `desktop-release.yml` : build desktop Windows/macOS en **release** (binaire sans console Windows) et publication sur GitHub Release stable (`desktop`, non-prerelease).

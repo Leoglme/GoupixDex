@@ -32,11 +32,21 @@ def _margin_for_user(db: Session, user: User | None, form_margin: int) -> int:
     return form_margin
 
 
+def _normalize_ocr_hint(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    t = " ".join(raw.strip().split())
+    if not t:
+        return None
+    return t[:500]
+
+
 @router.post("/scan-card")
 async def scan_card(
     db: Annotated[Session, Depends(get_db)],
     file: UploadFile = File(...),
     margin_percent: int = Form(20),
+    ocr_hint: str | None = Form(default=None),
     user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, Any]:
     """Run OCR + PokéWallet pricing; return suggested listing fields (no DB write)."""
@@ -44,7 +54,10 @@ async def scan_card(
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    ocr = ocr_service.extract_card_from_bytes(data, file.filename or "card.jpg")
+    hint = _normalize_ocr_hint(ocr_hint)
+    ocr = ocr_service.extract_card_from_bytes(
+        data, file.filename or "card.jpg", user_hint=hint
+    )
     set_code = ocr.get("set_code")
     card_number = ocr.get("card_number")
     pokemon = ocr.get("pokemon_name_english") or ocr.get("pokemon_name")
