@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.deps import get_current_user
 from models.user import User
-from schemas.users import UserCreate, UserResponse, UserUpdate
+from core.security import decrypt_vinted_credential
+from schemas.users import UserCreate, UserResponse, UserUpdate, VintedDecryptedResponse
 from services import auth_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -56,6 +57,16 @@ def list_users(
 @router.get("/me", response_model=UserResponse)
 def me(current: Annotated[User, Depends(get_current_user)]) -> UserResponse:
     return _serialize(current)
+
+
+@router.get("/me/vinted-decrypted", response_model=VintedDecryptedResponse)
+def me_vinted_decrypted(current: Annotated[User, Depends(get_current_user)]) -> VintedDecryptedResponse:
+    """Expose les identifiants Vinted en clair pour le worker Python local (app desktop)."""
+    plain = decrypt_vinted_credential(current.vinted_password)
+    return VintedDecryptedResponse(
+        vinted_email=current.vinted_email,
+        vinted_password=plain,
+    )
 
 
 @router.put("/{user_id}", response_model=UserResponse)

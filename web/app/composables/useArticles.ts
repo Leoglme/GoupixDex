@@ -29,8 +29,10 @@ export interface CreateArticleVintedResult {
   skipped?: boolean
   detail?: string
   /** Publication lancée en arrière-plan ; suivre ``stream_path`` en SSE. */
-  status?: 'running'
+  status?: 'running' | 'pending'
   stream_path?: string
+  /** Création sur l’API distante ; publication nodriver sur le worker local (Tauri). */
+  desktop_local?: boolean
 }
 
 export interface CreateArticleResponse {
@@ -67,7 +69,15 @@ export interface ArticleUpdateBody {
 }
 
 export function useArticles() {
-  const { $api } = useNuxtApp()
+  const { $api, $vintedLocal } = useNuxtApp()
+  const { isDesktopApp } = useDesktopRuntime()
+
+  function vintedHttp() {
+    if (import.meta.client && isDesktopApp.value && $vintedLocal) {
+      return $vintedLocal
+    }
+    return $api
+  }
 
   async function listArticles() {
     const { data } = await $api.get<Article[]>('/articles')
@@ -80,9 +90,15 @@ export function useArticles() {
   }
 
   async function createArticle(form: FormData) {
-    const { data } = await $api.post<CreateArticleResponse>('/articles', form, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' }
+    if (
+      import.meta.client
+      && isDesktopApp.value
+      && form.get('publish_to_vinted') === 'true'
+    ) {
+      headers['X-Goupix-Vinted-Target'] = 'local'
+    }
+    const { data } = await $api.post<CreateArticleResponse>('/articles', form, { headers })
     return data
   }
 
@@ -111,14 +127,14 @@ export function useArticles() {
   }
 
   async function publishArticleToVinted(id: number) {
-    const { data } = await $api.post<PublishVintedResponse>(
+    const { data } = await vintedHttp().post<PublishVintedResponse>(
       `/articles/${id}/publish-vinted`
     )
     return data
   }
 
   async function startVintedBatch(articleIds: number[]) {
-    const { data } = await $api.post<VintedBatchStartResponse>(
+    const { data } = await vintedHttp().post<VintedBatchStartResponse>(
       '/articles/vinted-batch',
       { article_ids: articleIds }
     )
@@ -126,7 +142,7 @@ export function useArticles() {
   }
 
   async function getVintedBatchActive() {
-    const { data } = await $api.get<VintedBatchActiveResponse>(
+    const { data } = await vintedHttp().get<VintedBatchActiveResponse>(
       '/articles/vinted-batch/active'
     )
     return data

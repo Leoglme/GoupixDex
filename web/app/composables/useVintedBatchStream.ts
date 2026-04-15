@@ -14,6 +14,7 @@ export function useVintedBatchStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
+  const { isDesktopApp } = useDesktopRuntime()
 
   const logEntries = ref<VintedLogEntry[]>([])
   const logEl = ref<HTMLElement | null>(null)
@@ -77,8 +78,16 @@ export function useVintedBatchStream() {
     if (!t) {
       return Promise.reject(new Error('Non authentifié'))
     }
-    const base = (config.public.apiBase as string).replace(/\/$/, '')
-    const url = `${base}${streamPath}?token=${encodeURIComponent(t)}`
+    const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
+    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(
+      /\/$/,
+      ''
+    )
+    const base = isDesktopApp.value ? localBase : remoteBase
+    const remoteParam = isDesktopApp.value
+      ? `&remote_api=${encodeURIComponent(remoteBase)}`
+      : ''
+    const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
 
     return new Promise((resolve, reject) => {
       let settled = false

@@ -26,6 +26,9 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000',
+      /** Worker Python local (Vinted / nodriver) — app Tauri uniquement */
+      vintedLocalBase:
+        process.env.NUXT_PUBLIC_VINTED_LOCAL_BASE || 'http://127.0.0.1:18766',
       githubRepo: process.env.NUXT_PUBLIC_GITHUB_REPO || 'leogu/GoupixDex',
       desktopReleaseChannel: process.env.NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL || 'latest',
       githubApiBase: process.env.NUXT_PUBLIC_GITHUB_API_BASE || 'https://api.github.com'

@@ -15,12 +15,31 @@ export default defineNuxtPlugin(() => {
     headers: { Accept: 'application/json' }
   })
 
-  api.interceptors.request.use((req) => {
+  const vintedLocal = axios.create({
+    baseURL: (config.public.vintedLocalBase as string).replace(/\/$/, ''),
+    headers: { Accept: 'application/json' }
+  })
+
+  const attachAuth = (req: { headers?: import('axios').AxiosRequestHeaders }) => {
     const t
       = token.value
         ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
     if (t) {
       req.headers.Authorization = `Bearer ${t}`
+    }
+    return req
+  }
+
+  api.interceptors.request.use((req) => {
+    attachAuth(req)
+    return req
+  })
+
+  vintedLocal.interceptors.request.use((req) => {
+    attachAuth(req)
+    const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
+    if (apiBase) {
+      req.headers['X-Goupix-Remote-Api'] = apiBase
     }
     return req
   })
@@ -40,9 +59,25 @@ export default defineNuxtPlugin(() => {
     }
   )
 
+  vintedLocal.interceptors.response.use(
+    r => r,
+    (err) => {
+      if (import.meta.client && err?.response?.status === 401) {
+        localStorage.removeItem(TOKEN_KEY)
+        token.value = null
+        const path = window.location.pathname
+        if (path !== '/login' && !path.startsWith('/login')) {
+          navigateTo('/login')
+        }
+      }
+      return Promise.reject(err)
+    }
+  )
+
   return {
     provide: {
-      api
+      api,
+      vintedLocal
     }
   }
 })

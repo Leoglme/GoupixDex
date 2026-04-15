@@ -14,7 +14,7 @@ const formRef = ref<{
 } | null>(null)
 
 const { scan } = useScanCard()
-const { createArticle } = useArticles()
+const { createArticle, publishArticleToVinted } = useArticles()
 const { getSettings } = useSettings()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
@@ -65,6 +65,25 @@ async function onSubmitCreate(fd: FormData) {
   submitting.value = true
   try {
     const { article, vinted } = await createArticle(fd)
+
+    if (isDesktopApp.value && vinted.desktop_local && vinted.stream_path) {
+      try {
+        await publishArticleToVinted(article.id)
+      } catch (err) {
+        toast.add({
+          title: 'Worker Vinted local',
+          description: apiErrorMessage(err),
+          color: 'error'
+        })
+        await navigateTo('/articles')
+        return
+      }
+      await navigateTo({
+        path: '/articles/vinted-logs',
+        query: { article: String(article.id) }
+      })
+      return
+    }
 
     if (vinted.status === 'running' && vinted.stream_path) {
       await navigateTo({

@@ -195,6 +195,7 @@ async def publish_article_to_vinted(
     stored_image_sources: list[str],
     *,
     progress: ProgressFn | None = None,
+    vinted_password_plain: str | None = None,
 ) -> dict[str, object]:
     """
     Attempt to list an article on Vinted. Does not raise on failure; returns status dict.
@@ -203,9 +204,12 @@ async def publish_article_to_vinted(
     Legacy bcrypt rows cannot be recovered; use env or re-save Vinted password in user settings.
     """
     email = user.vinted_email or os.environ.get("VINTED_EMAIL_OR_USERNAME")
-    password = decrypt_vinted_credential(user.vinted_password) or os.environ.get(
-        "VINTED_PASSWORD"
-    )
+    if vinted_password_plain is not None:
+        password = vinted_password_plain
+    else:
+        password = decrypt_vinted_credential(user.vinted_password) or os.environ.get(
+            "VINTED_PASSWORD"
+        )
 
     if not email or not password:
         logger.warning("Vinted publish skipped: missing credentials article_id=%s", article.id)

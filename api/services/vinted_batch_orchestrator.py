@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.security import decrypt_vinted_credential
@@ -30,12 +31,18 @@ async def run_vinted_batch_job(
     user_id: int,
     items: list[tuple[Article, list[str]]],
     user: User,
+    *,
+    vinted_password_plain: str | None = None,
+    mark_published: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> None:
     """
     Une session navigateur : connexion Vinted une fois, puis ``run_single_vinted_listing`` pour chaque article.
     """
     email = user.vinted_email or os.environ.get("VINTED_EMAIL_OR_USERNAME")
-    password = decrypt_vinted_credential(user.vinted_password) or os.environ.get("VINTED_PASSWORD")
+    if vinted_password_plain is not None:
+        password = vinted_password_plain
+    else:
+        password = decrypt_vinted_credential(user.vinted_password) or os.environ.get("VINTED_PASSWORD")
     if not email or not password:
         await _emit_job(
             job_id,
@@ -103,7 +110,10 @@ async def run_vinted_batch_job(
                 )
                 summary.append({"article_id": article.id, **r})
                 if bool(r.get("published")):
-                    article_service.mark_article_published_on_vinted(article.id, user_id)
+                    if mark_published is not None:
+                        await mark_published(article.id, user_id)
+                    else:
+                        article_service.mark_article_published_on_vinted(article.id, user_id)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Vinted batch item failed article_id=%s", article.id)
                 await _emit_job(

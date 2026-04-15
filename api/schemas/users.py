@@ -22,3 +22,12 @@ class UserResponse(BaseModel):
     created_at: str
 
     model_config = {"from_attributes": False}
+
+
+class VintedDecryptedResponse(BaseModel):
+    """
+    Mot de passe Vinted en clair — réservé au worker desktop local (HTTPS + JWT).
+    """
+
+    vinted_email: str | None
+    vinted_password: str | None

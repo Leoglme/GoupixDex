@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -227,8 +227,25 @@ def publish_vinted_for_article(
     }
 
 
+@router.post("/{article_id}/confirm-vinted-publish", status_code=status.HTTP_200_OK)
+def confirm_vinted_publish(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """
+    Marque l'article comme publié sur Vinted après succès du worker desktop local.
+    """
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    article_service.mark_article_published_on_vinted(article_id, user.id)
+    return {"ok": True}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_article(
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
@@ -283,7 +300,15 @@ async def create_article(
     db.commit()
     db.refresh(article)
 
-    if _form_bool(publish_to_vinted):
+    vinted_local_desktop = request.headers.get("x-goupix-vinted-target", "").strip().lower() == "local"
+
+    if _form_bool(publish_to_vinted) and vinted_local_desktop:
+        vinted_result = {
+            "status": "pending",
+            "stream_path": f"/articles/{article.id}/vinted-progress",
+            "desktop_local": True,
+        }
+    elif _form_bool(publish_to_vinted):
         vinted_progress_hub.register(article.id)
         background_tasks.add_task(
             run_vinted_publish_job,
@@ -291,7 +316,7 @@ async def create_article(
             user.id,
             stored_sources,
         )
-        vinted_result: dict[str, Any] = {
+        vinted_result = {
             "status": "running",
             "stream_path": f"/articles/{article.id}/vinted-progress",
         }
