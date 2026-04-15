@@ -1,5 +1,16 @@
 FROM python:3.12-slim-bookworm
 
+# Chromium + Xvfb : publication Vinted (nodriver) sans configuration manuelle dans le conteneur.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    xvfb \
+    xauth \
+    fonts-liberation \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV VINTED_CHROME_EXECUTABLE=/usr/bin/chromium
+
 WORKDIR /app
 
 COPY requirements.txt .

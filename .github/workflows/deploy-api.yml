@@ -1,5 +1,7 @@
 # Déploie l’API FastAPI (dossier api/) sur le VPS — venv + systemd + Nginx reload.
 # La base MariaDB peut être distante (ex. o2switch) : DATABASE_URL dans les secrets.
+# Sur le VPS : installe xvfb + xauth et lance Uvicorn sous xvfb-run (Chromium fenêtré si VINTED_BROWSER_HEADLESS=false).
+# Secret optionnel VINTED_BROWSER_HEADLESS : absent → true (historique) ; false → moins flaggé par Vinted sur Xvfb.
 
 name: Deploy API (FastAPI)
 
@@ -76,6 +78,8 @@ jobs:
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
           # Optionnel : chemin Chrome/Chromium si différent de /usr/bin/chromium
           VINTED_CHROME_EXECUTABLE: ${{ secrets.VINTED_CHROME_EXECUTABLE }}
+          # Optionnel : false = Chromium « fenêtré » sur Xvfb (souvent moins flaggé par Vinted) ; défaut true
+          VINTED_BROWSER_HEADLESS: ${{ secrets.VINTED_BROWSER_HEADLESS }}
         run: |
           set -euo pipefail
           f=api/.env
@@ -97,7 +101,7 @@ jobs:
             echo "VINTED_EMAIL_OR_USERNAME=${VINTED_EMAIL_OR_USERNAME:-}"
             echo "VINTED_PASSWORD=${VINTED_PASSWORD:-}"
             echo "CORS_ORIGINS=${CORS_ORIGINS:-*}"
-            echo "VINTED_BROWSER_HEADLESS=true"
+            echo "VINTED_BROWSER_HEADLESS=${VINTED_BROWSER_HEADLESS:-true}"
             echo "VINTED_CHROME_EXECUTABLE=${CHROME_PATH}"
           } > "$f"
 
@@ -140,7 +144,7 @@ jobs:
             APP_ROOT="$TARGET/api"
             sudo chown -R "$USER:$USER" "$APP_ROOT" || true
             sudo apt-get update -y
-            sudo apt-get install -y python3-venv python3-pip chromium fonts-liberation
+            sudo apt-get install -y python3-venv python3-pip chromium fonts-liberation xvfb xauth
             if [ ! -x "$APP_ROOT/.venv/bin/python" ]; then
               python3 -m venv "$APP_ROOT/.venv"
             fi
@@ -162,7 +166,8 @@ jobs:
             User=${DEPLOY_USER}
             WorkingDirectory=${APP_ROOT}
             EnvironmentFile=${APP_ROOT}/.env
-            ExecStart=${APP_ROOT}/.venv/bin/uvicorn main:app --host 127.0.0.1 --port ${PORT} --workers 2 --proxy-headers
+            # Affichage virtuel : Chromium avec VINTED_BROWSER_HEADLESS=false a besoin d'un DISPLAY (xauth requis pour xvfb-run).
+            ExecStart=/usr/bin/xvfb-run -a --server-args="-screen 0 1920x1080x24" ${APP_ROOT}/.venv/bin/uvicorn main:app --host 127.0.0.1 --port ${PORT} --workers 2 --proxy-headers
             Restart=always
             RestartSec=5
 
