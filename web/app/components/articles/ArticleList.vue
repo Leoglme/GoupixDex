@@ -21,6 +21,7 @@ const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
 const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
 /** Filtre texte : Pokémon, code set, série (nom extension), n°, titre. */
 const searchQuery = ref('')
+const { isDesktopApp } = useDesktopRuntime()
 
 function normalizeSearch(s: string) {
   return s
@@ -123,7 +124,10 @@ function isSelected(id: number) {
   return selectedIds.value.includes(id)
 }
 
-function toggleId(id: number, checked: boolean) {
+function toggleId(id: number, checked: boolean | 'indeterminate') {
+  if (checked === 'indeterminate') {
+    return
+  }
   if (checked) {
     if (!selectedIds.value.includes(id)) {
       selectedIds.value = [...selectedIds.value, id]
@@ -133,7 +137,10 @@ function toggleId(id: number, checked: boolean) {
   }
 }
 
-function toggleSelectAll(checked: boolean) {
+function toggleSelectAll(checked: boolean | 'indeterminate') {
+  if (checked === 'indeterminate') {
+    return
+  }
   const fids = filtered.value.map(r => r.id)
   if (checked) {
     const s = new Set(selectedIds.value)
@@ -281,7 +288,7 @@ function clearSelection() {
               <UCheckbox
                 :model-value="isSelected(row.id)"
                 :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
-                @update:model-value="(v: boolean) => toggleId(row.id, v)"
+                @update:model-value="(v) => toggleId(row.id, v)"
               />
             </td>
             <td class="px-3 py-2 font-medium text-highlighted">
@@ -340,7 +347,7 @@ function clearSelection() {
                   {
                     label: 'Mettre en ligne sur Vinted',
                     icon: 'i-lucide-store',
-                    disabled: row.is_sold || !(row.images?.length),
+                    disabled: !isDesktopApp || row.is_sold || !(row.images?.length),
                     onSelect: () => emit('publish-vinted', row)
                   },
                   { label: 'Marquer vendu', icon: 'i-lucide-circle-check', disabled: row.is_sold, onSelect: () => emit('sold', row) },
@@ -370,7 +377,7 @@ function clearSelection() {
           <UCheckbox
             :model-value="isSelected(row.id)"
             :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
-            @update:model-value="(v: boolean) => toggleId(row.id, v)"
+            @update:model-value="(v) => toggleId(row.id, v)"
           />
         </div>
         <div class="min-w-0 flex-1 space-y-2">
@@ -386,7 +393,7 @@ function clearSelection() {
             size="sm"
             variant="outline"
             icon="i-lucide-store"
-            :disabled="row.is_sold || !(row.images?.length)"
+              :disabled="!isDesktopApp || row.is_sold || !(row.images?.length)"
             @click="emit('publish-vinted', row)"
           >
             Vinted
@@ -418,5 +425,13 @@ function clearSelection() {
           : 'Aucun article.'
       }}
     </div>
+    <UAlert
+      v-if="!isDesktopApp"
+      color="neutral"
+      variant="subtle"
+      icon="i-lucide-monitor-smartphone"
+      title="Mise en ligne Vinted disponible uniquement dans l’app desktop"
+      description="Utilisez la page « Télécharger l’app » pour installer la version Windows/macOS."
+    />
   </div>
 </template>

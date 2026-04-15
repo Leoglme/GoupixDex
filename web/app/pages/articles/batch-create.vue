@@ -7,6 +7,7 @@ type ArticleFormExpose = {
 
 const { createArticle, startVintedBatch } = useArticles()
 const toast = useToast()
+const { isDesktopApp } = useDesktopRuntime()
 
 let nextSlotId = 1
 const formSlots = ref([{ id: 0 }])
@@ -69,7 +70,7 @@ async function submitAll() {
       color: 'success'
     })
 
-    if (batchVinted.value && createdIds.length) {
+    if (isDesktopApp.value && batchVinted.value && createdIds.length) {
       try {
         const { job_id, stream_path } = await startVintedBatch(createdIds)
         await navigateTo({
@@ -139,8 +140,15 @@ async function submitAll() {
           <div class="mt-4 rounded-lg border border-default p-4">
             <UCheckbox
               v-model="batchVinted"
+              :disabled="!isDesktopApp"
               label="Lancer la publication Vinted groupée après création (une connexion)"
             />
+            <p v-if="!isDesktopApp" class="mt-2 text-sm text-muted">
+              Disponible uniquement dans l’app desktop.
+              <NuxtLink to="/downloads" class="underline underline-offset-2">
+                Télécharger l’app
+              </NuxtLink>
+            </p>
           </div>
         </UCard>
 
@@ -186,7 +194,7 @@ async function submitAll() {
             @click="submitAll"
           >
             Créer {{ formSlots.length }} article(s)
-            <span v-if="batchVinted"> et lancer Vinted</span>
+            <span v-if="batchVinted && isDesktopApp"> et lancer Vinted</span>
           </UButton>
         </div>
       </div>

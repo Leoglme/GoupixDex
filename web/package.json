@@ -6,6 +6,10 @@
     "build": "nuxt build",
     "dev": "nuxt dev",
     "preview": "nuxt preview",
+    "generate": "nuxt generate",
+    "desktop:generate": "cross-env NUXT_DESKTOP_BUILD=1 nuxt generate",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck"
@@ -30,8 +34,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "@nuxt/eslint": "^1.15.2",
     "@types/node": "^25.5.2",
+    "cross-env": "^10.1.0",
     "eslint": "^10.2.0",
     "typescript": "^6.0.2",
     "vue-tsc": "^3.2.6"

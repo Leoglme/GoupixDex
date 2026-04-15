@@ -1,5 +1,8 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+const isDesktopBuild = process.env.NUXT_DESKTOP_BUILD === '1'
+
 export default defineNuxtConfig({
+  ssr: !isDesktopBuild,
   modules: [
     '@nuxt/eslint',
     '@nuxt/ui',
@@ -15,14 +18,17 @@ export default defineNuxtConfig({
   ],
 
   devtools: {
-    enabled: true
+    enabled: !isDesktopBuild
   },
 
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000'
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000',
+      githubRepo: process.env.NUXT_PUBLIC_GITHUB_REPO || 'leogu/GoupixDex',
+      desktopReleaseChannel: process.env.NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL || 'latest',
+      githubApiBase: process.env.NUXT_PUBLIC_GITHUB_API_BASE || 'https://api.github.com'
     }
   },
 
@@ -32,6 +38,12 @@ export default defineNuxtConfig({
     },
     '/settings/members': { redirect: '/settings/users' }
   },
+
+  nitro: isDesktopBuild
+    ? {
+        preset: 'static'
+      }
+    : undefined,
 
   compatibilityDate: '2024-07-11',
 

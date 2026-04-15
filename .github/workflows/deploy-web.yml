@@ -71,11 +71,15 @@ jobs:
         env:
           NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
           NUXT_PUBLIC_SITE_URL: ${{ secrets.NUXT_PUBLIC_SITE_URL }}
+          NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
+          NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL: latest
         run: |
           {
             echo "NODE_ENV=production"
             echo "NUXT_PUBLIC_API_BASE=${NUXT_PUBLIC_API_BASE}"
             echo "NUXT_PUBLIC_SITE_URL=${NUXT_PUBLIC_SITE_URL}"
+            echo "NUXT_PUBLIC_GITHUB_REPO=${NUXT_PUBLIC_GITHUB_REPO}"
+            echo "NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL=${NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL}"
           } > .env
 
       - name: Build Nuxt (Nitro)

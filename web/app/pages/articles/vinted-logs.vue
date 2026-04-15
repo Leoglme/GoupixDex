@@ -5,6 +5,7 @@ const route = useRoute()
 const { getVintedBatchActive } = useArticles()
 const batchStream = useVintedBatchStream()
 const publishStream = useVintedPublishStream()
+const { isDesktopApp } = useDesktopRuntime()
 
 /** ``batch`` | ``single`` | ``none`` (idle / chargement initial) */
 const streamMode = ref<'none' | 'batch' | 'single'>('none')
@@ -108,6 +109,12 @@ async function connectSingleArticle(articleId: number) {
 }
 
 async function bootstrap() {
+  if (!isDesktopApp.value) {
+    loading.value = false
+    streamMode.value = 'none'
+    idleMessage.value = 'Le journal Vinted est disponible uniquement dans l’application desktop.'
+    return
+  }
   const qJob = route.query.job
   const qArticle = route.query.article
   const jobId = typeof qJob === 'string' ? qJob.trim() : ''
@@ -197,7 +204,17 @@ onBeforeUnmount(() => {
           variant="subtle"
           icon="i-lucide-info"
           :title="idleMessage"
-        />
+        >
+          <template #description>
+            <span v-if="!isDesktopApp" class="text-sm text-muted">
+              Ouvrez
+              <NuxtLink to="/downloads" class="underline underline-offset-2">
+                la page de téléchargement
+              </NuxtLink>
+              pour installer l’app.
+            </span>
+          </template>
+        </UAlert>
 
         <UAlert
           v-if="streamError"

@@ -7,6 +7,8 @@ definePageMeta({ middleware: 'auth' })
 const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted } = useArticles()
 const { lookupMany } = usePricing()
 const toast = useToast()
+const { isDesktopApp } = useDesktopRuntime()
+const vintedLogsLink = computed(() => (isDesktopApp.value ? '/articles/vinted-logs' : '/downloads'))
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
@@ -116,6 +118,15 @@ async function confirmBulkDelete() {
 }
 
 async function onPublishVinted(a: Article) {
+  if (!isDesktopApp.value) {
+    toast.add({
+      title: 'Version web',
+      description: 'La mise en ligne Vinted est disponible uniquement dans l’application desktop.',
+      color: 'warning'
+    })
+    await navigateTo('/downloads')
+    return
+  }
   try {
     const { vinted } = await publishArticleToVinted(a.id)
     if (vinted.status === 'running' && vinted.stream_path) {
@@ -158,8 +169,8 @@ async function onPublishVinted(a: Article) {
             >
               Création groupée
             </UButton>
-            <UButton to="/articles/vinted-logs" color="neutral" variant="ghost" icon="i-lucide-scroll-text">
-              Journal Vinted
+            <UButton :to="vintedLogsLink" color="neutral" variant="ghost" icon="i-lucide-scroll-text">
+              {{ isDesktopApp ? 'Journal Vinted' : 'Télécharger l’app' }}
             </UButton>
             <UButton to="/articles/create" icon="i-lucide-plus">
               Nouvel article

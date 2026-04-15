@@ -45,6 +45,8 @@ const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
 /** Opt-in publication Vinted (création uniquement, désactivé par défaut). */
 const publishToVinted = ref(false)
+const { isDesktopApp } = useDesktopRuntime()
+const canUseVinted = computed(() => isDesktopApp.value)
 
 watch(
   () => props.article,
@@ -135,7 +137,7 @@ function buildCreateFormData(): FormData {
   for (const f of imageFiles.value) {
     fd.append('images', f)
   }
-  fd.append('publish_to_vinted', publishToVinted.value ? 'true' : 'false')
+  fd.append('publish_to_vinted', canUseVinted.value && publishToVinted.value ? 'true' : 'false')
   return fd
 }
 
@@ -219,7 +221,7 @@ function submit() {
     </div>
 
     <div
-      v-if="mode === 'create' && !hideVintedOption"
+      v-if="mode === 'create' && !hideVintedOption && canUseVinted"
       class="rounded-lg border border-default p-4 space-y-2"
     >
       <UCheckbox
@@ -230,6 +232,22 @@ function submit() {
         Si coché, l'API tente de créer l'annonce (identifiants Vinted et automation navigateur requis).
       </p>
     </div>
+    <UAlert
+      v-else-if="mode === 'create' && !hideVintedOption"
+      color="neutral"
+      variant="subtle"
+      icon="i-lucide-monitor-smartphone"
+      title="Publication Vinted disponible uniquement dans l’app desktop"
+    >
+      <template #description>
+        <span class="text-sm text-muted">
+          Téléchargez l’app depuis
+          <NuxtLink to="/downloads" class="underline underline-offset-2">
+            la page de téléchargement
+          </NuxtLink>.
+        </span>
+      </template>
+    </UAlert>
 
     <div v-if="mode === 'create'" class="space-y-2">
       <label class="text-sm font-medium text-highlighted">Images</label>

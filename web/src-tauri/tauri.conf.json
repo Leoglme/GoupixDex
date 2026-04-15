@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GoupixDex",
+  "version": "0.1.0",
+  "identifier": "fr.dibodev.goupixdex",
+  "build": {
+    "beforeDevCommand": "cross-env NUXT_DESKTOP_BUILD=1 nuxt dev --port 1420",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run desktop:generate",
+    "frontendDist": "../.output/public"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "GoupixDex",
+        "width": 1440,
+        "height": 900,
+        "resizable": true,
+        "minWidth": 1100,
+        "minHeight": 700
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../public/favicon.ico",
+      "../public/favicon-32x32.png",
+      "../public/android-chrome-192x192.png",
+      "../public/android-chrome-512x512.png"
+    ]
+  }
+}

@@ -5,6 +5,7 @@
 .nitro
 .cache
 dist
+src-tauri/target
 
 # Node dependencies
 node_modules

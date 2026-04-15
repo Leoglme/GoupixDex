@@ -4,8 +4,8 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 useDashboard()
 
 const open = ref(false)
-
-const links = [[{
+const { isDesktopApp } = useDesktopRuntime()
+const links = computed<NavigationMenuItem[][]>(() => [[{
   label: 'Tableau de bord',
   icon: 'i-lucide-layout-dashboard',
   to: '/dashboard',
@@ -18,19 +18,28 @@ const links = [[{
 }, {
   label: 'Journal Vinted',
   icon: 'i-lucide-scroll-text',
-  to: '/articles/vinted-logs',
+  to: isDesktopApp.value ? '/articles/vinted-logs' : '/downloads',
+  onSelect: () => { open.value = false }
+}, {
+  label: 'Télécharger l’app',
+  icon: 'i-lucide-download',
+  to: '/downloads',
   onSelect: () => { open.value = false }
 }, {
   label: 'Paramètres',
   icon: 'i-lucide-settings',
   to: '/settings',
   onSelect: () => { open.value = false }
-}]] satisfies NavigationMenuItem[][]
+}]])
 
 const groups = computed(() => [{
   id: 'links',
   label: 'Navigation',
-  items: links.flat()
+  items: links.value.flat().map(item => ({
+    label: item.label,
+    icon: item.icon,
+    to: item.to
+  }))
 }])
 
 function navMenuUi(collapsed: boolean) {

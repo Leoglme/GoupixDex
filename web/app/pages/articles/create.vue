@@ -12,6 +12,7 @@ const { scan } = useScanCard()
 const { createArticle } = useArticles()
 const { getSettings } = useSettings()
 const toast = useToast()
+const { isDesktopApp } = useDesktopRuntime()
 
 const scanning = ref(false)
 const submitting = ref(false)
@@ -50,6 +51,9 @@ async function onScanFile(e: Event) {
 }
 
 async function onSubmitCreate(fd: FormData) {
+  if (!isDesktopApp.value) {
+    fd.set('publish_to_vinted', 'false')
+  }
   vintedSubmit.value = fd.get('publish_to_vinted') === 'true'
   submitting.value = true
   try {
