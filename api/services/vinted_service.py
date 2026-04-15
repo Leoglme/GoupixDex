@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import os
+import tempfile
 import time
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import nodriver as uc
@@ -119,6 +123,62 @@ class VintedService:
     _browser: Optional[Browser] = None
     _tab: Optional[Tab] = None
     _VINTED_TIMEOUT_MS: int = 350
+
+    @classmethod
+    async def _emit_auth_log(
+        cls,
+        form_progress: FormProgressFn | None,
+        form_step: str,
+        message: str,
+        tab: Tab | None = None,
+        *,
+        detail: str | None = None,
+        with_screenshot: bool = False,
+    ) -> None:
+        """Événements SSE pendant l’auth Vinted (sous-étapes + capture optionnelle)."""
+        if not form_progress:
+            return
+        ev: dict[str, Any] = {
+            "type": "log",
+            "step": "auth",
+            "form_step": form_step,
+            "message": message,
+        }
+        if detail is not None:
+            ev["detail"] = detail
+        if with_screenshot and tab is not None:
+            shot = await cls._tab_screenshot_data_url(tab)
+            if shot:
+                ev["screenshot"] = shot
+        await form_progress(ev)
+
+    @classmethod
+    async def _tab_screenshot_data_url(cls, tab: Tab) -> str | None:
+        """JPEG redimensionné (data URL) pour les logs SSE — évite les payloads énormes."""
+        try:
+            fd, path = tempfile.mkstemp(suffix=".jpg")
+            os.close(fd)
+            p = Path(path)
+            await tab.save_screenshot(str(p), format="jpeg")
+            raw = p.read_bytes()
+            p.unlink(missing_ok=True)
+            try:
+                from io import BytesIO
+
+                from PIL import Image
+
+                im = Image.open(BytesIO(raw)).convert("RGB")
+                im.thumbnail((1280, 1280))
+                buf = BytesIO()
+                im.save(buf, format="JPEG", quality=72, optimize=True)
+                raw = buf.getvalue()
+            except Exception:
+                pass
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:image/jpeg;base64,{b64}"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Vinted screenshot failed: %s", exc)
+            return None
 
     @classmethod
     async def init_browser(cls) -> None:
@@ -568,7 +628,12 @@ class VintedService:
         await cls._activate_auth_testid_span(tab, el, "auth-select-type--register-switch")
 
     @classmethod
-    async def _click_auth_se_connecter_switch(cls, tab: Tab, total_timeout_sec: float = 45.0) -> None:
+    async def _click_auth_se_connecter_switch(
+        cls,
+        tab: Tab,
+        total_timeout_sec: float = 45.0,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         On the auth screen, click "Se connecter" to switch from the sign-up panel to the login panel.
 
@@ -588,6 +653,13 @@ class VintedService:
 
         if await cls._login_username_field_is_visible(tab):
             logger.info("Login panel already visible; skipping %s.", selector)
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_skip_se_connecter",
+                "Panneau connexion déjà affiché (champ identifiant visible).",
+                tab,
+                detail=(tab.target.url or "")[:400],
+            )
             return
 
         wait_timeout = min(5.0, max(1.2, min(total_timeout_sec, 8.0)))
@@ -610,23 +682,51 @@ class VintedService:
 
         await cls._activate_se_connecter_switch(tab, el)
         logger.info("Activated Se connecter (%s).", selector)
+        await cls._emit_auth_log(
+            form_progress,
+            "auth_se_connecter_clicked",
+            "« Se connecter » activé — attente du champ identifiant (max 4 s).",
+            tab,
+            detail=(tab.target.url or "")[:400],
+        )
         await cls._scroll_page_top(tab)
+        await tab.sleep(0.12)
 
-        settle_deadline = time.monotonic() + 1.5
+        settle_deadline = time.monotonic() + 4.0
         while time.monotonic() < settle_deadline:
             await tab
             if await cls._login_username_field_is_visible(tab):
                 logger.info("Login username field is now visible.")
+                await cls._emit_auth_log(
+                    form_progress,
+                    "auth_username_visible",
+                    "Champ identifiant visible après « Se connecter ».",
+                    tab,
+                    detail=(tab.target.url or "")[:400],
+                )
                 return
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.06)
 
         if not await cls._login_username_field_is_visible(tab):
             logger.warning(
-                "Se connecter was activated but username field did not become visible within 1.5s.",
+                "Se connecter was activated but username field did not become visible within 4s.",
+            )
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_username_wait",
+                "Champ identifiant toujours absent après attente — capture d'écran.",
+                tab,
+                detail=(tab.target.url or "")[:500],
+                with_screenshot=True,
             )
 
     @classmethod
-    async def _click_auth_login_email_option(cls, tab: Tab, total_timeout_sec: float = 12.0) -> None:
+    async def _click_auth_login_email_option(
+        cls,
+        tab: Tab,
+        total_timeout_sec: float = 12.0,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         After "Se connecter", choose login with e-mail (``auth-select-type--login-email``).
         """
@@ -635,6 +735,13 @@ class VintedService:
         await tab
         if await cls._login_username_field_is_visible(tab):
             logger.info("Username field already visible; skipping e-mail login method picker.")
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_skip_login_email",
+                "Connexion par e-mail inutile — champ identifiant déjà visible.",
+                tab,
+                detail=(tab.target.url or "")[:400],
+            )
             return
 
         wait_timeout = min(5.0, max(1.0, min(total_timeout_sec, 8.0)))
@@ -653,11 +760,25 @@ class VintedService:
 
         await cls._activate_auth_testid_span(tab, el, testid)
         logger.info("Clicked login via e-mail (%s).", selector)
+        await cls._emit_auth_log(
+            form_progress,
+            "auth_login_email_clicked",
+            "Option « Connexion par e-mail » activée.",
+            tab,
+            detail=(tab.target.url or "")[:400],
+        )
         await cls._scroll_page_top(tab)
-        await tab.sleep(0.05)
+        await tab.sleep(0.12)
 
     @classmethod
-    async def _fill_and_submit_credentials(cls, tab: Tab, email: str, password: str) -> None:
+    async def _fill_and_submit_credentials(
+        cls,
+        tab: Tab,
+        email: str,
+        password: str,
+        *,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         Fill username/password and submit the member login form (Continuer).
 
@@ -669,12 +790,34 @@ class VintedService:
         while time.monotonic() < form_deadline:
             await tab
             if await cls._login_username_field_is_visible(tab):
+                await cls._emit_auth_log(
+                    form_progress,
+                    "auth_username_ready",
+                    "Champ identifiant visible — remplissage des identifiants.",
+                    tab,
+                    detail=(tab.target.url or "")[:400],
+                )
                 break
-            await asyncio.sleep(0.06)
+            await asyncio.sleep(0.08)
         else:
             logger.warning("Username field did not become visible before credential fill.")
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_username_missing",
+                "Champ identifiant non visible avant saisie — capture d'écran.",
+                tab,
+                detail=(tab.target.url or "")[:500],
+                with_screenshot=True,
+            )
 
         await cls._scroll_page_top(tab)
+        await cls._emit_auth_log(
+            form_progress,
+            "auth_fill_start",
+            "Saisie de l'identifiant / mot de passe…",
+            tab,
+            detail="Champs username + password",
+        )
         if not await cls._set_input_value_for_react(tab, "input#username", email):
             await cls._set_input_value_for_react(tab, 'input[name="username"]', email)
         await tab.sleep(0.05)
@@ -715,6 +858,14 @@ class VintedService:
                 return_by_value=True,
             )
             logger.info("Submitted login via JS (Continuer / first submit).")
+        await cls._emit_auth_log(
+            form_progress,
+            "auth_submit_sent",
+            "Formulaire de connexion envoyé (Continuer / submit).",
+            tab,
+            detail=(tab.target.url or "")[:400],
+            with_screenshot=True,
+        )
         await tab.sleep(0.6)
         await tab
 
@@ -741,7 +892,13 @@ class VintedService:
         return True
 
     @classmethod
-    async def ensure_sign_in(cls, email: str, password: str) -> None:
+    async def ensure_sign_in(
+        cls,
+        email: str,
+        password: str,
+        *,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         Attempt sign-in up to five times using :meth:`sign_in_vinted`.
 
@@ -756,7 +913,7 @@ class VintedService:
             RuntimeError: If sign-in is still considered unsuccessful after all attempts.
         """
         max_attempts = 5
-        await cls.sign_in_vinted(email, password, from_home=True)
+        await cls.sign_in_vinted(email, password, from_home=True, form_progress=form_progress)
         await cls._require_tab().sleep(1.8)
         if await cls.is_connected():
             logger.info(
@@ -770,7 +927,7 @@ class VintedService:
                 attempt,
                 max_attempts - 1,
             )
-            await cls.sign_in_vinted(email, password, from_home=False)
+            await cls.sign_in_vinted(email, password, from_home=False, form_progress=form_progress)
             await cls._require_tab().sleep(1.5)
             if await cls.is_connected():
                 logger.info(
@@ -781,7 +938,14 @@ class VintedService:
         raise RuntimeError("Failed to sign in after multiple attempts")
 
     @classmethod
-    async def sign_in_vinted(cls, email: str, password: str, *, from_home: bool = True) -> None:
+    async def sign_in_vinted(
+        cls,
+        email: str,
+        password: str,
+        *,
+        from_home: bool = True,
+        form_progress: FormProgressFn | None = None,
+    ) -> None:
         """
         Navigate to auth, click Se connecter → e-mail, fill credentials, submit.
 
@@ -796,11 +960,33 @@ class VintedService:
         """
         tab = cls._require_tab()
         if from_home:
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_nav_home",
+                "Ouverture de vinted.fr (accueil)…",
+                tab,
+                detail="https://www.vinted.fr",
+            )
             await tab.get("https://www.vinted.fr")
             await cls._accept_onetrust_cookies(tab)
             await TimerService.wait(40)
             await cls._go_to_member_auth_entry(tab)
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_member_entry",
+                "Page d'authentification membre chargée.",
+                tab,
+                detail=(tab.target.url or "")[:500],
+                with_screenshot=True,
+            )
         else:
+            await cls._emit_auth_log(
+                form_progress,
+                "auth_retry_url",
+                "Rechargement direct de l'URL de connexion membre (retry).",
+                tab,
+                detail=VINTED_MEMBER_AUTH_URL,
+            )
             await tab.get(VINTED_MEMBER_AUTH_URL)
             await tab
             await tab.sleep(0.08)
@@ -808,10 +994,10 @@ class VintedService:
         await cls._accept_onetrust_cookies(tab, total_timeout_sec=4.0)
         await TimerService.wait(30)
         await cls._scroll_page_top(tab)
-        await cls._click_auth_se_connecter_switch(tab, total_timeout_sec=12.0)
+        await cls._click_auth_se_connecter_switch(tab, total_timeout_sec=12.0, form_progress=form_progress)
         await tab.sleep(0.04)
-        await cls._click_auth_login_email_option(tab, total_timeout_sec=8.0)
-        await cls._fill_and_submit_credentials(tab, email, password)
+        await cls._click_auth_login_email_option(tab, total_timeout_sec=8.0, form_progress=form_progress)
+        await cls._fill_and_submit_credentials(tab, email, password, form_progress=form_progress)
 
     @classmethod
     async def open_sell_item_page(cls) -> None:

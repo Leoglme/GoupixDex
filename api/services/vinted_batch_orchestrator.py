@@ -69,7 +69,7 @@ async def run_vinted_batch_job(
         await VintedService.init_page()
         await TimerService.wait(80)
         await _emit_job(job_id, "auth", "Connexion à Vinted…", form_step="auth_start")
-        await VintedService.ensure_sign_in(email, password)
+        await VintedService.ensure_sign_in(email, password, form_progress=forward_progress)
         await _emit_job(job_id, "auth", "Connecté — enchaînement des annonces.", form_step="auth_ok")
 
     except Exception as exc:  # noqa: BLE001

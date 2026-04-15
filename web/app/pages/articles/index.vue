@@ -7,12 +7,6 @@ definePageMeta({ middleware: 'auth' })
 const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted } = useArticles()
 const { lookupMany } = usePricing()
 const toast = useToast()
-const {
-  logs: vintedLogs,
-  logEl: vintedLogEl,
-  followStream: followVintedStream,
-  closeStream: closeVintedStream
-} = useVintedPublishStream()
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
@@ -30,9 +24,6 @@ const deleteId = ref<number | null>(null)
 
 const bulkDeleteOpen = ref(false)
 const bulkDeleteIds = ref<number[]>([])
-
-const vintedModalOpen = ref(false)
-const vintedBusy = ref(false)
 
 async function refresh() {
   loading.value = true
@@ -125,29 +116,29 @@ async function confirmBulkDelete() {
 }
 
 async function onPublishVinted(a: Article) {
-  vintedModalOpen.value = true
-  vintedBusy.value = true
   try {
     const { vinted } = await publishArticleToVinted(a.id)
     if (vinted.status === 'running' && vinted.stream_path) {
-      await followVintedStream(vinted.stream_path, 'list')
-      await refresh()
+      await navigateTo({
+        path: '/articles/vinted-logs',
+        query: { article: String(a.id) }
+      })
+      return
     }
+    toast.add({
+      title: 'Publication Vinted',
+      description: 'Réponse inattendue du serveur (pas de flux SSE).',
+      color: 'warning'
+    })
+    await refresh()
   } catch (e) {
     toast.add({
       title: 'Publication Vinted impossible',
       description: apiErrorMessage(e),
       color: 'error'
     })
-    vintedModalOpen.value = false
-  } finally {
-    vintedBusy.value = false
   }
 }
-
-onBeforeUnmount(() => {
-  closeVintedStream()
-})
 </script>
 
 <template>
@@ -258,30 +249,4 @@ onBeforeUnmount(() => {
     </template>
   </UModal>
 
-  <UModal
-    v-model:open="vintedModalOpen"
-    title="Publication Vinted"
-    description="Journal côté serveur (navigateur automatisé). Vous pouvez fermer cette fenêtre : la tâche continue."
-  >
-    <template #body>
-      <div class="space-y-3">
-        <p v-if="vintedBusy && vintedLogs.length === 0" class="text-sm text-muted">
-          Démarrage…
-        </p>
-        <ul
-          ref="vintedLogEl"
-          class="max-h-64 overflow-y-auto rounded-lg bg-elevated/50 p-3 text-sm font-mono space-y-1 border border-default min-h-[2.5rem]"
-        >
-          <li v-for="(line, i) in vintedLogs" :key="i" class="text-muted">
-            {{ line }}
-          </li>
-        </ul>
-        <div class="flex justify-end">
-          <UButton color="neutral" variant="subtle" @click="vintedModalOpen = false">
-            Fermer
-          </UButton>
-        </div>
-      </div>
-    </template>
-  </UModal>
 </template>

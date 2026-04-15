@@ -1,20 +1,26 @@
 /**
  * Connexion au flux SSE `/articles/:id/vinted-progress` après lancement d'une publication.
  */
-export type VintedStreamContext = 'create' | 'list'
+export type VintedStreamContext = 'create' | 'list' | 'logs'
+
+export interface VintedLogEntry {
+  text: string
+  /** Data URL image/jpeg (capture navigateur). */
+  screenshot?: string
+}
 
 export function useVintedPublishStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
 
-  const logs = ref<string[]>([])
+  const logEntries = ref<VintedLogEntry[]>([])
   const logEl = ref<HTMLElement | null>(null)
 
   let eventSource: EventSource | null = null
 
   watch(
-    logs,
+    logEntries,
     async () => {
       await nextTick()
       const el = logEl.value
@@ -30,16 +36,34 @@ export function useVintedPublishStream() {
     eventSource = null
   }
 
+  function pushLog(data: {
+    type?: string
+    message?: string
+    step?: string
+    form_step?: string
+    detail?: string
+    screenshot?: string
+  }) {
+    if (data.type !== 'log' || typeof data.message !== 'string') {
+      return
+    }
+    const tag = data.form_step ? `[${data.form_step}] ` : ''
+    const extra = data.detail ? ` — ${data.detail}` : ''
+    logEntries.value.push({
+      text: `${tag}${data.message}${extra}`,
+      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined
+    })
+  }
+
   /**
    * Ouvre le flux jusqu'à l'événement ``done`` ou ``error``.
-   * @param context - ``create`` : toasts combinés création + Vinted ; ``list`` : publication depuis la liste.
    */
   function followStream(
     streamPath: string,
     context: VintedStreamContext = 'list'
   ): Promise<void> {
     close()
-    logs.value = []
+    logEntries.value = []
     const t
       = token.value
         ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
@@ -61,43 +85,46 @@ export function useVintedPublishStream() {
             step?: string
             form_step?: string
             detail?: string
+            screenshot?: string
             vinted?: { published?: boolean, detail?: string }
           }
-          if (data.type === 'log' && typeof data.message === 'string') {
-            const tag = data.form_step ? `[${data.form_step}] ` : ''
-            const extra = data.detail ? ` — ${data.detail}` : ''
-            logs.value.push(`${tag}${data.message}${extra}`)
+          if (data.type === 'log') {
+            pushLog(data)
           } else if (data.type === 'done') {
             settled = true
             close()
             const v = data.vinted
-            if (v?.published) {
-              toast.add({
-                title:
-                  context === 'create'
-                    ? 'Article créé et publié sur Vinted'
-                    : 'Publié sur Vinted',
-                color: 'success'
-              })
-            } else {
-              toast.add({
-                title: context === 'create' ? 'Article créé' : 'Publication Vinted',
-                description:
-                  v?.detail === 'missing_vinted_credentials'
-                    ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
-                    : String(v?.detail ?? 'Publication non confirmée.'),
-                color: 'warning'
-              })
+            if (context !== 'logs') {
+              if (v?.published) {
+                toast.add({
+                  title:
+                    context === 'create'
+                      ? 'Article créé et publié sur Vinted'
+                      : 'Publié sur Vinted',
+                  color: 'success'
+                })
+              } else {
+                toast.add({
+                  title: context === 'create' ? 'Article créé' : 'Publication Vinted',
+                  description:
+                    v?.detail === 'missing_vinted_credentials'
+                      ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
+                      : String(v?.detail ?? 'Publication non confirmée.'),
+                  color: 'warning'
+                })
+              }
             }
             resolve()
           } else if (data.type === 'error') {
             settled = true
             close()
-            toast.add({
-              title: 'Flux publication',
-              description: String(data.message ?? 'Erreur'),
-              color: 'warning'
-            })
+            if (context !== 'logs') {
+              toast.add({
+                title: 'Flux publication',
+                description: String(data.message ?? 'Erreur'),
+                color: 'warning'
+              })
+            }
             resolve()
           }
         } catch {
@@ -120,5 +147,5 @@ export function useVintedPublishStream() {
     close()
   })
 
-  return { logs, logEl, followStream, closeStream: close }
+  return { logEntries, logEl, followStream, closeStream: close }
 }

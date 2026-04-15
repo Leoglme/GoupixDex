@@ -1,6 +1,8 @@
 /**
  * SSE pour ``GET /articles/vinted-batch/{job_id}/stream`` : logs + événements ``progress``.
  */
+import type { VintedLogEntry } from '~/composables/useVintedPublishStream'
+
 export interface VintedBatchProgress {
   current: number
   total: number
@@ -13,7 +15,7 @@ export function useVintedBatchStream() {
   const { token } = useAuth()
   const toast = useToast()
 
-  const logs = ref<string[]>([])
+  const logEntries = ref<VintedLogEntry[]>([])
   const logEl = ref<HTMLElement | null>(null)
   const progress = ref<VintedBatchProgress | null>(null)
   const finished = ref(false)
@@ -22,7 +24,7 @@ export function useVintedBatchStream() {
   let eventSource: EventSource | null = null
 
   watch(
-    logs,
+    logEntries,
     async () => {
       await nextTick()
       const el = logEl.value
@@ -38,12 +40,33 @@ export function useVintedBatchStream() {
     eventSource = null
   }
 
+  function pushLog(data: {
+    type?: string
+    message?: string
+    form_step?: string
+    detail?: string
+    screenshot?: string
+  }) {
+    if (data.type !== 'log' || typeof data.message !== 'string') {
+      return
+    }
+    const tag = data.form_step ? `[${data.form_step}] ` : ''
+    const extra = data.detail ? ` — ${data.detail}` : ''
+    logEntries.value.push({
+      text: `${tag}${data.message}${extra}`,
+      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined
+    })
+  }
+
   /**
    * Ouvre le flux jusqu'à ``done`` ou ``error`` (premier message).
    */
-  function followBatchStream(streamPath: string): Promise<void> {
+  function followBatchStream(
+    streamPath: string,
+    opts?: { quiet?: boolean }
+  ): Promise<void> {
     close()
-    logs.value = []
+    logEntries.value = []
     progress.value = null
     finished.value = false
     lastSummary.value = null
@@ -69,6 +92,7 @@ export function useVintedBatchStream() {
             step?: string
             form_step?: string
             detail?: string
+            screenshot?: string
             current?: number
             total?: number
             article_id?: number
@@ -87,10 +111,8 @@ export function useVintedBatchStream() {
             }
             return
           }
-          if (data.type === 'log' && typeof data.message === 'string') {
-            const tag = data.form_step ? `[${data.form_step}] ` : ''
-            const extra = data.detail ? ` — ${data.detail}` : ''
-            logs.value.push(`${tag}${data.message}${extra}`)
+          if (data.type === 'log') {
+            pushLog(data)
             return
           }
           if (data.type === 'done') {
@@ -99,21 +121,23 @@ export function useVintedBatchStream() {
             lastSummary.value = data.summary ?? data
             close()
             const v = data.vinted
-            if (v?.published) {
-              toast.add({
-                title: 'Lot Vinted terminé',
-                description: 'Toutes les annonces prévues ont été publiées.',
-                color: 'success'
-              })
-            } else {
-              toast.add({
-                title: 'Lot Vinted terminé',
-                description:
-                  v?.detail === 'missing_vinted_credentials'
-                    ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
-                    : String(v?.detail ?? 'Publication partielle ou non confirmée.'),
-                color: 'warning'
-              })
+            if (!opts?.quiet) {
+              if (v?.published) {
+                toast.add({
+                  title: 'Lot Vinted terminé',
+                  description: 'Toutes les annonces prévues ont été publiées.',
+                  color: 'success'
+                })
+              } else {
+                toast.add({
+                  title: 'Lot Vinted terminé',
+                  description:
+                    v?.detail === 'missing_vinted_credentials'
+                      ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
+                      : String(v?.detail ?? 'Publication partielle ou non confirmée.'),
+                  color: 'warning'
+                })
+              }
             }
             resolve()
             return
@@ -122,11 +146,13 @@ export function useVintedBatchStream() {
             settled = true
             finished.value = true
             close()
-            toast.add({
-              title: 'Flux publication groupée',
-              description: String(data.message ?? 'Erreur'),
-              color: 'warning'
-            })
+            if (!opts?.quiet) {
+              toast.add({
+                title: 'Flux publication groupée',
+                description: String(data.message ?? 'Erreur'),
+                color: 'warning'
+              })
+            }
             resolve()
           }
         } catch {
@@ -150,7 +176,7 @@ export function useVintedBatchStream() {
   })
 
   return {
-    logs,
+    logEntries,
     logEl,
     progress,
     finished,

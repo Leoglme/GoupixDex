@@ -50,6 +50,7 @@ async def _emit(
     *,
     form_step: str | None = None,
     detail: str | None = None,
+    screenshot: str | None = None,
 ) -> None:
     if progress is None:
         return
@@ -58,6 +59,8 @@ async def _emit(
         ev["form_step"] = form_step
     if detail is not None:
         ev["detail"] = detail
+    if screenshot:
+        ev["screenshot"] = screenshot
     await progress(ev)
 
 
@@ -220,7 +223,7 @@ async def publish_article_to_vinted(
         await VintedService.init_page()
         await TimerService.wait(80)
         await _emit(progress, "auth", "Connexion à Vinted…", form_step="auth_start")
-        await VintedService.ensure_sign_in(email, password)
+        await VintedService.ensure_sign_in(email, password, form_progress=progress)
         await _emit(progress, "auth", "Connecté.", form_step="auth_ok")
         await run_single_vinted_listing(article, user, stored_image_sources, progress)
         await _emit(progress, "browser", "Fermeture du navigateur…", form_step="browser_close")
