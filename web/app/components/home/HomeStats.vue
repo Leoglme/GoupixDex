@@ -70,7 +70,6 @@ const { data: stats } = await useAsyncData<Stat[]>('stats', async () => {
       :key="index"
       :icon="stat.icon"
       :title="stat.title"
-      to="/customers"
       variant="subtle"
       :ui="{
         container: 'gap-y-1.5',

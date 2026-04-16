@@ -12,22 +12,6 @@ export interface User {
   location: string
 }
 
-export interface Mail {
-  id: number
-  unread?: boolean
-  from: User
-  subject: string
-  body: string
-  date: string
-}
-
-export interface Member {
-  name: string
-  username: string
-  role: 'member' | 'owner'
-  avatar: AvatarProps
-}
-
 export interface Stat {
   title: string
   icon: string

@@ -74,18 +74,15 @@ export default defineNuxtConfig({
     sitemap: ['/sitemap.xml']
   },
 
+  /**
+   * Sitemap manuel : ne pas utiliser includeAppSources (toutes les routes pages/),
+   * sinon des routes internes ou de démo se retrouvent indexées.
+   * Ajouter ici uniquement les URLs marketing / publiques à faire crawler.
+   */
   sitemap: {
     sitemaps: false,
-    includeAppSources: true,
-    exclude: [
-      '/dashboard',
-      '/downloads',
-      '/articles',
-      '/articles/**',
-      '/settings',
-      '/settings/**',
-      '/login'
-    ]
+    includeAppSources: false,
+    urls: ['/', '/request']
   },
 
   routeRules: {

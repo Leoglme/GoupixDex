@@ -24,17 +24,19 @@ jobs:
     name: Build (PR — sans déploiement)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: web
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -50,17 +52,19 @@ jobs:
     name: Build & deploy
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: web
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -123,7 +127,7 @@ jobs:
             tar -xzf "$DEPLOY/nuxt-output.tar.gz" -C "$DEPLOY"
             rm -f "$DEPLOY/nuxt-output.tar.gz"
             if ! command -v node >/dev/null 2>&1; then
-              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
               sudo apt-get install -y nodejs
             fi
             if ! command -v pm2 >/dev/null 2>&1; then
