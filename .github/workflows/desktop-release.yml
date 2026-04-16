@@ -70,10 +70,19 @@ jobs:
         working-directory: web
         env:
           RELEASE_VERSION: 0.1.${{ github.run_number }}
+          UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/download/desktop/latest.json
+          UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
+          if [ -z "$UPDATER_PUBKEY" ]; then
+            echo "Secret TAURI_UPDATER_PUBKEY manquant."
+            exit 1
+          fi
+
           python3 << 'PY'
           import json, os, re
           version = os.environ["RELEASE_VERSION"]
+          updater_endpoint = os.environ["UPDATER_ENDPOINT"]
+          updater_pubkey = os.environ["UPDATER_PUBKEY"]
           os.chdir("src-tauri")
           with open("Cargo.toml", encoding="utf-8") as f:
               lines = f.read().splitlines(keepends=True)
@@ -93,6 +102,13 @@ jobs:
           with open("tauri.conf.json", encoding="utf-8") as f:
               conf = json.load(f)
           conf["version"] = version
+          conf.setdefault("bundle", {})
+          conf["bundle"]["createUpdaterArtifacts"] = True
+          conf.setdefault("plugins", {})
+          conf["plugins"]["updater"] = {
+              "endpoints": [updater_endpoint],
+              "pubkey": updater_pubkey
+          }
           with open("tauri.conf.json", "w", encoding="utf-8") as f:
               json.dump(conf, f, indent=2, ensure_ascii=False)
               f.write("\n")
@@ -109,6 +125,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
           NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
           tagName: desktop

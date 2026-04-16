@@ -5,3 +5,5 @@ api/__pycache__
 api/*.pyc
 api/.env
 web/.env
+web/goupixdex.key
+web/goupixdex.key.pub

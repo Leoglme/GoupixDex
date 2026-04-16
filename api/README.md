@@ -43,24 +43,24 @@ api/
 
 - Python **3.10+**
 - MariaDB or MySQL (local or Docker)
-- Optional: `POKE_WALLET_API_KEY`, `GROQ_API_KEY`, **Chromium** for Vinted (voir ci-dessous)
+- Optional: `POKE_WALLET_API_KEY`, `GROQ_API_KEY`, **Chromium** for Vinted (see below)
 
-### Vinted (Chromium) et Xvfb
+### Vinted (Chromium) and Xvfb
 
-La publication Vinted lance **Chromium** via **nodriver**. Sur une machine **sans écran** (VPS, conteneur, CI), `VINTED_BROWSER_HEADLESS=false` exige un **DISPLAY** : le dépôt prévoit **Xvfb** pour ne rien configurer à la main.
+Vinted publishing launches **Chromium** through **nodriver**. On a **headless machine** (VPS, container, CI), `VINTED_BROWSER_HEADLESS=false` requires a **DISPLAY**: this repository uses **Xvfb** so no manual display setup is needed.
 
-| Environnement | Comportement |
+| Environment | Behavior |
 |----------------|---------------|
-| **Docker Compose** (`api/`) | L’image installe **chromium**, **xvfb**, **xauth** ; la commande de service enveloppe **uvicorn** avec **`xvfb-run`**. Aucune étape manuelle. |
-| **Déploiement GitHub → VPS** (`.github/workflows/deploy-api.yml`) | `apt install` inclut **xvfb** et **xauth** ; l’unité **systemd** lance Uvicorn sous **`xvfb-run`**. |
-| **Linux sans Docker** (venv + systemd maison) | Installez `xvfb` et `xauth` (`apt install xvfb xauth`), puis lancez l’API avec : `xvfb-run -a --server-args="-screen 0 1920x1080x24" uvicorn …` si `VINTED_BROWSER_HEADLESS=false`. |
-| **Windows (dev)** | Pas besoin d’Xvfb ; utilisez `VINTED_BROWSER_HEADLESS=false` avec un bureau local, ou `run_dev.py` si vous utilisez `--reload` avec Vinted. |
+| **Docker Compose** (`api/`) | The image installs **chromium**, **xvfb**, and **xauth**; the service command wraps **uvicorn** with **`xvfb-run`**. No manual step required. |
+| **GitHub → VPS deploy** (`.github/workflows/deploy-api.yml`) | `apt install` includes **xvfb** and **xauth**; the **systemd** unit runs Uvicorn under **`xvfb-run`**. |
+| **Linux without Docker** (venv + custom systemd) | Install `xvfb` and `xauth` (`apt install xvfb xauth`), then run the API with: `xvfb-run -a --server-args="-screen 0 1920x1080x24" uvicorn …` when `VINTED_BROWSER_HEADLESS=false`. |
+| **Windows (dev)** | No Xvfb needed; use `VINTED_BROWSER_HEADLESS=false` with a local desktop session, or use `run_dev.py` when running `--reload` with Vinted. |
 
-**GitHub Actions (secret optionnel)** : `VINTED_BROWSER_HEADLESS` — si absent ou vide, la valeur générée sur le VPS reste **`true`** (comportement historique). Mettez **`false`** pour un Chromium fenêtré sur Xvfb (souvent moins refusé par Vinted que le headless intégré). **Cloudflare / IP hébergeur** peuvent quand même bloquer des requêtes : un `curl` en **403** depuis le VPS alors qu’un navigateur répond **200** est possible.
+**GitHub Actions (optional secret)**: `VINTED_BROWSER_HEADLESS` — if missing or empty, the value generated on the VPS remains **`true`** (historical behavior). Set **`false`** for a headed Chromium session on Xvfb (often less likely to be blocked by Vinted than built-in headless mode). **Cloudflare / hosting IPs** can still block requests: it is possible to get a **403** from `curl` on the VPS while a browser returns **200**.
 
-Variables utiles dans `.env` / `.env.example` : `VINTED_BROWSER_HEADLESS`, `VINTED_CHROME_EXECUTABLE` (souvent `/usr/bin/chromium` sous Linux).
+Useful variables in `.env` / `.env.example`: `VINTED_BROWSER_HEADLESS`, `VINTED_CHROME_EXECUTABLE` (often `/usr/bin/chromium` on Linux).
 
-**Windows / macOS (app desktop)** : avec `VINTED_BROWSER_HEADLESS=false`, le mode **`VINTED_BROWSER_DISCREET=true`** (défaut) garde `--start-maximized`, puis applique `--window-position` (hors écran) + `--start-minimized` pour rester discret tout en gardant un rendu "headed". Vous pouvez désactiver la minimisation via `VINTED_BROWSER_DISCREET_MINIMIZE=false`. Sur **Linux + Xvfb plein écran**, mettre `VINTED_BROWSER_DISCREET=false` pour garder le comportement standard.
+**Windows / macOS (desktop app)**: with `VINTED_BROWSER_HEADLESS=false`, **`VINTED_BROWSER_DISCREET=true`** (default) keeps `--start-maximized`, then applies `--window-position` (off-screen) + `--start-minimized` to stay discreet while keeping a headed rendering path. You can disable minimization with `VINTED_BROWSER_DISCREET_MINIMIZE=false`. On **Linux + full-screen Xvfb**, set `VINTED_BROWSER_DISCREET=false` to keep standard behavior.
 
 ## Install
 
@@ -113,13 +113,13 @@ python migrations/run_migrations.py
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Sous **Windows**, si vous utilisez **`--reload`** et la publication **Vinted** (nodriver / Chrome), uvicorn choisit une boucle sans support des sous-processus → erreur `NotImplementedError` dans nodriver. Utilisez plutôt :
+On **Windows**, if you use **`--reload`** with **Vinted** publishing (nodriver / Chrome), uvicorn can pick an event loop without subprocess support → `NotImplementedError` in nodriver. Use instead:
 
 ```bash
 python run_dev.py
 ```
 
-ou explicitement (Windows uniquement — la classe stdlib `ProactorEventLoop`) :
+or explicitly (Windows only — stdlib `ProactorEventLoop` class):
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000 --loop asyncio.windows_events:ProactorEventLoop
@@ -159,16 +159,16 @@ From `api/`:
 docker compose up --build
 ```
 
-- API: port **8000** (migrations + seed conditionnel au démarrage, puis **uvicorn** sous **`xvfb-run`** pour Vinted)
+- API: port **8000** (migrations + optional seed at startup, then **uvicorn** under **`xvfb-run`** for Vinted)
 - MariaDB: **3306**
 - phpMyAdmin: **8080**
-- L’image inclut **Chromium**, **Xvfb** et **xauth** ; les variables `VINTED_*` et **Supabase** peuvent être définies dans un fichier **`.env`** à côté de `docker-compose.yml` (substitution `${…}` — voir [Compose env files](https://docs.docker.com/compose/environment-variables/set-environment-variables/)).
+- The image includes **Chromium**, **Xvfb**, and **xauth**; `VINTED_*` and **Supabase** variables can be defined in a **`.env`** file next to `docker-compose.yml` (`${…}` substitution — see [Compose env files](https://docs.docker.com/compose/environment-variables/set-environment-variables/)).
 
 Create a user after startup: `docker compose exec api python seeders/user_seeder.py` (with env vars set), or use `POST /users` and `POST /auth/login`.
 
-### Déploiement API (GitHub → VPS)
+### API deployment (GitHub → VPS)
 
-Le workflow **Deploy API** installe **xvfb** et **xauth**, écrit l’unité **systemd** avec **`ExecStart=/usr/bin/xvfb-run … uvicorn`**, et peut fixer **`VINTED_BROWSER_HEADLESS`** via le secret du même nom (défaut **`true`** si le secret est absent). Aucune installation manuelle de Xvfb sur le VPS n’est nécessaire après un déploiement via cette CI.
+The **Deploy API** workflow installs **xvfb** and **xauth**, writes the **systemd** unit with **`ExecStart=/usr/bin/xvfb-run … uvicorn`**, and can set **`VINTED_BROWSER_HEADLESS`** via the secret of the same name (default **`true`** when the secret is missing). No manual Xvfb installation is required on the VPS after deploying through this CI.
 
 ## Limitations
 
