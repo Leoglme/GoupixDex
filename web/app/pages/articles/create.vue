@@ -20,18 +20,18 @@ const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
 
 const scanning = ref(false)
+const lastScanFile = ref<File | null>(null)
+const scanPreviewUrl = ref<string | null>(null)
 const submitting = ref(false)
 const vintedSubmit = ref(false)
 const scanInputKey = ref(0)
-/** Texte optionnel pour aider l’OCR (nom, set, code, n°…). */
+/** Texte optionnel pour aider le scan de carte (nom, set, code, n°…). */
 const scanOcrHint = ref('')
 
-async function onScanFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) {
-    return
-  }
+async function runScan(addImage: boolean) {
+  const file = lastScanFile.value
+  if (!file) return
+
   scanning.value = true
   try {
     let margin = 20
@@ -43,7 +43,9 @@ async function onScanFile(e: Event) {
     }
     const res = await scan(file, margin, scanOcrHint.value)
     formRef.value?.applyScanPrefill(res)
-    formRef.value?.addImageFiles([file])
+    if (addImage) {
+      formRef.value?.addImageFiles([file])
+    }
     toast.add({ title: 'Carte scannée — vérifiez les champs', color: 'success' })
   } catch (err) {
     toast.add({
@@ -55,6 +57,20 @@ async function onScanFile(e: Event) {
     scanning.value = false
     scanInputKey.value++
   }
+}
+
+async function onScanFile(file: File) {
+  if (scanPreviewUrl.value) {
+    URL.revokeObjectURL(scanPreviewUrl.value)
+  }
+  lastScanFile.value = file
+  scanPreviewUrl.value = URL.createObjectURL(file)
+  await runScan(true)
+}
+
+async function onOcrHintBlur() {
+  if (!lastScanFile.value) return
+  await runScan(false)
 }
 
 async function onSubmitCreate(fd: FormData) {
@@ -134,7 +150,7 @@ async function onSubmitCreate(fd: FormData) {
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton to="/articles" color="neutral" variant="ghost">
+          <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-list">
             Retour à la liste
           </UButton>
         </template>
@@ -142,69 +158,81 @@ async function onSubmitCreate(fd: FormData) {
     </template>
 
     <template #body>
-      <div class="p-4 sm:p-6 max-w-3xl space-y-8">
-        <UCard>
-          <template #header>
-            <div>
-              <p class="font-medium text-highlighted">
-                Scanner une carte
+      <div class="w-full px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
+        <!-- Bandeau contexte -->
+        <div
+          class="relative overflow-hidden rounded-2xl border border-default bg-gradient-to-br from-primary/10 via-elevated/60 to-primary/5 px-5 py-5 sm:px-7 sm:py-7"
+        >
+          <div class="absolute -right-16 -top-16 size-48 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+          <div class="absolute -bottom-24 -left-10 size-44 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
+          <div class="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div class="space-y-2 max-w-2xl">
+              <p class="text-xs font-medium uppercase tracking-wide text-primary">
+                Création d’article
               </p>
-              <p class="text-sm text-muted">
-                OCR + prix PokéWallet (Cardmarket / TCGPlayer) pour préremplir le formulaire.
+              <h1 class="text-xl sm:text-2xl font-semibold text-highlighted tracking-tight">
+                Scanner une carte et préparer sa fiche de vente
+              </h1>
+              <p class="text-sm sm:text-base text-muted leading-relaxed">
+                Importez une photo, laissez GoupixDex lire le set, le numéro et les prix de référence,
+                puis ajustez le titre, la description et les options Vinted avant publication.
               </p>
             </div>
-          </template>
-          <div class="space-y-4">
-            <div class="flex flex-wrap items-center gap-3">
-              <UInput
-                :key="scanInputKey"
-                type="file"
-                accept="image/*"
-                :disabled="scanning"
-                :ui="{
-                  base: 'cursor-pointer file:cursor-pointer disabled:cursor-not-allowed'
-                }"
-                @change="onScanFile"
-              />
-              <UIcon
-                v-if="scanning"
-                name="i-lucide-loader-2"
-                class="size-5 animate-spin text-primary"
-              />
+            <div class="flex flex-row lg:flex-col gap-2 lg:items-end shrink-0">
+              <UButton
+                to="/articles/batch-create"
+                size="sm"
+                color="neutral"
+                variant="soft"
+                icon="i-lucide-layers"
+              >
+                Création groupée
+              </UButton>
             </div>
-            <UFormField
-              label="Indice pour l’OCR (optionnel)"
-              description="Si la photo est floue ou difficile, indiquez par ex. le Pokémon, l’extension, le code set (SV5a…) ou le n° de carte pour aider la reconnaissance."
-              class="w-full max-w-xl"
-            >
-              <UInput
-                v-model="scanOcrHint"
-                placeholder="Ex. Pikachu SV5a 063/065, ou Gloupti M1L…"
-                :disabled="scanning"
-                class="mt-4 w-full sm:mt-5"
-              />
-            </UFormField>
           </div>
-        </UCard>
+        </div>
 
-        <UCard>
-          <template #header>
-            <p class="font-medium text-highlighted">
-              Détails de l'article
-            </p>
-          </template>
-          <ArticleForm
-            ref="formRef"
-            mode="create"
-            :loading="submitting"
-            :loading-hint="
-              submitting && vintedSubmit
-                ? 'Création de l\'article… puis ouverture du journal Vinted.'
-                : undefined
-            "
-            @submit-create="onSubmitCreate"
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.1fr)] lg:items-start">
+          <!-- Bloc formulaire principal (gauche) -->
+          <UCard class="ring-1 ring-default/60 shadow-sm order-2 lg:order-1">
+            <template #header>
+              <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <p class="font-medium text-highlighted">
+                  Détails de l'article
+                </p>
+                <p class="text-xs text-muted max-w-xs">
+                  Vérifiez toujours le set, le numéro et les prix suggérés avant de publier sur Vinted.
+                </p>
+              </div>
+            </template>
+            <ArticleForm
+              ref="formRef"
+              mode="create"
+              :loading="submitting"
+              :loading-hint="
+                submitting && vintedSubmit
+                  ? 'Création de l\'article… puis ouverture du journal Vinted.'
+                  : undefined
+              "
+              @submit-create="onSubmitCreate"
+            />
+          </UCard>
+
+          <!-- Bloc scan (droite) -->
+          <ScanCardPanel
+            v-model="scanOcrHint"
+            class="order-1 lg:order-2"
+            :preview-url="scanPreviewUrl"
+            :scanning="scanning"
+            :input-key="scanInputKey"
+            :hint-disabled="!lastScanFile"
+            hint-label="Indice pour le scan (optionnel)"
+            hint-description="Si la photo est floue ou difficile, indiquez par ex. le Pokémon, l’extension, le code set (SV5a…) ou le n° de carte pour aider la reconnaissance."
+            hint-placeholder="Ex. Pikachu SV5a 063/065, ou Gloupti M1L…"
+            @file-selected="onScanFile"
+            @hint-blur="onOcrHintBlur"
           />
-        </UCard>
+        </div>
       </div>
     </template>
   </UDashboardPanel>

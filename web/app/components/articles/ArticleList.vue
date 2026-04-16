@@ -155,6 +155,8 @@ function toggleSelectAll(checked: boolean | 'indeterminate') {
 function clearSelection() {
   selectedIds.value = []
 }
+
+const UAvatar = resolveComponent('UAvatar')
 </script>
 
 <template>
@@ -253,10 +255,10 @@ function clearSelection() {
     </div>
 
     <div class="hidden lg:block overflow-x-auto rounded-lg ring ring-default">
-      <table class="min-w-full text-sm">
-        <thead class="bg-elevated text-left text-muted uppercase text-xs">
+      <table class="min-w-full text-sm border-separate border-spacing-0">
+        <thead class="bg-elevated/60 text-left text-muted uppercase text-xs">
           <tr>
-            <th class="w-10 px-2 py-2 font-medium align-middle">
+            <th class="w-10 px-3 py-2 font-medium align-middle border-b border-default">
               <UCheckbox
                 :model-value="allFilteredSelected"
                 :indeterminate="someFilteredSelected && !allFilteredSelected"
@@ -264,37 +266,38 @@ function clearSelection() {
                 @update:model-value="toggleSelectAll"
               />
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="w-12 px-3 py-2 font-medium border-b border-default" />
+            <th class="px-3 py-2 font-medium border-b border-default">
               Pokémon
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Série / set
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               N°
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Achat
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Cardmarket
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               TCGPlayer
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Vendu
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Vinted
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Vente
             </th>
-            <th class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium border-b border-default">
               Dates
             </th>
-            <th class="px-3 py-2 font-medium text-end">
+            <th class="px-3 py-2 font-medium text-end border-b border-default">
               Actions
             </th>
           </tr>
@@ -305,38 +308,60 @@ function clearSelection() {
             :key="row.id"
             class="border-t border-default hover:bg-elevated/40"
           >
-            <td class="px-2 py-2 align-middle">
+            <td class="px-3 py-3 align-middle border-b border-default">
               <UCheckbox
                 :model-value="isSelected(row.id)"
                 :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
                 @update:model-value="(v) => toggleId(row.id, v)"
               />
             </td>
-            <td class="px-3 py-2 font-medium text-highlighted">
-              {{ row.pokemon_name || '—' }}
+            <td class="px-3 py-3 align-middle border-b border-default">
+              <UAvatar
+                v-if="row.images?.length"
+                size="lg"
+                :src="row.images[0]?.image_url"
+                :alt="row.title"
+                class="ring-1 ring-default/80"
+              />
+              <div
+                v-else
+                class="flex size-9 items-center justify-center rounded-full bg-elevated text-xs text-muted"
+              >
+                {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
+              </div>
             </td>
-            <td class="px-3 py-2 text-muted">
+            <td class="px-3 py-3 font-medium text-highlighted align-middle border-b border-default">
+              <div class="flex flex-col gap-0.5">
+                <span class="truncate">
+                  {{ row.pokemon_name || row.title || '—' }}
+                </span>
+                <span class="text-xs text-muted truncate">
+                  {{ row.title }}
+                </span>
+              </div>
+            </td>
+            <td class="px-3 py-3 text-muted align-middle border-b border-default">
               {{ pricingById.get(row.id)?.set_name || row.set_code || '—' }}
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               {{ row.card_number || '—' }}
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               {{ eur.format(row.purchase_price) }}
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               <span v-if="pricingById.get(row.id)?.cardmarket_eur != null">
                 {{ eur.format(pricingById.get(row.id)!.cardmarket_eur!) }}
               </span>
               <span v-else class="text-muted">—</span>
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               <span v-if="pricingById.get(row.id)?.tcgplayer_usd != null">
                 {{ usd.format(pricingById.get(row.id)!.tcgplayer_usd!) }}
               </span>
               <span v-else class="text-muted">—</span>
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               <UBadge
                 :color="row.is_sold ? 'success' : 'error'"
                 variant="subtle"
@@ -344,7 +369,7 @@ function clearSelection() {
                 {{ row.is_sold ? 'Oui' : 'Non' }}
               </UBadge>
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               <UBadge
                 :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
                 variant="subtle"
@@ -352,16 +377,16 @@ function clearSelection() {
                 {{ (row.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
               </UBadge>
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-3 align-middle border-b border-default">
               {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
             </td>
-            <td class="px-3 py-2 text-muted text-xs whitespace-nowrap">
+            <td class="px-3 py-3 text-muted text-xs whitespace-nowrap align-middle border-b border-default">
               <div>C : {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}</div>
               <div v-if="row.sold_at">
                 V : {{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}
               </div>
             </td>
-            <td class="px-3 py-2 text-end">
+            <td class="px-3 py-3 text-end align-middle border-b border-default">
               <UDropdownMenu
                 :items="[[
                   { label: 'Modifier', icon: 'i-lucide-pencil', onSelect: () => emit('edit', row.id) },
@@ -388,54 +413,98 @@ function clearSelection() {
       </table>
     </div>
 
-    <div class="lg:hidden space-y-4">
+    <div class="lg:hidden space-y-3">
       <div
         v-for="row in filtered"
         :key="row.id"
-        class="flex gap-3 items-start space-y-0"
+        class="w-full"
       >
-        <div class="pt-1 shrink-0">
-          <UCheckbox
-            :model-value="isSelected(row.id)"
-            :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
-            @update:model-value="(v) => toggleId(row.id, v)"
-          />
-        </div>
-        <div class="min-w-0 flex-1 space-y-2">
-          <ArticleCard
-            :article="row"
-            :pricing="pricingById.get(row.id)"
-          />
-        <div class="flex flex-wrap gap-2 justify-end">
-          <UButton size="sm" variant="outline" @click="emit('edit', row.id)">
-            Modifier
-          </UButton>
-          <UButton
-            size="sm"
-            variant="outline"
-            icon="i-lucide-store"
-              :disabled="!isDesktopApp || row.is_sold || !(row.images?.length)"
-            @click="emit('publish-vinted', row)"
-          >
-            Vinted
-          </UButton>
-          <UButton
-            size="sm"
-            :disabled="row.is_sold"
-            @click="emit('sold', row)"
-          >
-            Vendu
-          </UButton>
-          <UButton
-            size="sm"
-            color="error"
-            variant="soft"
-            @click="emit('delete', row.id)"
-          >
-            Supprimer
-          </UButton>
-        </div>
-        </div>
+        <UCard class="w-full border border-default/80 bg-elevated/70" :ui="{ body: 'p-3 space-y-3' }">
+          <div class="flex items-start gap-3">
+            <div class="pt-1 shrink-0">
+              <UCheckbox
+                :model-value="isSelected(row.id)"
+                :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
+                @update:model-value="(v) => toggleId(row.id, v)"
+              />
+            </div>
+            <div class="min-w-0 flex-1 space-y-2">
+              <div class="flex gap-3">
+                <div
+                  v-if="row.images?.length"
+                  class="w-20 shrink-0 rounded-lg overflow-hidden bg-elevated ring ring-default"
+                >
+                  <img
+                    :src="row.images[0]!.image_url"
+                    :alt="row.title"
+                    class="w-full h-20 object-cover"
+                  >
+                </div>
+                <div class="min-w-0 flex-1 space-y-1">
+                  <p class="font-medium text-highlighted truncate">
+                    {{ row.pokemon_name || row.title }}
+                  </p>
+                  <p class="text-xs text-muted truncate">
+                    {{ row.set_code || '—' }} · {{ row.card_number || '—' }}
+                  </p>
+                  <div class="flex flex-wrap gap-1.5 text-[11px]">
+                    <UBadge
+                      :color="row.is_sold ? 'success' : 'error'"
+                      variant="subtle"
+                    >
+                      {{ row.is_sold ? 'Vendu' : 'En stock' }}
+                    </UBadge>
+                    <UBadge
+                      :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
+                      variant="subtle"
+                    >
+                      Vinted {{ (row.published_on_vinted ?? false) ? 'oui' : 'non' }}
+                    </UBadge>
+                    <span class="text-muted">
+                      Achat {{ eur.format(row.purchase_price) }}
+                    </span>
+                    <span class="text-muted">
+                      Vente {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2 justify-end">
+                <UButton
+                  size="sm"
+                  variant="outline"
+                  @click="emit('edit', row.id)"
+                >
+                  Modifier
+                </UButton>
+                <UButton
+                  size="sm"
+                  variant="outline"
+                  icon="i-lucide-store"
+                  :disabled="!isDesktopApp || row.is_sold || !(row.images?.length)"
+                  @click="emit('publish-vinted', row)"
+                >
+                  Vinted
+                </UButton>
+                <UButton
+                  size="sm"
+                  :disabled="row.is_sold"
+                  @click="emit('sold', row)"
+                >
+                  Vendu
+                </UButton>
+                <UButton
+                  size="sm"
+                  color="error"
+                  variant="soft"
+                  @click="emit('delete', row.id)"
+                >
+                  Supprimer
+                </UButton>
+              </div>
+            </div>
+          </div>
+        </UCard>
       </div>
     </div>
 

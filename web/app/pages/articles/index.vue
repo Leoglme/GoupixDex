@@ -182,24 +182,44 @@ async function onPublishVinted(a: Article) {
     </template>
 
     <template #body>
-      <div class="p-4 sm:p-6">
-        <div class="flex flex-wrap items-center gap-3 mb-8 sm:mb-10">
-          <USwitch v-model="fetchMarketData" />
-          <span class="text-sm text-muted">
-            Récupérer les prix Cardmarket / PokéWallet (plus lent)
-          </span>
-        </div>
-        <ArticleList
-          :articles="articles"
-          :pricing-by-id="pricingById"
-          :loading="loading"
-          :pricing-loading="pricingLoading"
-          @edit="(id: number) => navigateTo(`/articles/${id}`)"
-          @delete="(id: number) => { deleteId = id; deleteOpen = true }"
-          @sold="openSold"
-          @publish-vinted="onPublishVinted"
-          @bulk-delete="openBulkDelete"
-        />
+      <div class="w-full px-4 sm:px-6 py-6 sm:py-8 space-y-4 sm:space-y-6">
+
+        <!-- Options de liste -->
+        <UCard class="ring-1 ring-default/60 shadow-sm" :ui="{ body: 'p-4 sm:p-5' }">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+              <USwitch v-model="fetchMarketData" />
+              <div class="space-y-0.5">
+                <p class="text-sm text-highlighted">
+                  Afficher les prix marché
+                </p>
+                <p class="text-xs text-muted">
+                  Récupération des prix Cardmarket / PokéWallet pour chaque carte (plus lent mais plus précis).
+                </p>
+              </div>
+            </div>
+            <p class="text-xs text-muted max-w-sm">
+              Désactivez cette option si vous voulez simplement mettre à jour vos fiches sans attendre les prix externes.
+            </p>
+          </div>
+        </UCard>
+
+        <!-- Table / cartes des articles -->
+        <UCard class="ring-1 ring-default/60 shadow-sm" :ui="{ body: 'p-0 sm:p-0' }">
+          <div class="p-3 sm:p-4">
+            <ArticleList
+              :articles="articles"
+              :pricing-by-id="pricingById"
+              :loading="loading"
+              :pricing-loading="pricingLoading"
+              @edit="(id: number) => navigateTo(`/articles/${id}`)"
+              @delete="(id: number) => { deleteId = id; deleteOpen = true }"
+              @sold="openSold"
+              @publish-vinted="onPublishVinted"
+              @bulk-delete="openBulkDelete"
+            />
+          </div>
+        </UCard>
       </div>
     </template>
   </UDashboardPanel>

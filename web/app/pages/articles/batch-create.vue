@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { ScanCardResponse } from '~/composables/useScanCard'
+
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
@@ -8,15 +10,28 @@ useGoupixPageSeo(
 
 type ArticleFormExpose = {
   buildCreateFormData: () => FormData
+  applyScanPrefill: (s: ScanCardResponse) => void
+  addImageFiles: (files: File[]) => void
 }
 
 const { createArticle, startVintedBatch } = useArticles()
+const { scan } = useScanCard()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
 
 let nextSlotId = 1
 const formSlots = ref([{ id: 0 }])
 const formRefs = ref<(ArticleFormExpose | null)[]>([])
+const scanInputKeys = ref<number[]>([0])
+const slotHints = ref<string[]>([''])
+const slotScanFiles = ref<(File | null)[]>([null])
+const slotScanPreviews = ref<(string | null)[]>([null])
+
+const batchVinted = ref(true)
+const submitting = ref(false)
+const scanning = ref(false)
+const bulkInputKey = ref(0)
+const photosPerArticle = ref(2)
 
 function bindFormRef(idx: number, el: unknown) {
   while (formRefs.value.length <= idx) {
@@ -27,6 +42,10 @@ function bindFormRef(idx: number, el: unknown) {
 
 function addForm() {
   formSlots.value.push({ id: nextSlotId++ })
+  scanInputKeys.value.push(0)
+  slotHints.value.push('')
+  slotScanFiles.value.push(null)
+  slotScanPreviews.value.push(null)
 }
 
 function removeForm(idx: number) {
@@ -35,10 +54,109 @@ function removeForm(idx: number) {
   }
   formSlots.value.splice(idx, 1)
   formRefs.value.splice(idx, 1)
+  const preview = slotScanPreviews.value[idx]
+  if (preview) {
+    URL.revokeObjectURL(preview)
+  }
+  scanInputKeys.value.splice(idx, 1)
+  slotHints.value.splice(idx, 1)
+  slotScanFiles.value.splice(idx, 1)
+  slotScanPreviews.value.splice(idx, 1)
 }
 
-const batchVinted = ref(true)
-const submitting = ref(false)
+async function runScanIntoForm(targetIndex: number, addImage: boolean) {
+  const file = slotScanFiles.value[targetIndex]
+  const comp = formRefs.value[targetIndex]
+  if (!file || !comp?.applyScanPrefill || !comp?.addImageFiles) {
+    return
+  }
+
+  scanning.value = true
+  try {
+    const result = await scan(file, 20, slotHints.value[targetIndex] ?? '')
+    comp.applyScanPrefill(result)
+    if (addImage) {
+      comp.addImageFiles([file])
+    }
+  } catch (e) {
+    toast.add({
+      title: 'Échec du scan',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
+  } finally {
+    scanning.value = false
+    scanInputKeys.value[targetIndex] = (scanInputKeys.value[targetIndex] ?? 0) + 1
+  }
+}
+
+async function onSlotScanFile(idx: number, file: File) {
+  slotScanFiles.value[idx] = file
+  const prev = slotScanPreviews.value[idx]
+  if (prev) {
+    URL.revokeObjectURL(prev)
+  }
+  slotScanPreviews.value[idx] = URL.createObjectURL(file)
+  await runScanIntoForm(idx, true)
+}
+
+async function onSlotHintBlur(idx: number) {
+  if (!slotScanFiles.value[idx]) {
+    return
+  }
+  await runScanIntoForm(idx, false)
+}
+
+async function onBulkScanFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  if (!files.length) {
+    return
+  }
+  const chunkSize = Math.max(1, Math.floor(Number(photosPerArticle.value) || 2))
+  const chunks: File[][] = []
+  for (let i = 0; i < files.length; i += chunkSize) {
+    chunks.push(files.slice(i, i + chunkSize))
+  }
+  while (formSlots.value.length < chunks.length) {
+    addForm()
+  }
+
+  scanning.value = true
+  try {
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const comp = formRefs.value[idx]
+      const chunk = chunks[idx] ?? []
+      if (!comp || !chunk.length) {
+        continue
+      }
+      const first = chunk[0]!
+      const result = await scan(first, 20, slotHints.value[idx] ?? '')
+      comp.applyScanPrefill(result)
+      comp.addImageFiles(chunk)
+      slotScanFiles.value[idx] = first
+      const prev = slotScanPreviews.value[idx]
+      if (prev) {
+        URL.revokeObjectURL(prev)
+      }
+      slotScanPreviews.value[idx] = URL.createObjectURL(first)
+    }
+    toast.add({
+      title: 'Préremplissage scan terminé',
+      description: `${chunks.length} formulaire(s) alimenté(s) automatiquement.`,
+      color: 'success'
+    })
+  } catch (err) {
+    toast.add({
+      title: 'Erreur pendant le traitement groupé',
+      description: apiErrorMessage(err),
+      color: 'error'
+    })
+  } finally {
+    scanning.value = false
+    bulkInputKey.value++
+  }
+}
 
 async function submitAll() {
   const createdIds: number[] = []
@@ -77,7 +195,7 @@ async function submitAll() {
 
     if (isDesktopApp.value && batchVinted.value && createdIds.length) {
       try {
-        const { job_id, stream_path } = await startVintedBatch(createdIds)
+        const { job_id } = await startVintedBatch(createdIds)
         await navigateTo({
           path: '/articles/vinted-logs',
           query: { job: job_id }
@@ -120,7 +238,7 @@ async function submitAll() {
               icon="i-lucide-list"
               to="/articles"
             >
-              Liste
+              Retour à la liste
             </UButton>
             <UButton
               color="neutral"
@@ -136,58 +254,139 @@ async function submitAll() {
     </template>
 
     <template #body>
-      <div class="p-4 sm:p-6 max-w-4xl space-y-6">
-        <UCard>
+      <div class="w-full px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
+        <!-- Bandeau contexte -->
+        <div
+          class="relative overflow-hidden rounded-2xl border border-default bg-gradient-to-br from-primary/10 via-elevated/60 to-primary/5 px-5 py-5 sm:px-7 sm:py-7"
+        >
+          <div class="absolute -right-16 -top-16 size-48 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+          <div class="absolute -bottom-24 -left-10 size-44 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
+          <div class="relative space-y-3 max-w-3xl">
+            <p class="text-xs font-medium uppercase tracking-wide text-primary">
+              Création groupée d’articles
+            </p>
+            <h1 class="text-xl sm:text-2xl font-semibold text-highlighted tracking-tight">
+              Préparez plusieurs cartes en une seule passe
+            </h1>
+            <p class="text-sm sm:text-base text-muted leading-relaxed">
+              Remplissez plusieurs fiches, puis lancez la création (et éventuellement la publication Vinted groupée)
+              en un seul clic. Idéal après une grosse session de scan ou de tri.
+            </p>
+          </div>
+        </div>
+
+        <UCard class="ring-1 ring-default/60 shadow-sm" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
+          <div class="rounded-xl border border-primary/20 bg-primary/5 p-4 sm:p-5 space-y-4">
+            <div class="flex flex-col gap-2">
+              <p class="font-medium text-highlighted">
+                Ajouter plusieurs photos et préremplir les articles
+              </p>
+              <p class="text-sm text-muted">
+                Importez toutes vos photos d’un coup. GoupixDex les répartit par article, lance les scans et remplit les
+                formulaires (champs + images).
+              </p>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-end">
+              <UFormField label="Photos par article">
+                <UInput
+                  v-model="photosPerArticle"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="w-full"
+                />
+              </UFormField>
+              <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                <UButton
+                  size="sm"
+                  color="primary"
+                  icon="i-lucide-images"
+                  :loading="scanning"
+                  @click="$refs.bulkScanInput?.click?.()"
+                >
+                  Upload plusieurs images
+                </UButton>
+              </div>
+            </div>
+            <input
+              :key="bulkInputKey"
+              ref="bulkScanInput"
+              type="file"
+              accept="image/*"
+              multiple
+              class="hidden"
+              @change="onBulkScanFiles"
+            >
+          </div>
+
           <p class="text-sm text-muted">
-            Remplissez plusieurs fiches puis validez une seule fois. Les articles sont créés à la suite ;
-            si vous cochez l’option ci-dessous, une <strong>seule session</strong> Chrome enchaîne les publications Vinted.
+            Les articles sont créés l’un après l’autre. Si vous activez l’option ci-dessous avec l’application desktop,
+            une <strong>seule session</strong> Chrome enchaîne les publications Vinted pour limiter les captchas.
           </p>
-          <div class="mt-4 rounded-lg border border-default p-4">
+          <div class="rounded-lg border border-default/80 bg-elevated/60 p-4 space-y-3">
             <UCheckbox
               v-model="batchVinted"
               :disabled="!isDesktopApp"
-              label="Lancer la publication Vinted groupée après création (une connexion)"
+              label="Lancer la publication Vinted groupée après création (une seule connexion)"
             />
-            <p v-if="!isDesktopApp" class="mt-2 text-sm text-muted">
+            <p v-if="!isDesktopApp" class="text-sm text-muted">
               Disponible uniquement dans l’app desktop.
               <NuxtLink to="/downloads" class="underline underline-offset-2">
                 Télécharger l’app
               </NuxtLink>
             </p>
           </div>
+
         </UCard>
 
-        <div
-          v-for="(slot, idx) in formSlots"
-          :key="slot.id"
-          class="space-y-2"
-        >
-          <UCard>
-            <template #header>
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <p class="font-medium text-highlighted">
-                  Article {{ idx + 1 }}
-                </p>
-                <UButton
-                  v-if="formSlots.length > 1"
-                  color="error"
-                  variant="ghost"
-                  size="xs"
-                  icon="i-lucide-trash-2"
-                  @click="removeForm(idx)"
-                >
-                  Retirer ce bloc
-                </UButton>
-              </div>
-            </template>
-            <ArticleForm
-              :ref="(el) => bindFormRef(idx, el)"
-              mode="create"
-              :loading="submitting"
-              :hide-vinted-option="true"
-              :show-submit-button="false"
+        <div class="space-y-6">
+          <div
+            v-for="(slot, idx) in formSlots"
+            :key="slot.id"
+            class="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.1fr)] lg:items-start"
+          >
+            <UCard class="ring-1 ring-default/60 shadow-sm">
+              <template #header>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="font-medium text-highlighted">
+                    Article {{ idx + 1 }} — Détails
+                  </p>
+                  <UButton
+                    v-if="formSlots.length > 1"
+                    color="error"
+                    variant="ghost"
+                    size="xs"
+                    icon="i-lucide-trash-2"
+                    @click="removeForm(idx)"
+                  >
+                    Retirer
+                  </UButton>
+                </div>
+              </template>
+              <ArticleForm
+                :ref="(el) => bindFormRef(idx, el)"
+                mode="create"
+                :loading="submitting"
+                :hide-vinted-option="true"
+                :show-submit-button="false"
+              />
+            </UCard>
+
+            <ScanCardPanel
+              v-model="slotHints[idx]"
+              :title="`Article ${idx + 1} — Scanner une carte`"
+              subtitle="Scan de carte + prix PokéWallet pour préremplir ce formulaire."
+              :preview-url="slotScanPreviews[idx]"
+              :scanning="scanning"
+              :input-key="scanInputKeys[idx]"
+              :hint-disabled="!slotScanFiles[idx]"
+              hint-label="Indice pour le scan (optionnel)"
+              hint-description="Au blur du champ, un nouveau scan est relancé sur la photo courante."
+              hint-placeholder="Ex. Pikachu SV5a 063/065, ou Gloupti M1L…"
+              @file-selected="(file) => onSlotScanFile(idx, file)"
+              @hint-blur="onSlotHintBlur(idx)"
             />
-          </UCard>
+          </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-3">
@@ -200,6 +399,14 @@ async function submitAll() {
           >
             Créer {{ formSlots.length }} article(s)
             <span v-if="batchVinted && isDesktopApp"> et lancer Vinted</span>
+          </UButton>
+          <UButton
+            color="neutral"
+            variant="soft"
+            icon="i-lucide-plus"
+            @click="addForm"
+          >
+            Ajouter un formulaire
           </UButton>
         </div>
       </div>
