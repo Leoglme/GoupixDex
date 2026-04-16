@@ -249,6 +249,7 @@ class GroqVisionClient:
             return collector
         set_code = collector.get("set_code")
         first: PokeWalletCard | None = None
+        hint = self._normalize_user_hint(opts.get("user_hint"))
 
         if set_code:
             for lookup_number in lookup_numbers:
@@ -259,7 +260,7 @@ class GroqVisionClient:
                 )
                 results = by_set.get("results", [])
                 if results:
-                    first = results[0]
+                    first = self._pick_best_wallet_result(results, collector, hint)
                     break
 
         english_hint_raw = (collector.get("pokemon_name_english") or "").strip()
@@ -269,7 +270,7 @@ class GroqVisionClient:
                 by_name = wallet.search(f"{english_hint} {lookup_number}", {"limit": 15, "page": 1})
                 results = by_name.get("results", [])
                 if results:
-                    first = results[0]
+                    first = self._pick_best_wallet_result(results, collector, hint)
                     break
 
         printed_raw = (collector.get("pokemon_name") or "").strip()
@@ -285,7 +286,7 @@ class GroqVisionClient:
                 by_printed = wallet.search(f"{printed_name} {lookup_number}", {"limit": 15, "page": 1})
                 results = by_printed.get("results", [])
                 if results:
-                    first = results[0]
+                    first = self._pick_best_wallet_result(results, collector, hint)
                     break
 
         if first is None:
@@ -293,7 +294,7 @@ class GroqVisionClient:
                 by_num = wallet.search(lookup_number, {"limit": 25, "page": 1})
                 results = by_num.get("results", [])
                 if results:
-                    first = results[0]
+                    first = self._pick_best_wallet_result(results, collector, hint)
                     break
 
         if first is None:
@@ -329,11 +330,25 @@ class GroqVisionClient:
         rarity_raw = (info.get("rarity") or "").strip()
         rarity_english = rarity_raw if rarity_raw else collector.get("rarity_english")
 
-        resolved_set_code = (
-            self._normalize_set_code_case(api_set_code_raw) if api_set_code_raw else collector.get("set_code")
+        existing_set_code = collector.get("set_code")
+        normalized_existing_set = (
+            self._normalize_set_code_case(existing_set_code) if existing_set_code else None
         )
+        normalized_api_set = self._normalize_set_code_case(api_set_code_raw) if api_set_code_raw else None
+        resolved_set_code = normalized_existing_set
+        if normalized_api_set is not None and (
+            normalized_existing_set is None or normalized_existing_set == normalized_api_set
+        ):
+            resolved_set_code = normalized_api_set
         card_number_raw = (info.get("card_number") or "").strip()
-        resolved_card_number = card_number_raw if card_number_raw else collector.get("card_number")
+        existing_card_number = collector.get("card_number")
+        resolved_card_number = existing_card_number
+        if card_number_raw and (
+            existing_card_number is None
+            or self._normalize_card_number(existing_card_number)
+            == self._normalize_card_number(card_number_raw)
+        ):
+            resolved_card_number = card_number_raw
         split = self._split_card_collector_fraction(resolved_card_number)
 
         return cast(
@@ -706,6 +721,64 @@ class GroqVisionClient:
             if swapped not in values:
                 values.append(swapped)
         return values
+
+    @staticmethod
+    def _normalize_card_number(value: str | None) -> str | None:
+        if value is None:
+            return None
+        t = value.strip()
+        if t == "":
+            return None
+        return re.sub(r"\s+", "", t).upper()
+
+    @staticmethod
+    def _normalize_text_for_match(value: str | None) -> str:
+        if value is None:
+            return ""
+        return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+    def _pick_best_wallet_result(
+        self,
+        results: list[PokeWalletCard],
+        collector: GroqVisionCardCollectorResult,
+        hint: str | None,
+    ) -> PokeWalletCard:
+        wanted_set = self._normalize_set_code_case(collector["set_code"]) if collector.get("set_code") else None
+        wanted_num = self._normalize_card_number(collector.get("card_number"))
+        wanted_en = self._normalize_text_for_match(collector.get("pokemon_name_english"))
+        wanted_printed = self._normalize_text_for_match(collector.get("pokemon_name"))
+        normalized_hint = self._normalize_text_for_match(hint)
+
+        def score(card: PokeWalletCard) -> int:
+            info = card.get("card_info", {})
+            if not isinstance(info, dict):
+                return 0
+            points = 0
+            card_set = self._normalize_set_code_case(info.get("set_code", "")) if info.get("set_code") else None
+            card_num = self._normalize_card_number(info.get("card_number"))
+            clean_name = self._normalize_text_for_match(info.get("clean_name"))
+            raw_name = self._normalize_text_for_match(info.get("name"))
+            joined_name = f"{clean_name} {raw_name}".strip()
+            if wanted_set is not None and card_set == wanted_set:
+                points += 12
+            if wanted_num is not None and card_num == wanted_num:
+                points += 10
+            if wanted_en and wanted_en in joined_name:
+                points += 8
+            if wanted_printed and wanted_printed in joined_name:
+                points += 6
+            if normalized_hint:
+                hint_tokens = [tok for tok in normalized_hint.split() if len(tok) >= 2]
+                token_hits = sum(1 for tok in hint_tokens if tok in joined_name)
+                points += min(8, token_hits * 2)
+                if wanted_set is None and any(tok == (card_set or "").lower() for tok in hint_tokens):
+                    points += 6
+                if wanted_num is None and any(tok == (card_num or "").lower() for tok in hint_tokens):
+                    points += 5
+            return points
+
+        best = max(results, key=score)
+        return best
 
     @staticmethod
     def _split_card_collector_fraction(card_number: str | None) -> dict[str, str | None]:

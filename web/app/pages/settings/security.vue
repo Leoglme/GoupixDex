@@ -41,20 +41,16 @@ const validate = (state: Partial<PasswordSchema>): FormError[] => {
       class="flex flex-col gap-4 max-w-xs"
     >
       <UFormField name="current">
-        <UInput
+        <PasswordInput
           v-model="password.current"
-          type="password"
           placeholder="Current password"
-          class="w-full"
         />
       </UFormField>
 
       <UFormField name="new">
-        <UInput
+        <PasswordInput
           v-model="password.new"
-          type="password"
           placeholder="New password"
-          class="w-full"
         />
       </UFormField>
 

@@ -58,11 +58,9 @@ async function onSubmit() {
       </UFormField>
 
       <UFormField label="Mot de passe (8 caractères min.)">
-        <UInput
+        <PasswordInput
           v-model="form.password"
-          type="password"
           required
-          class="w-full"
           autocomplete="new-password"
         />
       </UFormField>
@@ -72,10 +70,8 @@ async function onSubmit() {
       </UFormField>
 
       <UFormField label="Mot de passe Vinted">
-        <UInput
+        <PasswordInput
           v-model="form.vinted_password"
-          type="password"
-          class="w-full"
           autocomplete="new-password"
         />
       </UFormField>

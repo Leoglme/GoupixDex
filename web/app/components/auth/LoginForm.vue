@@ -60,14 +60,12 @@ async function onSubmit() {
       name="password"
       required
     >
-      <UInput
+      <PasswordInput
         v-model="password"
-        type="password"
         name="password"
         icon="i-lucide-lock-keyhole"
         autocomplete="current-password"
         size="md"
-        class="w-full"
       />
     </UFormField>
 
