@@ -88,7 +88,7 @@ The command first builds the Nuxt frontend in desktop mode (`NUXT_DESKTOP_BUILD=
 ## CI/CD
 
 - `deploy-web.yml` : build + déploiement web (Nitro + PM2).
-- `desktop-release.yml` : build desktop Windows/macOS en **release** (binaire sans console Windows) et publication sur GitHub Release stable (`desktop`, non-prerelease).
+- `desktop-release.yml` : build desktop Windows/macOS en **release** (binaire sans console Windows) et publication d'une GitHub Release stable **par version** (`v0.1.x`, non-prerelease).
 
 ## Tauri updater: key generation and GitHub secrets
 

@@ -128,9 +128,9 @@ async def run_single_vinted_listing(
     """
     Une annonce complète sur la page Vinted déjà ouverte dans le navigateur :
     matérialise les images, ouvre « vendre », remplit, publie.
-    Ne démarre ni ne ferme Chrome (session réutilisée par l’appelant).
+    Ne démarre ni ne ferme Chrome (session réutilisée par l'appelant).
     """
-    _ = user  # réservé (symétrie avec l’API publique)
+    _ = user  # réservé (symétrie avec l'API publique)
     prefix = f"{batch_label} — " if batch_label else ""
 
     root = get_project_root()

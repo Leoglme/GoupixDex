@@ -166,7 +166,7 @@ const UAvatar = resolveComponent('UAvatar')
       color="info"
       variant="subtle"
       icon="i-lucide-sparkles"
-      title="Mise en ligne Vinted disponible uniquement dans l’app desktop"
+      title="Mise en ligne Vinted disponible uniquement dans l'app desktop"
     >
       <template #description>
         <p class="text-sm leading-relaxed">
@@ -175,7 +175,7 @@ const UAvatar = resolveComponent('UAvatar')
             to="/downloads"
             class="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
           >
-            Télécharger l’app
+            Télécharger l'app
           </NuxtLink>
           (installateurs et conseils pour choisir le bon fichier).
         </p>

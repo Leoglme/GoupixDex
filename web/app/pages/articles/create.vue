@@ -168,7 +168,7 @@ async function onSubmitCreate(fd: FormData) {
           <div class="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div class="space-y-2 max-w-2xl">
               <p class="text-xs font-medium uppercase tracking-wide text-primary">
-                Création d’article
+                Création d'article
               </p>
               <h1 class="text-xl sm:text-2xl font-semibold text-highlighted tracking-tight">
                 Scanner une carte et préparer sa fiche de vente
@@ -227,7 +227,7 @@ async function onSubmitCreate(fd: FormData) {
             :input-key="scanInputKey"
             :hint-disabled="!lastScanFile"
             hint-label="Indice pour le scan (optionnel)"
-            hint-description="Si la photo est floue ou difficile, indiquez par ex. le Pokémon, l’extension, le code set (SV5a…) ou le n° de carte pour aider la reconnaissance."
+            hint-description="Si la photo est floue ou difficile, indiquez par ex. le Pokémon, l'extension, le code set (SV5a…) ou le n° de carte pour aider la reconnaissance."
             hint-placeholder="Ex. Pikachu SV5a 063/065, ou Gloupti M1L…"
             @file-selected="onScanFile"
             @hint-blur="onOcrHintBlur"

@@ -4,8 +4,8 @@ import type { ScanCardResponse } from '~/composables/useScanCard'
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Création groupée d’articles',
-  'Ajoutez plusieurs cartes Pokémon TCG en une session GoupixDex et lancez éventuellement une publication Vinted groupée depuis l’app desktop.'
+  "Création groupée d'articles",
+  "Ajoutez plusieurs cartes Pokémon TCG en une session GoupixDex et lancez éventuellement une publication Vinted groupée depuis l'app desktop."
 )
 
 type ArticleFormExpose = {
@@ -263,7 +263,7 @@ async function submitAll() {
           <div class="absolute -bottom-24 -left-10 size-44 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
           <div class="relative space-y-3 max-w-3xl">
             <p class="text-xs font-medium uppercase tracking-wide text-primary">
-              Création groupée d’articles
+              Création groupée d'articles
             </p>
             <h1 class="text-xl sm:text-2xl font-semibold text-highlighted tracking-tight">
               Préparez plusieurs cartes en une seule passe
@@ -282,7 +282,7 @@ async function submitAll() {
                 Ajouter plusieurs photos et préremplir les articles
               </p>
               <p class="text-sm text-muted">
-                Importez toutes vos photos d’un coup. GoupixDex les répartit par article, lance les scans et remplit les
+                Importez toutes vos photos d'un coup. GoupixDex les répartit par article, lance les scans et remplit les
                 formulaires (champs + images).
               </p>
             </div>
@@ -320,7 +320,7 @@ async function submitAll() {
           </div>
 
           <p class="text-sm text-muted">
-            Les articles sont créés l’un après l’autre. Si vous activez l’option ci-dessous avec l’application desktop,
+            Les articles sont créés l'un après l'autre. Si vous activez l'option ci-dessous avec l'application desktop,
             une <strong>seule session</strong> Chrome enchaîne les publications Vinted pour limiter les captchas.
           </p>
           <div class="rounded-lg border border-default/80 bg-elevated/60 p-4 space-y-3">
@@ -330,9 +330,9 @@ async function submitAll() {
               label="Lancer la publication Vinted groupée après création (une seule connexion)"
             />
             <p v-if="!isDesktopApp" class="text-sm text-muted">
-              Disponible uniquement dans l’app desktop.
+              Disponible uniquement dans l'app desktop.
               <NuxtLink to="/downloads" class="underline underline-offset-2">
-                Télécharger l’app
+                Télécharger l'app
               </NuxtLink>
             </p>
           </div>

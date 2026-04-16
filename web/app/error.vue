@@ -7,7 +7,7 @@ defineProps<{
 
 useGoupixPageSeo(
   'Page introuvable',
-  'Cette page GoupixDex n’existe pas ou a été déplacée. Retournez au tableau de bord ou à l’accueil.'
+  "Cette page GoupixDex n'existe pas ou a été déplacée. Retournez au tableau de bord ou à l'accueil."
 )
 
 useHead({

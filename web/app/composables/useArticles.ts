@@ -31,7 +31,7 @@ export interface CreateArticleVintedResult {
   /** Publication lancée en arrière-plan ; suivre ``stream_path`` en SSE. */
   status?: 'running' | 'pending'
   stream_path?: string
-  /** Création sur l’API distante ; publication nodriver sur le worker local (Tauri). */
+  /** Création sur l'API distante ; publication nodriver sur le worker local (Tauri). */
   desktop_local?: boolean
 }
 

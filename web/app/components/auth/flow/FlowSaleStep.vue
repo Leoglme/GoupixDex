@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Même esprit que l’overlay « vendu » de SellingCardAnimation : carte générique + check + badge.
+ * Même esprit que l'overlay « vendu » de SellingCardAnimation : carte générique + check + badge.
  */
 defineProps<{
   reduceMotion: boolean

@@ -3,7 +3,7 @@ definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
   'Journal publication Vinted',
-  'Suivez en direct les étapes de connexion et de publication Vinted dans GoupixDex : logs détaillés et captures d’écran (application desktop).'
+  "Suivez en direct les étapes de connexion et de publication Vinted dans GoupixDex : logs détaillés et captures d'écran (application desktop)."
 )
 
 const route = useRoute()
@@ -117,7 +117,7 @@ async function bootstrap() {
   if (!isDesktopApp.value) {
     loading.value = false
     streamMode.value = 'none'
-    idleMessage.value = 'Le journal Vinted est disponible uniquement dans l’application desktop.'
+    idleMessage.value = "Le journal Vinted est disponible uniquement dans l'application desktop."
     return
   }
   const qJob = route.query.job
@@ -145,10 +145,10 @@ async function bootstrap() {
       await connectBatchJob(active.job_id)
     } else {
       idleMessage.value =
-        'Aucune publication en cours. Lancez une mise en ligne depuis la liste d’articles ou créez un article avec publication Vinted, puis ouvrez à nouveau ce journal (vous serez redirigé automatiquement).'
+        "Aucune publication en cours. Lancez une mise en ligne depuis la liste d'articles ou créez un article avec publication Vinted, puis ouvrez à nouveau ce journal (vous serez redirigé automatiquement)."
     }
   } catch {
-    idleMessage.value = 'Impossible de récupérer l’état du lot (réseau ou session).'
+    idleMessage.value = "Impossible de récupérer l'état du lot (réseau ou session)."
   } finally {
     loading.value = false
   }
@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
               <NuxtLink to="/downloads" class="underline underline-offset-2">
                 la page de téléchargement
               </NuxtLink>
-              pour installer l’app.
+              pour installer l'app.
             </span>
           </template>
         </UAlert>

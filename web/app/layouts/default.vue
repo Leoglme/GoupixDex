@@ -8,7 +8,7 @@ const { isDesktopApp } = useDesktopRuntime()
 
 /**
  * Journal Vinted : desktop uniquement.
- * Télécharger l’app : web uniquement (sur l’exe, /downloads redirige vers le dashboard).
+ * Télécharger l'app : web uniquement (sur l'exe, /downloads redirige vers le dashboard).
  */
 const links = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
@@ -37,7 +37,7 @@ const links = computed<NavigationMenuItem[][]>(() => {
 
   if (!isDesktopApp.value) {
     items.push({
-      label: 'Télécharger l’app',
+      label: "Télécharger l'app",
       icon: 'i-lucide-download',
       to: '/downloads',
       onSelect: () => { open.value = false }

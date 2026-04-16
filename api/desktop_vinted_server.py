@@ -1,14 +1,14 @@
 """
 Worker HTTP local (127.0.0.1) : publication Vinted / nodriver sur le PC utilisateur.
 
-Les métadonnées et le JWT sont lus sur l’API distante ; Chrome et nodriver tournent ici.
+Les métadonnées et le JWT sont lus sur l'API distante ; Chrome et nodriver tournent ici.
 
 Lancer depuis le dossier ``api/`` (venv activé) ::
 
     python desktop_vinted_server.py
 
 Variables utiles : ``GOUPIX_VINTED_LOCAL_PORT`` (défaut 18766), ``GOUPIX_REMOTE_API`` (URL API si
-le client n’envoie pas ``X-Goupix-Remote-Api``).
+le client n'envoie pas ``X-Goupix-Remote-Api``).
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ async def get_user_id_introspected(
     raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
     remote: Annotated[str, Depends(get_remote_base_flexible)],
 ) -> int:
-    """Valide le JWT via l’API distante (pas besoin du secret JWT en local)."""
+    """Valide le JWT via l'API distante (pas besoin du secret JWT en local)."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             f"{remote}/users/me",
@@ -77,7 +77,7 @@ async def get_user_id_introspected(
     if not r.is_success:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Impossible de joindre l’API distante pour valider la session.",
+            detail="Impossible de joindre l'API distante pour valider la session.",
         )
     return int(r.json()["id"])
 

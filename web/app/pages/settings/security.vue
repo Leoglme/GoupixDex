@@ -1,7 +1,7 @@
 <script setup lang="ts">
 useGoupixPageSeo(
   'Paramètres — sécurité',
-  'Mettez à jour votre mot de passe GoupixDex et sécurisez l’accès à votre espace marchand.'
+  "Mettez à jour votre mot de passe GoupixDex et sécurisez l'accès à votre espace marchand."
 )
 
 import * as z from 'zod'

@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build-desktop:
     name: Build desktop (${{ matrix.platform }})
-    # Évite l’avertissement « actions JS sur Node 20 » (passage Node 24 côté runner GitHub).
+    # Évite l'avertissement « actions JS sur Node 20 » (passage Node 24 côté runner GitHub).
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
@@ -70,7 +70,7 @@ jobs:
         working-directory: web
         env:
           RELEASE_VERSION: 0.1.${{ github.run_number }}
-          UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/download/desktop/latest.json
+          UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
           UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
           if [ -z "$UPDATER_PUBKEY" ]; then
@@ -129,12 +129,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
-          tagName: desktop
-          releaseName: "GoupixDex Desktop"
+          tagName: v0.1.${{ github.run_number }}
+          releaseName: "GoupixDex Desktop v0.1.${{ github.run_number }}"
           releaseBody: |
             Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).
 
-            Installeurs : voir les assets ci-dessous (.exe, .msi, .dmg).
+            Installeurs : voir les assets de cette version (.exe, .msi, .dmg).
 
             **Version appli :** `0.1.${{ github.run_number }}` (semver patch = numéro de run GitHub Actions, unique à chaque build sur `main`).
           releaseDraft: false

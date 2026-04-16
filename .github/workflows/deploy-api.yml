@@ -1,4 +1,4 @@
-# Déploie l’API FastAPI (dossier api/) sur le VPS — venv + systemd + Nginx reload.
+# Déploie l'API FastAPI (dossier api/) sur le VPS — venv + systemd + Nginx reload.
 # La base MariaDB peut être distante (ex. o2switch) : DATABASE_URL dans les secrets.
 # Sur le VPS : installe xvfb + xauth et lance Uvicorn sous xvfb-run (Chromium fenêtré si VINTED_BROWSER_HEADLESS=false).
 # Secret optionnel VINTED_BROWSER_HEADLESS : absent → true (historique) ; false → moins flaggé par Vinted sur Xvfb.

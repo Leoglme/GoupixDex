@@ -1,7 +1,7 @@
 """Execute SQL migration files in order (``001_*.sql``, ``002_*.sql``, ...).
 
-Chaque fichier n’est exécuté qu’une fois : le nom du fichier est enregistré dans
-``schema_migrations``. Les fichiers SQL doivent rester idempotents lorsque c’est
+Chaque fichier n'est exécuté qu'une fois : le nom du fichier est enregistré dans
+``schema_migrations``. Les fichiers SQL doivent rester idempotents lorsque c'est
 possible (ex. ``CREATE TABLE IF NOT EXISTS``, ``ADD COLUMN IF NOT EXISTS``).
 """
 

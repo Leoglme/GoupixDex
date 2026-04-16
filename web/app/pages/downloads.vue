@@ -2,8 +2,8 @@
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Télécharger l’application',
-  'Installez GoupixDex sur Windows ou macOS pour la publication Vinted et retrouvez le même tableau de bord que sur le web.'
+  "Télécharger l'application",
+  "Installez GoupixDex sur Windows ou macOS pour la publication Vinted et retrouvez le même tableau de bord que sur le web."
 )
 
 type ReleaseAsset = {
@@ -60,7 +60,7 @@ const {
     const channel = releaseChannel.value
 
     if (channel === 'latest') {
-      // Dernière release **stable** (non brouillon, non préversion) — un seul jeu d’assets
+      // Dernière release **stable** (non brouillon, non préversion) — un seul jeu d'assets
       try {
         return await $fetch<GithubRelease>(`${base}/repos/${slug}/releases/latest`)
       } catch (e: unknown) {
@@ -118,7 +118,7 @@ function classifyAsset(asset: ReleaseAsset): DownloadItem | null {
       sortKey: 20,
       label: 'Windows x64 — installateur MSI',
       description:
-        'Format .msi : utile si votre entreprise impose ce type de paquet, ou si l’installateur .exe pose problème. Windows 10 ou 11 en 64 bits.'
+        "Format .msi : utile si votre entreprise impose ce type de paquet, ou si l'installateur .exe pose problème. Windows 10 ou 11 en 64 bits."
     }
   }
 
@@ -149,7 +149,7 @@ function classifyAsset(asset: ReleaseAsset): DownloadItem | null {
       label: appleSilicon ? 'macOS — Apple Silicon (M1, M2, M3…)' : 'macOS — Mac Intel (x64)',
       description: appleSilicon
         ? 'Pour les Mac avec puce Apple (M1 et suivantes). Ouvrez le fichier .dmg, puis faites glisser GoupixDex dans le dossier Applications.'
-        : 'Pour les Mac à processeur Intel. Ouvrez le .dmg, puis glissez l’application dans Applications.'
+        : "Pour les Mac à processeur Intel. Ouvrez le .dmg, puis glissez l'application dans Applications."
     }
   }
 
@@ -166,7 +166,7 @@ function classifyAsset(asset: ReleaseAsset): DownloadItem | null {
         ? 'macOS — archive .app (Apple Silicon)'
         : 'macOS — archive .app (Intel)',
       description:
-        'Réservé aux utilisateurs à l’aise avec le terminal : décompressez l’archive pour obtenir l’app sans passer par un .dmg.'
+        "Réservé aux utilisateurs à l'aise avec le terminal : décompressez l'archive pour obtenir l'app sans passer par un .dmg."
     }
   }
 
@@ -178,7 +178,7 @@ function sortItems(items: DownloadItem[]) {
 }
 
 /**
- * Plusieurs assets peuvent produire le même libellé (ex. deux .exe « setup ») : on n’en garde qu’un,
+ * Plusieurs assets peuvent produire le même libellé (ex. deux .exe « setup ») : on n'en garde qu'un,
  * de préférence le plus lourd (installateur complet vs artefact secondaire).
  */
 function dedupeDownloadItemsByLabel(items: DownloadItem[]): DownloadItem[] {
@@ -241,7 +241,7 @@ function formatBytes(n?: number) {
 <template>
   <UDashboardPanel id="downloads">
     <template #header>
-      <UDashboardNavbar title="Télécharger l’application">
+      <UDashboardNavbar title="Télécharger l'application">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
@@ -261,11 +261,11 @@ function formatBytes(n?: number) {
                 Application desktop GoupixDex
               </p>
               <h1 class="text-2xl sm:text-3xl font-semibold text-highlighted tracking-tight">
-                Installez l’app sur votre ordinateur
+                Installez l'app sur votre ordinateur
               </h1>
               <p class="text-muted text-base leading-relaxed">
                 Choisissez la ligne qui correspond à votre système : Windows ou macOS, puis le bon type de processeur.
-                La publication Vinted n’est disponible que dans cette application — le site web sert à gérer le reste.
+                La publication Vinted n'est disponible que dans cette application — le site web sert à gérer le reste.
               </p>
             </div>
             <div
@@ -286,7 +286,7 @@ function formatBytes(n?: number) {
           variant="subtle"
           icon="i-lucide-sparkles"
           title="Quel fichier télécharger ?"
-          description="Sous Windows, privilégiez l’installateur « recommandé ». Sur Mac récent (puce M), prenez la ligne Apple Silicon ; sur Mac Intel, la ligne Intel."
+          description="Sous Windows, privilégiez l'installateur « recommandé ». Sur Mac récent (puce M), prenez la ligne Apple Silicon ; sur Mac Intel, la ligne Intel."
         />
 
         <UCard

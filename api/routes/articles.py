@@ -51,7 +51,7 @@ def bulk_delete_articles(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Supprime plusieurs articles appartenant à l’utilisateur connecté."""
+    """Supprime plusieurs articles appartenant à l'utilisateur connecté."""
     unique_ids = list(dict.fromkeys(body.ids))
     deleted = article_service.delete_articles_by_ids(db, user.id, unique_ids)
     return {"deleted": deleted, "requested": len(unique_ids)}

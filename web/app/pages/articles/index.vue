@@ -6,7 +6,7 @@ definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
   'Articles',
-  'Liste de vos annonces et cartes Pokémon TCG dans GoupixDex : recherche, édition, vente et mise en ligne Vinted depuis l’app desktop.'
+  "Liste de vos annonces et cartes Pokémon TCG dans GoupixDex : recherche, édition, vente et mise en ligne Vinted depuis l'app desktop."
 )
 
 const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted } = useArticles()
@@ -125,7 +125,7 @@ async function onPublishVinted(a: Article) {
   if (!isDesktopApp.value) {
     toast.add({
       title: 'Version web',
-      description: 'La mise en ligne Vinted est disponible uniquement dans l’application desktop.',
+      description: "La mise en ligne Vinted est disponible uniquement dans l'application desktop.",
       color: 'warning'
     })
     await navigateTo('/downloads')

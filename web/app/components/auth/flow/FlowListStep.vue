@@ -22,7 +22,7 @@ defineProps<{
             Vinted
           </p>
           <p class="truncate text-[0.65rem] text-muted">
-            Déposer l’annonce
+            Déposer l'annonce
           </p>
         </div>
         <div

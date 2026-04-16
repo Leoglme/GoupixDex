@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Orchestration du parcours : scan → fiche → Vinted → stats → vente.
- * Clic sur une étape : affiche l’animation correspondante et relance le défilement auto.
+ * Clic sur une étape : affiche l'animation correspondante et relance le défilement auto.
  */
 type FlowStep = 'scan' | 'form' | 'list' | 'stats' | 'sale'
 
@@ -88,7 +88,7 @@ function runStep() {
   }, ms)
 }
 
-/** Clic : affiche l’étape et relance le défilement automatique. */
+/** Clic : affiche l'étape et relance le défilement automatique. */
 function goToStep(i: number) {
   if (i < 0 || i >= STEPS.length) {
     return

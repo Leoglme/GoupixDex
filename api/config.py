@@ -44,7 +44,7 @@ class AppSettings(BaseSettings):
     supabase_storage_bucket: str | None = None
     usd_to_eur: float = 0.92
     cors_origins: str = "*"
-    #: Marge initiale (table ``settings``) à la création d’un compte et pour le margin_seeder.
+    #: Marge initiale (table ``settings``) à la création d'un compte et pour le margin_seeder.
     seed_margin_percent: int = Field(default=60, ge=0, le=500)
     #: Base PokéWallet ou URL du proxy (ex. https://goupixdex-proxy.dibodev.fr).
     poke_wallet_base_url: str = "https://api.pokewallet.io"

@@ -5,14 +5,14 @@ definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
   'Tableau de bord',
-  'Vue d’ensemble GoupixDex : stock, chiffre d’affaires, marges et répartition des ventes pour vos cartes Pokémon TCG.'
+  "Vue d'ensemble GoupixDex : stock, chiffre d'affaires, marges et répartition des ventes pour vos cartes Pokémon TCG."
 )
 
 const { fetchDashboard } = useStats()
 
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
-/** Si vrai, l’API agrège les refs Cardmarket via PokéWallet (plus lent). */
+/** Si vrai, l'API agrège les refs Cardmarket via PokéWallet (plus lent). */
 const fetchMarketData = ref(false)
 const toast = useToast()
 

@@ -153,7 +153,7 @@ class VintedService:
         detail: str | None = None,
         with_screenshot: bool = False,
     ) -> None:
-        """Événements SSE pendant l’auth Vinted (sous-étapes + capture optionnelle)."""
+        """Événements SSE pendant l'auth Vinted (sous-étapes + capture optionnelle)."""
         if not form_progress:
             return
         ev: dict[str, Any] = {

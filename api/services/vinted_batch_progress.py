@@ -55,7 +55,7 @@ _job_owner: dict[str, int] = {}
 
 
 def try_register_job(job_id: str, user_id: int) -> bool:
-    """Enregistre un job ; False si l’utilisateur a déjà un lot en cours."""
+    """Enregistre un job ; False si l'utilisateur a déjà un lot en cours."""
     if user_id in _active_job_by_user:
         return False
     _sessions[job_id] = VintedBatchSession()
@@ -69,7 +69,7 @@ def get_job_user_id(job_id: str) -> int | None:
 
 
 def clear_active_job_for_user(user_id: int) -> None:
-    """Libère le pointeur « job actif » pour l’utilisateur (la session SSE reste jusqu’à cleanup)."""
+    """Libère le pointeur « job actif » pour l'utilisateur (la session SSE reste jusqu'à cleanup)."""
     _active_job_by_user.pop(user_id, None)
 
 

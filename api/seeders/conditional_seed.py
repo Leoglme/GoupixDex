@@ -3,7 +3,7 @@ Bootstrap base vide : exécute les seeders uniquement si les tables concernées 
 
 - ``users`` vide → ``user_seeder.py`` (nécessite ``SEED_USER_EMAIL`` / ``SEED_USER_PASSWORD``)
 - ``margin_settings`` vide (et au moins un utilisateur) → ``margin_seeder.py``
-- ``articles`` vide + variable d’environnement ``SEED_DEV_ARTICLES`` truthy → ``article_seeder.py``
+- ``articles`` vide + variable d'environnement ``SEED_DEV_ARTICLES`` truthy → ``article_seeder.py``
 
 À lancer depuis le dossier ``api/`` (CI / VPS après déploiement, ou en local)::
 
@@ -91,7 +91,7 @@ def main() -> None:
     elif n_articles == 0 and _env_truthy("SEED_DEV_ARTICLES") and n_users == 0:
         print(
             "[conditional_seed] articles vides mais aucun utilisateur — "
-            "article_seeder ignoré (exécutez user_seeder d’abord).",
+            "article_seeder ignoré (exécutez user_seeder d'abord).",
             file=sys.stderr,
         )
     elif n_articles == 0:
