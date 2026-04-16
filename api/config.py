@@ -53,6 +53,14 @@ class AppSettings(BaseSettings):
     poke_wallet_user_agent: str = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
     #: Sur le VPS : ``true`` (navigateur sans fenêtre). En local : laisser ``false`` ou absent.
     vinted_browser_headless: bool = False
+    #: Si ``headless`` est ``false`` : fenêtre hors écran (Chrome réel, moins bloqué par Vinted que le vrai headless).
+    #: Mettre ``false`` pour retrouver ``--start-maximized`` (ex. Xvfb plein écran).
+    vinted_browser_discreet: bool = True
+    #: Position initiale (coords écran). Valeurs négatives : souvent hors du moniteur principal (Windows / macOS).
+    vinted_browser_discreet_x: int = -2400
+    vinted_browser_discreet_y: int = 0
+    #: En mode discret, minimise la fenêtre juste après ouverture (peut être désactivé en cas de souci UI).
+    vinted_browser_discreet_minimize: bool = True
     #: Chemin explicite vers Chromium/Chrome (ex. ``/usr/bin/chromium`` sur Debian après ``apt install chromium``).
     vinted_chrome_executable: str | None = None
 

@@ -93,8 +93,14 @@ def _normalize_vinted_label(text: str) -> str:
     )
 
 
-def _build_browser_args(*, headless: bool) -> list[str]:
-    """Flags communs ; en headless (prod VPS) on évite --start-maximized et on renforce la stabilité serveur."""
+def _build_browser_args(*, headless: bool, discreet: bool) -> list[str]:
+    """
+    Flags communs.
+
+    - **headless** : VPS / CI (vrai headless Chromium).
+    - **discreet** (si pas headless) : « headless maison » — même comportement visuel qu'avant
+      (fenêtre maximisée), mais déplacée hors écran puis minimisée pour être plus discrète.
+    """
     base: list[str] = [
         "--no-sandbox",
         "--disable-blink-features=AutomationControlled",
@@ -107,6 +113,18 @@ def _build_browser_args(*, headless: bool) -> list[str]:
                 "--disable-dev-shm-usage",
             ]
         )
+    elif discreet:
+        settings = get_settings()
+        x, y = settings.vinted_browser_discreet_x, settings.vinted_browser_discreet_y
+        base.extend(
+            [
+                "--start-maximized",
+                f"--window-position={x},{y}",
+                "--start-minimized" if settings.vinted_browser_discreet_minimize else "",
+                "--disable-dev-shm-usage",
+            ]
+        )
+        base = [arg for arg in base if arg]
     else:
         base.append("--start-maximized")
     return base
@@ -193,13 +211,21 @@ class VintedService:
         """
         settings = get_settings()
         headless = settings.vinted_browser_headless
+        discreet = bool(settings.vinted_browser_discreet) and not headless
         start_kw: dict[str, Any] = {
             "headless": headless,
-            "browser_args": _build_browser_args(headless=headless),
+            "browser_args": _build_browser_args(headless=headless, discreet=discreet),
             "sandbox": False,
         }
         if settings.vinted_chrome_executable:
             start_kw["browser_executable_path"] = settings.vinted_chrome_executable.strip()
+        if discreet:
+            logger.info(
+                "Vinted navigateur en mode discret (maximized @ %s,%s, minimized=%s)",
+                settings.vinted_browser_discreet_x,
+                settings.vinted_browser_discreet_y,
+                settings.vinted_browser_discreet_minimize,
+            )
         cls._browser = await uc.start(**start_kw)
         if cls._browser is None:
             raise RuntimeError("nodriver.start() returned no browser instance")
@@ -1717,23 +1743,129 @@ class VintedService:
             await emit_step("form_error", f"Échec sur le formulaire : {exc}", detail=str(exc))
             raise
 
+        shot = await cls._tab_screenshot_data_url(cls._require_tab())
+        await emit_step(
+            "form_done",
+            "Formulaire entièrement rempli — prêt pour publication.",
+            screenshot=shot,
+        )
         logger.info("Filling in the remaining item details — done")
 
     @classmethod
-    async def publish(cls) -> None:
+    async def _read_member_articles_count(cls, tab: Tab) -> int | None:
         """
-        Click the Vinted upload/save button to publish the listing.
+        Lit le compteur d'articles visible sur l'interface membre (ex. ``48 articles``).
+        Renvoie ``None`` si non disponible.
+        """
+        raw = await tab.evaluate(
+            """
+            (() => {
+                const texts = [];
+                const add = (s) => {
+                    const t = String(s || '').trim();
+                    if (t) texts.push(t);
+                };
+                const candidates = [
+                    ...document.querySelectorAll('a[href*="/member/"]'),
+                    ...document.querySelectorAll('[data-testid*="member"]'),
+                    ...document.querySelectorAll('h1,h2,h3,p,span,strong'),
+                ];
+                for (const el of candidates) {
+                    add(el.textContent || '');
+                    add(el.getAttribute && el.getAttribute('aria-label'));
+                    add(el.getAttribute && el.getAttribute('title'));
+                }
+                for (const t of texts) {
+                    const m = t.match(/(\\d{1,6})\\s+articles?\\b/i);
+                    if (m) return Number.parseInt(m[1], 10);
+                }
+                return null;
+            })()
+            """,
+            return_by_value=True,
+        )
+        if isinstance(raw, int):
+            return raw
+        return None
+
+    @classmethod
+    async def publish(cls, *, progress: FormProgressFn | None = None) -> None:
+        """
+        Click the Vinted upload/save button, puis attend une confirmation réelle côté profil membre.
 
         Returns:
             None
 
         Raises:
-            RuntimeError: If the button is not clickable in time.
+            RuntimeError: Si le bouton est introuvable ou si la confirmation post-publication échoue.
         """
         tab = cls._require_tab()
+        before_count = await cls._read_member_articles_count(tab)
         await cls._scroll_selector_into_view('[data-testid="upload-form-save-button"]')
         btn = await tab.select('[data-testid="upload-form-save-button"]', timeout=15)
         if btn is None:
             raise RuntimeError("upload-form-save-button not found")
         await btn.click()
-        logger.info("Item listed for sale successfully.")
+        logger.info("Publish clicked — waiting for member profile confirmation.")
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "publish",
+                    "form_step": "publish_submitted",
+                    "message": "Bouton « Ajouter » cliqué — attente de confirmation côté profil…",
+                }
+            )
+
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            await tab
+            url = (tab.target.url or "").lower()
+            after_count = await cls._read_member_articles_count(tab)
+            on_member_profile = "/member/" in url
+            count_incremented = (
+                after_count is not None
+                and before_count is not None
+                and after_count > before_count
+            )
+            if on_member_profile and (count_incremented or before_count is None):
+                shot = await cls._tab_screenshot_data_url(tab)
+                logger.info(
+                    "Item listed successfully (member profile reached, count %s -> %s).",
+                    before_count,
+                    after_count,
+                )
+                if progress:
+                    detail = (
+                        f"Profil membre confirmé — compteur {before_count} -> {after_count}."
+                        if before_count is not None and after_count is not None
+                        else "Profil membre confirmé après publication."
+                    )
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "publish",
+                            "form_step": "publish_confirmed",
+                            "message": "Annonce publiée avec succès sur Vinted.",
+                            "detail": detail,
+                            "screenshot": shot,
+                        }
+                    )
+                return
+            await asyncio.sleep(0.35)
+
+        shot = await cls._tab_screenshot_data_url(tab)
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "publish",
+                    "form_step": "publish_wait_failed",
+                    "message": "Publication non confirmée : pas de redirection profil ou compteur inchangé.",
+                    "detail": f"compteur_avant={before_count}",
+                    "screenshot": shot,
+                }
+            )
+        raise RuntimeError(
+            "Publication non confirmée (pas de redirection membre et/ou compteur d'articles inchangé)."
+        )

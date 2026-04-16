@@ -20,11 +20,14 @@ export default defineNuxtPlugin(() => {
     headers: { Accept: 'application/json' }
   })
 
-  const attachAuth = (req: { headers?: import('axios').AxiosRequestHeaders }) => {
+  const attachAuth = (req: import('axios').InternalAxiosRequestConfig) => {
     const t
       = token.value
         ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
     if (t) {
+      if (!req.headers) {
+        req.headers = new axios.AxiosHeaders()
+      }
       req.headers.Authorization = `Bearer ${t}`
     }
     return req

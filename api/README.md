@@ -60,6 +60,8 @@ La publication Vinted lance **Chromium** via **nodriver**. Sur une machine **san
 
 Variables utiles dans `.env` / `.env.example` : `VINTED_BROWSER_HEADLESS`, `VINTED_CHROME_EXECUTABLE` (souvent `/usr/bin/chromium` sous Linux).
 
+**Windows / macOS (app desktop)** : avec `VINTED_BROWSER_HEADLESS=false`, le mode **`VINTED_BROWSER_DISCREET=true`** (défaut) garde `--start-maximized`, puis applique `--window-position` (hors écran) + `--start-minimized` pour rester discret tout en gardant un rendu "headed". Vous pouvez désactiver la minimisation via `VINTED_BROWSER_DISCREET_MINIMIZE=false`. Sur **Linux + Xvfb plein écran**, mettre `VINTED_BROWSER_DISCREET=false` pour garder le comportement standard.
+
 ## Install
 
 ```bash

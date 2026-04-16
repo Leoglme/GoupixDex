@@ -7,6 +7,8 @@ useGoupixPageSeo(
 )
 
 type ReleaseAsset = {
+  /** Id GitHub (unique par asset) — utile pour dédoublonner */
+  id?: number
   name: string
   browser_download_url: string
   size?: number
@@ -58,14 +60,24 @@ const {
     const channel = releaseChannel.value
 
     if (channel === 'latest') {
-      const rows = await $fetch<GithubRelease[]>(`${base}/repos/${slug}/releases`, {
-        query: { per_page: '30' }
-      })
-      const picked = rows.find(r => !r.draft)
-      if (!picked) {
-        throw new Error('Aucune release publiée sur ce dépôt.')
+      // Dernière release **stable** (non brouillon, non préversion) — un seul jeu d’assets
+      try {
+        return await $fetch<GithubRelease>(`${base}/repos/${slug}/releases/latest`)
+      } catch (e: unknown) {
+        const status = (e as { status?: number; statusCode?: number })?.status
+          ?? (e as { statusCode?: number })?.statusCode
+        if (status !== 404) {
+          throw e
+        }
+        const rows = await $fetch<GithubRelease[]>(`${base}/repos/${slug}/releases`, {
+          query: { per_page: '20' }
+        })
+        const picked = rows.find(r => !r.draft && !r.prerelease) ?? rows.find(r => !r.draft)
+        if (!picked) {
+          throw new Error('Aucune release publiée sur ce dépôt.')
+        }
+        return picked
       }
-      return picked
     }
 
     return await $fetch<GithubRelease>(
@@ -74,6 +86,24 @@ const {
   },
   { watch: [releasesBase, repoSlug, releaseChannel] }
 )
+
+/** GitHub ne devrait pas renvoyer deux fois le même asset ; on filtre par id / URL au cas où. */
+function dedupeAssets(assets: ReleaseAsset[]): ReleaseAsset[] {
+  const seen = new Set<string>()
+  const out: ReleaseAsset[] = []
+  for (const a of assets) {
+    const key
+      = a.id != null
+        ? `id:${a.id}`
+        : (a.browser_download_url || a.name)
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    out.push(a)
+  }
+  return out
+}
 
 function classifyAsset(asset: ReleaseAsset): DownloadItem | null {
   const n = asset.name
@@ -147,18 +177,50 @@ function sortItems(items: DownloadItem[]) {
   return [...items].sort((a, b) => a.sortKey - b.sortKey || a.label.localeCompare(b.label))
 }
 
+/**
+ * Plusieurs assets peuvent produire le même libellé (ex. deux .exe « setup ») : on n’en garde qu’un,
+ * de préférence le plus lourd (installateur complet vs artefact secondaire).
+ */
+function dedupeDownloadItemsByLabel(items: DownloadItem[]): DownloadItem[] {
+  const byLabel = new Map<string, DownloadItem>()
+  for (const item of items) {
+    const prev = byLabel.get(item.label)
+    if (!prev) {
+      byLabel.set(item.label, item)
+      continue
+    }
+    const ps = prev.asset.size ?? 0
+    const ns = item.asset.size ?? 0
+    if (ns > ps) {
+      byLabel.set(item.label, item)
+    }
+  }
+  return sortItems([...byLabel.values()])
+}
+
 const windowsDownloads = computed(() => {
-  const items = (release.value?.assets ?? [])
+  const items = dedupeAssets(release.value?.assets ?? [])
     .map(classifyAsset)
     .filter((x): x is DownloadItem => Boolean(x && x.platform === 'windows'))
-  return sortItems(items)
+  return dedupeDownloadItemsByLabel(items)
 })
 
 const macDownloads = computed(() => {
-  const items = (release.value?.assets ?? [])
+  const items = dedupeAssets(release.value?.assets ?? [])
     .map(classifyAsset)
     .filter((x): x is DownloadItem => Boolean(x && x.platform === 'macos'))
-  return sortItems(items)
+  return dedupeDownloadItemsByLabel(items)
+})
+
+const releaseVersionLabel = computed(() => {
+  const r = release.value
+  if (!r) {
+    return ''
+  }
+  if (r.name?.trim()) {
+    return r.name.trim()
+  }
+  return r.tag_name ?? ''
 })
 
 function formatBytes(n?: number) {
@@ -233,15 +295,23 @@ function formatBytes(n?: number) {
         >
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-3 px-1">
-              <div>
+              <div class="min-w-0 space-y-1">
                 <p class="text-sm text-muted">
                   Version disponible
                 </p>
                 <p class="text-lg font-semibold text-highlighted">
                   Téléchargements
+                  <template v-if="releaseVersionLabel">
+                    <span class="block sm:inline sm:before:content-['\00a0—\00a0'] mt-1 sm:mt-0 text-base font-mono text-primary">
+                      {{ releaseVersionLabel }}
+                    </span>
+                  </template>
+                </p>
+                <p v-if="release?.tag_name && release.name?.trim() && release.name.trim() !== release.tag_name" class="text-sm text-muted">
+                  Étiquette Git : {{ release.tag_name }}
                 </p>
               </div>
-              <div v-if="release?.tag_name" class="flex flex-wrap items-center gap-2">
+              <div v-if="release?.tag_name" class="flex flex-wrap items-center gap-2 shrink-0">
                 <UBadge color="neutral" variant="subtle" size="md">
                   {{ release.tag_name }}
                 </UBadge>

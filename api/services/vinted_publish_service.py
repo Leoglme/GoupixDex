@@ -184,7 +184,7 @@ async def run_single_vinted_listing(
     )
     await TimerService.wait(400)
     await _emit(progress, "publish", f"{prefix}Envoi de l'annonce…", form_step="publish_click")
-    await VintedService.publish()
+    await VintedService.publish(progress=progress)
     await TimerService.wait(500)
     return {"published": True, "detail": "published", "article_id": article.id}
 
