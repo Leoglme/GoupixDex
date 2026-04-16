@@ -35,6 +35,7 @@ fn spawn_vinted_local_worker() -> Result<Child, std::io::Error> {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_updater::Builder::new().build())
+    .plugin(tauri_plugin_process::init())
     .manage(VintedLocalChild(Mutex::new(None)))
     .setup(|app| {
       match spawn_vinted_local_worker() {

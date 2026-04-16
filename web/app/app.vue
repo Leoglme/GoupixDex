@@ -28,14 +28,18 @@ useSeoMeta({
   description: fallbackDescription,
   ogTitle: 'GoupixDex',
   ogDescription: fallbackDescription,
+  ogSiteName: 'GoupixDex',
   ogImage: '/logo-goupix-dev-256x256.png',
   applicationName: 'GoupixDex',
+  twitterTitle: 'GoupixDex',
+  twitterDescription: fallbackDescription,
   twitterCard: 'summary_large_image'
 })
 </script>
 
 <template>
   <UApp>
+    <DesktopUpdaterPanel />
     <NuxtLoadingIndicator />
 
     <NuxtLayout>

@@ -7,10 +7,9 @@ ajouter un input si l'ocr détecte mauvaise carte pour aider un peu pokewallter 
 Une fois connecté (navigateur visible, ou connexion manuelle une fois), réutiliser le même profil Chrome (répertoire utilisateur) avec cookies / session sauvegardés, et n'utiliser le headless que pour des actions déjà authentifiées — si Vinted ne challenge plus la session. C'est l'approche la plus courante pour les automations « semi-légitimes » côté outil interne.
 
 
-headless ?
-dégager proxy o2switch ?
+
+
 sync vinted
-publication quit avant attendre la redirection sur le profile membre vinted et si le nom d'articles  articles 48 articles s'incremente sucess => log sucess et picture du profil avec l'article ajouté, profite en pour ajouter screen dans les logs quand le formulaire est rempli 
 
 
 Alakazam / Alakazam m1s 071/063 AR - Mega Symphonia - Pokémon Japonais
