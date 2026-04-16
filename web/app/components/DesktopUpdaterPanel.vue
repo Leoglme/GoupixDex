@@ -3,7 +3,7 @@ import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 
-type UpdaterStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'installed' | 'error'
+type UpdaterStatus = 'idle' | 'available' | 'downloading' | 'installed' | 'error'
 
 const { isDesktopApp } = useDesktopRuntime()
 
@@ -42,7 +42,6 @@ const downloadLabel = computed(() => {
 const canDismiss = computed(() => status.value === 'available' || status.value === 'error')
 
 const statusTitle = computed(() => {
-  if (status.value === 'checking') return 'Recherche d’une mise à jour'
   if (status.value === 'available') return 'Mise à jour disponible'
   if (status.value === 'downloading') return 'Téléchargement et installation'
   if (status.value === 'installed') return 'Mise à jour installée'
@@ -51,9 +50,6 @@ const statusTitle = computed(() => {
 })
 
 const statusDescription = computed(() => {
-  if (status.value === 'checking') {
-    return 'Vérification de la dernière version de GoupixDex sur les serveurs de mise à jour…'
-  }
   if (status.value === 'available') {
     if (nextVersion.value && currentVersion.value) {
       return `Passez de la version ${currentVersion.value} à ${nextVersion.value} en un clic. L’application se fermera brièvement pour finaliser l’installation.`
@@ -133,8 +129,6 @@ async function checkForUpdate() {
   }
   window.sessionStorage.setItem('goupix-updater-checked', '1')
 
-  visible.value = true
-  status.value = 'checking'
   errorMessage.value = null
   resetDownloadProgress()
 
@@ -143,7 +137,6 @@ async function checkForUpdate() {
     pendingUpdate.value = update
 
     if (!update) {
-      visible.value = false
       status.value = 'idle'
       return
     }
@@ -151,9 +144,11 @@ async function checkForUpdate() {
     currentVersion.value = update.currentVersion || null
     nextVersion.value = update.version || null
     status.value = 'available'
+    visible.value = true
   } catch (error) {
-    status.value = 'error'
-    errorMessage.value = error instanceof Error ? error.message : 'Vérification impossible.'
+    console.error('[Updater] Vérification silencieuse échouée :', error)
+    status.value = 'idle'
+    pendingUpdate.value = null
   }
 }
 
@@ -241,14 +236,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="status === 'checking'" class="space-y-2">
-            <UProgress animation="carousel" size="md" class="w-full" />
-            <p class="text-xs text-muted">
-              Connexion sécurisée au manifeste de mise à jour…
-            </p>
-          </div>
-
-          <div v-else-if="status === 'downloading'" class="space-y-3">
+          <div v-if="status === 'downloading'" class="space-y-3">
             <div class="flex items-center justify-between gap-3 text-xs text-muted">
               <span class="tabular-nums font-medium text-highlighted">{{ downloadLabel }}</span>
               <span v-if="totalBytes && totalBytes > 0" class="tabular-nums">
