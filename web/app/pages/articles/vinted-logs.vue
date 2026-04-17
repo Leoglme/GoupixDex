@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
+
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
@@ -10,10 +12,15 @@ const route = useRoute()
 const { getVintedBatchActive } = useArticles()
 const batchStream = useVintedBatchStream()
 const publishStream = useVintedPublishStream()
+const wardrobeStream = useWardrobeSyncStream()
 const { isDesktopApp } = useDesktopRuntime()
 
-/** ``batch`` | ``single`` | ``none`` (idle / chargement initial) */
-const streamMode = ref<'none' | 'batch' | 'single'>('none')
+/** ``batch`` | ``single`` | ``wardrobe`` | ``none`` (idle / initial load) */
+const streamMode = ref<'none' | 'batch' | 'single' | 'wardrobe'>('none')
+
+const navbarTitle = computed(() =>
+  streamMode.value === 'wardrobe' ? 'Journal import Vinted' : 'Journal publication Vinted'
+)
 
 const logScrollEl = ref<HTMLElement | null>(null)
 
@@ -23,6 +30,9 @@ const activeLogEntries = computed(() => {
   }
   if (streamMode.value === 'batch') {
     return batchStream.logEntries.value
+  }
+  if (streamMode.value === 'wardrobe') {
+    return wardrobeStream.logEntries.value
   }
   return []
 })
@@ -49,7 +59,9 @@ const progress = computed(() =>
 const finished = computed(() =>
   streamMode.value === 'batch' ? batchStream.finished.value : false
 )
-/** Flux article unique : ``followStream`` s'est terminé sans erreur réseau. */
+/** Wardrobe stream: finished before redirect to batch create. */
+const wardrobeFinished = ref(false)
+/** Single-article stream: ``followStream`` ended without a network error. */
 const singleFinished = ref(false)
 const lastSummary = computed(() =>
   streamMode.value === 'batch' ? batchStream.lastSummary.value : null
@@ -84,10 +96,33 @@ async function connectBatchJob(jobId: string) {
   streamMode.value = 'batch'
   batchStream.closeBatchStream()
   publishStream.closeStream()
+  wardrobeStream.closeStream()
   try {
     await batchStream.followBatchStream(`/articles/vinted-batch/${jobId}/stream`, {
       quiet: true
     })
+  } catch (e) {
+    streamError.value = e instanceof Error ? e.message : 'Flux interrompu'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function connectWardrobeJob(jobId: string) {
+  idleMessage.value = null
+  streamError.value = null
+  singleFinished.value = false
+  wardrobeFinished.value = false
+  loading.value = true
+  streamMode.value = 'wardrobe'
+  batchStream.closeBatchStream()
+  publishStream.closeStream()
+  wardrobeStream.closeStream()
+  try {
+    const result = await wardrobeStream.followJobStream(jobId)
+    sessionStorage.setItem(WARDROBE_IMPORT_STORAGE_KEY, JSON.stringify({ result }))
+    wardrobeFinished.value = true
+    await navigateTo({ path: '/articles/batch-create', query: { from: 'wardrobe' } })
   } catch (e) {
     streamError.value = e instanceof Error ? e.message : 'Flux interrompu'
   } finally {
@@ -103,6 +138,7 @@ async function connectSingleArticle(articleId: number) {
   streamMode.value = 'single'
   batchStream.closeBatchStream()
   publishStream.closeStream()
+  wardrobeStream.closeStream()
   try {
     await publishStream.followStream(`/articles/${articleId}/vinted-progress`, 'logs')
     singleFinished.value = true
@@ -122,10 +158,16 @@ async function bootstrap() {
   }
   const qJob = route.query.job
   const qArticle = route.query.article
+  const qWardrobe = route.query.wardrobe_job
   const jobId = typeof qJob === 'string' ? qJob.trim() : ''
+  const wardrobeJobId = typeof qWardrobe === 'string' ? qWardrobe.trim() : ''
   const articleIdRaw = typeof qArticle === 'string' ? qArticle.trim() : ''
   const articleId = articleIdRaw ? Number.parseInt(articleIdRaw, 10) : NaN
 
+  if (wardrobeJobId) {
+    await connectWardrobeJob(wardrobeJobId)
+    return
+  }
   if (jobId) {
     await connectBatchJob(jobId)
     return
@@ -157,7 +199,7 @@ async function bootstrap() {
 onMounted(bootstrap)
 
 watch(
-  () => [route.query.job, route.query.article],
+  () => [route.query.job, route.query.article, route.query.wardrobe_job],
   () => {
     bootstrap()
   }
@@ -166,6 +208,7 @@ watch(
 onBeforeUnmount(() => {
   batchStream.closeBatchStream()
   publishStream.closeStream()
+  wardrobeStream.closeStream()
 })
 </script>
 
@@ -179,7 +222,7 @@ onBeforeUnmount(() => {
     }"
   >
     <template #header>
-      <UDashboardNavbar title="Journal publication Vinted">
+      <UDashboardNavbar :title="navbarTitle">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
@@ -289,6 +332,17 @@ onBeforeUnmount(() => {
           </UCard>
 
           <UCard
+            v-else-if="streamMode === 'wardrobe' && loading"
+            class="shrink-0"
+            :ui="{ body: 'py-3' }"
+          >
+            <p class="text-center text-sm text-muted">
+              Synchronisation garde-robe Vinted (connexion Chrome, catalogue)…
+            </p>
+            <UProgress size="md" class="mt-2 w-full" animation="carousel" />
+          </UCard>
+
+          <UCard
             class="flex min-h-[12rem] flex-1 flex-col overflow-hidden"
             :ui="{
               root: 'flex min-h-0 flex-1 flex-col overflow-hidden',
@@ -299,8 +353,15 @@ onBeforeUnmount(() => {
             <template #header>
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-medium text-highlighted">Journal serveur</span>
-                <UBadge v-if="finished || singleFinished" color="success" variant="subtle">
+                <UBadge v-if="finished || singleFinished || wardrobeFinished" color="success" variant="subtle">
                   Terminé
+                </UBadge>
+                <UBadge
+                  v-else-if="streamMode === 'wardrobe' && !loading"
+                  color="neutral"
+                  variant="subtle"
+                >
+                  Import garde-robe
                 </UBadge>
                 <UBadge
                   v-else-if="streamMode === 'single' && !loading"

@@ -19,12 +19,12 @@ class SoldPatch(BaseModel):
 
 
 class BulkIdsBody(BaseModel):
-    """Suppression groupée d'articles (même utilisateur)."""
+    """Bulk delete articles (same owner)."""
 
     ids: list[int] = Field(min_length=1, max_length=500)
 
 
 class VintedBatchStartBody(BaseModel):
-    """Lancement d'une publication Vinted groupée (une session Chrome)."""
+    """Start a grouped Vinted publish job (single Chrome session)."""
 
     article_ids: list[int] = Field(min_length=1, max_length=40)

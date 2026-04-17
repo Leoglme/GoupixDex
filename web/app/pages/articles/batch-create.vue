@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ScanCardResponse } from '~/composables/useScanCard'
+import { syncResultToPrefillSlots, WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -12,12 +13,14 @@ type ArticleFormExpose = {
   buildCreateFormData: () => FormData
   applyScanPrefill: (s: ScanCardResponse) => void
   addImageFiles: (files: File[]) => void
+  applyWardrobeSlot: (p: import('~/composables/useWardrobeImportPrefill').WardrobeSlotPrefill) => Promise<void>
 }
 
 const { createArticle, startVintedBatch } = useArticles()
 const { scan } = useScanCard()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
+const route = useRoute()
 
 let nextSlotId = 1
 const formSlots = ref([{ id: 0 }])
@@ -28,10 +31,22 @@ const slotScanFiles = ref<(File | null)[]>([null])
 const slotScanPreviews = ref<(string | null)[]>([null])
 
 const batchVinted = ref(true)
+const wardrobeImportLoading = ref(false)
 const submitting = ref(false)
 const scanning = ref(false)
 const bulkInputKey = ref(0)
 const photosPerArticle = ref(2)
+const bulkScanInput = ref<HTMLInputElement | null>(null)
+
+function clickBulkScanInput() {
+  bulkScanInput.value?.click()
+}
+
+function setSlotHint(idx: number, value: string) {
+  const next = [...slotHints.value]
+  next[idx] = value
+  slotHints.value = next
+}
 
 function bindFormRef(idx: number, el: unknown) {
   while (formRefs.value.length <= idx) {
@@ -157,6 +172,68 @@ async function onBulkScanFiles(e: Event) {
     bulkInputKey.value++
   }
 }
+
+async function applyWardrobeSessionImport() {
+  const raw = sessionStorage.getItem(WARDROBE_IMPORT_STORAGE_KEY)
+  if (!raw) {
+    return
+  }
+  sessionStorage.removeItem(WARDROBE_IMPORT_STORAGE_KEY)
+  wardrobeImportLoading.value = true
+  try {
+    const body = JSON.parse(raw) as { result: Record<string, unknown> }
+    const slots = syncResultToPrefillSlots(body.result)
+    if (!slots.length) {
+      toast.add({
+        title: 'Aucune annonce à importer',
+        description: 'La synchronisation ne contient pas de lignes exploitables.',
+        color: 'warning'
+      })
+      return
+    }
+    batchVinted.value = false
+    for (const p of slotScanPreviews.value) {
+      if (p) {
+        URL.revokeObjectURL(p)
+      }
+    }
+    formSlots.value = slots.map((_, i) => ({ id: i }))
+    nextSlotId = slots.length
+    scanInputKeys.value = slots.map(() => 0)
+    slotHints.value = slots.map(() => '')
+    slotScanFiles.value = slots.map(() => null)
+    slotScanPreviews.value = slots.map(() => null)
+    formRefs.value = []
+    await nextTick()
+    await nextTick()
+    for (let i = 0; i < slots.length; i++) {
+      const comp = formRefs.value[i]
+      if (comp?.applyWardrobeSlot) {
+        await comp.applyWardrobeSlot(slots[i]!)
+      }
+    }
+    toast.add({
+      title: 'Import Vinted',
+      description: `${slots.length} fiche(s) préremplie(s). Vérifiez le prix d’achat puis créez les articles.`,
+      color: 'success'
+    })
+  } catch (e) {
+    toast.add({
+      title: 'Import Vinted',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
+  } finally {
+    wardrobeImportLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  if (route.query.from === 'wardrobe') {
+    batchVinted.value = false
+  }
+  await applyWardrobeSessionImport()
+})
 
 async function submitAll() {
   const createdIds: number[] = []
@@ -302,7 +379,7 @@ async function submitAll() {
                   color="primary"
                   icon="i-lucide-images"
                   :loading="scanning"
-                  @click="$refs.bulkScanInput?.click?.()"
+                  @click="clickBulkScanInput"
                 >
                   Upload plusieurs images
                 </UButton>
@@ -326,7 +403,7 @@ async function submitAll() {
           <div class="rounded-lg border border-default/80 bg-elevated/60 p-4 space-y-3">
             <UCheckbox
               v-model="batchVinted"
-              :disabled="!isDesktopApp"
+              :disabled="!isDesktopApp || route.query.from === 'wardrobe'"
               label="Lancer la publication Vinted groupée après création (une seule connexion)"
             />
             <p v-if="!isDesktopApp" class="text-sm text-muted">
@@ -373,7 +450,8 @@ async function submitAll() {
             </UCard>
 
             <ScanCardPanel
-              v-model="slotHints[idx]"
+              :model-value="slotHints[idx] ?? ''"
+              @update:model-value="(v: string) => setSlotHint(idx, v)"
               :title="`Article ${idx + 1} — Scanner une carte`"
               subtitle="Scan de carte + prix PokéWallet pour préremplir ce formulaire."
               :preview-url="slotScanPreviews[idx]"

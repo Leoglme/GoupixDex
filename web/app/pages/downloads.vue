@@ -7,7 +7,7 @@ useGoupixPageSeo(
 )
 
 type ReleaseAsset = {
-  /** Id GitHub (unique par asset) — utile pour dédoublonner */
+  /** GitHub id (unique per asset) — used for deduplication */
   id?: number
   name: string
   browser_download_url: string
@@ -60,7 +60,7 @@ const {
     const channel = releaseChannel.value
 
     if (channel === 'latest') {
-      // Dernière release **stable** (non brouillon, non préversion) — un seul jeu d'assets
+      // Latest **stable** release (not draft, not prerelease) — single asset set
       try {
         return await $fetch<GithubRelease>(`${base}/repos/${slug}/releases/latest`)
       } catch (e: unknown) {
@@ -74,7 +74,7 @@ const {
         })
         const picked = rows.find(r => !r.draft && !r.prerelease) ?? rows.find(r => !r.draft)
         if (!picked) {
-          throw new Error('Aucune release publiée sur ce dépôt.')
+          throw new Error('No published release on this repository.')
         }
         return picked
       }
@@ -87,7 +87,7 @@ const {
   { watch: [releasesBase, repoSlug, releaseChannel] }
 )
 
-/** GitHub ne devrait pas renvoyer deux fois le même asset ; on filtre par id / URL au cas où. */
+/** GitHub should not return the same asset twice; filter by id / URL just in case. */
 function dedupeAssets(assets: ReleaseAsset[]): ReleaseAsset[] {
   const seen = new Set<string>()
   const out: ReleaseAsset[] = []

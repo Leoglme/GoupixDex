@@ -20,11 +20,11 @@ from models.image import Image as ImageModel
 from models.user import User
 from schemas.articles import ArticleUpdate, BulkIdsBody, SoldPatch, VintedBatchStartBody
 from services import article_service
-from services import vinted_batch_progress as vinted_batch_hub
-from services import vinted_progress as vinted_progress_hub
+from services.vinted_batch_session_service import VintedBatchSessionService as vinted_batch_hub
+from services.vinted_progress_session_service import VintedProgressSessionService as vinted_progress_hub
 from services import supabase_storage_service
-from services.vinted_background import run_vinted_publish_job
-from services.vinted_batch_background import run_vinted_batch_publish_job
+from services.vinted_background_service import VintedBackgroundService
+from services.vinted_batch_background_service import VintedBatchBackgroundService
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
@@ -45,13 +45,30 @@ def _form_bool(value: str | None) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
+def _parse_sold_at_iso(value: str | None) -> dt.datetime | None:
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        return dt.datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=dt.UTC)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sold_at (expected ISO 8601 or YYYY-MM-DD).",
+        ) from exc
+
+
 @router.post("/bulk-delete", status_code=status.HTTP_200_OK)
 def bulk_delete_articles(
     body: BulkIdsBody,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Supprime plusieurs articles appartenant à l'utilisateur connecté."""
+    """Delete multiple articles owned by the authenticated user."""
     unique_ids = list(dict.fromkeys(body.ids))
     deleted = article_service.delete_articles_by_ids(db, user.id, unique_ids)
     return {"deleted": deleted, "requested": len(unique_ids)}
@@ -61,7 +78,7 @@ def bulk_delete_articles(
 def vinted_batch_active(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Job Vinted groupé en cours pour cet utilisateur (sinon null)."""
+    """Active grouped Vinted job for this user, if any (otherwise null)."""
     jid = vinted_batch_hub.get_active_job_id(user.id)
     return {
         "job_id": jid,
@@ -74,12 +91,12 @@ async def vinted_batch_stream(
     job_id: str,
     user: Annotated[User, Depends(get_current_user_from_token_str)],
 ) -> StreamingResponse:
-    """SSE : logs + événements ``progress`` pour un lot Vinted."""
+    """SSE: logs + ``progress`` events for a Vinted batch job."""
     owner = vinted_batch_hub.get_job_user_id(job_id)
     if owner is None:
-        raise HTTPException(status_code=404, detail="Job introuvable ou expiré.")
+        raise HTTPException(status_code=404, detail="Job not found or expired.")
     if owner != user.id:
-        raise HTTPException(status_code=403, detail="Accès refusé à ce job.")
+        raise HTTPException(status_code=403, detail="Access denied for this job.")
 
     async def generate():
         async for ev in vinted_batch_hub.event_stream(job_id):
@@ -104,29 +121,29 @@ def start_vinted_batch(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
     """
-    Enfile un lot de publications Vinted (navigateur unique, annonces enchaînées).
-    Suivre ``GET /articles/vinted-batch/{job_id}/stream``.
+    Queue a batch of Vinted listings (single browser, sequential listings).
+    Follow ``GET /articles/vinted-batch/{job_id}/stream``.
     """
     unique_ids = list(dict.fromkeys(body.article_ids))
     for aid in unique_ids:
         article = article_service.get_article(db, aid, user.id)
         if article is None:
-            raise HTTPException(status_code=400, detail=f"Article {aid} introuvable.")
+            raise HTTPException(status_code=400, detail=f"Article {aid} not found.")
         if not article.images:
             raise HTTPException(
                 status_code=400,
-                detail=f"L'article {aid} n'a pas d'image (requis pour Vinted).",
+                detail=f"Article {aid} has no images (required for Vinted).",
             )
 
     job_id = str(uuid.uuid4())
     if not vinted_batch_hub.try_register_job(job_id, user.id):
         raise HTTPException(
             status_code=409,
-            detail="Une publication Vinted groupée est déjà en cours pour ce compte.",
+            detail="A grouped Vinted publish is already running for this account.",
         )
 
     background_tasks.add_task(
-        run_vinted_batch_publish_job,
+        VintedBatchBackgroundService.run_vinted_batch_publish_job,
         job_id,
         user.id,
         unique_ids,
@@ -153,7 +170,7 @@ async def vinted_progress_stream(
     db: Annotated[Session, Depends(get_db)],
 ) -> StreamingResponse:
     """
-    Flux SSE des étapes de publication Vinted (JWT via ``Authorization`` ou ``?token=``).
+    SSE stream of Vinted publish steps (JWT via ``Authorization`` or ``?token=``).
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -194,8 +211,8 @@ def publish_vinted_for_article(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
     """
-    Lance la publication Vinted pour un article existant (images déjà enregistrées).
-    Suivre le flux SSE ``GET /articles/{id}/vinted-progress``.
+    Start Vinted publish for an existing article (images already stored).
+    Follow SSE ``GET /articles/{id}/vinted-progress``.
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -203,18 +220,18 @@ def publish_vinted_for_article(
     if article.is_sold:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Article déjà vendu — publication sur Vinted inadaptée.",
+            detail="Article already sold — not suitable for Vinted listing.",
         )
     image_urls = [img.image_url for img in article.images]
     if not image_urls:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Au moins une image est requise pour publier sur Vinted.",
+            detail="At least one image is required to publish on Vinted.",
         )
 
     vinted_progress_hub.register(article_id)
     background_tasks.add_task(
-        run_vinted_publish_job,
+        VintedBackgroundService.run_vinted_publish_job,
         article_id,
         user.id,
         image_urls,
@@ -234,7 +251,7 @@ def confirm_vinted_publish(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, bool]:
     """
-    Marque l'article comme publié sur Vinted après succès du worker desktop local.
+    Mark the article as published on Vinted after success from the local desktop worker.
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -258,9 +275,16 @@ async def create_article(
     condition: str = Form("Near Mint"),
     sell_price: str | None = Form(None),
     publish_to_vinted: str | None = Form(None),
+    is_sold: str | None = Form(None),
+    sold_at: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
     settings = get_settings()
+    sold_flag = _form_bool(is_sold)
+    sold_at_dt = _parse_sold_at_iso(sold_at) if sold_flag else None
+    if sold_flag and sold_at_dt is None:
+        sold_at_dt = dt.datetime.now(dt.UTC)
+
     article = Article(
         user_id=user.id,
         title=title.strip(),
@@ -271,7 +295,8 @@ async def create_article(
         condition=condition.strip() or "Near Mint",
         purchase_price=_parse_decimal_required(purchase_price),
         sell_price=_parse_decimal(sell_price),
-        is_sold=False,
+        is_sold=sold_flag,
+        sold_at=sold_at_dt if sold_flag else None,
     )
     db.add(article)
     db.flush()
@@ -302,16 +327,18 @@ async def create_article(
 
     vinted_local_desktop = request.headers.get("x-goupix-vinted-target", "").strip().lower() == "local"
 
-    if _form_bool(publish_to_vinted) and vinted_local_desktop:
+    want_vinted = _form_bool(publish_to_vinted) and not sold_flag
+
+    if want_vinted and vinted_local_desktop:
         vinted_result = {
             "status": "pending",
             "stream_path": f"/articles/{article.id}/vinted-progress",
             "desktop_local": True,
         }
-    elif _form_bool(publish_to_vinted):
+    elif want_vinted:
         vinted_progress_hub.register(article.id)
         background_tasks.add_task(
-            run_vinted_publish_job,
+            VintedBackgroundService.run_vinted_publish_job,
             article.id,
             user.id,
             stored_sources,

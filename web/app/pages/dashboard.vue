@@ -12,7 +12,7 @@ const { fetchDashboard } = useStats()
 
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
-/** Si vrai, l'API agrège les refs Cardmarket via PokéWallet (plus lent). */
+/** When true, the API aggregates Cardmarket refs via PokéWallet (slower). */
 const fetchMarketData = ref(false)
 const toast = useToast()
 
@@ -126,7 +126,7 @@ const pieStyle = computed(() => {
         </div>
 
         <template v-else-if="stats">
-          <!-- Cartes bénéfices / CA : une seule bande (style Nuxt UI dashboard) -->
+          <!-- Profit / revenue stat cards: single band (Nuxt UI dashboard style) -->
           <UPageGrid class="lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-px">
             <StatsCard
               title="Bénéfice (7 j)"
@@ -151,7 +151,7 @@ const pieStyle = computed(() => {
           </UPageGrid>
 
           <div class="grid gap-6 lg:grid-cols-2">
-            <!-- Stock en vente -->
+            <!-- Inventory for sale -->
             <UCard>
               <template #header>
                 <p class="text-sm font-medium text-highlighted">
@@ -207,7 +207,7 @@ const pieStyle = computed(() => {
               </p>
             </UCard>
 
-            <!-- Camembert + légende avec pastilles -->
+            <!-- Pie chart + legend with dots -->
             <UCard>
               <template #header>
                 <p class="text-sm font-medium text-highlighted">
@@ -251,13 +251,13 @@ const pieStyle = computed(() => {
             </UCard>
           </div>
 
-          <!-- Graphique CA cumulé (pleine largeur) -->
+          <!-- Cumulative revenue chart (full width) -->
           <DashboardRevenueChart :stats="stats" />
 
-          <!-- Dernières ventes -->
+          <!-- Recent sales -->
           <DashboardSalesTable :sales="stats.recent_sales" />
 
-          <!-- Classements -->
+          <!-- Rankings -->
           <Charts :stats="stats" />
         </template>
       </div>

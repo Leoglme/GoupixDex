@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from app_types.groq_vision import GroqVisionCardCollectorResult, GroqVisionImageMimeType
-from services.groq_vision_client import GroqVisionClient
+from services.groq_vision_service import GroqVisionService
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def extract_card_from_bytes(
         enrich_from_pokewallet: When True, enables PokéWallet + PokéAPI enrichment when keys exist.
         user_hint: Optional short text to help the vision model (Pokémon, set code, etc.).
     """
-    client = GroqVisionClient()
+    client = GroqVisionService()
     mime = _mime_from_name(filename)
     opts: dict[str, bool | float | str] = {
         "resolve_english_name_from_poke_wallet": enrich_from_pokewallet,

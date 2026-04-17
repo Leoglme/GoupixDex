@@ -32,17 +32,14 @@ def main() -> None:
     _load_dotenv()
 
     from app_types.pokewallet import PokeWalletSearchOptions
-    from services.pokewallet_client import PokeWalletClient
-    from services.pokewallet_reference_prices import (
-        pick_cardmarket_reference_eur,
-        pick_tcgplayer_reference_usd,
-    )
+    from services.poke_wallet_client_service import PokeWalletClientService
+    from services.poke_wallet_reference_prices_service import PokeWalletReferencePricesService
 
     example_set_code = "SV8"
     example_card_number = "112"
     example_pokemon_name: str | None = "Magneton"
 
-    client = PokeWalletClient()
+    client = PokeWalletClientService()
     opts: PokeWalletSearchOptions = {"limit": 20, "page": 1}
     if example_pokemon_name:
         opts["pokemonName"] = example_pokemon_name
@@ -57,8 +54,8 @@ def main() -> None:
     cardmarket_prices = (first.get("cardmarket") or {}).get("prices") or []
     tcgplayer_prices = (first.get("tcgplayer") or {}).get("prices") or []
 
-    cardmarket_ref = pick_cardmarket_reference_eur(cardmarket_prices)
-    tcgplayer_ref = pick_tcgplayer_reference_usd(tcgplayer_prices)
+    cardmarket_ref = PokeWalletReferencePricesService.pick_cardmarket_reference_eur(cardmarket_prices)
+    tcgplayer_ref = PokeWalletReferencePricesService.pick_tcgplayer_reference_usd(tcgplayer_prices)
 
     info = first.get("card_info", {})
     out = {

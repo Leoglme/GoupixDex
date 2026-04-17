@@ -70,8 +70,8 @@ async def _materialize_listing_images(
     images_dir: Path,
 ) -> list[str]:
     """
-    Prépare des fichiers locaux pour nodrive : URLs HTTPS téléchargées, chemins locaux copiés.
-    Renvoie les noms de fichiers (basename) dans ``images_dir``.
+    Prepare local files for nodriver: download HTTPS URLs, copy local paths.
+    Returns basenames in ``images_dir``.
     """
     images_dir.mkdir(parents=True, exist_ok=True)
     basenames: list[str] = []
@@ -81,8 +81,8 @@ async def _materialize_listing_images(
             resp = await client.get(src)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Téléchargement image Vinted échoué %s: %s", src, exc)
-            raise RuntimeError(f"Téléchargement image impossible: {src}") from exc
+            logger.error("Vinted image download failed %s: %s", src, exc)
+            raise RuntimeError(f"Image download failed: {src}") from exc
         path_part = urlparse(src).path
         ext = Path(path_part).suffix or ".jpg"
         if not ext.startswith("."):
@@ -95,7 +95,7 @@ async def _materialize_listing_images(
     def _one_local(src: str) -> str:
         p = Path(src)
         if not p.is_file():
-            raise RuntimeError(f"Fichier image introuvable pour Vinted: {src}")
+            raise RuntimeError(f"Image file not found for Vinted: {src}")
         ext = p.suffix or ".jpg"
         name = f"listing_{article_id}_{uuid.uuid4().hex[:10]}{ext}"
         dst = images_dir / name
@@ -126,11 +126,11 @@ async def run_single_vinted_listing(
     batch_label: str | None = None,
 ) -> dict[str, Any]:
     """
-    Une annonce complète sur la page Vinted déjà ouverte dans le navigateur :
-    matérialise les images, ouvre « vendre », remplit, publie.
-    Ne démarre ni ne ferme Chrome (session réutilisée par l'appelant).
+    Full listing flow on an already-open Vinted page:
+    materialize images, open sell, fill, publish.
+    Does not start or stop Chrome (caller reuses the session).
     """
-    _ = user  # réservé (symétrie avec l'API publique)
+    _ = user  # reserved (symmetry with public API)
     prefix = f"{batch_label} — " if batch_label else ""
 
     root = get_project_root()

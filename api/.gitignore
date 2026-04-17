@@ -6,3 +6,5 @@ ebayBuilder.ts
 __pycache__/
 *.pyc
 uploads/
+# Fichiers générés pour les annonces Vinted (listing_<id>_<hash>.<ext>)
+images/listing_*

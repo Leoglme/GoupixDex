@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Article } from '~/composables/useArticles'
 import type { PricingLookup } from '~/composables/usePricing'
-
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
@@ -13,12 +12,15 @@ const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticl
 const { lookupMany } = usePricing()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
+const { startJob } = useWardrobeLocalSync()
+
+const wardrobeSyncing = ref(false)
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
 const loading = ref(true)
 const pricingLoading = ref(false)
-/** Si faux (défaut), aucun appel PokéWallet / Cardmarket sur la liste. */
+/** When false (default), no PokéWallet / Cardmarket calls for the list. */
 const fetchMarketData = ref(false)
 
 const soldOpen = ref(false)
@@ -121,6 +123,35 @@ async function confirmBulkDelete() {
   }
 }
 
+async function onWardrobeImportFromVinted() {
+  if (!isDesktopApp.value) {
+    toast.add({
+      title: 'Application desktop requise',
+      description:
+        'La synchronisation Vinted utilise le worker local (Chrome). Installez l’app pour Windows ou macOS.',
+      color: 'warning'
+    })
+    await navigateTo('/downloads')
+    return
+  }
+  wardrobeSyncing.value = true
+  try {
+    const jobId = await startJob()
+    await navigateTo({
+      path: '/articles/vinted-logs',
+      query: { wardrobe_job: jobId }
+    })
+  } catch (e) {
+    toast.add({
+      title: 'Synchronisation Vinted',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
+  } finally {
+    wardrobeSyncing.value = false
+  }
+}
+
 async function onPublishVinted(a: Article) {
   if (!isDesktopApp.value) {
     toast.add({
@@ -202,6 +233,40 @@ async function onPublishVinted(a: Article) {
               Désactivez cette option si vous voulez simplement mettre à jour vos fiches sans attendre les prix externes.
             </p>
           </div>
+        </UCard>
+
+        <UCard
+          v-if="!loading && articles.length === 0"
+          class="ring-1 ring-primary/25 shadow-sm border-primary/20"
+          :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
+        >
+          <div class="space-y-2">
+            <p class="text-sm font-medium text-highlighted">
+              Aucun article pour l’instant
+            </p>
+            <p class="text-sm text-muted leading-relaxed">
+              Si vous vendez déjà sur Vinted, vous pouvez importer vos annonces actives et vendues dans GoupixDex.
+              Une fenêtre Chrome s’ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <UButton
+              icon="i-lucide-cloud-download"
+              :loading="wardrobeSyncing"
+              :disabled="!isDesktopApp"
+              @click="onWardrobeImportFromVinted"
+            >
+              Importer depuis Vinted
+            </UButton>
+            <UButton to="/articles/create" color="neutral" variant="subtle" icon="i-lucide-plus">
+              Créer un article manuellement
+            </UButton>
+          </div>
+          <p v-if="!isDesktopApp" class="text-xs text-muted">
+            L’import Vinted n’est disponible que dans
+            <NuxtLink to="/downloads" class="underline underline-offset-2">l’application desktop</NuxtLink>
+            (worker local sur ce poste).
+          </p>
         </UCard>
 
         <!-- Table / cartes des articles -->

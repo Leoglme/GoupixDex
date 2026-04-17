@@ -7,19 +7,23 @@ import base64
 import json
 import logging
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlparse
 
 import nodriver as uc
-from nodriver import Element
+from nodriver import Element, cdp
 
 from app_types.payload import ItemPayload
 from app_types.vinted import VintedPackageSize
 from config import get_settings
-from services.os_service import get_project_root
+from services.os_service import get_project_root, resolve_vinted_nodriver_user_data_dir
 from services.timer_service import TimerService
 
 if TYPE_CHECKING:
@@ -27,15 +31,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Callback SSE : dict avec au moins ``type``, ``message`` ; champs optionnels ``form_step``, ``detail``.
+# SSE callback: dict with at least ``type``, ``message``; optional ``form_step``, ``detail``.
 FormProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def _parse_eval_dict_result(raw: Any, *, context: str = "") -> dict[str, Any]:
     """
-    nodriver renvoie souvent un ``RemoteObject`` pour les objets JS au lieu d'un dict.
-    Préférer ``return JSON.stringify({...})`` côté page ; ce helper accepte dict, str JSON,
-    ou une reconstruction minimale depuis ``RemoteObject.deep_serialized_value``.
+    nodriver often returns a ``RemoteObject`` for JS objects instead of a dict.
+    Prefer ``return JSON.stringify({...})`` in the page; this helper accepts dict, JSON str,
+    or a minimal rebuild from ``RemoteObject.deep_serialized_value``.
     """
     if isinstance(raw, dict):
         return raw
@@ -51,12 +55,12 @@ def _parse_eval_dict_result(raw: Any, *, context: str = "") -> dict[str, Any]:
             return _remote_deep_value_to_dict(val)
         except Exception:  # noqa: BLE001
             pass
-    logger.error("Évaluation JS inutilisable (%s): %r", context, raw)
+    logger.error("Unusable JS evaluation (%s): %r", context, raw)
     raise TypeError(f"Unexpected evaluate result: {type(raw).__name__}")
 
 
 def _remote_deep_value_to_dict(val: Any) -> dict[str, Any]:
-    """Reconstruit un dict depuis la structure ``DeepSerializedValue.value`` (liste de paires)."""
+    """Rebuild a dict from ``DeepSerializedValue.value`` (list of pairs)."""
     if isinstance(val, dict):
         return val
     if not isinstance(val, list):
@@ -83,7 +87,7 @@ _AUTH_FLOW_URL_MARKERS: tuple[str, ...] = (
 )
 
 def _normalize_vinted_label(text: str) -> str:
-    """Aligne apostrophes typographiques / ASCII pour matcher le DOM Vinted."""
+    """Normalize typographic/ASCII apostrophes to match the Vinted DOM."""
     return (
         (text or "")
         .replace("\u2019", "'")
@@ -95,11 +99,11 @@ def _normalize_vinted_label(text: str) -> str:
 
 def _build_browser_args(*, headless: bool, discreet: bool) -> list[str]:
     """
-    Flags communs.
+    Shared Chromium flags.
 
-    - **headless** : VPS / CI (vrai headless Chromium).
-    - **discreet** (si pas headless) : « headless maison » — même comportement visuel qu'avant
-      (fenêtre maximisée), mais déplacée hors écran puis minimisée pour être plus discrète.
+    - **headless**: VPS / CI (true headless Chromium).
+    - **discreet** (when not headless): “fake headless” — same visual behavior as before
+      (maximized window), moved off-screen then minimized to stay unobtrusive.
     """
     base: list[str] = [
         "--no-sandbox",
@@ -153,7 +157,7 @@ class VintedService:
         detail: str | None = None,
         with_screenshot: bool = False,
     ) -> None:
-        """Événements SSE pendant l'auth Vinted (sous-étapes + capture optionnelle)."""
+        """SSE events during Vinted auth (sub-steps + optional screenshot)."""
         if not form_progress:
             return
         ev: dict[str, Any] = {
@@ -172,7 +176,7 @@ class VintedService:
 
     @classmethod
     async def _tab_screenshot_data_url(cls, tab: Tab) -> str | None:
-        """JPEG redimensionné (data URL) pour les logs SSE — évite les payloads énormes."""
+        """Resized JPEG (data URL) for SSE logs — avoids huge payloads."""
         try:
             fd, path = tempfile.mkstemp(suffix=".jpg")
             os.close(fd)
@@ -219,9 +223,16 @@ class VintedService:
         }
         if settings.vinted_chrome_executable:
             start_kw["browser_executable_path"] = settings.vinted_chrome_executable.strip()
+        if not settings.vinted_browser_ephemeral:
+            uds = resolve_vinted_nodriver_user_data_dir(settings.vinted_user_data_dir)
+            uds.mkdir(parents=True, exist_ok=True)
+            start_kw["user_data_dir"] = str(uds)
+            logger.info("Vinted browser: persistent profile %s", uds)
+        else:
+            logger.info("Vinted browser: ephemeral profile (VINTED_BROWSER_EPHEMERAL).")
         if discreet:
             logger.info(
-                "Vinted navigateur en mode discret (maximized @ %s,%s, minimized=%s)",
+                "Vinted browser discreet mode (maximized @ %s,%s, minimized=%s)",
                 settings.vinted_browser_discreet_x,
                 settings.vinted_browser_discreet_y,
                 settings.vinted_browser_discreet_minimize,
@@ -248,19 +259,37 @@ class VintedService:
     @classmethod
     def close_browser(cls) -> None:
         """
-        Ferme le processus Chrome lancé par ``init_browser`` et réinitialise l'état du service.
+        Stop the Chrome process started by ``init_browser`` and reset service state.
 
-        À appeler en ``finally`` après une session d'automation (succès ou erreur).
+        Call from ``finally`` after an automation session (success or failure).
         """
         if cls._browser is None:
             return
+        browser = cls._browser
+        pid: int | None = None
         try:
-            cls._browser.stop()
+            proc = getattr(browser, "_process", None)
+            if proc is not None:
+                pid = getattr(proc, "pid", None)
+        except Exception:  # noqa: BLE001
+            pid = None
+        try:
+            browser.stop()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Fermeture du navigateur Vinted : %s", exc)
+            logger.warning("Vinted browser shutdown: %s", exc)
         finally:
             cls._browser = None
             cls._tab = None
+        if sys.platform == "win32" and pid:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    timeout=12,
+                    check=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("taskkill Chrome post-stop: %s", exc)
 
     @classmethod
     def _require_tab(cls) -> Tab:
@@ -273,6 +302,64 @@ class VintedService:
         """Return True if the location is still a Vinted login/sign-up route."""
         u = (url or "").lower()
         return any(marker in u for marker in _AUTH_FLOW_URL_MARKERS)
+
+    @classmethod
+    def _member_id_from_tab_url(cls, tab: Tab) -> int | None:
+        """Extract ``/member/{id}`` from the tab's current URL, if present."""
+        url = (tab.target.url or "").strip()
+        m = re.search(r"/member/(\d+)", url, re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            return None
+        return n if n > 0 else None
+
+    @classmethod
+    def _vinted_origin_from_tab_url(cls, tab: Tab) -> str:
+        """Origin https://www.vinted.fr (or current host if already on a Vinted domain)."""
+        origin = "https://www.vinted.fr"
+        try:
+            cur = (tab.target.url or "").strip()
+            if cur.startswith("http"):
+                p = urlparse(cur)
+                if p.netloc and "vinted" in p.netloc.lower():
+                    origin = f"{p.scheme}://{p.netloc}"
+        except Exception:  # noqa: BLE001
+            pass
+        return origin
+
+    @classmethod
+    async def _wait_vinted_user_menu_usable(cls, tab: Tab, *, timeout: float = 18.0) -> None:
+        """
+        Wait until the account menu button is visible (after redirect / SPA hydration),
+        then a short pause to avoid races with reloads or early clicks.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            ok = await tab.evaluate(
+                """
+                (() => {
+                  const b = document.querySelector('[data-testid="user-menu-button"]')
+                    || document.getElementById('user-menu-button');
+                  if (!b) return false;
+                  const cs = window.getComputedStyle(b);
+                  if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                  const r = b.getBoundingClientRect();
+                  return r.width > 2 && r.height > 2;
+                })()
+                """,
+                return_by_value=True,
+            )
+            if ok is True:
+                await asyncio.sleep(0.4)
+                return
+            await asyncio.sleep(0.12)
+        logger.warning(
+            "Vinted user menu not detected after %ss — continuing anyway.",
+            timeout,
+        )
 
     @classmethod
     async def _header_guest_login_button_visible(cls, tab: Tab) -> bool:
@@ -307,7 +394,7 @@ class VintedService:
 
     @classmethod
     async def _scroll_selector_into_view(cls, css_selector: str) -> None:
-        """Centre le formulaire sur un champ pour limiter les clics hors cible après reflow."""
+        """Scroll a field into view to reduce mis-clicks after layout reflow."""
         tab = cls._require_tab()
         await tab
         sel_json = json.dumps(css_selector)
@@ -326,7 +413,7 @@ class VintedService:
 
     @classmethod
     async def _catalog_debug_probe(cls) -> None:
-        """Logs JSON décrivant le DOM catalogue (panneaux, titres, URL) pour diagnostiquer les échecs."""
+        """Emit JSON logs describing the catalog DOM (panels, titles, URL) for debugging failures."""
         tab = cls._require_tab()
         await tab
         probe = await tab.evaluate(
@@ -382,8 +469,8 @@ class VintedService:
     @classmethod
     async def _ensure_catalog_dropdown_open(cls) -> bool:
         """
-        Ouvre le sélecteur catégorie (input puis chevron si besoin).
-        Retourne True si un panneau catalogue plausible est détecté.
+        Open the category selector (input then chevron if needed).
+        Returns True if a plausible catalog panel is detected.
         """
         tab = cls._require_tab()
         await tab
@@ -938,9 +1025,21 @@ class VintedService:
         Raises:
             RuntimeError: If sign-in is still considered unsuccessful after all attempts.
         """
+        tab = cls._require_tab()
+        await tab.get("https://www.vinted.fr")
+        await cls._accept_onetrust_cookies(tab, total_timeout_sec=2.0)
+        await asyncio.sleep(0.25)
+        await tab
+        if await cls.is_connected():
+            logger.info(
+                "Vinted session reused (persistent browser profile) — skipping new login.",
+            )
+            return
+
         max_attempts = 5
-        await cls.sign_in_vinted(email, password, from_home=True, form_progress=form_progress)
-        await cls._require_tab().sleep(1.8)
+        # Already on home: open member URL directly (avoids second home load + ``from_home`` delays).
+        await cls.sign_in_vinted(email, password, from_home=False, form_progress=form_progress)
+        await tab.sleep(1.8)
         if await cls.is_connected():
             logger.info(
                 "Session looks logged in (past auth URL and no visible guest header login button).",
@@ -1039,7 +1138,7 @@ class VintedService:
 
     @classmethod
     async def wait_for_listing_form(cls, timeout_sec: float = 25.0) -> None:
-        """Attend que le formulaire d'annonce (upload photos / catalogue) soit prêt."""
+        """Wait until the listing form (photo upload / catalog) is ready."""
         tab = cls._require_tab()
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
@@ -1107,12 +1206,12 @@ class VintedService:
         """
         Walk the category dropdown using the given label path.
 
-        Feuilles (ex. « Cartes à collectionner à l'unité ») peuvent exposer un ``radio`` :
-        on clique le radio pour éviter les erreurs CDP sur le conteneur.
+        Leaf rows (e.g. “single collectible cards”) may use a ``radio``:
+        click the radio to avoid CDP errors on the container.
 
         Args:
             category_path: Ordered list of category titles as shown in the Vinted UI.
-            form_progress: Journalisation optionnelle (SSE) pour chaque sous-étape.
+            form_progress: Optional SSE logging for each sub-step.
 
         Returns:
             None
@@ -1537,9 +1636,9 @@ class VintedService:
         """
         Click the shipping package size cell (small / medium / large).
 
-        Vinted change parfois les ``data-testid`` (ordre des segments, suffixes). On essaie
-        plusieurs sélecteurs, puis un clic par index sur la rangée de 3 cellules, puis un
-        repli sur le libellé (FR/EN).
+        Vinted sometimes changes ``data-testid`` values (segment order, suffixes). We try
+        several selectors, then click by index on the row of three cells, then fall back
+        to label text (FR/EN).
 
         Args:
             package_size: One of ``small``, ``medium``, ``large``.
@@ -1619,11 +1718,11 @@ class VintedService:
         try:
             parsed = _parse_eval_dict_result(raw, context="select_package_size")
         except (TypeError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Sélection colis : réponse JS invalide ({raw!r})") from exc
+            raise RuntimeError(f"Package selection: invalid JS response ({raw!r})") from exc
         if not parsed.get("ok"):
             raise RuntimeError(
-                f"Impossible de sélectionner la taille de colis ({package_size!r}). "
-                f"Exemples data-testid (package/parcel/colis) : {parsed.get('sample')}"
+                f"Could not select package size ({package_size!r}). "
+                f"Sample data-testids (package/parcel): {parsed.get('sample')}"
             )
         await tab.sleep(0.15)
         logger.info(
@@ -1653,15 +1752,15 @@ class VintedService:
         progress: FormProgressFn | None = None,
     ) -> None:
         """
-        Ordre aligné sur le formulaire Vinted : photos → titre → description → catégorie →
-        marque → état → prix → colis.
+        Field order follows the Vinted form: photos → title → description → category →
+        brand → condition → price → package.
 
         Args:
             vinted_item: Parsed row from ``items.json``.
             category_path: Category breadcrumb labels.
             brand: Brand to select.
             package_size: Parcel size for the listing.
-            progress: Callback optionnel (dict SSE : ``form_step``, ``message``, etc.).
+            progress: Optional callback (SSE dict: ``form_step``, ``message``, etc.).
 
         Returns:
             None
@@ -1791,13 +1890,13 @@ class VintedService:
     @classmethod
     async def publish(cls, *, progress: FormProgressFn | None = None) -> None:
         """
-        Click the Vinted upload/save button, puis attend une confirmation réelle côté profil membre.
+        Click the Vinted upload/save button, then wait for real confirmation on the member profile.
 
         Returns:
             None
 
         Raises:
-            RuntimeError: Si le bouton est introuvable ou si la confirmation post-publication échoue.
+            RuntimeError: If the button is missing or post-publish confirmation fails.
         """
         tab = cls._require_tab()
         before_count = await cls._read_member_articles_count(tab)
@@ -1867,5 +1966,295 @@ class VintedService:
                 }
             )
         raise RuntimeError(
-            "Publication non confirmée (pas de redirection membre et/ou compteur d'articles inchangé)."
+            "Publish not confirmed (no member redirect and/or article count unchanged)."
+        )
+
+    @classmethod
+    def _parse_vinted_member_id_from_eval_json(cls, raw: Any) -> int | None:
+        """Parse a ``tab.evaluate`` result (JSON string or dict)."""
+        if isinstance(raw, dict):
+            parsed = raw
+        elif isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+        else:
+            return None
+        if not parsed.get("ok"):
+            return None
+        try:
+            n = int(parsed["id"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        return n if n > 0 else None
+
+    @classmethod
+    async def _wait_member_id_in_url(cls, tab: Tab, *, max_sec: float = 10.0) -> int | None:
+        """Wait until the address bar contains ``/member/{id}`` (after “My profile” click)."""
+        deadline = time.monotonic() + max_sec
+        while time.monotonic() < deadline:
+            # Do not ``await tab`` here: on SPA profile it can stall the CDP stream.
+            url = (tab.target.url or "").strip()
+            m = re.search(r"/member/(\d+)", url, re.IGNORECASE)
+            if m:
+                try:
+                    return int(m.group(1))
+                except ValueError:
+                    return None
+            await asyncio.sleep(0.12)
+        return None
+
+    @classmethod
+    async def _open_user_menu_fast(cls, tab: Tab) -> None:
+        """Open the avatar menu (minimal delays)."""
+        await tab
+        trigger = await tab.select('[data-testid="user-menu-button"]', timeout=6)
+        if trigger is None:
+            trigger = await tab.select("#user-menu-button", timeout=2)
+        if trigger is not None:
+            try:
+                await trigger.scroll_into_view()
+                await tab.sleep(0.04)
+                await trigger.click()
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("nodriver user menu click: %s", exc)
+        await tab.evaluate(
+            """
+            (() => {
+              const b = document.querySelector('[data-testid="user-menu-button"]')
+                || document.getElementById('user-menu-button');
+              if (b) b.click();
+            })()
+            """,
+            return_by_value=True,
+        )
+
+    @classmethod
+    async def _read_mon_profil_member_id_from_open_menu(cls, tab: Tab) -> int | None:
+        """
+        Menu already open: read id from the “My profile” link (or first ``/member/{id}``)
+        **without clicking** — post-login SPA routing may return home if we click too early.
+        """
+        raw = await tab.evaluate(
+            r"""
+            (() => {
+              function normHref(h) {
+                const t = (h || '').trim();
+                if (!t) return '';
+                if (t.startsWith('http')) return t;
+                return 'https://www.vinted.fr' + (t.startsWith('/') ? t : '/' + t);
+              }
+              function idFromHref(h) {
+                const abs = normHref(h);
+                const m = abs.match(/\/member\/(\d+)/);
+                return m ? Number(m[1]) : 0;
+              }
+              const candidates = Array.from(
+                document.querySelectorAll('.user-menu-groups a[href], a.nav-link[href^="/member/"], a[href^="/member/"]')
+              );
+              let fallback = null;
+              for (const a of candidates) {
+                const h = (a.getAttribute('href') || '').trim();
+                if (!/^\/member\/\d+/.test(h) && !/^https?:\/\//.test(h)) continue;
+                if (!/\/member\/\d+/.test(normHref(h))) continue;
+                const idNum = idFromHref(h);
+                if (!Number.isFinite(idNum) || idNum <= 0) continue;
+                const text = (a.textContent || '').toLowerCase();
+                if (text.includes('profil') || text.includes('profile')) {
+                  return JSON.stringify({ ok: true, id: idNum, href: h, mode: 'profil' });
+                }
+                if (fallback == null) fallback = { h: h, id: idNum };
+              }
+              if (fallback != null) {
+                return JSON.stringify({ ok: true, id: fallback.id, href: fallback.h, mode: 'fallback' });
+              }
+              return JSON.stringify({ ok: false, err: 'no_member_link' });
+            })()
+            """,
+            return_by_value=True,
+        )
+        return cls._parse_vinted_member_id_from_eval_json(raw)
+
+    @classmethod
+    async def _member_id_from_profile_menu_dom(cls, tab: Tab) -> int | None:
+        """
+        Open account menu, read id from “My profile”, then ``tab.get(/member/{id})`` (full-page
+        navigation, more reliable than clicking during refresh / hydration).
+        """
+        for attempt in range(2):
+            await cls._open_user_menu_fast(tab)
+            await tab.sleep(0.28 if attempt == 0 else 0.38)
+
+            menu_id = await cls._read_mon_profil_member_id_from_open_menu(tab)
+            if menu_id is None:
+                continue
+
+            origin = cls._vinted_origin_from_tab_url(tab)
+            try:
+                await tab.get(f"{origin}/member/{menu_id}")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Navigation directe profil membre : %s", exc)
+                return menu_id
+
+            url_id = await cls._wait_member_id_in_url(tab, max_sec=12.0)
+            if url_id is not None:
+                return url_id
+            return menu_id
+
+        return None
+
+    @classmethod
+    async def _member_id_from_users_me_fetch(cls, tab: Tab) -> int | None:
+        """Fallback: same-origin ``fetch`` to ``/api/v2/users/me``."""
+        raw = await tab.evaluate(
+            r"""
+            (async () => {
+              try {
+                const r = await fetch('https://www.vinted.fr/api/v2/users/me', {
+                  credentials: 'include',
+                  headers: { 'Accept': 'application/json' },
+                });
+                const t = await r.text();
+                if (!r.ok) {
+                  return JSON.stringify({ ok: false, status: r.status, snippet: t.slice(0, 240) });
+                }
+                const j = JSON.parse(t);
+                const u = j.user && typeof j.user === 'object' ? j.user : j;
+                const idRaw = u && (u.id != null ? u.id : u.user_id);
+                const idNum = idRaw != null && idRaw !== '' ? Number(idRaw) : NaN;
+                if (!Number.isFinite(idNum) || idNum <= 0) {
+                  return JSON.stringify({ ok: false, err: 'no_id', keys: Object.keys(j || {}).slice(0, 12) });
+                }
+                return JSON.stringify({ ok: true, id: idNum });
+              } catch (e) {
+                return JSON.stringify({ ok: false, err: String(e) });
+              }
+            })()
+            """,
+            return_by_value=True,
+        )
+        return cls._parse_vinted_member_id_from_eval_json(raw)
+
+    @classmethod
+    async def fetch_logged_in_vinted_user_numeric_id(cls) -> int:
+        """
+        After nodriver login, read member id from the “My profile” menu,
+        falling back to ``/api/v2/users/me`` if needed.
+
+        Returns:
+            Vinted member id (integer).
+
+        Raises:
+            RuntimeError: If the id cannot be read.
+        """
+        tab = cls._require_tab()
+
+        mid = cls._member_id_from_tab_url(tab)
+        if mid is not None:
+            logger.info("Member id already in URL: %s", mid)
+            return mid
+
+        cur = (tab.target.url or "").strip()
+        if not cur.lower().startswith("https://www.vinted.fr") or cls._url_is_auth_flow(cur):
+            await tab.get("https://www.vinted.fr")
+        else:
+            logger.debug(
+                "Reading member id without reloading home (avoids multiple refreshes). URL=%s",
+                cur[:220],
+            )
+
+        # Short: without OneTrust banner we do not block 8s; before menu (otherwise banner can hide it).
+        await cls._accept_onetrust_cookies(tab, total_timeout_sec=2.0)
+        await cls._wait_vinted_user_menu_usable(tab)
+        await asyncio.sleep(0.12)
+
+        mid = await cls._member_id_from_profile_menu_dom(tab)
+        if mid is not None:
+            logger.info("Vinted member id read from profile menu: %s", mid)
+            return mid
+
+        logger.info("Profile menu failed, trying users/me…")
+        mid = await cls._member_id_from_users_me_fetch(tab)
+        if mid is not None:
+            logger.info("Vinted member id read from users/me: %s", mid)
+            return mid
+
+        raise RuntimeError(
+            "Could not read Vinted member id (user menu + users/me). "
+            "Ensure the session is logged in on the home page."
+        )
+
+    #: Typical Vinted session cookie names / fragments (domain sometimes empty in CDP).
+    _VINTED_COOKIE_NAME_HINTS: tuple[str, ...] = (
+        "vinted",
+        "access_token_web",
+        "refresh_token_web",
+        "frappe",
+        "datadome",
+        "cf_clearance",
+        "anon_id",
+    )
+
+    @classmethod
+    def _vinted_cookie_header_from_objects(cls, cookies: list[Any]) -> str:
+        """Build ``Cookie`` header: vinted domain **or** typical session cookie name."""
+        parts: list[str] = []
+        for c in cookies:
+            dom = str(getattr(c, "domain", "") or "").lower().lstrip(".")
+            name_raw = getattr(c, "name", None)
+            name = (name_raw or "").lower()
+            value = getattr(c, "value", None)
+            if not name_raw or value is None:
+                continue
+            domain_ok = "vinted" in dom.replace(".", "")
+            name_ok = any(h in name for h in cls._VINTED_COOKIE_NAME_HINTS)
+            if not domain_ok and not name_ok:
+                continue
+            parts.append(f"{name_raw}={value}")
+        return "; ".join(parts)
+
+    @classmethod
+    async def export_vinted_session_cookie_header(cls) -> str:
+        """
+        Cookies for ``requests``.
+
+        With a **persistent profile** (default), CDP ``Storage.getCookies`` often stalls
+        on Windows with nodriver: we skip CDP here; cookies are read from the profile SQLite file
+        **after** :meth:`close_browser` (see desktop wardrobe flow).
+
+        In **ephemeral profile** mode, we try a short ``Storage.getCookies`` on the browser connection.
+        """
+        if cls._browser is None:
+            return ""
+
+        settings = get_settings()
+        if not settings.vinted_browser_ephemeral:
+            logger.info(
+                "Cookie export: deferred to Chromium profile SQLite after close "
+                "(CDP often blocked on this stack).",
+            )
+            return ""
+
+        conn_browser = cls._browser.connection
+        if conn_browser is None:
+            raise RuntimeError("nodriver browser connection missing.")
+        try:
+            cdp_cookies = await asyncio.wait_for(
+                conn_browser.send(cdp.storage.get_cookies()),
+                timeout=12.0,
+            )
+            hdr = cls._vinted_cookie_header_from_objects(list(cdp_cookies))
+            if hdr.strip():
+                logger.info("Vinted cookies exported via Storage.getCookies (ephemeral profile).")
+                return hdr
+        except asyncio.TimeoutError:
+            logger.warning("Storage.getCookies timeout (ephemeral profile).")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Storage.getCookies : %s", exc)
+
+        raise RuntimeError(
+            "Cannot export Vinted cookies (ephemeral profile, CDP). "
+            "Use a persistent profile or reopen the session."
         )

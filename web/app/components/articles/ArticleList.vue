@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
 const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
-/** Filtre texte : Pokémon, code set, série (nom extension), n°, titre. */
+/** Text filter: Pokémon, set code, set name, card #, title. */
 const searchQuery = ref('')
 const { isDesktopApp } = useDesktopRuntime()
 
@@ -97,7 +97,7 @@ const filtered = computed(() => {
   return rows
 })
 
-/** Sélection multi-lignes (ids visibles dans la liste courante) */
+/** Multi-row selection (ids visible in the current list) */
 const selectedIds = ref<number[]>([])
 
 watch(
@@ -182,7 +182,7 @@ const UAvatar = resolveComponent('UAvatar')
       </template>
     </UAlert>
 
-    <!-- Recherche à gauche, filtres à droite (md+) ; colonne sur très petit écran -->
+    <!-- Search left, filters right (md+); stacked on very small screens -->
     <div
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4"
     >

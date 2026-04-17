@@ -8,11 +8,8 @@ from typing import Any
 
 from app_types.pokewallet import PokeWalletCard
 from config import get_settings
-from services.pokewallet_client import PokeWalletClient
-from services.pokewallet_reference_prices import (
-    pick_cardmarket_reference_eur,
-    pick_tcgplayer_reference_usd,
-)
+from services.poke_wallet_client_service import PokeWalletClientService
+from services.poke_wallet_reference_prices_service import PokeWalletReferencePricesService
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ def fetch_card_prices(
         }
 
     try:
-        client = PokeWalletClient()
+        client = PokeWalletClientService()
     except ValueError as exc:
         logger.warning("PokeWallet client unavailable: %s", exc)
         return {
@@ -81,8 +78,8 @@ def fetch_card_prices(
     cm_rows = (first.get("cardmarket") or {}).get("prices") or []
     tcg_rows = (first.get("tcgplayer") or {}).get("prices") or []
 
-    cm_eur = pick_cardmarket_reference_eur(cm_rows)
-    tcg_usd = pick_tcgplayer_reference_usd(tcg_rows)
+    cm_eur = PokeWalletReferencePricesService.pick_cardmarket_reference_eur(cm_rows)
+    tcg_usd = PokeWalletReferencePricesService.pick_tcgplayer_reference_usd(tcg_rows)
 
     tcg_eur: float | None = None
     if tcg_usd is not None and tcg_usd > 0:

@@ -18,9 +18,9 @@ security = HTTPBearer(auto_error=False)
 
 def get_bearer_or_query_token(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
-    token: Annotated[str | None, Query(description="JWT pour EventSource (sans header Authorization)")] = None,
+    token: Annotated[str | None, Query(description="JWT for EventSource (when Authorization header is unavailable)")] = None,
 ) -> str:
-    """JWT depuis ``Authorization: Bearer`` ou ``?token=`` (SSE / EventSource)."""
+    """JWT from ``Authorization: Bearer`` or ``?token=`` (SSE / EventSource)."""
     if credentials is not None:
         return credentials.credentials
     if token and token.strip():
@@ -32,7 +32,7 @@ def get_current_user_from_token_str(
     raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
-    """Utilisateur courant à partir du jeton Bearer ou query."""
+    """Current user resolved from Bearer token or query string."""
     try:
         sub = get_sub_from_token(raw_token)
         user_id = int(sub)

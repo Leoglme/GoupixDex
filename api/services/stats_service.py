@@ -77,7 +77,7 @@ def compute_dashboard_stats(
         float(a.sell_price) for a in unsold if a.sell_price is not None
     )
 
-    # CA cumulé par mois (prix de vente des articles vendus)
+    # Cumulative revenue by month (sell price of sold articles)
     monthly_revenue: dict[str, float] = {}
     for a in sold:
         sold_at = _as_utc(a.sold_at)

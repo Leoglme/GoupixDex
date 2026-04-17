@@ -25,9 +25,9 @@ SEARCH_LIMIT_MIN = 1
 SEARCH_PAGE_MIN = 1
 
 
-class PokeWalletClient:
+class PokeWalletClientService:
     """
-    HTTP client for the `PokéWallet <https://api.pokewallet.io>`_ Pokémon card API.
+    HTTP service for the `PokéWallet <https://api.pokewallet.io>`_ Pokémon card API.
     Loads ``POKE_WALLET_API_KEY`` from the environment (e.g. via ``.env`` and ``python-dotenv``)
     unless an explicit key is passed.
     """
@@ -35,9 +35,9 @@ class PokeWalletClient:
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         """
         Args:
-            api_key: Optional API key (requis sauf si ``POKE_WALLET_PROXY_SECRET`` est défini :
-                la clé peut alors être portée uniquement par le proxy).
-            base_url: URL de base ; si omis, utilise ``poke_wallet_base_url`` dans les settings.
+            api_key: Optional API key (required unless ``POKE_WALLET_PROXY_SECRET`` is set:
+                the key may then live only on the proxy).
+            base_url: Base URL; if omitted, uses ``poke_wallet_base_url`` from settings.
 
         Raises:
             ValueError: When no API key is available and proxy secret is not configured.

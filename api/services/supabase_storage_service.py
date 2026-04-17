@@ -1,4 +1,4 @@
-"""Upload d'images vers Supabase Storage (API S3-compatible, clé service côté serveur)."""
+"""Upload images to Supabase Storage (S3-compatible API, service role key on the server)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _client: Client | None = None
 
 
 def is_configured(settings: AppSettings | None = None) -> bool:
-    """True si URL, clé API (service role) et nom de bucket sont renseignés."""
+    """True when URL, API key (service role), and bucket name are set."""
     if create_client is None:
         return False
     s = settings or get_settings()
@@ -38,8 +38,8 @@ def _get_client() -> Client:
     global _client
     if create_client is None:
         raise RuntimeError(
-            "Le paquet Python « supabase » est absent. Installez-le avec "
-            "`pip install 'supabase>=2'` ou reconstruisez l'image Docker "
+            "The Python package `supabase` is missing. Install it with "
+            "`pip install 'supabase>=2'` or rebuild the Docker image "
             "(`docker compose build --no-cache api`).",
         ) from _SUPABASE_IMPORT_ERROR
     if _client is not None:
@@ -48,7 +48,7 @@ def _get_client() -> Client:
     url = (s.supabase_url or "").strip()
     key = (s.supabase_api_key or "").strip()
     if not url or not key:
-        raise RuntimeError("Supabase URL ou clé API manquante")
+        raise RuntimeError("Supabase URL or API key missing")
     _client = create_client(url, key)
     return _client
 
@@ -77,17 +77,17 @@ def upload_image_bytes_sync(
     original_filename: str | None,
 ) -> str:
     """
-    Envoie les octets vers le bucket configuré et renvoie l'URL publique du fichier.
+    Upload bytes to the configured bucket and return the file's public URL.
 
     Raises:
-        RuntimeError: configuration ou réponse Storage invalide.
+        RuntimeError: Invalid configuration or Storage response.
     """
     if not data:
         raise ValueError("empty image payload")
     s = get_settings()
     bucket = (s.supabase_storage_bucket or "").strip()
     if not bucket:
-        raise RuntimeError("SUPABASE_STORAGE_BUCKET manquant")
+        raise RuntimeError("SUPABASE_STORAGE_BUCKET missing")
 
     ext = Path(original_filename or "img").suffix or ".jpg"
     if not ext.startswith("."):
@@ -105,7 +105,7 @@ def upload_image_bytes_sync(
     client.storage.from_(bucket).upload(object_path, data, file_options=file_options)
     public_url = client.storage.from_(bucket).get_public_url(object_path)
     if not public_url or not str(public_url).startswith("http"):
-        raise RuntimeError(f"URL publique Supabase invalide: {public_url!r}")
+        raise RuntimeError(f"Invalid Supabase public URL: {public_url!r}")
     return str(public_url)
 
 
@@ -116,7 +116,7 @@ async def upload_image_bytes(
     data: bytes,
     original_filename: str | None,
 ) -> str:
-    """Version async (client Supabase synchrone exécuté dans un thread)."""
+    """Async wrapper (sync Supabase client runs in a thread)."""
     return await asyncio.to_thread(
         upload_image_bytes_sync,
         user_id=user_id,

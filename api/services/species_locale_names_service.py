@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -19,8 +20,24 @@ FRENCH_LANGUAGE_NAME = "fr"
 JAPANESE_KANA_LANGUAGE_NAME = "ja-hrkt"
 JAPANESE_LANGUAGE_NAME = "ja"
 
+# TCG card title suffixes are not part of the PokéAPI species slug (e.g. ``hydreigon`` not ``hydreigon-ex``).
+_CARD_FORM_SUFFIX_RE = re.compile(
+    r"\s+(?:ex|v|vmax|vstar|gx|tag\s*team|tt|break|lv\.?\s*x|lvx|mega)\s*$",
+    re.IGNORECASE,
+)
 
-class SpeciesLocaleNames:
+
+def english_tcg_display_name_to_species_label(english: str) -> str:
+    """Strip trailing stage / form markers (``ex``, ``V``, …) for ``pokemon-species`` lookup."""
+    s = english.strip()
+    prev = None
+    while s != prev:
+        prev = s
+        s = _CARD_FORM_SUFFIX_RE.sub("", s).strip()
+    return s
+
+
+class SpeciesLocaleNamesService:
     """French and Japanese species labels from a single PokéAPI ``pokemon-species`` response."""
 
     __slots__ = ("french", "japanese")
@@ -63,19 +80,21 @@ def _pick_name_for_languages(
     return None
 
 
-def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNames:
+def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNamesService:
     """
     Fetch official French and Japanese (katakana preferred) species names in one HTTP request.
 
     Args:
-        english_species_name: English species label (e.g. ``Ivysaur``) used to build the PokéAPI slug.
+        english_species_name: English species or TCG-style label (e.g. ``Ivysaur``, ``Hydreigon ex``)
+            used to build the PokéAPI slug.
     """
     trimmed = english_species_name.strip()
     if trimmed == "":
-        return SpeciesLocaleNames(None, None)
-    slug = english_species_name_to_poke_api_slug(trimmed)
+        return SpeciesLocaleNamesService(None, None)
+    base = english_tcg_display_name_to_species_label(trimmed)
+    slug = english_species_name_to_poke_api_slug(base if base else trimmed)
     if slug == "":
-        return SpeciesLocaleNames(None, None)
+        return SpeciesLocaleNamesService(None, None)
     url = f"{POKEAPI_SPECIES_URL}/{quote(slug, safe='')}"
     try:
         req = Request(url, headers=DEFAULT_REQUEST_HEADERS)
@@ -84,12 +103,12 @@ def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNames:
         payload = cast(dict[str, Any], json.loads(raw))
         names = payload.get("names")
         if not isinstance(names, list):
-            return SpeciesLocaleNames(None, None)
+            return SpeciesLocaleNamesService(None, None)
         fr = _pick_name_for_languages(names, (FRENCH_LANGUAGE_NAME,))
         ja = _pick_name_for_languages(names, (JAPANESE_KANA_LANGUAGE_NAME, JAPANESE_LANGUAGE_NAME))
-        return SpeciesLocaleNames(fr, ja)
+        return SpeciesLocaleNamesService(fr, ja)
     except (OSError, HTTPError, URLError, json.JSONDecodeError, TimeoutError):
-        return SpeciesLocaleNames(None, None)
+        return SpeciesLocaleNamesService(None, None)
 
 
 def fetch_french_species_name(english_species_name: str) -> str | None:

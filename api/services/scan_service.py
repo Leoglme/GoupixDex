@@ -8,6 +8,40 @@ from typing import Any
 from app_types.groq_vision import GroqVisionCardCollectorResult
 
 
+_FORM_SUFFIX_RE = re.compile(
+    r"^(?:ex|v|vmax|vstar|gx|tag\s*team|tt|break|lv\.?\s*x|lvx|mega)(?:\s|$)",
+    re.IGNORECASE,
+)
+
+
+def _fr_en_same_for_title(name_fr: str, name_en: str) -> bool:
+    """
+    True when FR and EN denote the same species for title purposes: identical strings, or one is
+    the other plus a common TCG form suffix (ex, V, VMAX, …) so we must not show ``Fr / En`` twice.
+    """
+    a = name_fr.strip()
+    b = name_en.strip()
+    if not a or not b:
+        return False
+    if a.casefold() == b.casefold():
+        return True
+    a_cf, b_cf = a.casefold(), b.casefold()
+
+    def _longer_is_shorter_plus_form(longer_cf: str, shorter_cf: str) -> bool:
+        if not longer_cf.startswith(shorter_cf):
+            return False
+        rest = longer_cf[len(shorter_cf) :].strip()
+        if not rest:
+            return True
+        return bool(_FORM_SUFFIX_RE.match(rest))
+
+    if _longer_is_shorter_plus_form(b_cf, a_cf):
+        return True
+    if _longer_is_shorter_plus_form(a_cf, b_cf):
+        return True
+    return False
+
+
 def _strip_set_code_prefix_from_expansion_name(set_name: str, set_code: str | None) -> str:
     """Remove a leading ``M1L:`` / ``SV7:`` style prefix when it duplicates ``set_code``."""
     trimmed_name = set_name.strip()
@@ -23,7 +57,7 @@ def _strip_set_code_prefix_from_expansion_name(set_name: str, set_code: str | No
 
 
 def _listing_language_label(ocr: GroqVisionCardCollectorResult) -> str:
-    """Français when the printed name matches the French dex name (e.g. French-language card), else Japonais."""
+    """``Français`` when the printed name matches the French dex name (French-language card), else ``Japonais``."""
     fr = (ocr.get("pokemon_name_french") or "").strip()
     printed = (ocr.get("pokemon_name") or "").strip()
     if fr and printed and fr == printed:
@@ -58,9 +92,12 @@ def build_title_and_description(
     rarity = (ci.get("rarity") or ocr.get("rarity_english") or "").strip()
     lang_label = _listing_language_label(ocr)
 
-    # Title: "Fr / En" + set lower + number + expansion + Pokémon + langue
+    # Title: "Fr / En" only when both exist and they are genuinely different species labels.
     if name_fr and name_en:
-        name_block = f"{name_fr} / {name_en}"
+        if _fr_en_same_for_title(name_fr, name_en):
+            name_block = name_fr
+        else:
+            name_block = f"{name_fr} / {name_en}"
     elif name_fr:
         name_block = name_fr
     elif name_en:
@@ -93,7 +130,11 @@ def build_title_and_description(
     ]
     if set_name_raw:
         lines.append(f"Série : {set_name}")
-    lines.append(f"Nom : {display_fr}" + (f" / {name_en}" if name_en and name_en != display_fr else ""))
+    nom_base = (name_fr or printed).strip() or name_en
+    if name_en and nom_base and _fr_en_same_for_title(nom_base, name_en):
+        lines.append(f"Nom : {nom_base}")
+    else:
+        lines.append(f"Nom : {display_fr}" + (f" / {name_en}" if name_en and name_en != display_fr else ""))
     if card_number:
         line = f"Numéro : {card_number}"
         if variant:

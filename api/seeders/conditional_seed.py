@@ -1,15 +1,15 @@
 """
-Bootstrap base vide : exécute les seeders uniquement si les tables concernées sont vides.
+Bootstrap an empty database: run seeders only when the relevant tables are empty.
 
-- ``users`` vide → ``user_seeder.py`` (nécessite ``SEED_USER_EMAIL`` / ``SEED_USER_PASSWORD``)
-- ``margin_settings`` vide (et au moins un utilisateur) → ``margin_seeder.py``
-- ``articles`` vide + variable d'environnement ``SEED_DEV_ARTICLES`` truthy → ``article_seeder.py``
+- Empty ``users`` → ``user_seeder.py`` (requires ``SEED_USER_EMAIL`` / ``SEED_USER_PASSWORD``)
+- Empty ``margin_settings`` (and at least one user) → ``margin_seeder.py``
+- Empty ``articles`` + truthy ``SEED_DEV_ARTICLES`` → ``article_seeder.py``
 
-À lancer depuis le dossier ``api/`` (CI / VPS après déploiement, ou en local)::
+Run from the ``api/`` folder (CI / VPS after deploy, or locally)::
 
     python seeders/conditional_seed.py
 
-Voir aussi ``run_all.py`` pour forcer tous les seeders sans condition.
+See also ``run_all.py`` to force all seeders unconditionally.
 """
 
 from __future__ import annotations
@@ -74,33 +74,33 @@ def main() -> None:
     )
 
     if n_users == 0:
-        print("[conditional_seed] table users vide → user_seeder")
+        print("[conditional_seed] empty users table → user_seeder")
         _run_sub("user_seeder.py")
         n_users, n_margins, n_articles = _table_counts()
-        print(f"[conditional_seed] après user: users={n_users}, margins={n_margins}, articles={n_articles}")
+        print(f"[conditional_seed] after user: users={n_users}, margins={n_margins}, articles={n_articles}")
 
     if n_margins == 0 and n_users > 0:
-        print("[conditional_seed] table margin_settings vide → margin_seeder")
+        print("[conditional_seed] empty margin_settings table → margin_seeder")
         _run_sub("margin_seeder.py")
         n_users, n_margins, n_articles = _table_counts()
-        print(f"[conditional_seed] après margin: users={n_users}, margins={n_margins}, articles={n_articles}")
+        print(f"[conditional_seed] after margin: users={n_users}, margins={n_margins}, articles={n_articles}")
 
     if n_articles == 0 and n_users > 0 and _env_truthy("SEED_DEV_ARTICLES"):
-        print("[conditional_seed] table articles vide + SEED_DEV_ARTICLES → article_seeder")
+        print("[conditional_seed] empty articles table + SEED_DEV_ARTICLES → article_seeder")
         _run_sub("article_seeder.py")
     elif n_articles == 0 and _env_truthy("SEED_DEV_ARTICLES") and n_users == 0:
         print(
-            "[conditional_seed] articles vides mais aucun utilisateur — "
-            "article_seeder ignoré (exécutez user_seeder d'abord).",
+            "[conditional_seed] articles empty but no user — "
+            "skipping article_seeder (run user_seeder first).",
             file=sys.stderr,
         )
     elif n_articles == 0:
         print(
-            "[conditional_seed] table articles vide — article_seeder ignoré "
-            "(définissez SEED_DEV_ARTICLES=1 pour insérer les cartes de dev).",
+            "[conditional_seed] empty articles table — skipping article_seeder "
+            "(set SEED_DEV_ARTICLES=1 to insert dev cards).",
         )
 
-    print("\n[conditional_seed] terminé.\n")
+    print("\n[conditional_seed] done.\n")
 
 
 if __name__ == "__main__":

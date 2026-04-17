@@ -1,7 +1,7 @@
-"""Force l'exécution de tous les seeders (user → margin → articles dev).
+"""Force-run all seeders (user → margin → dev articles).
 
-Pour une base déjà peuplée, préférez ``conditional_seed.py`` (CI / premier déploiement)
-qui n'exécute chaque script que si la table correspondante est vide (articles : option
+For an already populated database, prefer ``conditional_seed.py`` (CI / first deploy),
+which runs each script only when the target table is empty (articles: optional
 ``SEED_DEV_ARTICLES``).
 """
 

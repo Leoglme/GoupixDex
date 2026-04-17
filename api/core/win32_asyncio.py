@@ -1,5 +1,5 @@
-"""Windows: politique Proactor (utile hors uvicorn). Avec ``uvicorn --reload``, préférer
-``python run_dev.py`` ou ``--loop core.nodriver_uvicorn_loop:loop_factory`` (voir README).
+"""Windows: Proactor event-loop policy (useful outside uvicorn). With ``uvicorn --reload``, prefer
+``python run_dev.py`` or ``--loop core.nodriver_uvicorn_loop:...`` (see README).
 """
 
 from __future__ import annotations

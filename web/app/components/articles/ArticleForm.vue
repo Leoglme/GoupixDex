@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
+import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
 
 const props = withDefaults(
   defineProps<{
     mode: 'create' | 'edit'
     article?: Article | null
     loading?: boolean
-    /** Texte affiché sous le bouton pendant le chargement (ex. attente Vinted). */
+    /** Text shown under the button while loading (e.g. waiting on Vinted). */
     loadingHint?: string | null
-    /** Masquer la case « Publier sur Vinted » (ex. création groupée avec option globale). */
+    /** Hide the “Publish on Vinted” checkbox (e.g. batch create with a global option). */
     hideVintedOption?: boolean
-    /** Afficher le bouton d'envoi du formulaire (désactiver si envoi délégué au parent). */
+    /** Show the form submit button (disable if the parent handles submit). */
     showSubmitButton?: boolean
   }>(),
   {
@@ -43,10 +44,33 @@ const sellPrice = ref('')
 
 const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
-/** Opt-in publication Vinted (création uniquement, désactivé par défaut). */
+/** Opt-in Vinted publish (create only, off by default). */
 const publishToVinted = ref(false)
+/** Vinted wardrobe import (create): sold status + date on API side. */
+const importIsSold = ref(false)
+const importSoldAt = ref<string | null>(null)
 const { isDesktopApp } = useDesktopRuntime()
-const canUseVinted = computed(() => isDesktopApp.value)
+const { fetchBlob: fetchVintedListingImageBlob } = useVintedListingImage()
+const canUseVinted = computed(() => isDesktopApp.value && !importIsSold.value)
+
+async function blobFromVintedPhotoUrl(url: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(url)
+    if (res.ok) {
+      return await res.blob()
+    }
+  } catch {
+    /* CORS ou réseau */
+  }
+  if (isDesktopApp.value) {
+    try {
+      return await fetchVintedListingImageBlob(url)
+    } catch {
+      return null
+    }
+  }
+  return null
+}
 
 watch(
   () => props.article,
@@ -88,7 +112,7 @@ function removePreview(i: number) {
   imageFiles.value.splice(i, 1)
 }
 
-/** Ajoute des fichiers image (ex. même fichier que le scan OCR). */
+/** Append image files (e.g. same file as OCR scan). */
 function addImageFiles(files: File[]) {
   for (const f of files) {
     imageFiles.value.push(f)
@@ -112,9 +136,47 @@ function applyScanPrefill(scan: {
   if (scan.listing_preview.suggested_price != null) {
     purchasePrice.value = String(scan.listing_preview.suggested_price)
   }
+  importIsSold.value = false
+  importSoldAt.value = null
 }
 
-defineExpose({ applyScanPrefill, addImageFiles, buildCreateFormData })
+async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
+  while (previews.value.length) {
+    removePreview(0)
+  }
+  importIsSold.value = p.isSold
+  importSoldAt.value = p.soldAt
+  title.value = p.title
+  description.value = p.description
+  purchasePrice.value = p.purchasePrice || '0'
+  sellPrice.value = p.sellPrice
+  pokemonName.value = p.pokemonName
+  setCode.value = p.setCode
+  cardNumber.value = p.cardNumber
+  condition.value = conditionOptions.some(o => o.value === p.condition)
+    ? p.condition
+    : 'Near Mint'
+  publishToVinted.value = false
+
+  for (let i = 0; i < p.photoUrls.length; i++) {
+    const url = p.photoUrls[i]!
+    try {
+      const blob = await blobFromVintedPhotoUrl(url)
+      if (!blob) {
+        continue
+      }
+      const ext = blob.type.includes('png') ? 'png' : 'jpg'
+      const file = new File([blob], `vinted-${i}.${ext}`, {
+        type: blob.type || 'image/jpeg'
+      })
+      addImageFiles([file])
+    } catch {
+      /* image optionnelle */
+    }
+  }
+}
+
+defineExpose({ applyScanPrefill, addImageFiles, buildCreateFormData, applyWardrobeSlot })
 
 function buildCreateFormData(): FormData {
   const fd = new FormData()
@@ -138,6 +200,10 @@ function buildCreateFormData(): FormData {
     fd.append('images', f)
   }
   fd.append('publish_to_vinted', canUseVinted.value && publishToVinted.value ? 'true' : 'false')
+  fd.append('is_sold', importIsSold.value ? 'true' : 'false')
+  if (importIsSold.value && importSoldAt.value) {
+    fd.append('sold_at', importSoldAt.value)
+  }
   return fd
 }
 
@@ -221,7 +287,7 @@ function submit() {
     </div>
 
     <div
-      v-if="mode === 'create' && !hideVintedOption && canUseVinted"
+      v-if="mode === 'create' && !hideVintedOption && canUseVinted && !importIsSold"
       class="rounded-lg border border-default p-4 space-y-2"
     >
       <UCheckbox

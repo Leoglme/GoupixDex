@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Orchestration du parcours : scan → fiche → Vinted → stats → vente.
- * Clic sur une étape : affiche l'animation correspondante et relance le défilement auto.
+ * Flow orchestration: scan → form → Vinted → stats → sale.
+ * Step click: show the matching animation and restart auto-advance.
  */
 type FlowStep = 'scan' | 'form' | 'list' | 'stats' | 'sale'
 
@@ -21,7 +21,7 @@ const formFill = ref(0)
 
 const currentStep = computed(() => STEPS[stepIndex.value])
 
-/** Libellés explicites pour chaque étape */
+/** Display label for each step */
 const stepLabel: Record<FlowStep, string> = {
   scan: 'Scan carte',
   form: 'Remplissage auto',
@@ -88,7 +88,7 @@ function runStep() {
   }, ms)
 }
 
-/** Clic : affiche l'étape et relance le défilement automatique. */
+/** Click: jump to step and restart auto-advance. */
 function goToStep(i: number) {
   if (i < 0 || i >= STEPS.length) {
     return

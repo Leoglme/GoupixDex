@@ -1,4 +1,4 @@
-"""Démarre l'API en mode reload avec une boucle asyncio compatible nodriver (Windows)."""
+"""Start the API with reload and a nodriver-friendly asyncio loop (Windows)."""
 
 from __future__ import annotations
 

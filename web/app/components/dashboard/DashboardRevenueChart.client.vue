@@ -14,7 +14,7 @@ const eur = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0
 })
 
-/** Au moins 2 points pour tracer un segment ; point bas à 0 pour le cumul. */
+/** At least 2 points to draw a segment; baseline at 0 for cumulative. */
 const chartData = computed(() => {
   const t = props.stats?.revenue_timeline ?? []
   if (!t.length) {

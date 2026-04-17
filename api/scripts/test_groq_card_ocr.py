@@ -41,9 +41,9 @@ def main() -> None:
         print("Image path must be non-empty.", file=sys.stderr)
         raise SystemExit(2)
 
-    from services.groq_vision_client import GroqVisionClient
+    from services.groq_vision_service import GroqVisionService
 
-    client = GroqVisionClient()
+    client = GroqVisionService()
     result = client.extract_card_collector_from_image_path(
         image_path,
         {

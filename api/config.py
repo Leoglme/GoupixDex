@@ -44,25 +44,29 @@ class AppSettings(BaseSettings):
     supabase_storage_bucket: str | None = None
     usd_to_eur: float = 0.92
     cors_origins: str = "*"
-    #: Marge initiale (table ``settings``) à la création d'un compte et pour le margin_seeder.
+    #: Initial margin (``settings`` table) when creating an account and for ``margin_seeder``.
     seed_margin_percent: int = Field(default=60, ge=0, le=500)
-    #: Base PokéWallet ou URL du proxy (ex. https://goupixdex-proxy.dibodev.fr).
+    #: PokéWallet base URL or proxy URL (e.g. https://goupixdex-proxy.dibodev.fr).
     poke_wallet_base_url: str = "https://api.pokewallet.io"
-    #: Si défini, envoi de ``X-Proxy-Secret`` ; la clé API peut rester uniquement sur le proxy.
+    #: When set, sends ``X-Proxy-Secret``; the API key can stay only on the proxy.
     poke_wallet_proxy_secret: str | None = None
     poke_wallet_user_agent: str = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
-    #: Sur le VPS : ``true`` (navigateur sans fenêtre). En local : laisser ``false`` ou absent.
+    #: On the VPS: ``true`` (headless browser). Locally: leave ``false`` or unset.
     vinted_browser_headless: bool = False
-    #: Si ``headless`` est ``false`` : fenêtre hors écran (Chrome réel, moins bloqué par Vinted que le vrai headless).
-    #: Mettre ``false`` pour retrouver ``--start-maximized`` (ex. Xvfb plein écran).
+    #: When ``headless`` is ``false``: off-screen window (real Chrome; often less blocked by Vinted than true headless).
+    #: Set ``false`` to use ``--start-maximized`` (e.g. full-screen Xvfb).
     vinted_browser_discreet: bool = True
-    #: Position initiale (coords écran). Valeurs négatives : souvent hors du moniteur principal (Windows / macOS).
+    #: Initial window position (screen coords). Negative values: often off the primary monitor (Windows / macOS).
     vinted_browser_discreet_x: int = -2400
     vinted_browser_discreet_y: int = 0
-    #: En mode discret, minimise la fenêtre juste après ouverture (peut être désactivé en cas de souci UI).
+    #: In discreet mode, minimize the window right after open (can be disabled if UI glitches).
     vinted_browser_discreet_minimize: bool = True
-    #: Chemin explicite vers Chromium/Chrome (ex. ``/usr/bin/chromium`` sur Debian après ``apt install chromium``).
+    #: Explicit path to Chromium/Chrome (e.g. ``/usr/bin/chromium`` on Debian after ``apt install chromium``).
     vinted_chrome_executable: str | None = None
+    #: Persistent nodriver Chrome profile (Vinted session). Empty = default folder under user local data.
+    vinted_user_data_dir: str | None = None
+    #: When ``true``: no ``user_data_dir`` (throwaway profile each launch, as before).
+    vinted_browser_ephemeral: bool = False
 
 
 @lru_cache

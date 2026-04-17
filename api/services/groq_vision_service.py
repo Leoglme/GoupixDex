@@ -16,8 +16,8 @@ from PIL import Image, ImageOps
 from app_types.groq_vision import GroqVisionCardCollectorResult, GroqVisionExtractOptions
 from app_types.groq_vision import GroqVisionImageMimeType
 from app_types.pokewallet import PokeWalletCard
-from services.pokeapi_species_locale import fetch_species_locale_names
-from services.pokewallet_client import PokeWalletClient
+from services.poke_wallet_client_service import PokeWalletClientService
+from services.species_locale_names_service import fetch_species_locale_names
 
 DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 ENV_API_KEY = "GROQ_API_KEY"
@@ -31,7 +31,7 @@ RESIZE_LONG_EDGE_PX: tuple[int, ...] = (2048, 1600, 1280, 1024, 800, 640)
 JPEG_QUALITY_STEPS: tuple[int, ...] = (88, 78, 68, 58, 48)
 
 
-class GroqVisionClient:
+class GroqVisionService:
     """
     Client for `Groq <https://console.groq.com/docs/vision>`_ vision chat completions.
     Extracts Pokémon TCG **set code**, **collector number**, **fraction parts**, and **Pokémon names**
@@ -244,7 +244,7 @@ class GroqVisionClient:
         if env_val == "" and proxy_secret == "":
             return collector
         try:
-            wallet = PokeWalletClient()
+            wallet = PokeWalletClientService()
         except ValueError:
             return collector
         set_code = collector.get("set_code")

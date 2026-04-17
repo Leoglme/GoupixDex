@@ -16,8 +16,8 @@ export function useAuth() {
     () => null
   )
   /**
-   * Client uniquement : `true` dès que l'état « token présent ou non » est connu (lecture synchrone `localStorage`),
-   * sans attendre `/users/me` — sinon le CTA reste bloqué sur le skeleton si l'API est lent ou bloquée.
+   * Client-only: `true` once we know whether a token exists (sync `localStorage` read),
+   * without waiting for `/users/me` — otherwise the CTA stays on skeleton if the API is slow or stuck.
    */
   const authResolved = useState<boolean>('goupix_auth_resolved', () => false)
 

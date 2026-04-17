@@ -1,17 +1,17 @@
-"""Boucle asyncio pour uvicorn + nodriver sous Windows.
+"""Asyncio event loop for uvicorn + nodriver on Windows.
 
-Avec ``--reload``, uvicorn peut sélectionner ``SelectorEventLoop``, incompatible avec
+With ``--reload``, uvicorn may pick ``SelectorEventLoop``, which is incompatible with
 ``create_subprocess_exec`` (Chrome / nodriver).
 
-Pour un ``--loop`` **personnalisé**, uvicorn importe **un seul** objet et le passe à
-``asyncio.Runner`` : ce doit être la **classe** de boucle (ex. ``ProactorEventLoop``),
-appelée sans argument pour créer l'instance — **pas** une fonction du type
-``lambda use_subprocess: ProactorEventLoop`` (voir ``uvicorn.config.Config.get_loop_factory``).
+For a **custom** ``--loop``, uvicorn imports **one** object and passes it to
+``asyncio.Runner``: it must be the **loop class** (e.g. ``ProactorEventLoop``),
+instantiated with no arguments — **not** a factory like
+``lambda: ProactorEventLoop()`` (see ``uvicorn.config.Config.get_loop_factory``).
 
-Référence à passer à ``uvicorn --loop`` sur Windows :
+Value to pass to ``uvicorn --loop`` on Windows:
 """
 
 from __future__ import annotations
 
-# Classe d'event loop du stdlib (importable uniquement sous Windows).
+# Stdlib event-loop class (importable only on Windows).
 UVICORN_WINDOWS_NODRIVER_LOOP = "asyncio.windows_events:ProactorEventLoop"
