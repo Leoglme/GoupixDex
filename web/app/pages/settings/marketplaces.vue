@@ -18,7 +18,9 @@ const onboardingLoading = ref(false)
 const s = ref<Awaited<ReturnType<typeof getSettings>> | null>(null)
 
 const locationName = ref('Domicile')
+/** E.164 (ex. +33642193812), alimenté par le composant PhoneInput. */
 const phone = ref('')
+
 const addressLine1 = ref('')
 const addressLine2 = ref('')
 const city = ref('')
@@ -92,7 +94,13 @@ async function startEbayOAuth() {
 
 async function submitOnboarding() {
   if (!phone.value.trim() || !addressLine1.value.trim() || !city.value.trim() || !postalCode.value.trim()) {
-    toast.add({ title: 'Champs requis', description: 'Renseignez l’adresse et un téléphone.', color: 'warning' })
+    toast.add({
+      title: 'Champs requis',
+      description: phone.value.trim()
+        ? 'Renseignez l’adresse et le code postal.'
+        : 'Indiquez un numéro de téléphone mobile valide (avec indicatif pays).',
+      color: 'warning'
+    })
     return
   }
   onboardingLoading.value = true
@@ -256,8 +264,13 @@ onMounted(async () => {
             <UFormField label="Nom du lieu (ex. Domicile)">
               <UInput v-model="locationName" class="w-full" />
             </UFormField>
-            <UFormField label="Téléphone (indicatif +33…)" required>
-              <UInput v-model="phone" type="tel" class="w-full" placeholder="+33…" />
+            <UFormField
+              label="Téléphone mobile"
+              required
+              class="min-w-0 sm:col-span-2"
+              description="Indicatif pays + numéro. Le clavier numérique s’ouvre sur mobile."
+            >
+              <PhoneInput v-model="phone" name="phone" default-country-code="FR" class="w-full" />
             </UFormField>
             <UFormField label="Adresse ligne 1" class="sm:col-span-2" required>
               <UInput v-model="addressLine1" class="w-full" />
