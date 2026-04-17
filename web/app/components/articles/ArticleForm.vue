@@ -47,7 +47,7 @@ const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
 /** Opt-in Vinted publish (create only, off by default). */
 const publishToVinted = ref(false)
-/** Opt-in eBay publish (API Inventory ; create only). */
+/** Publier sur eBay à la création (si le canal est prêt). */
 const publishToEbay = ref(false)
 const svcSettings = ref<AppSettings | null>(null)
 const { getSettings } = useSettings()
@@ -372,19 +372,23 @@ function submit() {
       <UCheckbox
         v-model="publishToEbay"
         :disabled="!canPublishEbay"
-        label="Publier sur eBay (API)"
+        label="Publier sur eBay"
       />
       <p v-if="canPublishEbay" class="text-sm text-muted">
-        Mise en ligne via Inventory API après création de l’article (images HTTPS / Supabase requis).
+        Une annonce sera créée sur votre compte eBay France en même temps que l’article. Ajoutez au moins une photo pour la mise en ligne.
       </p>
       <p v-else-if="!svcSettings?.ebay_connected" class="text-sm text-muted">
         Connectez votre compte eBay dans
         <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
           Paramètres → Places de marché
-        </NuxtLink>.
+        </NuxtLink>
+        pour activer cette option.
       </p>
       <p v-else class="text-sm text-muted">
-        Complétez la catégorie eBay, l’emplacement marchand et les trois politiques (expédition, paiement, retours) dans les paramètres.
+        Terminez la configuration eBay (adresse d’expédition et règles automatiques) dans
+        <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
+          Paramètres → Places de marché
+        </NuxtLink>.
       </p>
     </div>
 

@@ -7,6 +7,8 @@ const props = defineProps<{
   pricingById: Map<number, PricingLookup>
   loading?: boolean
   pricingLoading?: boolean
+  /** eBay activé + compte connecté + assistant terminé (paramètres). Sinon le bouton eBay est masqué. */
+  ebayPublishAvailable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -14,8 +16,13 @@ const emit = defineEmits<{
   delete: [id: number]
   sold: [article: Article]
   'publish-vinted': [article: Article]
+  'publish-ebay': [article: Article]
   'bulk-delete': [ids: number[]]
 }>()
+
+function ebayRowDisabled(row: Article) {
+  return row.is_sold || (row.published_on_ebay ?? false) || !(row.images?.length)
+}
 
 const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
 const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
@@ -396,6 +403,16 @@ const UAvatar = resolveComponent('UAvatar')
                     disabled: !isDesktopApp || row.is_sold || !(row.images?.length),
                     onSelect: () => emit('publish-vinted', row)
                   },
+                  ...(props.ebayPublishAvailable
+                    ? [
+                        {
+                          label: 'Mettre en ligne sur eBay',
+                          icon: 'i-lucide-shopping-bag',
+                          disabled: ebayRowDisabled(row),
+                          onSelect: () => emit('publish-ebay', row)
+                        }
+                      ]
+                    : []),
                   { label: 'Marquer vendu', icon: 'i-lucide-circle-check', disabled: row.is_sold, onSelect: () => emit('sold', row) },
                   { label: 'Supprimer', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => emit('delete', row.id) }
                 ]]"
@@ -485,6 +502,16 @@ const UAvatar = resolveComponent('UAvatar')
                   @click="emit('publish-vinted', row)"
                 >
                   Vinted
+                </UButton>
+                <UButton
+                  v-if="ebayPublishAvailable"
+                  size="sm"
+                  variant="outline"
+                  icon="i-lucide-shopping-bag"
+                  :disabled="ebayRowDisabled(row)"
+                  @click="emit('publish-ebay', row)"
+                >
+                  eBay
                 </UButton>
                 <UButton
                   size="sm"

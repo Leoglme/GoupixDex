@@ -94,9 +94,11 @@ async function onSubmitCreate(fd: FormData) {
       if (ebay?.skipped && ebay?.detail) {
         const ebayMsg: Record<string, string> = {
           ebay_disabled: 'eBay est désactivé dans les paramètres.',
-          ebay_listing_config_incomplete: 'Complétez la configuration eBay (catégorie, politiques…).',
-          ebay_not_connected: 'Connectez eBay (OAuth) dans Paramètres → Places de marché.',
-          ebay_requires_https_images: 'eBay exige des images HTTPS (ex. Supabase).'
+          ebay_listing_config_incomplete:
+            'Terminez la configuration eBay dans Paramètres → Places de marché (adresse et règles).',
+          ebay_not_connected: 'Connectez votre compte eBay dans Paramètres → Places de marché.',
+          ebay_requires_https_images:
+            'Les photos doivent être enregistrées et accessibles en ligne pour publier sur eBay — réessayez après upload des images.'
         }
         toast.add({
           title: 'Article créé — eBay ignoré',

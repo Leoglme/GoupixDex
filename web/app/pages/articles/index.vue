@@ -8,13 +8,17 @@ useGoupixPageSeo(
   "Liste de vos annonces et cartes Pokémon TCG dans GoupixDex : recherche, édition, vente et mise en ligne Vinted depuis l'app desktop."
 )
 
-const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted } = useArticles()
+const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted, publishArticleToEbay } =
+  useArticles()
+const { getSettings } = useSettings()
 const { lookupMany } = usePricing()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
 const { startJob } = useWardrobeLocalSync()
 
 const wardrobeSyncing = ref(false)
+/** Affiche l’action « Mettre en ligne sur eBay » (canal activé + compte prêt dans les paramètres). */
+const ebayPublishAvailable = ref(false)
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
@@ -51,7 +55,22 @@ async function refresh() {
   }
 }
 
-onMounted(refresh)
+async function loadEbayAvailability() {
+  try {
+    const s = await getSettings()
+    ebayPublishAvailable.value =
+      s.ebay_enabled === true
+      && s.ebay_oauth_configured === true
+      && s.ebay_connected === true
+      && s.ebay_listing_config_complete === true
+  } catch {
+    ebayPublishAvailable.value = false
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([refresh(), loadEbayAvailability()])
+})
 
 watch(fetchMarketData, () => {
   refresh()
@@ -149,6 +168,24 @@ async function onWardrobeImportFromVinted() {
     })
   } finally {
     wardrobeSyncing.value = false
+  }
+}
+
+async function onPublishEbay(a: Article) {
+  try {
+    await publishArticleToEbay(a.id)
+    toast.add({
+      title: 'Mise en ligne sur eBay',
+      description: 'La publication est lancée. La liste se mettra à jour dans quelques instants.',
+      color: 'success'
+    })
+    await refresh()
+  } catch (e) {
+    toast.add({
+      title: 'Impossible de publier sur eBay',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
   }
 }
 
@@ -277,10 +314,12 @@ async function onPublishVinted(a: Article) {
               :pricing-by-id="pricingById"
               :loading="loading"
               :pricing-loading="pricingLoading"
+              :ebay-publish-available="ebayPublishAvailable"
               @edit="(id: number) => navigateTo(`/articles/${id}`)"
               @delete="(id: number) => { deleteId = id; deleteOpen = true }"
               @sold="openSold"
               @publish-vinted="onPublishVinted"
+              @publish-ebay="onPublishEbay"
               @bulk-delete="openBulkDelete"
             />
           </div>
