@@ -15,11 +15,14 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from core.database import get_db
 from core.deps import get_current_user, get_current_user_from_token_str
+from core.security import decrypt_ebay_token
 from models.article import Article
 from models.image import Image as ImageModel
 from models.user import User
 from schemas.articles import ArticleUpdate, BulkIdsBody, SoldPatch, VintedBatchStartBody
 from services import article_service
+from services.ebay_background_service import EbayBackgroundService
+from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
 from services.vinted_batch_session_service import VintedBatchSessionService as vinted_batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as vinted_progress_hub
 from services import supabase_storage_service
@@ -124,6 +127,12 @@ def start_vinted_batch(
     Queue a batch of Vinted listings (single browser, sequential listings).
     Follow ``GET /articles/vinted-batch/{job_id}/stream``.
     """
+    ms = get_or_create_user_settings(db, user.id)
+    if not ms.vinted_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vinted is disabled in your marketplace settings.",
+        )
     unique_ids = list(dict.fromkeys(body.article_ids))
     for aid in unique_ids:
         article = article_service.get_article(db, aid, user.id)
@@ -152,6 +161,51 @@ def start_vinted_batch(
         "job_id": job_id,
         "stream_path": f"/articles/vinted-batch/{job_id}/stream",
     }
+
+
+@router.post("/ebay-batch", status_code=status.HTTP_202_ACCEPTED)
+def start_ebay_batch(
+    body: VintedBatchStartBody,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Queue sequential eBay Inventory publishes (one article after another)."""
+    ms = get_or_create_user_settings(db, user.id)
+    if not ms.ebay_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="eBay is disabled in your marketplace settings.",
+        )
+    if not ebay_listing_config_complete(ms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete eBay listing settings (category, location, policies) before batch publish.",
+        )
+    if not decrypt_ebay_token(user.ebay_refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect eBay (OAuth) before publishing.",
+        )
+    unique_ids = list(dict.fromkeys(body.article_ids))
+    for aid in unique_ids:
+        article = article_service.get_article(db, aid, user.id)
+        if article is None:
+            raise HTTPException(status_code=400, detail=f"Article {aid} not found.")
+        if article.is_sold:
+            raise HTTPException(status_code=400, detail=f"Article {aid} is sold.")
+        if not any((img.image_url or "").startswith("https://") for img in article.images):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Article {aid} needs at least one HTTPS image for eBay.",
+            )
+
+    background_tasks.add_task(
+        EbayBackgroundService.run_ebay_batch_sequential,
+        user.id,
+        unique_ids,
+    )
+    return {"queued": len(unique_ids)}
 
 
 @router.get("")
@@ -228,6 +282,12 @@ def publish_vinted_for_article(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one image is required to publish on Vinted.",
         )
+    ms = get_or_create_user_settings(db, user.id)
+    if not ms.vinted_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vinted is disabled in your marketplace settings.",
+        )
 
     vinted_progress_hub.register(article_id)
     background_tasks.add_task(
@@ -260,6 +320,56 @@ def confirm_vinted_publish(
     return {"ok": True}
 
 
+@router.post("/{article_id}/publish-ebay")
+def publish_ebay_for_article(
+    article_id: int,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Start eBay publish (Inventory API) for an existing article."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if article.is_sold:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Article already sold — not suitable for eBay listing.",
+        )
+    if not any((img.image_url or "").startswith("https://") for img in article.images):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one HTTPS image is required for eBay.",
+        )
+    ms = get_or_create_user_settings(db, user.id)
+    if not ms.ebay_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="eBay is disabled in your marketplace settings.",
+        )
+    if not ebay_listing_config_complete(ms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete eBay listing settings (category, location, policies) first.",
+        )
+    if not decrypt_ebay_token(user.ebay_refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect eBay (OAuth) first.",
+        )
+
+    background_tasks.add_task(
+        EbayBackgroundService.run_ebay_publish_job,
+        article_id,
+        user.id,
+    )
+    return {
+        "ebay": {
+            "status": "running",
+        },
+    }
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_article(
     request: Request,
@@ -275,6 +385,7 @@ async def create_article(
     condition: str = Form("Near Mint"),
     sell_price: str | None = Form(None),
     publish_to_vinted: str | None = Form(None),
+    publish_to_ebay: str | None = Form(None),
     is_sold: str | None = Form(None),
     sold_at: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
@@ -327,9 +438,13 @@ async def create_article(
 
     vinted_local_desktop = request.headers.get("x-goupix-vinted-target", "").strip().lower() == "local"
 
-    want_vinted = _form_bool(publish_to_vinted) and not sold_flag
+    ms = get_or_create_user_settings(db, user.id)
+    raw_want_vinted = _form_bool(publish_to_vinted) and not sold_flag
+    want_vinted = raw_want_vinted and ms.vinted_enabled
 
-    if want_vinted and vinted_local_desktop:
+    if raw_want_vinted and not ms.vinted_enabled:
+        vinted_result = {"published": False, "skipped": True, "detail": "vinted_disabled"}
+    elif want_vinted and vinted_local_desktop:
         vinted_result = {
             "status": "pending",
             "stream_path": f"/articles/{article.id}/vinted-progress",
@@ -349,9 +464,30 @@ async def create_article(
         }
     else:
         vinted_result = {"published": False, "skipped": True, "detail": "not_requested"}
+
+    raw_want_ebay = _form_bool(publish_to_ebay) and not sold_flag
+    ebay_result: dict[str, Any] = {"published": False, "skipped": True, "detail": "not_requested"}
+    if raw_want_ebay:
+        if not ms.ebay_enabled:
+            ebay_result = {"skipped": True, "detail": "ebay_disabled"}
+        elif not ebay_listing_config_complete(ms):
+            ebay_result = {"skipped": True, "detail": "ebay_listing_config_incomplete"}
+        elif not decrypt_ebay_token(user.ebay_refresh_token):
+            ebay_result = {"skipped": True, "detail": "ebay_not_connected"}
+        elif not any(str(u).startswith("https://") for u in stored_sources):
+            ebay_result = {"skipped": True, "detail": "ebay_requires_https_images"}
+        else:
+            background_tasks.add_task(
+                EbayBackgroundService.run_ebay_publish_job,
+                article.id,
+                user.id,
+            )
+            ebay_result = {"status": "running"}
+
     return {
         "article": article_service.article_to_dict(article),
         "vinted": vinted_result,
+        "ebay": ebay_result,
     }
 
 

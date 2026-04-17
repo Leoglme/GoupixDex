@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
+import type { AppSettings } from '~/composables/useSettings'
 import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
 
 const props = withDefaults(
@@ -46,12 +47,38 @@ const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
 /** Opt-in Vinted publish (create only, off by default). */
 const publishToVinted = ref(false)
+/** Opt-in eBay publish (API Inventory ; create only). */
+const publishToEbay = ref(false)
+const svcSettings = ref<AppSettings | null>(null)
+const { getSettings } = useSettings()
 /** Vinted wardrobe import (create): sold status + date on API side. */
 const importIsSold = ref(false)
 const importSoldAt = ref<string | null>(null)
 const { isDesktopApp } = useDesktopRuntime()
 const { fetchBlob: fetchVintedListingImageBlob } = useVintedListingImage()
-const canUseVinted = computed(() => isDesktopApp.value && !importIsSold.value)
+const canUseVinted = computed(
+  () => isDesktopApp.value && !importIsSold.value && (svcSettings.value?.vinted_enabled !== false)
+)
+const showEbayPublish = computed(
+  () =>
+    !importIsSold.value
+    && svcSettings.value?.ebay_enabled === true
+    && svcSettings.value?.ebay_oauth_configured === true
+)
+const canPublishEbay = computed(
+  () =>
+    showEbayPublish.value
+    && svcSettings.value?.ebay_connected === true
+    && svcSettings.value?.ebay_listing_config_complete === true
+)
+
+onMounted(async () => {
+  try {
+    svcSettings.value = await getSettings()
+  } catch {
+    svcSettings.value = null
+  }
+})
 
 async function blobFromVintedPhotoUrl(url: string): Promise<Blob | null> {
   try {
@@ -157,6 +184,7 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
     ? p.condition
     : 'Near Mint'
   publishToVinted.value = false
+  publishToEbay.value = false
 
   for (let i = 0; i < p.photoUrls.length; i++) {
     const url = p.photoUrls[i]!
@@ -200,6 +228,7 @@ function buildCreateFormData(): FormData {
     fd.append('images', f)
   }
   fd.append('publish_to_vinted', canUseVinted.value && publishToVinted.value ? 'true' : 'false')
+  fd.append('publish_to_ebay', canPublishEbay.value && publishToEbay.value ? 'true' : 'false')
   fd.append('is_sold', importIsSold.value ? 'true' : 'false')
   if (importIsSold.value && importSoldAt.value) {
     fd.append('sold_at', importSoldAt.value)
@@ -286,8 +315,25 @@ function submit() {
       </UFormField>
     </div>
 
+    <UAlert
+      v-if="mode === 'create' && !hideVintedOption && !importIsSold && isDesktopApp && svcSettings && !svcSettings.vinted_enabled"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-store"
+      title="Vinted désactivé"
+    >
+      <template #description>
+        <p class="text-sm leading-relaxed">
+          Réactivez Vinted dans
+          <NuxtLink to="/settings/marketplaces" class="font-medium text-primary underline underline-offset-2">
+            Paramètres → Places de marché
+          </NuxtLink>
+          pour proposer la publication automatisée.
+        </p>
+      </template>
+    </UAlert>
     <div
-      v-if="mode === 'create' && !hideVintedOption && canUseVinted && !importIsSold"
+      v-else-if="mode === 'create' && !hideVintedOption && canUseVinted && !importIsSold"
       class="rounded-lg border border-default p-4 space-y-2"
     >
       <UCheckbox
@@ -299,7 +345,7 @@ function submit() {
       </p>
     </div>
     <UAlert
-      v-else-if="mode === 'create' && !hideVintedOption"
+      v-else-if="mode === 'create' && !hideVintedOption && !importIsSold"
       color="info"
       variant="subtle"
       icon="i-lucide-sparkles"
@@ -314,10 +360,33 @@ function submit() {
           >
             Télécharger l'app
           </NuxtLink>
-          pour activer la case « Publier sur Vinted ».
+          pour activer la case « Publier sur Vinted » (si Vinted est activé dans les paramètres).
         </p>
       </template>
     </UAlert>
+
+    <div
+      v-if="mode === 'create' && showEbayPublish"
+      class="rounded-lg border border-default p-4 space-y-2"
+    >
+      <UCheckbox
+        v-model="publishToEbay"
+        :disabled="!canPublishEbay"
+        label="Publier sur eBay (API)"
+      />
+      <p v-if="canPublishEbay" class="text-sm text-muted">
+        Mise en ligne via Inventory API après création de l’article (images HTTPS / Supabase requis).
+      </p>
+      <p v-else-if="!svcSettings?.ebay_connected" class="text-sm text-muted">
+        Connectez votre compte eBay dans
+        <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
+          Paramètres → Places de marché
+        </NuxtLink>.
+      </p>
+      <p v-else class="text-sm text-muted">
+        Complétez la catégorie eBay, l’emplacement marchand et les trois politiques (expédition, paiement, retours) dans les paramètres.
+      </p>
+    </div>
 
     <div v-if="mode === 'create'" class="space-y-2">
       <label class="text-sm font-medium text-highlighted">Images</label>

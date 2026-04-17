@@ -80,7 +80,33 @@ async function onSubmitCreate(fd: FormData) {
   vintedSubmit.value = fd.get('publish_to_vinted') === 'true'
   submitting.value = true
   try {
-    const { article, vinted } = await createArticle(fd)
+    const { article, vinted, ebay } = await createArticle(fd)
+
+    function notifyEbayOutcome() {
+      if (ebay?.status === 'running') {
+        toast.add({
+          title: 'Publication eBay lancée',
+          description: 'La mise en ligne se fait en arrière-plan (vérifiez votre vendeur eBay).',
+          color: 'success'
+        })
+        return true
+      }
+      if (ebay?.skipped && ebay?.detail) {
+        const ebayMsg: Record<string, string> = {
+          ebay_disabled: 'eBay est désactivé dans les paramètres.',
+          ebay_listing_config_incomplete: 'Complétez la configuration eBay (catégorie, politiques…).',
+          ebay_not_connected: 'Connectez eBay (OAuth) dans Paramètres → Places de marché.',
+          ebay_requires_https_images: 'eBay exige des images HTTPS (ex. Supabase).'
+        }
+        toast.add({
+          title: 'Article créé — eBay ignoré',
+          description: ebayMsg[ebay.detail] ?? ebay.detail,
+          color: 'warning'
+        })
+        return true
+      }
+      return false
+    }
 
     if (isDesktopApp.value && vinted.desktop_local && vinted.stream_path) {
       try {
@@ -94,6 +120,7 @@ async function onSubmitCreate(fd: FormData) {
         await navigateTo('/articles')
         return
       }
+      notifyEbayOutcome()
       await navigateTo({
         path: '/articles/vinted-logs',
         query: { article: String(article.id) }
@@ -102,12 +129,15 @@ async function onSubmitCreate(fd: FormData) {
     }
 
     if (vinted.status === 'running' && vinted.stream_path) {
+      notifyEbayOutcome()
       await navigateTo({
         path: '/articles/vinted-logs',
         query: { article: String(article.id) }
       })
       return
     }
+
+    const ebayNotified = notifyEbayOutcome()
 
     if (vintedSubmit.value) {
       if (vinted.published) {
@@ -121,11 +151,13 @@ async function onSubmitCreate(fd: FormData) {
           description:
             vinted.detail === 'missing_vinted_credentials'
               ? "Identifiants Vinted manquants (profil utilisateur ou variables d'environnement)."
-              : (typeof vinted.detail === 'string' ? vinted.detail : 'Publication Vinted non confirmée.'),
+              : vinted.detail === 'vinted_disabled'
+                ? 'Vinted est désactivé dans Paramètres → Places de marché.'
+                : (typeof vinted.detail === 'string' ? vinted.detail : 'Publication Vinted non confirmée.'),
           color: 'warning'
         })
       }
-    } else {
+    } else if (!ebayNotified) {
       toast.add({ title: 'Article créé', color: 'success' })
     }
     await navigateTo('/articles')

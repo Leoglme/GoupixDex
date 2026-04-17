@@ -16,7 +16,7 @@ type ArticleFormExpose = {
   applyWardrobeSlot: (p: import('~/composables/useWardrobeImportPrefill').WardrobeSlotPrefill) => Promise<void>
 }
 
-const { createArticle, startVintedBatch } = useArticles()
+const { createArticle, startVintedBatch, startEbayBatch } = useArticles()
 const { scan } = useScanCard()
 const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
@@ -31,6 +31,7 @@ const slotScanFiles = ref<(File | null)[]>([null])
 const slotScanPreviews = ref<(string | null)[]>([null])
 
 const batchVinted = ref(true)
+const batchEbay = ref(false)
 const wardrobeImportLoading = ref(false)
 const submitting = ref(false)
 const scanning = ref(false)
@@ -270,6 +271,23 @@ async function submitAll() {
       color: 'success'
     })
 
+    if (batchEbay.value && createdIds.length) {
+      try {
+        const { queued } = await startEbayBatch(createdIds)
+        toast.add({
+          title: 'File eBay démarrée',
+          description: `${queued} annonce(s) seront publiées successivement sur eBay.`,
+          color: 'success'
+        })
+      } catch (e) {
+        toast.add({
+          title: 'Création OK — lot eBay non lancé',
+          description: apiErrorMessage(e),
+          color: 'warning'
+        })
+      }
+    }
+
     if (isDesktopApp.value && batchVinted.value && createdIds.length) {
       try {
         const { job_id } = await startVintedBatch(createdIds)
@@ -412,6 +430,17 @@ async function submitAll() {
                 Télécharger l'app
               </NuxtLink>
             </p>
+            <UCheckbox
+              v-model="batchEbay"
+              label="Lancer la publication eBay en file après création (API, une annonce après l’autre)"
+            />
+            <p class="text-sm text-muted">
+              Nécessite eBay connecté et configuré dans
+              <NuxtLink to="/settings/marketplaces" class="underline underline-offset-2">
+                Paramètres → Places de marché
+              </NuxtLink>
+              .
+            </p>
           </div>
 
         </UCard>
@@ -477,6 +506,7 @@ async function submitAll() {
           >
             Créer {{ formSlots.length }} article(s)
             <span v-if="batchVinted && isDesktopApp"> et lancer Vinted</span>
+            <span v-if="batchEbay"> et eBay</span>
           </UButton>
           <UButton
             color="neutral"

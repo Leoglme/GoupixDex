@@ -67,6 +67,13 @@ class AppSettings(BaseSettings):
     vinted_user_data_dir: str | None = None
     #: When ``true``: no ``user_data_dir`` (throwaway profile each launch, as before).
     vinted_browser_ephemeral: bool = False
+    #: eBay REST (Inventory API + OAuth). Leave unset to disable server-side eBay features.
+    ebay_client_id: str | None = None
+    ebay_client_secret: str | None = None
+    #: RuName / redirect URI registered in eBay Developer → Your eBay Sign-in Settings.
+    ebay_redirect_uri: str | None = None
+    #: Use sandbox API hosts (``auth.sandbox.ebay.com``, ``api.sandbox.ebay.com``).
+    ebay_use_sandbox: bool = True
 
 
 @lru_cache

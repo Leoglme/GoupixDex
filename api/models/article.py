@@ -41,6 +41,17 @@ class Article(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    published_on_ebay: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    ebay_listing_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ebay_published_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="articles")
     images: Mapped[list["Image"]] = relationship(back_populates="article", cascade="all, delete-orphan")

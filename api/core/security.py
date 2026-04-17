@@ -87,3 +87,16 @@ def store_user_vinted_password(plain: str | None) -> str | None:
         return None
     stripped = plain.strip()
     return encrypt_vinted_credential(stripped) if stripped else None
+
+
+def store_ebay_token(plain: str | None) -> str | None:
+    """Encrypt OAuth token for DB storage (same Fernet key as Vinted secrets)."""
+    if plain is None:
+        return None
+    stripped = plain.strip()
+    return encrypt_vinted_credential(stripped) if stripped else None
+
+
+def decrypt_ebay_token(stored: str | None) -> str | None:
+    """Decrypt stored eBay OAuth token."""
+    return decrypt_vinted_credential(stored)

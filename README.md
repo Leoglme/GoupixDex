@@ -24,13 +24,14 @@
 - **Pricing** — PokéWallet-backed Cardmarket (EUR) and TCGPlayer (USD) signals, with configurable margin.
 - **Inventory** — Articles CRUD, images (e.g. Supabase), sold state and sell price.
 - **Vinted** — Optional automated listing creation (see API docs for credentials and limitations).
+- **eBay** — Optional listing via eBay Inventory API (OAuth per user, business policies). Setup guide: [`api/EBAY.md`](api/EBAY.md).
 - **Dashboard** — Revenue, profit, and inventory-oriented views.
 
 ## Tech stack (overview)
 
 - **Frontend:** Nuxt, Nuxt UI, Vue 3  
 - **Backend:** FastAPI, SQLAlchemy, MariaDB/MySQL, JWT auth  
-- **Integrations:** Groq (vision), PokéWallet (prices), optional Vinted automation
+- **Integrations:** Groq (vision), PokéWallet (prices), optional Vinted automation, optional eBay Sell APIs
 
 For setup, environment variables, and run commands, use the dedicated guides:
 

@@ -6,6 +6,7 @@ const route = useRoute()
 const links = computed(() => {
   const path = route.path
   const isConfig = path === '/settings' || path === '/settings/'
+  const isMarketplaces = path.startsWith('/settings/marketplaces')
   const isUsers = path.startsWith('/settings/users')
   return [[{
     label: 'Configuration',
@@ -13,6 +14,11 @@ const links = computed(() => {
     to: '/settings',
     exact: true,
     active: isConfig
+  }, {
+    label: 'Marketplace',
+    icon: 'i-lucide-store',
+    to: '/settings/marketplaces',
+    active: isMarketplaces
   }, {
     label: 'Utilisateurs',
     icon: 'i-lucide-users',

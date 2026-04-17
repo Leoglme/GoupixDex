@@ -17,7 +17,7 @@ async function load() {
   loading.value = true
   try {
     const s = await getSettings()
-    margin.value = s.margin_percent
+    margin.value = s.margin_percent ?? 20
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -32,7 +32,7 @@ onMounted(() => {
 async function saveMargin() {
   saving.value = true
   try {
-    const s = await updateSettings(margin.value)
+    const s = await updateSettings({ margin_percent: margin.value })
     margin.value = s.margin_percent
     toast.add({ title: 'Marge enregistrée', color: 'success' })
   } catch (e) {

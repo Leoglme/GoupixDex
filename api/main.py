@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from config import get_settings
 from routes import articles as articles_routes
 from routes import auth as auth_routes
+from routes import ebay_route
 from routes import pricing_route
 from routes import scan as scan_routes
 from routes import settings_route
@@ -96,6 +97,7 @@ app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(users_routes.router)
 app.include_router(articles_routes.router)
 app.include_router(settings_route.router)
+app.include_router(ebay_route.router)
 app.include_router(pricing_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)

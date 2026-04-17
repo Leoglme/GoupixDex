@@ -56,6 +56,12 @@ const eur = new Intl.NumberFormat('fr-FR', {
           >
             Vinted {{ (article.published_on_vinted ?? false) ? 'oui' : 'non' }}
           </UBadge>
+          <UBadge
+            :color="(article.published_on_ebay ?? false) ? 'success' : 'neutral'"
+            variant="subtle"
+          >
+            eBay {{ (article.published_on_ebay ?? false) ? 'oui' : 'non' }}
+          </UBadge>
           <span class="text-muted">Achat {{ eur.format(article.purchase_price) }}</span>
           <span class="text-muted">
             Vente {{ article.sell_price != null ? eur.format(article.sell_price) : '—' }}

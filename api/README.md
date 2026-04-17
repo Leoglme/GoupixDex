@@ -1,6 +1,6 @@
 # GoupixDex — API (Python)
 
-Backend for **GoupixDex**: Pokémon TCG scanning, pricing (PokéWallet), inventory articles, JWT auth, and optional Vinted automation (nodriver).
+Backend for **GoupixDex**: Pokémon TCG scanning, pricing (PokéWallet), inventory articles, JWT auth, optional Vinted automation (nodriver), and optional **eBay** listing (OAuth + Inventory API — see [`EBAY.md`](EBAY.md)).
 
 ## Stack
 

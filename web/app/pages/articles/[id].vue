@@ -6,12 +6,13 @@ definePageMeta({ middleware: 'auth' })
 const route = useRoute()
 const id = computed(() => Number(route.params.id))
 
-const { getArticle, updateArticle } = useArticles()
+const { getArticle, updateArticle, publishArticleToEbay } = useArticles()
 const toast = useToast()
 
 const article = ref<Article | null>(null)
 const loading = ref(true)
 const submitting = ref(false)
+const publishingEbay = ref(false)
 
 async function load() {
   loading.value = true
@@ -26,6 +27,23 @@ async function load() {
 }
 
 onMounted(load)
+
+async function publishEbay() {
+  publishingEbay.value = true
+  try {
+    await publishArticleToEbay(id.value)
+    toast.add({
+      title: 'Publication eBay démarrée',
+      description: 'Traitement en arrière-plan — rafraîchissez la liste dans quelques instants.',
+      color: 'success'
+    })
+    await load()
+  } catch (e) {
+    toast.add({ title: 'eBay', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    publishingEbay.value = false
+  }
+}
 
 async function onSubmitEdit(body: ArticleUpdateBody) {
   submitting.value = true
@@ -102,6 +120,24 @@ useSeoMeta({
             >
               {{ (article.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
             </UBadge>
+            <span class="text-sm text-muted">eBay</span>
+            <UBadge
+              :color="(article.published_on_ebay ?? false) ? 'success' : 'neutral'"
+              variant="subtle"
+            >
+              {{ (article.published_on_ebay ?? false) ? 'Oui' : 'Non' }}
+            </UBadge>
+            <UButton
+              v-if="!article.is_sold && !(article.published_on_ebay ?? false)"
+              size="xs"
+              variant="soft"
+              color="primary"
+              :loading="publishingEbay"
+              icon="i-lucide-shopping-bag"
+              @click="publishEbay"
+            >
+              Publier sur eBay
+            </UButton>
           </div>
           <ArticleForm
             mode="edit"

@@ -47,6 +47,11 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "vinted_published_at": article.vinted_published_at.isoformat()
         if article.vinted_published_at
         else None,
+        "published_on_ebay": bool(article.published_on_ebay),
+        "ebay_listing_id": article.ebay_listing_id,
+        "ebay_published_at": article.ebay_published_at.isoformat()
+        if article.ebay_published_at
+        else None,
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "images": [{"id": img.id, "image_url": img.image_url, "created_at": img.created_at.isoformat()} for img in article.images],
@@ -64,6 +69,21 @@ def mark_article_published_on_vinted(article_id: int, user_id: int) -> bool:
             return False
         article.published_on_vinted = True
         article.vinted_published_at = dt.datetime.now(dt.UTC)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def mark_article_published_on_ebay(article_id: int, user_id: int, listing_id: str) -> bool:
+    db = SessionLocal()
+    try:
+        article = get_article(db, article_id, user_id)
+        if article is None:
+            return False
+        article.published_on_ebay = True
+        article.ebay_listing_id = listing_id[:64]
+        article.ebay_published_at = dt.datetime.now(dt.UTC)
         db.commit()
         return True
     finally:

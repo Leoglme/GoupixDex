@@ -19,6 +19,9 @@ export interface Article {
   /** Mis à jour côté serveur après une publication Vinted réussie. */
   published_on_vinted?: boolean
   vinted_published_at?: string | null
+  published_on_ebay?: boolean
+  ebay_listing_id?: string | null
+  ebay_published_at?: string | null
   created_at: string
   sold_at: string | null
   images: ArticleImage[]
@@ -35,9 +38,17 @@ export interface CreateArticleVintedResult {
   desktop_local?: boolean
 }
 
+export interface CreateArticleEbayResult {
+  published?: boolean
+  skipped?: boolean
+  detail?: string
+  status?: 'running'
+}
+
 export interface CreateArticleResponse {
   article: Article
   vinted: CreateArticleVintedResult
+  ebay?: CreateArticleEbayResult
 }
 
 export interface PublishVintedResponse {
@@ -55,6 +66,16 @@ export interface VintedBatchStartResponse {
 export interface VintedBatchActiveResponse {
   job_id: string | null
   stream_path: string | null
+}
+
+export interface EbayBatchStartResponse {
+  queued: number
+}
+
+export interface PublishEbayResponse {
+  ebay: {
+    status: 'running'
+  }
 }
 
 export interface ArticleUpdateBody {
@@ -148,6 +169,18 @@ export function useArticles() {
     return data
   }
 
+  async function publishArticleToEbay(id: number) {
+    const { data } = await $api.post<PublishEbayResponse>(`/articles/${id}/publish-ebay`)
+    return data
+  }
+
+  async function startEbayBatch(articleIds: number[]) {
+    const { data } = await $api.post<EbayBatchStartResponse>('/articles/ebay-batch', {
+      article_ids: articleIds
+    })
+    return data
+  }
+
   return {
     listArticles,
     getArticle,
@@ -157,7 +190,9 @@ export function useArticles() {
     deleteArticlesBulk,
     markSold,
     publishArticleToVinted,
+    publishArticleToEbay,
     startVintedBatch,
+    startEbayBatch,
     getVintedBatchActive
   }
 }
