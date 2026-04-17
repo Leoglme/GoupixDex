@@ -32,6 +32,21 @@ _CONDITION_TO_EBAY: dict[str, str] = {
     "Poor": "USED_ACCEPTABLE",
 }
 
+# Catégories feuille « cartes à jouer / TCG » (descripteur d’état carte obligatoire — Metadata / MIP eBay).
+_TCG_LEAF_CATEGORY_IDS = frozenset({"183050", "183454", "261328"})
+# Descripteur « état de la carte » (cartes non gradées) — name + value IDs eBay.
+_CARD_CONDITION_DESCRIPTOR_NAME = "40001"
+_APP_TO_CARD_CONDITION_VALUE_ID: dict[str, str] = {
+    "Mint": "400010",
+    "Near Mint": "400010",
+    "NM": "400010",
+    "Excellent": "400011",
+    "Good": "400012",
+    "Lightly Played": "400015",
+    "Played": "400016",
+    "Poor": "400017",
+}
+
 _MARKETPLACE_CURRENCY: dict[str, str] = {
     "EBAY_US": "USD",
     "EBAY_GB": "GBP",
@@ -46,6 +61,12 @@ def _currency_for_marketplace(marketplace_id: str) -> str:
 
 def _ebay_condition(app_condition: str) -> str:
     return _CONDITION_TO_EBAY.get(app_condition.strip(), "USED_EXCELLENT")
+
+
+def _card_condition_descriptor_value_id(app_condition: str) -> str:
+    """ID valeur du descripteur « Card Condition » (cartes non gradées), voir MIP eBay."""
+    key = (app_condition or "").strip()
+    return _APP_TO_CARD_CONDITION_VALUE_ID.get(key, "400010")
 
 
 def _listing_price_eur(article: Article) -> Decimal:
@@ -160,6 +181,15 @@ async def publish_article_to_ebay(
             "imageUrls": https_images[:24],
         },
     }
+
+    category_id = effective_ebay_category_id(ms).strip()
+    if category_id in _TCG_LEAF_CATEGORY_IDS:
+        inv_payload["conditionDescriptors"] = [
+            {
+                "name": _CARD_CONDITION_DESCRIPTOR_NAME,
+                "values": [_card_condition_descriptor_value_id(article.condition)],
+            }
+        ]
 
     headers = {
         "Authorization": f"Bearer {token}",
