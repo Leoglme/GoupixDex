@@ -82,6 +82,7 @@ jobs:
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           EBAY_REDIRECT_URI: ${{ secrets.EBAY_REDIRECT_URI }}
           EBAY_USE_SANDBOX: ${{ secrets.EBAY_USE_SANDBOX }}
+          EBAY_DEFAULT_CATEGORY_ID: ${{ secrets.EBAY_DEFAULT_CATEGORY_ID }}
         run: |
           set -euo pipefail
           f=api/.env
@@ -109,6 +110,7 @@ jobs:
             echo "EBAY_CLIENT_SECRET=${EBAY_CLIENT_SECRET:-}"
             echo "EBAY_REDIRECT_URI=${EBAY_REDIRECT_URI:-}"
             echo "EBAY_USE_SANDBOX=${EBAY_USE_SANDBOX:-true}"
+            echo "EBAY_DEFAULT_CATEGORY_ID=${EBAY_DEFAULT_CATEGORY_ID:-}"
           } > "$f"
 
       - name: Pack api tree

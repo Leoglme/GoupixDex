@@ -46,6 +46,7 @@ def _settings_public_row(db: Session, user: User) -> dict[str, Any]:
         "ebay_enabled": bool(ms.ebay_enabled),
         "ebay_marketplace_id": ms.ebay_marketplace_id,
         "ebay_category_id": ms.ebay_category_id,
+        "ebay_default_category_id": app.ebay_default_category_id or None,
         "ebay_merchant_location_key": ms.ebay_merchant_location_key,
         "ebay_fulfillment_policy_id": ms.ebay_fulfillment_policy_id,
         "ebay_payment_policy_id": ms.ebay_payment_policy_id,
@@ -142,6 +143,7 @@ def ebay_status(
 async def ebay_seller_setup(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    marketplace_id: Annotated[str | None, Query(max_length=32)] = None,
 ) -> dict[str, Any]:
     """Locations + business policies for the authenticated seller (requires eBay connection)."""
     ms = get_or_create_user_settings(db, user.id)
@@ -154,7 +156,7 @@ async def ebay_seller_setup(
         token = await ensure_ebay_access_token(db, user)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    mp = (ms.ebay_marketplace_id or "EBAY_FR").strip()
+    mp = (marketplace_id or ms.ebay_marketplace_id or "EBAY_FR").strip()
     try:
         locations = await fetch_inventory_locations(token)
         fulfillment = await fetch_fulfillment_policies(token, mp)

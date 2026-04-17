@@ -37,17 +37,19 @@ Ajoutez dans `api/.env` (voir `api/.env.example`) :
 | `EBAY_CLIENT_SECRET` | Cert ID (Client Secret). |
 | `EBAY_REDIRECT_URI` | **Exactement** la même URL que *Your auth accepted URL* (ex. `https://.../settings/marketplaces`). |
 | `EBAY_USE_SANDBOX` | `true` pour `auth.sandbox.ebay.com` / `api.sandbox.ebay.com`, `false` pour la production. |
+| `EBAY_DEFAULT_CATEGORY_ID` | *(Optionnel)* ID de catégorie feuille pour le marketplace ciblé. Si renseigné, les utilisateurs peuvent laisser la catégorie vide dans l’app ; la valeur utilisateur reste prioritaire. |
 
 Redémarrez l’API après modification.
 
 ## 5. Flux dans l’application web
 
-1. **Paramètres → Places de marché** : activez **eBay**, enregistrez si besoin.
+1. **Paramètres → Marketplace** : activez **eBay**, enregistrez si besoin.
 2. Cliquez **Se connecter à eBay** : redirection vers la page de consentement eBay.
 3. Après acceptation, eBay renvoie vers `/settings/marketplaces?code=...&state=...` : le front envoie le `code` au backend (`POST /ebay/oauth/exchange`), qui stocke les jetons (chiffrés) sur l’utilisateur.
-4. Renseignez **l’ID de catégorie** eBay, la **clé d’emplacement** (`merchantLocationKey`) et les **trois politiques** (expédition, paiement, retours). Vous pouvez utiliser **Importer emplacement & politiques** si votre compte n’en a qu’une de chaque (sinon copiez les IDs depuis la réponse API ou l’interface eBay).
+4. Choisissez **l’emplacement d’expédition** et les **trois politiques** (expédition, paiement, retours) dans les listes proposées après connexion (données lues sur votre compte eBay). Si une liste est vide, créez d’abord l’emplacement / les politiques dans l’espace vendeur eBay.
+5. **Catégorie** : soit renseignée par l’administrateur dans `EBAY_DEFAULT_CATEGORY_ID`, soit saisie (override) dans l’interface. Sans catégorie effective (ni défaut ni champ utilisateur), la publication reste bloquée.
 
-Sans ces champs, la publication est ignorée avec un message explicite.
+Sans emplacement ni politiques, la publication est ignorée avec un message explicite.
 
 ## 6. Images et sandbox
 

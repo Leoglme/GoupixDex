@@ -28,6 +28,7 @@ def _to_response(db: Session, user: User) -> SettingsResponse:
         ebay_enabled=bool(s.ebay_enabled),
         ebay_marketplace_id=s.ebay_marketplace_id,
         ebay_category_id=s.ebay_category_id,
+        ebay_default_category_id=(get_settings().ebay_default_category_id or None),
         ebay_merchant_location_key=s.ebay_merchant_location_key,
         ebay_fulfillment_policy_id=s.ebay_fulfillment_policy_id,
         ebay_payment_policy_id=s.ebay_payment_policy_id,

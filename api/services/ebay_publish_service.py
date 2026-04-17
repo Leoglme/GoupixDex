@@ -17,7 +17,7 @@ from models.article import Article
 from models.margin_settings import MarginSettings
 from models.user import User
 from services.ebay_oauth_service import _api_base_url, refresh_user_access_token
-from services.user_settings_service import ebay_listing_config_complete
+from services.user_settings_service import ebay_listing_config_complete, effective_ebay_category_id
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ async def publish_article_to_ebay(
             "marketplaceId": marketplace_id,
             "format": "FIXED_PRICE",
             "listingDuration": "GTC",
-            "categoryId": str(ms.ebay_category_id).strip(),
+            "categoryId": effective_ebay_category_id(ms),
             "merchantLocationKey": str(ms.ebay_merchant_location_key).strip(),
             "listingPolicies": {
                 "fulfillmentPolicyId": str(ms.ebay_fulfillment_policy_id).strip(),

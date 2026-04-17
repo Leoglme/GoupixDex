@@ -6,6 +6,11 @@ useGoupixPageSeo(
   'Gérez vos marketplaces de vente et choisissez où publier vos annonces.'
 )
 
+type SellerLocation = { merchantLocationKey: string, name?: string }
+type FulfillmentRow = { fulfillmentPolicyId: string, name?: string }
+type PaymentRow = { paymentPolicyId: string, name?: string }
+type ReturnRow = { returnPolicyId: string, name?: string }
+
 const { getSettings, updateSettings } = useSettings()
 const { $api } = useNuxtApp()
 const toast = useToast()
@@ -16,6 +21,11 @@ const loading = ref(true)
 const saving = ref(false)
 const setupLoading = ref(false)
 const s = ref<Awaited<ReturnType<typeof getSettings>> | null>(null)
+
+const sellerLocations = ref<SellerLocation[]>([])
+const sellerFulfillment = ref<FulfillmentRow[]>([])
+const sellerPayment = ref<PaymentRow[]>([])
+const sellerReturns = ref<ReturnRow[]>([])
 
 const marketplaceOptions = [
   { label: 'eBay France (EBAY_FR)', value: 'EBAY_FR' },
@@ -33,6 +43,62 @@ const marketplaceSelectItems = computed(() => {
     base.unshift({ label: mid, value: mid })
   }
   return base
+})
+
+function rowLabel(name: string | undefined, id: string) {
+  const n = name?.trim()
+  return n ? `${n} — ${id}` : id
+}
+
+function withSavedFallback<T extends { label: string, value: string }>(
+  items: T[],
+  current: string | null | undefined
+): T[] {
+  const cur = current?.trim()
+  if (cur && !items.some(i => i.value === cur)) {
+    return [{ label: `${cur} (enregistré)`, value: cur } as T, ...items]
+  }
+  return items
+}
+
+const locationSelectItems = computed(() => {
+  const base = sellerLocations.value.map(l => ({
+    label: rowLabel(l.name, l.merchantLocationKey),
+    value: l.merchantLocationKey
+  }))
+  return withSavedFallback(base, s.value?.ebay_merchant_location_key)
+})
+
+const fulfillmentSelectItems = computed(() => {
+  const base = sellerFulfillment.value.map(p => ({
+    label: rowLabel(p.name, p.fulfillmentPolicyId),
+    value: p.fulfillmentPolicyId
+  }))
+  return withSavedFallback(base, s.value?.ebay_fulfillment_policy_id)
+})
+
+const paymentSelectItems = computed(() => {
+  const base = sellerPayment.value.map(p => ({
+    label: rowLabel(p.name, p.paymentPolicyId),
+    value: p.paymentPolicyId
+  }))
+  return withSavedFallback(base, s.value?.ebay_payment_policy_id)
+})
+
+const returnSelectItems = computed(() => {
+  const base = sellerReturns.value.map(p => ({
+    label: rowLabel(p.name, p.returnPolicyId),
+    value: p.returnPolicyId
+  }))
+  return withSavedFallback(base, s.value?.ebay_return_policy_id)
+})
+
+const categoryHint = computed(() => {
+  const d = s.value?.ebay_default_category_id?.trim()
+  if (d) {
+    return `Laisser vide pour utiliser la catégorie définie sur le serveur (${d}). Sinon, saisissez un autre identifiant.`
+  }
+  return 'Identifiant de catégorie eBay pour vos annonces. Sinon, une catégorie par défaut peut être configurée côté serveur.'
 })
 
 async function load() {
@@ -70,46 +136,77 @@ async function save() {
   }
 }
 
-async function loadSellerSetup() {
+async function loadSellerSetup(opts: { silent?: boolean, fillSingleIfEmpty?: boolean } = {}) {
+  const silent = opts.silent ?? false
+  const fillSingleIfEmpty = opts.fillSingleIfEmpty ?? true
+  if (!s.value?.ebay_connected) {
+    sellerLocations.value = []
+    sellerFulfillment.value = []
+    sellerPayment.value = []
+    sellerReturns.value = []
+    return
+  }
   setupLoading.value = true
   try {
+    const mp = s.value.ebay_marketplace_id?.trim() || 'EBAY_FR'
     const { data } = await $api.get<{
       marketplace_id: string
-      locations: { merchantLocationKey: string, name?: string }[]
-      fulfillment_policies: { fulfillmentPolicyId: string, name?: string }[]
-      payment_policies: { paymentPolicyId: string, name?: string }[]
-      return_policies: { returnPolicyId: string, name?: string }[]
-    }>('/ebay/seller-setup')
+      locations: SellerLocation[]
+      fulfillment_policies: FulfillmentRow[]
+      payment_policies: PaymentRow[]
+      return_policies: ReturnRow[]
+    }>('/ebay/seller-setup', { params: { marketplace_id: mp } })
+
+    sellerLocations.value = data.locations ?? []
+    sellerFulfillment.value = data.fulfillment_policies ?? []
+    sellerPayment.value = data.payment_policies ?? []
+    sellerReturns.value = data.return_policies ?? []
+
     if (!s.value) {
       return
     }
-    const one = <T extends { merchantLocationKey?: string, fulfillmentPolicyId?: string, paymentPolicyId?: string, returnPolicyId?: string }>(arr: T[], key: keyof T) =>
+
+    const one = <T extends Record<string, unknown>>(arr: T[], key: keyof T) =>
       arr.length === 1 ? String(arr[0]![key]) : null
-    const loc = one(data.locations, 'merchantLocationKey')
-    const fp = one(data.fulfillment_policies, 'fulfillmentPolicyId')
-    const pp = one(data.payment_policies, 'paymentPolicyId')
-    const rp = one(data.return_policies, 'returnPolicyId')
-    if (loc) {
-      s.value.ebay_merchant_location_key = loc
+
+    if (fillSingleIfEmpty) {
+      if (!s.value.ebay_merchant_location_key?.trim()) {
+        const v = one(sellerLocations.value, 'merchantLocationKey')
+        if (v) {
+          s.value.ebay_merchant_location_key = v
+        }
+      }
+      if (!s.value.ebay_fulfillment_policy_id?.trim()) {
+        const v = one(sellerFulfillment.value, 'fulfillmentPolicyId')
+        if (v) {
+          s.value.ebay_fulfillment_policy_id = v
+        }
+      }
+      if (!s.value.ebay_payment_policy_id?.trim()) {
+        const v = one(sellerPayment.value, 'paymentPolicyId')
+        if (v) {
+          s.value.ebay_payment_policy_id = v
+        }
+      }
+      if (!s.value.ebay_return_policy_id?.trim()) {
+        const v = one(sellerReturns.value, 'returnPolicyId')
+        if (v) {
+          s.value.ebay_return_policy_id = v
+        }
+      }
     }
-    if (fp) {
-      s.value.ebay_fulfillment_policy_id = fp
+
+    if (!silent) {
+      const nLoc = sellerLocations.value.length
+      const nF = sellerFulfillment.value.length
+      const nP = sellerPayment.value.length
+      const nR = sellerReturns.value.length
+      toast.add({
+        title: 'Listes eBay chargées',
+        description: `${nLoc} emplacement(s), ${nF} expédition, ${nP} paiement, ${nR} retours.`,
+        color: 'success'
+      })
     }
-    if (pp) {
-      s.value.ebay_payment_policy_id = pp
-    }
-    if (rp) {
-      s.value.ebay_return_policy_id = rp
-    }
-    const filled = [loc, fp, pp, rp].filter(Boolean).length
-    toast.add({
-      title: 'Données vendeur eBay chargées',
-      description:
-        filled === 4
-          ? 'Une seule politique / emplacement détecté : champs préremplis. Sinon complétez à la main.'
-          : 'Sélectionnez les IDs dans la liste ou copiez-les depuis la réponse API si besoin.',
-      color: 'success'
-    })
   } catch (e) {
     toast.add({ title: 'Impossible de charger eBay', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -122,6 +219,7 @@ async function exchangeOAuthCode(code: string) {
     await $api.post('/ebay/oauth/exchange', { code })
     toast.add({ title: 'Compte eBay connecté', color: 'success' })
     await load()
+    await loadSellerSetup({ silent: true, fillSingleIfEmpty: true })
   } catch (e) {
     toast.add({ title: 'Échange OAuth échoué', description: apiErrorMessage(e), color: 'error' })
   }
@@ -131,6 +229,10 @@ async function disconnectEbay() {
   try {
     await $api.post('/ebay/oauth/disconnect')
     toast.add({ title: 'eBay déconnecté', color: 'success' })
+    sellerLocations.value = []
+    sellerFulfillment.value = []
+    sellerPayment.value = []
+    sellerReturns.value = []
     await load()
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
@@ -168,6 +270,9 @@ onMounted(async () => {
     await router.replace({ path: '/settings/marketplaces', query: {} })
   }
   await load()
+  if (s.value?.ebay_connected) {
+    await loadSellerSetup({ silent: true, fillSingleIfEmpty: true })
+  }
 })
 </script>
 
@@ -210,7 +315,7 @@ onMounted(async () => {
         </template>
         <div class="space-y-4">
           <UCheckbox v-model="s.vinted_enabled" label="Vinted activé (publication depuis l’app desktop)" />
-          <UCheckbox v-model="s.ebay_enabled" label="eBay activé (Inventory API, compte connecté requis)" />
+          <UCheckbox v-model="s.ebay_enabled" label="eBay activé (compte connecté requis)" />
           <p class="text-sm text-muted">
             Par défaut : Vinted activé, eBay désactivé. Désactiver Vinted masque les options de publication associées dans les formulaires.
           </p>
@@ -220,10 +325,10 @@ onMounted(async () => {
       <UCard v-if="s.ebay_enabled && s.ebay_oauth_configured">
         <template #header>
           <p class="font-medium text-highlighted">
-            Connexion eBay (OAuth)
+            Connexion eBay
           </p>
           <p class="text-sm text-muted">
-            Environnement API : <strong>{{ s.ebay_environment }}</strong>
+            Environnement : <strong>{{ s.ebay_environment }}</strong>
           </p>
         </template>
         <div class="flex flex-wrap gap-2 items-center">
@@ -252,14 +357,17 @@ onMounted(async () => {
       <UCard v-if="s.ebay_enabled">
         <template #header>
           <p class="font-medium text-highlighted">
-            Paramètres d’annonce eBay
+            Annonce eBay
           </p>
           <p class="text-sm text-muted">
-            Identifiants de catégorie eBay, emplacement marchand et politiques « Business » (expédition, paiement, retours).
+            Choisissez le site eBay, la catégorie si besoin, puis l’emplacement et les règles d’expédition, de paiement et de retours (listes issues de votre compte après connexion).
           </p>
         </template>
         <div class="space-y-4">
-          <UFormField label="Marketplace eBay">
+          <UFormField
+            label="Site eBay (marketplace)"
+            hint="Après un changement, utilisez « Actualiser les listes » pour recharger emplacement et politiques."
+          >
             <USelect
               v-model="s.ebay_marketplace_id"
               :items="marketplaceSelectItems"
@@ -268,23 +376,88 @@ onMounted(async () => {
               class="w-full max-w-md"
             />
           </UFormField>
+
+          <UFormField label="Catégorie (optionnel)" :hint="categoryHint">
+            <UInput
+              v-model="s.ebay_category_id"
+              :placeholder="s.ebay_default_category_id?.trim() ? `Défaut serveur : ${s.ebay_default_category_id}` : 'ex. 183454'"
+              class="w-full max-w-md"
+            />
+          </UFormField>
+
           <UFormField
-            label="ID catégorie eBay"
-            hint="Ex. catégorie cartes à l’unité pour votre site (Taxonomy / suggestions eBay)."
+            label="Emplacement d’expédition"
+            :hint="s.ebay_connected ? '' : 'Connectez eBay pour remplir la liste.'"
           >
-            <UInput v-model="s.ebay_category_id" placeholder="ex. 183454" class="w-full max-w-md" />
+            <USelect
+              v-if="locationSelectItems.length"
+              v-model="s.ebay_merchant_location_key"
+              :items="locationSelectItems"
+              value-key="value"
+              label-key="label"
+              class="w-full max-w-md"
+            />
+            <UInput
+              v-else
+              v-model="s.ebay_merchant_location_key"
+              placeholder="Chargement ou saisie manuelle de la clé"
+              class="w-full max-w-md"
+              :disabled="!s.ebay_connected"
+            />
           </UFormField>
-          <UFormField label="Clé emplacement (merchantLocationKey)">
-            <UInput v-model="s.ebay_merchant_location_key" class="w-full max-w-md" />
+
+          <UFormField label="Expédition">
+            <USelect
+              v-if="fulfillmentSelectItems.length"
+              v-model="s.ebay_fulfillment_policy_id"
+              :items="fulfillmentSelectItems"
+              value-key="value"
+              label-key="label"
+              class="w-full max-w-md"
+            />
+            <UInput
+              v-else
+              v-model="s.ebay_fulfillment_policy_id"
+              placeholder="Identifiant de politique d’expédition"
+              class="w-full max-w-md"
+              :disabled="!s.ebay_connected"
+            />
           </UFormField>
-          <UFormField label="ID politique d’expédition (fulfillment)">
-            <UInput v-model="s.ebay_fulfillment_policy_id" class="w-full max-w-md" />
+
+          <UFormField label="Paiement">
+            <USelect
+              v-if="paymentSelectItems.length"
+              v-model="s.ebay_payment_policy_id"
+              :items="paymentSelectItems"
+              value-key="value"
+              label-key="label"
+              class="w-full max-w-md"
+            />
+            <UInput
+              v-else
+              v-model="s.ebay_payment_policy_id"
+              placeholder="Identifiant de politique de paiement"
+              class="w-full max-w-md"
+              :disabled="!s.ebay_connected"
+            />
           </UFormField>
-          <UFormField label="ID politique de paiement">
-            <UInput v-model="s.ebay_payment_policy_id" class="w-full max-w-md" />
-          </UFormField>
-          <UFormField label="ID politique de retours">
-            <UInput v-model="s.ebay_return_policy_id" class="w-full max-w-md" />
+
+          <UFormField label="Retours">
+            <USelect
+              v-if="returnSelectItems.length"
+              v-model="s.ebay_return_policy_id"
+              :items="returnSelectItems"
+              value-key="value"
+              label-key="label"
+              class="w-full max-w-md"
+            />
+            <UInput
+              v-else
+              v-model="s.ebay_return_policy_id"
+              placeholder="Identifiant de politique de retours"
+              class="w-full max-w-md"
+              :disabled="!s.ebay_connected"
+            />
           </UFormField>
 
           <UBadge
@@ -294,7 +467,7 @@ onMounted(async () => {
             {{
               s.ebay_listing_config_complete
                 ? 'Configuration annonce complète'
-                : 'Il manque des champs pour publier sur eBay'
+                : 'Il manque des éléments pour publier sur eBay'
             }}
           </UBadge>
 
@@ -304,10 +477,10 @@ onMounted(async () => {
               color="neutral"
               variant="soft"
               :loading="setupLoading"
-              icon="i-lucide-download"
-              @click="loadSellerSetup"
+              icon="i-lucide-refresh-cw"
+              @click="loadSellerSetup({ silent: false, fillSingleIfEmpty: true })"
             >
-              Importer emplacement & politiques (si unique)
+              Actualiser les listes
             </UButton>
             <UButton :loading="saving" @click="save">
               Enregistrer
@@ -318,13 +491,12 @@ onMounted(async () => {
 
       <UCard v-else>
         <p class="text-sm text-muted">
-          Activez eBay ci-dessus pour configurer la connexion OAuth et les politiques d’annonce.
+          Activez eBay ci-dessus pour configurer la connexion et l’annonce.
         </p>
         <UButton class="mt-4" :loading="saving" @click="save">
           Enregistrer les canaux
         </UButton>
       </UCard>
-
     </template>
   </div>
 </template>

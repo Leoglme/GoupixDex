@@ -74,6 +74,9 @@ class AppSettings(BaseSettings):
     ebay_redirect_uri: str | None = None
     #: Use sandbox API hosts (``auth.sandbox.ebay.com``, ``api.sandbox.ebay.com``).
     ebay_use_sandbox: bool = True
+    #: Default eBay leaf category ID for offers when the user leaves the field empty (instance-wide).
+    #: Still overridable per user in settings. Must match the marketplace (e.g. EBAY_FR taxonomy).
+    ebay_default_category_id: str | None = None
 
 
 @lru_cache
