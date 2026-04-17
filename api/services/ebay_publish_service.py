@@ -36,6 +36,7 @@ _CONDITION_TO_EBAY: dict[str, str] = {
 _TCG_LEAF_CATEGORY_IDS = frozenset({"183050", "183454", "261328"})
 # Descripteur « état de la carte » (cartes non gradées) — name + value IDs eBay.
 _CARD_CONDITION_DESCRIPTOR_NAME = "40001"
+# Aligné sur le sélecteur « État » du formulaire article (ArticleForm.vue) + anciennes valeurs en base.
 _APP_TO_CARD_CONDITION_VALUE_ID: dict[str, str] = {
     "Mint": "400010",
     "Near Mint": "400010",
@@ -45,6 +46,17 @@ _APP_TO_CARD_CONDITION_VALUE_ID: dict[str, str] = {
     "Lightly Played": "400015",
     "Played": "400016",
     "Poor": "400017",
+}
+# État article Inventory (conditionId) pour catégories TCG — dérivé du champ ``article.condition``.
+_TCG_ITEM_CONDITION_ENUM: dict[str, str] = {
+    "Mint": "USED_VERY_GOOD",
+    "Near Mint": "USED_VERY_GOOD",
+    "NM": "USED_VERY_GOOD",
+    "Excellent": "USED_VERY_GOOD",
+    "Good": "USED_GOOD",
+    "Lightly Played": "USED_GOOD",
+    "Played": "USED_ACCEPTABLE",
+    "Poor": "USED_ACCEPTABLE",
 }
 
 _MARKETPLACE_CURRENCY: dict[str, str] = {
@@ -65,17 +77,12 @@ def _ebay_condition(app_condition: str) -> str:
 
 def _ebay_condition_for_category(category_id: str, app_condition: str) -> str:
     """
-    Pour les catégories cartes TCG avec descripteur « état de la carte », eBay attend l’état article
-    **4000 = USED_VERY_GOOD** (carte non gradée), pas **3000 = USED_EXCELLENT** — sinon erreur 25059
-    à la publication. Voir condition-id-values (trading cards) dans la doc eBay.
+    Pour les catégories cartes TCG : état article + descripteur carte doivent suivre la doc eBay
+    (pas ``USED_EXCELLENT`` / 3000 seul). Chaque libellé du formulaire article a son mapping explicite.
     """
     if category_id.strip() in _TCG_LEAF_CATEGORY_IDS:
         c = (app_condition or "").strip()
-        if c in ("Poor", "Played"):
-            return "USED_ACCEPTABLE"
-        if c in ("Good", "Lightly Played"):
-            return "USED_GOOD"
-        return "USED_VERY_GOOD"
+        return _TCG_ITEM_CONDITION_ENUM.get(c, "USED_VERY_GOOD")
     return _ebay_condition(app_condition)
 
 
@@ -83,6 +90,25 @@ def _card_condition_descriptor_value_id(app_condition: str) -> str:
     """ID valeur du descripteur « Card Condition » (cartes non gradées), voir MIP eBay."""
     key = (app_condition or "").strip()
     return _APP_TO_CARD_CONDITION_VALUE_ID.get(key, "400010")
+
+
+def _product_aspects(
+    article: Article,
+    *,
+    category_id: str,
+    marketplace_id: str,
+) -> dict[str, list[str]]:
+    aspects: dict[str, list[str]] = {"Brand": ["Pokémon"]}
+    if article.pokemon_name:
+        aspects["Character"] = [article.pokemon_name.strip()]
+    if article.set_code:
+        aspects["Set"] = [article.set_code.strip()]
+    if article.card_number:
+        aspects["Card Number"] = [article.card_number.strip()]
+    # EBAY_FR : caractéristique « Jeu » obligatoire pour nombreuses catégories cartes (erreur 25002).
+    if marketplace_id.strip().upper() == "EBAY_FR" and category_id.strip() in _TCG_LEAF_CATEGORY_IDS:
+        aspects["Jeu"] = ["Pokémon"]
+    return aspects
 
 
 def _listing_price_eur(article: Article) -> Decimal:
@@ -139,17 +165,6 @@ def _description_html(article: Article) -> str:
     return f"<p>{esc}</p>"
 
 
-def _product_aspects(article: Article) -> dict[str, list[str]]:
-    aspects: dict[str, list[str]] = {"Brand": ["Pokémon"]}
-    if article.pokemon_name:
-        aspects["Character"] = [article.pokemon_name.strip()]
-    if article.set_code:
-        aspects["Set"] = [article.set_code.strip()]
-    if article.card_number:
-        aspects["Card Number"] = [article.card_number.strip()]
-    return aspects
-
-
 async def publish_article_to_ebay(
     db: Session,
     article: Article,
@@ -195,7 +210,7 @@ async def publish_article_to_ebay(
         "product": {
             "title": title,
             "description": _description_html(article),
-            "aspects": _product_aspects(article),
+            "aspects": _product_aspects(article, category_id=category_id, marketplace_id=marketplace_id),
             "imageUrls": https_images[:24],
         },
     }
