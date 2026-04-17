@@ -6,11 +6,6 @@ useGoupixPageSeo(
   'Gérez vos marketplaces de vente et choisissez où publier vos annonces.'
 )
 
-type SellerLocation = { merchantLocationKey: string, name?: string }
-type FulfillmentRow = { fulfillmentPolicyId: string, name?: string }
-type PaymentRow = { paymentPolicyId: string, name?: string }
-type ReturnRow = { returnPolicyId: string, name?: string }
-
 const { getSettings, updateSettings } = useSettings()
 const { $api } = useNuxtApp()
 const toast = useToast()
@@ -19,87 +14,15 @@ const router = useRouter()
 
 const loading = ref(true)
 const saving = ref(false)
-const setupLoading = ref(false)
+const onboardingLoading = ref(false)
 const s = ref<Awaited<ReturnType<typeof getSettings>> | null>(null)
 
-const sellerLocations = ref<SellerLocation[]>([])
-const sellerFulfillment = ref<FulfillmentRow[]>([])
-const sellerPayment = ref<PaymentRow[]>([])
-const sellerReturns = ref<ReturnRow[]>([])
-
-const marketplaceOptions = [
-  { label: 'eBay France (EBAY_FR)', value: 'EBAY_FR' },
-  { label: 'eBay Allemagne (EBAY_DE)', value: 'EBAY_DE' },
-  { label: 'eBay UK (EBAY_GB)', value: 'EBAY_GB' },
-  { label: 'eBay US (EBAY_US)', value: 'EBAY_US' },
-  { label: 'eBay Italie (EBAY_IT)', value: 'EBAY_IT' },
-  { label: 'eBay Espagne (EBAY_ES)', value: 'EBAY_ES' }
-]
-
-const marketplaceSelectItems = computed(() => {
-  const base = [...marketplaceOptions]
-  const mid = s.value?.ebay_marketplace_id?.trim()
-  if (mid && !base.some(b => b.value === mid)) {
-    base.unshift({ label: mid, value: mid })
-  }
-  return base
-})
-
-function rowLabel(name: string | undefined, id: string) {
-  const n = name?.trim()
-  return n ? `${n} — ${id}` : id
-}
-
-function withSavedFallback<T extends { label: string, value: string }>(
-  items: T[],
-  current: string | null | undefined
-): T[] {
-  const cur = current?.trim()
-  if (cur && !items.some(i => i.value === cur)) {
-    return [{ label: `${cur} (enregistré)`, value: cur } as T, ...items]
-  }
-  return items
-}
-
-const locationSelectItems = computed(() => {
-  const base = sellerLocations.value.map(l => ({
-    label: rowLabel(l.name, l.merchantLocationKey),
-    value: l.merchantLocationKey
-  }))
-  return withSavedFallback(base, s.value?.ebay_merchant_location_key)
-})
-
-const fulfillmentSelectItems = computed(() => {
-  const base = sellerFulfillment.value.map(p => ({
-    label: rowLabel(p.name, p.fulfillmentPolicyId),
-    value: p.fulfillmentPolicyId
-  }))
-  return withSavedFallback(base, s.value?.ebay_fulfillment_policy_id)
-})
-
-const paymentSelectItems = computed(() => {
-  const base = sellerPayment.value.map(p => ({
-    label: rowLabel(p.name, p.paymentPolicyId),
-    value: p.paymentPolicyId
-  }))
-  return withSavedFallback(base, s.value?.ebay_payment_policy_id)
-})
-
-const returnSelectItems = computed(() => {
-  const base = sellerReturns.value.map(p => ({
-    label: rowLabel(p.name, p.returnPolicyId),
-    value: p.returnPolicyId
-  }))
-  return withSavedFallback(base, s.value?.ebay_return_policy_id)
-})
-
-const categoryHint = computed(() => {
-  const d = s.value?.ebay_default_category_id?.trim()
-  if (d) {
-    return `Laisser vide pour utiliser la catégorie définie sur le serveur (${d}). Sinon, saisissez un autre identifiant.`
-  }
-  return 'Identifiant de catégorie eBay pour vos annonces. Sinon, une catégorie par défaut peut être configurée côté serveur.'
-})
+const locationName = ref('Domicile')
+const phone = ref('')
+const addressLine1 = ref('')
+const addressLine2 = ref('')
+const city = ref('')
+const postalCode = ref('')
 
 async function load() {
   loading.value = true
@@ -112,7 +35,7 @@ async function load() {
   }
 }
 
-async function save() {
+async function saveChannels() {
   if (!s.value) {
     return
   }
@@ -120,13 +43,7 @@ async function save() {
   try {
     s.value = await updateSettings({
       vinted_enabled: s.value.vinted_enabled,
-      ebay_enabled: s.value.ebay_enabled,
-      ebay_marketplace_id: s.value.ebay_marketplace_id,
-      ebay_category_id: s.value.ebay_category_id?.trim() || null,
-      ebay_merchant_location_key: s.value.ebay_merchant_location_key?.trim() || null,
-      ebay_fulfillment_policy_id: s.value.ebay_fulfillment_policy_id?.trim() || null,
-      ebay_payment_policy_id: s.value.ebay_payment_policy_id?.trim() || null,
-      ebay_return_policy_id: s.value.ebay_return_policy_id?.trim() || null
+      ebay_enabled: s.value.ebay_enabled
     })
     toast.add({ title: 'Enregistré', color: 'success' })
   } catch (e) {
@@ -136,90 +53,11 @@ async function save() {
   }
 }
 
-async function loadSellerSetup(opts: { silent?: boolean, fillSingleIfEmpty?: boolean } = {}) {
-  const silent = opts.silent ?? false
-  const fillSingleIfEmpty = opts.fillSingleIfEmpty ?? true
-  if (!s.value?.ebay_connected) {
-    sellerLocations.value = []
-    sellerFulfillment.value = []
-    sellerPayment.value = []
-    sellerReturns.value = []
-    return
-  }
-  setupLoading.value = true
-  try {
-    const mp = s.value.ebay_marketplace_id?.trim() || 'EBAY_FR'
-    const { data } = await $api.get<{
-      marketplace_id: string
-      locations: SellerLocation[]
-      fulfillment_policies: FulfillmentRow[]
-      payment_policies: PaymentRow[]
-      return_policies: ReturnRow[]
-    }>('/ebay/seller-setup', { params: { marketplace_id: mp } })
-
-    sellerLocations.value = data.locations ?? []
-    sellerFulfillment.value = data.fulfillment_policies ?? []
-    sellerPayment.value = data.payment_policies ?? []
-    sellerReturns.value = data.return_policies ?? []
-
-    if (!s.value) {
-      return
-    }
-
-    const one = <T extends Record<string, unknown>>(arr: T[], key: keyof T) =>
-      arr.length === 1 ? String(arr[0]![key]) : null
-
-    if (fillSingleIfEmpty) {
-      if (!s.value.ebay_merchant_location_key?.trim()) {
-        const v = one(sellerLocations.value, 'merchantLocationKey')
-        if (v) {
-          s.value.ebay_merchant_location_key = v
-        }
-      }
-      if (!s.value.ebay_fulfillment_policy_id?.trim()) {
-        const v = one(sellerFulfillment.value, 'fulfillmentPolicyId')
-        if (v) {
-          s.value.ebay_fulfillment_policy_id = v
-        }
-      }
-      if (!s.value.ebay_payment_policy_id?.trim()) {
-        const v = one(sellerPayment.value, 'paymentPolicyId')
-        if (v) {
-          s.value.ebay_payment_policy_id = v
-        }
-      }
-      if (!s.value.ebay_return_policy_id?.trim()) {
-        const v = one(sellerReturns.value, 'returnPolicyId')
-        if (v) {
-          s.value.ebay_return_policy_id = v
-        }
-      }
-    }
-
-    if (!silent) {
-      const nLoc = sellerLocations.value.length
-      const nF = sellerFulfillment.value.length
-      const nP = sellerPayment.value.length
-      const nR = sellerReturns.value.length
-      toast.add({
-        title: 'Listes eBay chargées',
-        description: `${nLoc} emplacement(s), ${nF} expédition, ${nP} paiement, ${nR} retours.`,
-        color: 'success'
-      })
-    }
-  } catch (e) {
-    toast.add({ title: 'Impossible de charger eBay', description: apiErrorMessage(e), color: 'error' })
-  } finally {
-    setupLoading.value = false
-  }
-}
-
 async function exchangeOAuthCode(code: string) {
   try {
     await $api.post('/ebay/oauth/exchange', { code })
     toast.add({ title: 'Compte eBay connecté', color: 'success' })
     await load()
-    await loadSellerSetup({ silent: true, fillSingleIfEmpty: true })
   } catch (e) {
     toast.add({ title: 'Échange OAuth échoué', description: apiErrorMessage(e), color: 'error' })
   }
@@ -229,10 +67,6 @@ async function disconnectEbay() {
   try {
     await $api.post('/ebay/oauth/disconnect')
     toast.add({ title: 'eBay déconnecté', color: 'success' })
-    sellerLocations.value = []
-    sellerFulfillment.value = []
-    sellerPayment.value = []
-    sellerReturns.value = []
     await load()
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
@@ -256,6 +90,35 @@ async function startEbayOAuth() {
   }
 }
 
+async function submitOnboarding() {
+  if (!phone.value.trim() || !addressLine1.value.trim() || !city.value.trim() || !postalCode.value.trim()) {
+    toast.add({ title: 'Champs requis', description: 'Renseignez l’adresse et un téléphone.', color: 'warning' })
+    return
+  }
+  onboardingLoading.value = true
+  try {
+    await $api.post('/ebay/onboarding/setup', {
+      location_name: locationName.value.trim() || 'Domicile',
+      phone: phone.value.trim(),
+      address_line1: addressLine1.value.trim(),
+      address_line2: addressLine2.value.trim() || null,
+      city: city.value.trim(),
+      postal_code: postalCode.value.trim(),
+      country: 'FR'
+    })
+    toast.add({
+      title: 'Réglages eBay prêts',
+      description: 'Vous pouvez publier vos cartes sur eBay France.',
+      color: 'success'
+    })
+    await load()
+  } catch (e) {
+    toast.add({ title: 'Configuration eBay', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    onboardingLoading.value = false
+  }
+}
+
 onMounted(async () => {
   const code = typeof route.query.code === 'string' ? route.query.code : null
   const st = typeof route.query.state === 'string' ? route.query.state : null
@@ -270,9 +133,6 @@ onMounted(async () => {
     await router.replace({ path: '/settings/marketplaces', query: {} })
   }
   await load()
-  if (s.value?.ebay_connected) {
-    await loadSellerSetup({ silent: true, fillSingleIfEmpty: true })
-  }
 })
 </script>
 
@@ -315,17 +175,20 @@ onMounted(async () => {
         </template>
         <div class="space-y-4">
           <UCheckbox v-model="s.vinted_enabled" label="Vinted activé (publication depuis l’app desktop)" />
-          <UCheckbox v-model="s.ebay_enabled" label="eBay activé (compte connecté requis)" />
+          <UCheckbox v-model="s.ebay_enabled" label="eBay activé (France — compte connecté requis)" />
           <p class="text-sm text-muted">
-            Par défaut : Vinted activé, eBay désactivé. Désactiver Vinted masque les options de publication associées dans les formulaires.
+            eBay est configuré pour <strong>eBay France</strong> uniquement (cartes Pokémon, envoi depuis votre adresse).
           </p>
+          <UButton :loading="saving" @click="saveChannels">
+            Enregistrer les canaux
+          </UButton>
         </div>
       </UCard>
 
       <UCard v-if="s.ebay_enabled && s.ebay_oauth_configured">
         <template #header>
           <p class="font-medium text-highlighted">
-            Connexion eBay
+            eBay France
           </p>
           <p class="text-sm text-muted">
             Environnement : <strong>{{ s.ebay_environment }}</strong>
@@ -354,148 +217,94 @@ onMounted(async () => {
         </div>
       </UCard>
 
-      <UCard v-if="s.ebay_enabled">
+      <UCard
+        v-if="s.ebay_enabled && s.ebay_connected && s.ebay_listing_config_complete"
+        class="border-success/30"
+      >
+        <p class="font-medium text-highlighted">
+          Prêt pour eBay
+        </p>
+        <p class="text-sm text-muted mt-1">
+          Vos annonces peuvent être publiées sur eBay France depuis les formulaires d’articles.
+        </p>
+      </UCard>
+
+      <UCard v-if="s.ebay_enabled && s.ebay_connected && !s.ebay_listing_config_complete">
         <template #header>
           <p class="font-medium text-highlighted">
-            Annonce eBay
-          </p>
-          <p class="text-sm text-muted">
-            Choisissez le site eBay, la catégorie si besoin, puis l’emplacement et les règles d’expédition, de paiement et de retours (listes issues de votre compte après connexion).
+            Terminer la configuration (2 minutes)
           </p>
         </template>
-        <div class="space-y-4">
-          <UFormField
-            label="Site eBay (marketplace)"
-            hint="Après un changement, utilisez « Actualiser les listes » pour recharger emplacement et politiques."
-          >
-            <USelect
-              v-model="s.ebay_marketplace_id"
-              :items="marketplaceSelectItems"
-              value-key="value"
-              label-key="label"
-              class="w-full max-w-md"
-            />
-          </UFormField>
 
-          <UFormField label="Catégorie (optionnel)" :hint="categoryHint">
-            <UInput
-              v-model="s.ebay_category_id"
-              :placeholder="s.ebay_default_category_id?.trim() ? `Défaut serveur : ${s.ebay_default_category_id}` : 'ex. 183454'"
-              class="w-full max-w-md"
-            />
-          </UFormField>
+        <div class="space-y-6">
+          <div class="space-y-3 text-sm text-muted">
+            <p class="font-medium text-highlighted">
+              Étape 1 — Connexion
+            </p>
+            <p>Vous êtes connecté à eBay. Nous utilisons votre compte uniquement pour publier vos cartes.</p>
 
-          <UFormField
-            label="Emplacement d’expédition"
-            :hint="s.ebay_connected ? '' : 'Connectez eBay pour remplir la liste.'"
-          >
-            <USelect
-              v-if="locationSelectItems.length"
-              v-model="s.ebay_merchant_location_key"
-              :items="locationSelectItems"
-              value-key="value"
-              label-key="label"
-              class="w-full max-w-md"
-            />
-            <UInput
-              v-else
-              v-model="s.ebay_merchant_location_key"
-              placeholder="Chargement ou saisie manuelle de la clé"
-              class="w-full max-w-md"
-              :disabled="!s.ebay_connected"
-            />
-          </UFormField>
-
-          <UFormField label="Expédition">
-            <USelect
-              v-if="fulfillmentSelectItems.length"
-              v-model="s.ebay_fulfillment_policy_id"
-              :items="fulfillmentSelectItems"
-              value-key="value"
-              label-key="label"
-              class="w-full max-w-md"
-            />
-            <UInput
-              v-else
-              v-model="s.ebay_fulfillment_policy_id"
-              placeholder="Identifiant de politique d’expédition"
-              class="w-full max-w-md"
-              :disabled="!s.ebay_connected"
-            />
-          </UFormField>
-
-          <UFormField label="Paiement">
-            <USelect
-              v-if="paymentSelectItems.length"
-              v-model="s.ebay_payment_policy_id"
-              :items="paymentSelectItems"
-              value-key="value"
-              label-key="label"
-              class="w-full max-w-md"
-            />
-            <UInput
-              v-else
-              v-model="s.ebay_payment_policy_id"
-              placeholder="Identifiant de politique de paiement"
-              class="w-full max-w-md"
-              :disabled="!s.ebay_connected"
-            />
-          </UFormField>
-
-          <UFormField label="Retours">
-            <USelect
-              v-if="returnSelectItems.length"
-              v-model="s.ebay_return_policy_id"
-              :items="returnSelectItems"
-              value-key="value"
-              label-key="label"
-              class="w-full max-w-md"
-            />
-            <UInput
-              v-else
-              v-model="s.ebay_return_policy_id"
-              placeholder="Identifiant de politique de retours"
-              class="w-full max-w-md"
-              :disabled="!s.ebay_connected"
-            />
-          </UFormField>
-
-          <UBadge
-            :color="s.ebay_listing_config_complete ? 'success' : 'warning'"
-            variant="subtle"
-          >
-            {{
-              s.ebay_listing_config_complete
-                ? 'Configuration annonce complète'
-                : 'Il manque des éléments pour publier sur eBay'
-            }}
-          </UBadge>
-
-          <div class="flex flex-wrap gap-2">
-            <UButton
-              v-if="s.ebay_connected"
-              color="neutral"
-              variant="soft"
-              :loading="setupLoading"
-              icon="i-lucide-refresh-cw"
-              @click="loadSellerSetup({ silent: false, fillSingleIfEmpty: true })"
-            >
-              Actualiser les listes
-            </UButton>
-            <UButton :loading="saving" @click="save">
-              Enregistrer
-            </UButton>
+            <p class="font-medium text-highlighted pt-2">
+              Étape 2 — Adresse d’expédition
+            </p>
+            <p>
+              Indiquez l’adresse d’où vous postez vos colis. Nous créons automatiquement l’emplacement et les règles eBay
+              (livraison France, paiement, retours) sans que vous alliez sur le site eBay.
+            </p>
           </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UFormField label="Nom du lieu (ex. Domicile)">
+              <UInput v-model="locationName" class="w-full" />
+            </UFormField>
+            <UFormField label="Téléphone (indicatif +33…)" required>
+              <UInput v-model="phone" type="tel" class="w-full" placeholder="+33…" />
+            </UFormField>
+            <UFormField label="Adresse ligne 1" class="sm:col-span-2" required>
+              <UInput v-model="addressLine1" class="w-full" />
+            </UFormField>
+            <UFormField label="Adresse ligne 2 (optionnel)" class="sm:col-span-2">
+              <UInput v-model="addressLine2" class="w-full" />
+            </UFormField>
+            <UFormField label="Ville" required>
+              <UInput v-model="city" class="w-full" />
+            </UFormField>
+            <UFormField label="Code postal" required>
+              <UInput v-model="postalCode" class="w-full" />
+            </UFormField>
+            <UFormField label="Pays">
+              <p class="text-sm text-muted py-2">
+                France (FR)
+              </p>
+            </UFormField>
+          </div>
+
+          <p v-if="s.ebay_category_id?.trim()" class="text-xs text-muted">
+            Catégorie personnalisée (compte) : {{ s.ebay_category_id }}
+          </p>
+          <p v-else class="text-xs text-muted">
+            Catégorie par défaut (eBay France, application) : {{ s.ebay_default_category_id }}
+          </p>
+
+          <UButton
+            :loading="onboardingLoading"
+            icon="i-lucide-wand-sparkles"
+            @click="submitOnboarding"
+          >
+            Créer mes réglages eBay automatiquement
+          </UButton>
         </div>
       </UCard>
 
-      <UCard v-else>
+      <UCard v-else-if="s.ebay_enabled && !s.ebay_connected">
         <p class="text-sm text-muted">
-          Activez eBay ci-dessus pour configurer la connexion et l’annonce.
+          Connectez votre compte eBay ci-dessus pour lancer l’assistant.
         </p>
-        <UButton class="mt-4" :loading="saving" @click="save">
-          Enregistrer les canaux
-        </UButton>
+      </UCard>
+
+      <UCard v-else-if="!s.ebay_enabled">
+        <p class="text-sm text-muted">
+          Activez eBay dans « Canaux » pour configurer la vente sur eBay France.
+        </p>
       </UCard>
     </template>
   </div>

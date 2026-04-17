@@ -7,8 +7,8 @@ class SettingsResponse(BaseModel):
     ebay_enabled: bool
     ebay_marketplace_id: str
     ebay_category_id: str | None
-    #: Instance default from ``EBAY_DEFAULT_CATEGORY_ID`` (read-only); used when ``ebay_category_id`` is empty.
-    ebay_default_category_id: str | None
+    #: Défaut application eBay France (read-only) ; utilisé quand ``ebay_category_id`` est vide.
+    ebay_default_category_id: str
     ebay_merchant_location_key: str | None
     ebay_fulfillment_policy_id: str | None
     ebay_payment_policy_id: str | None

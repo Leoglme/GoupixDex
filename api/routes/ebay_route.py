@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from config import get_settings
+from config import EBAY_FR_DEFAULT_LEAF_CATEGORY_ID, get_settings
 from core.database import get_db
 from core.deps import get_current_user
 from core.security import decrypt_ebay_token, store_ebay_token
@@ -28,6 +28,7 @@ from services.ebay_seller_metadata_service import (
     fetch_return_policies,
     opt_in_selling_policy_management,
 )
+from services.ebay_onboarding_service import run_ebay_onboarding
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
 
 router = APIRouter(prefix="/ebay", tags=["ebay"])
@@ -35,6 +36,18 @@ router = APIRouter(prefix="/ebay", tags=["ebay"])
 
 class EbayCodeBody(BaseModel):
     code: str = Field(min_length=4, max_length=4096)
+
+
+class EbayOnboardingBody(BaseModel):
+    """Address used to register the default inventory location (France)."""
+
+    location_name: str = Field(default="Domicile", max_length=64)
+    phone: str = Field(..., min_length=6, max_length=32)
+    address_line1: str = Field(..., min_length=1, max_length=180)
+    address_line2: str | None = Field(default=None, max_length=180)
+    city: str = Field(..., min_length=1, max_length=80)
+    postal_code: str = Field(..., min_length=4, max_length=12)
+    country: str = Field(default="FR", max_length=2)
 
 
 def _settings_public_row(db: Session, user: User) -> dict[str, Any]:
@@ -47,7 +60,7 @@ def _settings_public_row(db: Session, user: User) -> dict[str, Any]:
         "ebay_enabled": bool(ms.ebay_enabled),
         "ebay_marketplace_id": ms.ebay_marketplace_id,
         "ebay_category_id": ms.ebay_category_id,
-        "ebay_default_category_id": app.ebay_default_category_id or None,
+        "ebay_default_category_id": EBAY_FR_DEFAULT_LEAF_CATEGORY_ID,
         "ebay_merchant_location_key": ms.ebay_merchant_location_key,
         "ebay_fulfillment_policy_id": ms.ebay_fulfillment_policy_id,
         "ebay_payment_policy_id": ms.ebay_payment_policy_id,
@@ -138,6 +151,42 @@ def ebay_status(
 ) -> dict[str, Any]:
     """Connection + listing readiness (no secrets)."""
     return _settings_public_row(db, user)
+
+
+@router.post("/onboarding/setup", status_code=status.HTTP_200_OK)
+async def ebay_onboarding_setup(
+    body: EbayOnboardingBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Create default EBAY_FR inventory location + business policies when missing, then save IDs on the user settings row.
+    Requires OAuth and ``sell.account`` / ``sell.inventory`` scopes. La catégorie feuille France est fixée dans l’application.
+    """
+    if not decrypt_ebay_token(user.ebay_refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect eBay first (OAuth).",
+        )
+    ms = get_or_create_user_settings(db, user.id)
+    try:
+        return await run_ebay_onboarding(
+            db,
+            user,
+            ms,
+            location_name=body.location_name.strip(),
+            phone=body.phone.strip(),
+            address_line1=body.address_line1.strip(),
+            address_line2=body.address_line2.strip() if body.address_line2 else None,
+            city=body.city.strip(),
+            postal_code=body.postal_code.strip(),
+            country=body.country.strip().upper() or "FR",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/seller-setup")

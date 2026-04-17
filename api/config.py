@@ -19,6 +19,11 @@ class AppConfig(TypedDict):
     package_size: VintedPackageSize
 
 
+#: Catégorie feuille eBay France (EBAY_FR) pour cartes JCC / Pokémon à l’unité (Inventory API).
+#: À ajuster si la taxonomie eBay évolue ; vérifier via l’API Taxonomy pour ``EBAY_FR``.
+EBAY_FR_DEFAULT_LEAF_CATEGORY_ID = "183454"
+
+
 config: AppConfig = {
     "category_path": [
         "Loisirs et collections",
@@ -74,9 +79,9 @@ class AppSettings(BaseSettings):
     ebay_redirect_uri: str | None = None
     #: Use sandbox API hosts (``auth.sandbox.ebay.com``, ``api.sandbox.ebay.com``).
     ebay_use_sandbox: bool = True
-    #: Default eBay leaf category ID for offers when the user leaves the field empty (instance-wide).
-    #: Still overridable per user in settings. Must match the marketplace (e.g. EBAY_FR taxonomy).
-    ebay_default_category_id: str | None = None
+    #: Default shipping carrier / service for auto-created fulfillment policy (EBAY_FR). Must match eBay enums.
+    ebay_fr_fulfillment_carrier_code: str = "Colissimo"
+    ebay_fr_fulfillment_service_code: str = "FR_ColiposteColissimo"
 
 
 @lru_cache

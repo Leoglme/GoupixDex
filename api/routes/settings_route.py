@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from config import get_settings
+from config import EBAY_FR_DEFAULT_LEAF_CATEGORY_ID, get_settings
 from core.database import get_db
 from core.deps import get_current_user
 from core.security import decrypt_ebay_token
@@ -28,7 +28,7 @@ def _to_response(db: Session, user: User) -> SettingsResponse:
         ebay_enabled=bool(s.ebay_enabled),
         ebay_marketplace_id=s.ebay_marketplace_id,
         ebay_category_id=s.ebay_category_id,
-        ebay_default_category_id=(get_settings().ebay_default_category_id or None),
+        ebay_default_category_id=EBAY_FR_DEFAULT_LEAF_CATEGORY_ID,
         ebay_merchant_location_key=s.ebay_merchant_location_key,
         ebay_fulfillment_policy_id=s.ebay_fulfillment_policy_id,
         ebay_payment_policy_id=s.ebay_payment_policy_id,

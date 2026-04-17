@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from config import get_settings
+from config import EBAY_FR_DEFAULT_LEAF_CATEGORY_ID
 from models.margin_settings import MarginSettings
 
 
@@ -19,11 +19,11 @@ def get_or_create_user_settings(db: Session, user_id: int) -> MarginSettings:
 
 
 def effective_ebay_category_id(ms: MarginSettings) -> str:
-    """User override if set, otherwise ``EBAY_DEFAULT_CATEGORY_ID`` from the environment."""
+    """Surcharge utilisateur si renseignée, sinon catégorie feuille France intégrée à l’application."""
     user_cat = (ms.ebay_category_id or "").strip()
     if user_cat:
         return user_cat
-    return (get_settings().ebay_default_category_id or "").strip()
+    return EBAY_FR_DEFAULT_LEAF_CATEGORY_ID.strip()
 
 
 def ebay_listing_config_complete(ms: MarginSettings) -> bool:

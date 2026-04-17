@@ -37,7 +37,8 @@ Ajoutez dans `api/.env` (voir `api/.env.example`) :
 | `EBAY_CLIENT_SECRET` | Cert ID (Client Secret). |
 | `EBAY_REDIRECT_URI` | **Exactement** la même URL que *Your auth accepted URL* (ex. `https://.../settings/marketplaces`). |
 | `EBAY_USE_SANDBOX` | `true` pour `auth.sandbox.ebay.com` / `api.sandbox.ebay.com`, `false` pour la production. |
-| `EBAY_DEFAULT_CATEGORY_ID` | *(Optionnel)* ID de catégorie feuille pour le marketplace ciblé. Si renseigné, les utilisateurs peuvent laisser la catégorie vide dans l’app ; la valeur utilisateur reste prioritaire. |
+| `EBAY_FR_FULFILLMENT_CARRIER_CODE` | *(Optionnel, défaut `Colissimo`)* Transporteur pour la politique d’expédition créée automatiquement. |
+| `EBAY_FR_FULFILLMENT_SERVICE_CODE` | *(Optionnel, défaut `FR_ColiposteColissimo`)* Code service d’affranchissement ; à ajuster si eBay renvoie une erreur sur la création de politique. |
 
 Redémarrez l’API après modification.
 
@@ -46,10 +47,10 @@ Redémarrez l’API après modification.
 1. **Paramètres → Marketplace** : activez **eBay**, enregistrez si besoin.
 2. Cliquez **Se connecter à eBay** : redirection vers la page de consentement eBay.
 3. Après acceptation, eBay renvoie vers `/settings/marketplaces?code=...&state=...` : le front envoie le `code` au backend (`POST /ebay/oauth/exchange`), qui stocke les jetons (chiffrés) sur l’utilisateur.
-4. Choisissez **l’emplacement d’expédition** et les **trois politiques** (expédition, paiement, retours) dans les listes proposées après connexion (données lues sur votre compte eBay). Si une liste est vide, créez d’abord l’emplacement / les politiques dans l’espace vendeur eBay.
-5. **Catégorie** : soit renseignée par l’administrateur dans `EBAY_DEFAULT_CATEGORY_ID`, soit saisie (override) dans l’interface. Sans catégorie effective (ni défaut ni champ utilisateur), la publication reste bloquée.
+4. **Assistant** : après connexion, l’app propose de saisir **l’adresse d’expédition** puis appelle `POST /ebay/onboarding/setup`, qui inscrit le compte aux politiques métier si besoin, crée un **emplacement inventaire** et des **politiques** par défaut (eBay France) lorsqu’ils manquent, et enregistre les IDs côté GoupixDex. Aucune configuration manuelle sur ebay.fr n’est nécessaire dans le flux normal.
+5. **Catégorie** : l’ID de catégorie feuille pour les annonces (cartes JCC / Pokémon à l’unité sur **eBay France**) est défini dans le code (`EBAY_FR_DEFAULT_LEAF_CATEGORY_ID` dans `api/config.py`). Une valeur différente peut encore être enregistrée par utilisateur dans `ebay_category_id` si besoin.
 
-Sans emplacement ni politiques, la publication est ignorée avec un message explicite.
+Si la création automatique de la politique d’**expédition** échoue (service postal invalide), ajustez `EBAY_FR_FULFILLMENT_CARRIER_CODE` et `EBAY_FR_FULFILLMENT_SERVICE_CODE` (valeurs attendues par eBay pour `EBAY_FR`).
 
 ## 6. Images et sandbox
 
