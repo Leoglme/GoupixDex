@@ -1,142 +1,142 @@
-name: Desktop build & release (Tauri)
+# name: Desktop build & release (Tauri)
 
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - '.github/workflows/desktop-release.yml'
-  workflow_dispatch:
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - 'web/**'
+#       - '.github/workflows/desktop-release.yml'
+#   workflow_dispatch:
 
-concurrency:
-  group: goupixdex-desktop-${{ github.ref }}
-  cancel-in-progress: true
+# concurrency:
+#   group: goupixdex-desktop-${{ github.ref }}
+#   cancel-in-progress: true
 
-jobs:
-  build-desktop:
-    name: Build desktop (${{ matrix.platform }})
-    # Évite l'avertissement « actions JS sur Node 20 » (passage Node 24 côté runner GitHub).
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
-          - platform: macos-latest
-            args: --target aarch64-apple-darwin
-          - platform: windows-latest
-            args: ""
-    runs-on: ${{ matrix.platform }}
+# jobs:
+#   build-desktop:
+#     name: Build desktop (${{ matrix.platform }})
+#     # Évite l'avertissement « actions JS sur Node 20 » (passage Node 24 côté runner GitHub).
+#     env:
+#       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+#     permissions:
+#       contents: write
+#     strategy:
+#       fail-fast: false
+#       matrix:
+#         include:
+#           - platform: macos-latest
+#             args: --target x86_64-apple-darwin
+#           - platform: macos-latest
+#             args: --target aarch64-apple-darwin
+#           - platform: windows-latest
+#             args: ""
+#     runs-on: ${{ matrix.platform }}
 
-    defaults:
-      run:
-        working-directory: web
+#     defaults:
+#       run:
+#         working-directory: web
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v6
+#         with:
+#           node-version: '24'
+#           cache: npm
+#           cache-dependency-path: web/package-lock.json
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10
+#       - name: Install pnpm
+#         uses: pnpm/action-setup@v5
+#         with:
+#           version: 10
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+#       - name: Install Rust stable
+#         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install macOS Rust targets
-        if: startsWith(matrix.platform, 'macos')
-        run: |
-          rustup target add aarch64-apple-darwin
-          rustup target add x86_64-apple-darwin
+#       - name: Install macOS Rust targets
+#         if: startsWith(matrix.platform, 'macos')
+#         run: |
+#           rustup target add aarch64-apple-darwin
+#           rustup target add x86_64-apple-darwin
 
-      - name: Install frontend dependencies
-        run: npm ci
+#       - name: Install frontend dependencies
+#         run: npm ci
 
-      # Version unique par run CI (semver patch = run_number) pour futur updater / traçabilité des builds.
-      - name: Set desktop version for this release
-        shell: bash
-        working-directory: web
-        env:
-          RELEASE_VERSION: 0.1.${{ github.run_number }}
-          UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
-          UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-        run: |
-          if [ -z "$UPDATER_PUBKEY" ]; then
-            echo "Secret TAURI_UPDATER_PUBKEY manquant."
-            exit 1
-          fi
+#       # Version unique par run CI (semver patch = run_number) pour futur updater / traçabilité des builds.
+#       - name: Set desktop version for this release
+#         shell: bash
+#         working-directory: web
+#         env:
+#           RELEASE_VERSION: 0.1.${{ github.run_number }}
+#           UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+#           UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+#         run: |
+#           if [ -z "$UPDATER_PUBKEY" ]; then
+#             echo "Secret TAURI_UPDATER_PUBKEY manquant."
+#             exit 1
+#           fi
 
-          python3 << 'PY'
-          import json, os, re
-          version = os.environ["RELEASE_VERSION"]
-          updater_endpoint = os.environ["UPDATER_ENDPOINT"]
-          updater_pubkey = os.environ["UPDATER_PUBKEY"]
-          os.chdir("src-tauri")
-          with open("Cargo.toml", encoding="utf-8") as f:
-              lines = f.read().splitlines(keepends=True)
-          in_package = False
-          out = []
-          for line in lines:
-              s = line.strip()
-              if s == "[package]":
-                  in_package = True
-              elif s.startswith("[") and s != "[package]":
-                  in_package = False
-              if in_package and re.match(r"^version\s*=\s*", line):
-                  line = f'version = "{version}"\n'
-              out.append(line)
-          with open("Cargo.toml", "w", encoding="utf-8") as f:
-              f.writelines(out)
-          with open("tauri.conf.json", encoding="utf-8") as f:
-              conf = json.load(f)
-          conf["version"] = version
-          conf.setdefault("bundle", {})
-          conf["bundle"]["createUpdaterArtifacts"] = True
-          conf.setdefault("plugins", {})
-          conf["plugins"]["updater"] = {
-              "endpoints": [updater_endpoint],
-              "pubkey": updater_pubkey
-          }
-          with open("tauri.conf.json", "w", encoding="utf-8") as f:
-              json.dump(conf, f, indent=2, ensure_ascii=False)
-              f.write("\n")
-          print(f"Desktop version set to {version}")
-          PY
+#           python3 << 'PY'
+#           import json, os, re
+#           version = os.environ["RELEASE_VERSION"]
+#           updater_endpoint = os.environ["UPDATER_ENDPOINT"]
+#           updater_pubkey = os.environ["UPDATER_PUBKEY"]
+#           os.chdir("src-tauri")
+#           with open("Cargo.toml", encoding="utf-8") as f:
+#               lines = f.read().splitlines(keepends=True)
+#           in_package = False
+#           out = []
+#           for line in lines:
+#               s = line.strip()
+#               if s == "[package]":
+#                   in_package = True
+#               elif s.startswith("[") and s != "[package]":
+#                   in_package = False
+#               if in_package and re.match(r"^version\s*=\s*", line):
+#                   line = f'version = "{version}"\n'
+#               out.append(line)
+#           with open("Cargo.toml", "w", encoding="utf-8") as f:
+#               f.writelines(out)
+#           with open("tauri.conf.json", encoding="utf-8") as f:
+#               conf = json.load(f)
+#           conf["version"] = version
+#           conf.setdefault("bundle", {})
+#           conf["bundle"]["createUpdaterArtifacts"] = True
+#           conf.setdefault("plugins", {})
+#           conf["plugins"]["updater"] = {
+#               "endpoints": [updater_endpoint],
+#               "pubkey": updater_pubkey
+#           }
+#           with open("tauri.conf.json", "w", encoding="utf-8") as f:
+#               json.dump(conf, f, indent=2, ensure_ascii=False)
+#               f.write("\n")
+#           print(f"Desktop version set to {version}")
+#           PY
 
-      - name: Sync Cargo.lock for new desktop version
-        working-directory: web/src-tauri
-        run: cargo update -p goupixdex-desktop
+#       - name: Sync Cargo.lock for new desktop version
+#         working-directory: web/src-tauri
+#         run: cargo update -p goupixdex-desktop
 
-      - name: Build and publish desktop artifacts
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
-          NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: web
-          tagName: v0.1.${{ github.run_number }}
-          releaseName: "GoupixDex Desktop v0.1.${{ github.run_number }}"
-          releaseBody: |
-            Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).
+#       - name: Build and publish desktop artifacts
+#         uses: tauri-apps/tauri-action@v0
+#         env:
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#           NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
+#           NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
+#           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+#           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+#         with:
+#           projectPath: web
+#           tagName: v0.1.${{ github.run_number }}
+#           releaseName: "GoupixDex Desktop v0.1.${{ github.run_number }}"
+#           releaseBody: |
+#             Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).
 
-            Installeurs : voir les assets de cette version (.exe, .msi, .dmg).
+#             Installeurs : voir les assets de cette version (.exe, .msi, .dmg).
 
-            **Version appli :** `0.1.${{ github.run_number }}` (semver patch = numéro de run GitHub Actions, unique à chaque build sur `main`).
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+#             **Version appli :** `0.1.${{ github.run_number }}` (semver patch = numéro de run GitHub Actions, unique à chaque build sur `main`).
+#           releaseDraft: false
+#           prerelease: false
+#           args: ${{ matrix.args }}
