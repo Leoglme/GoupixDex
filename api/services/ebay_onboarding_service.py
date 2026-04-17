@@ -130,18 +130,13 @@ async def _create_fulfillment_policy_fr(token: str, *, app: AppSettings | None =
 async def _create_payment_policy_fr(token: str, *, app: AppSettings | None = None) -> str:
     s = app or get_settings()
     root = _api_base_url(s)
-    # EBAY_FR exige ``brands`` dès que ``paymentMethodType`` vaut CREDIT_CARD (sinon 20401).
+    # Paiements gérés par eBay (Managed Payments) : ne pas envoyer ``paymentMethods`` / cartes.
+    # Les marques CREDIT_CARD provoquent 20403 PAYMENT_METHOD_NOT_ALLOWED en prod FR.
     payload: dict[str, Any] = {
         "name": "GoupixDex — Paiement",
         "marketplaceId": MARKETPLACE_FR,
         "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
         "immediatePay": True,
-        "paymentMethods": [
-            {
-                "paymentMethodType": "CREDIT_CARD",
-                "brands": ["VISA", "MASTERCARD", "AMERICAN_EXPRESS", "DISCOVER"],
-            }
-        ],
     }
     url = f"{root}/sell/account/v1/payment_policy"
     async with httpx.AsyncClient(timeout=120.0) as client:

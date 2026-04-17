@@ -278,11 +278,17 @@ onMounted(async () => {
             <UFormField label="Adresse ligne 2 (optionnel)" class="sm:col-span-2">
               <UInput v-model="addressLine2" class="w-full" />
             </UFormField>
-            <UFormField label="Ville" required>
-              <UInput v-model="city" class="w-full" />
-            </UFormField>
             <UFormField label="Code postal" required>
-              <UInput v-model="postalCode" class="w-full" />
+              <UInput
+                v-model="postalCode"
+                class="w-full"
+                inputmode="numeric"
+                autocomplete="postal-code"
+                maxlength="12"
+              />
+            </UFormField>
+            <UFormField label="Ville" required>
+              <UInput v-model="city" class="w-full" autocomplete="address-level2" />
             </UFormField>
             <UFormField label="Pays">
               <p class="text-sm text-muted py-2">
