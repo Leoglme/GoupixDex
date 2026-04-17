@@ -63,6 +63,22 @@ def _ebay_condition(app_condition: str) -> str:
     return _CONDITION_TO_EBAY.get(app_condition.strip(), "USED_EXCELLENT")
 
 
+def _ebay_condition_for_category(category_id: str, app_condition: str) -> str:
+    """
+    Pour les catégories cartes TCG avec descripteur « état de la carte », eBay attend l’état article
+    **4000 = USED_VERY_GOOD** (carte non gradée), pas **3000 = USED_EXCELLENT** — sinon erreur 25059
+    à la publication. Voir condition-id-values (trading cards) dans la doc eBay.
+    """
+    if category_id.strip() in _TCG_LEAF_CATEGORY_IDS:
+        c = (app_condition or "").strip()
+        if c in ("Poor", "Played"):
+            return "USED_ACCEPTABLE"
+        if c in ("Good", "Lightly Played"):
+            return "USED_GOOD"
+        return "USED_VERY_GOOD"
+    return _ebay_condition(app_condition)
+
+
 def _card_condition_descriptor_value_id(app_condition: str) -> str:
     """ID valeur du descripteur « Card Condition » (cartes non gradées), voir MIP eBay."""
     key = (app_condition or "").strip()
@@ -170,9 +186,11 @@ async def publish_article_to_ebay(
     price = _listing_price_eur(article)
     price_str = f"{price.quantize(Decimal('0.01'))}"
 
+    category_id = effective_ebay_category_id(ms).strip()
+
     inv_payload: dict[str, Any] = {
         "availability": {"shipToLocationAvailability": {"quantity": 1}},
-        "condition": _ebay_condition(article.condition),
+        "condition": _ebay_condition_for_category(category_id, article.condition),
         "conditionDescription": html.escape((article.condition or "")[:1000]),
         "product": {
             "title": title,
@@ -182,7 +200,6 @@ async def publish_article_to_ebay(
         },
     }
 
-    category_id = effective_ebay_category_id(ms).strip()
     if category_id in _TCG_LEAF_CATEGORY_IDS:
         inv_payload["conditionDescriptors"] = [
             {
