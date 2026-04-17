@@ -12,9 +12,81 @@ from services.ebay_oauth_service import _api_base_url
 
 logger = logging.getLogger(__name__)
 
+# Locale per marketplace (eBay REST request components) for Account API policy calls.
+_MARKETPLACE_LOCALE: dict[str, str] = {
+    "EBAY_US": "en-US",
+    "EBAY_MOTORS_US": "en-US",
+    "EBAY_AT": "de-AT",
+    "EBAY_AU": "en-AU",
+    "EBAY_BE": "fr-BE",
+    "EBAY_CA": "fr-CA",
+    "EBAY_CH": "de-CH",
+    "EBAY_DE": "de-DE",
+    "EBAY_ES": "es-ES",
+    "EBAY_FR": "fr-FR",
+    "EBAY_GB": "en-GB",
+    "EBAY_HK": "zh-HK",
+    "EBAY_IE": "en-IE",
+    "EBAY_IT": "it-IT",
+    "EBAY_MY": "en-US",
+    "EBAY_NL": "nl-NL",
+    "EBAY_PH": "en-PH",
+    "EBAY_PL": "pl-PL",
+    "EBAY_SG": "en-US",
+    "EBAY_TW": "zh-TW",
+}
+
+
+def _marketplace_locale(marketplace_id: str) -> str:
+    return _MARKETPLACE_LOCALE.get(marketplace_id.strip().upper(), "en-US")
+
 
 def _marketplace_header(marketplace_id: str) -> dict[str, str]:
     return {"X-EBAY-C-MARKETPLACE-ID": marketplace_id.strip()}
+
+
+def _account_api_headers(access_token: str, marketplace_id: str) -> dict[str, str]:
+    loc = _marketplace_locale(marketplace_id)
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Content-Language": loc,
+        "Accept-Language": loc,
+        **_marketplace_header(marketplace_id),
+    }
+
+
+async def opt_in_selling_policy_management(access_token: str, *, app: AppSettings | None = None) -> None:
+    """
+    Opt seller into Business Policies (SELLING_POLICY_MANAGEMENT).
+    Fixes "User is not eligible for Business Policy" on getFulfillmentPolicies; eBay may take up to ~24h
+    to process (see getOptedInPrograms).
+    """
+    s = app or get_settings()
+    root = _api_base_url(s)
+    url = f"{root}/sell/account/v1/program/opt_in"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            url,
+            json={"programType": "SELLING_POLICY_MANAGEMENT"},
+            headers=headers,
+        )
+    if resp.status_code == 200:
+        logger.info("eBay opt_in SELLING_POLICY_MANAGEMENT: OK")
+        return
+    if resp.status_code in (409, 400):
+        logger.info(
+            "eBay opt_in SELLING_POLICY_MANAGEMENT: %s %s (often already opted in or pending)",
+            resp.status_code,
+            resp.text[:400],
+        )
+        return
+    logger.warning("eBay opt_in SELLING_POLICY_MANAGEMENT: %s %s", resp.status_code, resp.text[:500])
 
 
 async def fetch_inventory_locations(access_token: str, *, app: AppSettings | None = None) -> list[dict[str, Any]]:
@@ -57,11 +129,7 @@ async def fetch_fulfillment_policies(
     s = app or get_settings()
     root = _api_base_url(s)
     url = f"{root}/sell/account/v1/fulfillment_policy"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        **_marketplace_header(marketplace_id),
-    }
+    headers = _account_api_headers(access_token, marketplace_id)
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(url, params={"marketplace_id": marketplace_id}, headers=headers)
     if resp.status_code >= 400:
@@ -85,11 +153,7 @@ async def fetch_payment_policies(
     s = app or get_settings()
     root = _api_base_url(s)
     url = f"{root}/sell/account/v1/payment_policy"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        **_marketplace_header(marketplace_id),
-    }
+    headers = _account_api_headers(access_token, marketplace_id)
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(url, params={"marketplace_id": marketplace_id}, headers=headers)
     if resp.status_code >= 400:
@@ -113,11 +177,7 @@ async def fetch_return_policies(
     s = app or get_settings()
     root = _api_base_url(s)
     url = f"{root}/sell/account/v1/return_policy"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        **_marketplace_header(marketplace_id),
-    }
+    headers = _account_api_headers(access_token, marketplace_id)
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(url, params={"marketplace_id": marketplace_id}, headers=headers)
     if resp.status_code >= 400:

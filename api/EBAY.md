@@ -67,4 +67,5 @@ Sans emplacement ni politiques, la publication est ignorée avec un message expl
 ## 8. Dépannage rapide
 
 - **Erreur à l’échange de code** : `redirect_uri` différent de celui enregistré chez eBay, ou `code` déjà consommé / expiré (les codes sont à usage unique et très courts).
+- **« User is not eligible for Business Policy »** (logs : erreur 20403 sur `fulfillment_policy`) : le compte doit être inscrit au programme **politiques métier**. L’API appelle automatiquement [`optInToProgram`](https://developer.ebay.com/api-docs/sell/account/resources/program/methods/optInToProgram) avec `SELLING_POLICY_MANAGEMENT` avant de charger les politiques ; eBay peut mettre **jusqu’à ~24 h** à activer — réessayez plus tard ou vérifiez avec `getOptedInPrograms`.
 - **Erreur à la publication** : catégorie incorrecte, politiques incompatibles avec le marketplace, ou **descripteurs d’état** obligatoires pour certaines catégories cartes — consultez les messages d’erreur dans les logs API (`ebay_body`).

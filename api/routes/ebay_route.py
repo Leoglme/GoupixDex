@@ -26,6 +26,7 @@ from services.ebay_seller_metadata_service import (
     fetch_inventory_locations,
     fetch_payment_policies,
     fetch_return_policies,
+    opt_in_selling_policy_management,
 )
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
 
@@ -158,6 +159,7 @@ async def ebay_seller_setup(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     mp = (marketplace_id or ms.ebay_marketplace_id or "EBAY_FR").strip()
     try:
+        await opt_in_selling_policy_management(token)
         locations = await fetch_inventory_locations(token)
         fulfillment = await fetch_fulfillment_policies(token, mp)
         payment = await fetch_payment_policies(token, mp)
