@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Flow orchestration: scan → form → Vinted → stats → sale.
+ * Flow orchestration: scan → form → publication (Vinted/eBay) → stats → sale.
  * Step click: show the matching animation and restart auto-advance.
  */
 type FlowStep = 'scan' | 'form' | 'list' | 'stats' | 'sale'
@@ -9,7 +9,8 @@ const STEPS: FlowStep[] = ['scan', 'form', 'list', 'stats', 'sale']
 const DURATION_MS: Record<FlowStep, number> = {
   scan: 2200,
   form: 3000,
-  list: 2100,
+  /** Vinted ↔ eBay card alternation (~3.2 s per phase); allow at least one full cycle */
+  list: 7000,
   stats: 2400,
   sale: 2200
 }
@@ -25,7 +26,7 @@ const currentStep = computed(() => STEPS[stepIndex.value])
 const stepLabel: Record<FlowStep, string> = {
   scan: 'Scan carte',
   form: 'Remplissage auto',
-  list: 'Publication Vinted',
+  list: 'Publication',
   stats: 'Stats & marges',
   sale: 'Carte vendue'
 }
@@ -196,7 +197,7 @@ onBeforeUnmount(() => {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <FlowListStep
+        <FlowPublishLoopStep
           v-if="currentStep === 'list'"
           :reduce-motion="reduceMotion"
         />

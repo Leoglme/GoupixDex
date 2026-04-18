@@ -215,7 +215,7 @@ async function applyWardrobeSessionImport() {
     }
     toast.add({
       title: 'Import Vinted',
-      description: `${slots.length} fiche(s) préremplie(s). Vérifiez le prix d’achat puis créez les articles.`,
+      description: `${slots.length} fiche(s) préremplie(s). Vérifiez le prix d'achat puis créez les articles.`,
       color: 'success'
     })
   } catch (e) {
@@ -432,7 +432,7 @@ async function submitAll() {
             </p>
             <UCheckbox
               v-model="batchEbay"
-              label="Lancer la publication eBay en file après création (API, une annonce après l’autre)"
+              label="Lancer la publication eBay en file après création (API, une annonce après l'autre)"
             />
             <p class="text-sm text-muted">
               Nécessite eBay connecté et configuré dans

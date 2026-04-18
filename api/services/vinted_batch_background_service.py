@@ -29,7 +29,7 @@ class VintedBatchBackgroundService:
                     {
                         "type": "log",
                         "step": "error",
-                        "message": "Utilisateur introuvable — abandon du lot.",
+                        "message": "User not found — aborting batch.",
                         "form_step": "failed",
                     },
                 )
@@ -59,7 +59,7 @@ class VintedBatchBackgroundService:
                     {
                         "type": "log",
                         "step": "error",
-                        "message": "Aucun article valide (introuvable ou sans image).",
+                        "message": "No valid articles (missing or no images).",
                         "form_step": "failed",
                     },
                 )

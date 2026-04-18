@@ -60,7 +60,7 @@ def article_to_dict(article: Article) -> dict[str, Any]:
 
 def mark_article_published_on_vinted(article_id: int, user_id: int) -> bool:
     """
-    Marque l'article comme publié sur Vinted (session DB courte, adaptée aux tâches longues).
+    Mark the article as published on Vinted (short DB session, suitable for long-running tasks).
     """
     db = SessionLocal()
     try:
@@ -93,7 +93,7 @@ def mark_article_published_on_ebay(article_id: int, user_id: int, listing_id: st
 def delete_articles_by_ids(db: Session, user_id: int, ids: list[int]) -> int:
     """
     Supprime les articles dont l'id est dans ``ids`` et ``user_id`` correspond.
-    Renvoie le nombre de lignes supprimées.
+    Returns the number of deleted rows.
     """
     if not ids:
         return 0

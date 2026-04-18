@@ -43,6 +43,8 @@ export interface CreateArticleEbayResult {
   skipped?: boolean
   detail?: string
   status?: 'running'
+  /** Suivi temps réel (même endpoint SSE que Vinted). */
+  stream_path?: string
 }
 
 export interface CreateArticleResponse {
@@ -75,6 +77,7 @@ export interface EbayBatchStartResponse {
 export interface PublishEbayResponse {
   ebay: {
     status: 'running'
+    stream_path: string
   }
 }
 

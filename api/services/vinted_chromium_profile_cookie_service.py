@@ -30,7 +30,7 @@ class VintedChromiumProfileCookieService:
         legacy = profile_dir / "Default" / "Cookies"
         cookie_db = network if network.is_file() else legacy
         if not cookie_db.is_file():
-            logger.warning("Fichier Cookies Chromium introuvable sous %s", profile_dir)
+            logger.warning("Chromium Cookies file not found under %s", profile_dir)
             return ""
 
         local_state = profile_dir / "Local State"
@@ -39,7 +39,7 @@ class VintedChromiumProfileCookieService:
         try:
             import browser_cookie3 as bc3
         except ImportError:
-            logger.error("browser_cookie3 n'est pas installé.")
+            logger.error("browser_cookie3 is not installed.")
             return ""
 
         try:
@@ -49,7 +49,7 @@ class VintedChromiumProfileCookieService:
                 key_file=key_file,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Lecture cookies profil Chromium : %s", exc)
+            logger.warning("Chromium profile cookie read failed: %s", exc)
             return ""
 
         parts: list[str] = []
@@ -63,5 +63,5 @@ class VintedChromiumProfileCookieService:
                 parts.append(f"{name}={value}")
         header = "; ".join(parts)
         if header:
-            logger.info("Cookies Vinted lus depuis le profil disque (%s entrées).", len(parts))
+            logger.info("Read Vinted cookies from disk profile (%s entries).", len(parts))
         return header

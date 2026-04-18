@@ -141,6 +141,14 @@ async function onSubmitCreate(fd: FormData) {
 
     const ebayNotified = notifyEbayOutcome()
 
+    if (ebay?.status === 'running' && ebay?.stream_path) {
+      await navigateTo({
+        path: '/articles/vinted-logs',
+        query: { article: String(article.id) }
+      })
+      return
+    }
+
     if (vintedSubmit.value) {
       if (vinted.published) {
         toast.add({

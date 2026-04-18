@@ -10,7 +10,7 @@ const props = withDefaults(
     loading?: boolean
     /** Text shown under the button while loading (e.g. waiting on Vinted). */
     loadingHint?: string | null
-    /** Hide the “Publish on Vinted” checkbox (e.g. batch create with a global option). */
+    /** Hide the "Publish on Vinted" checkbox (e.g. batch create with a global option). */
     hideVintedOption?: boolean
     /** Show the form submit button (disable if the parent handles submit). */
     showSubmitButton?: boolean
@@ -375,7 +375,7 @@ function submit() {
         label="Publier sur eBay"
       />
       <p v-if="canPublishEbay" class="text-sm text-muted">
-        Une annonce sera créée sur votre compte eBay France en même temps que l’article. Ajoutez au moins une photo pour la mise en ligne.
+        Une annonce sera créée sur votre compte eBay France en même temps que l'article. Ajoutez au moins une photo pour la mise en ligne.
       </p>
       <p v-else-if="!svcSettings?.ebay_connected" class="text-sm text-muted">
         Connectez votre compte eBay dans
@@ -385,7 +385,7 @@ function submit() {
         pour activer cette option.
       </p>
       <p v-else class="text-sm text-muted">
-        Terminez la configuration eBay (adresse d’expédition et règles automatiques) dans
+        Terminez la configuration eBay (adresse d'expédition et règles automatiques) dans
         <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
           Paramètres → Places de marché
         </NuxtLink>.

@@ -21,6 +21,7 @@ from models.image import Image as ImageModel
 from models.user import User
 from schemas.articles import ArticleUpdate, BulkIdsBody, SoldPatch, VintedBatchStartBody
 from services import article_service
+from services.combined_marketplace_service import CombinedMarketplaceService
 from services.ebay_background_service import EbayBackgroundService
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
 from services.vinted_batch_session_service import VintedBatchSessionService as vinted_batch_hub
@@ -224,7 +225,7 @@ async def vinted_progress_stream(
     db: Annotated[Session, Depends(get_db)],
 ) -> StreamingResponse:
     """
-    SSE stream of Vinted publish steps (JWT via ``Authorization`` or ``?token=``).
+    SSE stream for Vinted and/or eBay publish steps (JWT via ``Authorization`` or ``?token=``).
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -358,6 +359,7 @@ def publish_ebay_for_article(
             detail="Connect eBay (OAuth) first.",
         )
 
+    vinted_progress_hub.register(article_id)
     background_tasks.add_task(
         EbayBackgroundService.run_ebay_publish_job,
         article_id,
@@ -366,6 +368,7 @@ def publish_ebay_for_article(
     return {
         "ebay": {
             "status": "running",
+            "stream_path": f"/articles/{article_id}/vinted-progress",
         },
     }
 
@@ -441,13 +444,35 @@ async def create_article(
     ms = get_or_create_user_settings(db, user.id)
     raw_want_vinted = _form_bool(publish_to_vinted) and not sold_flag
     want_vinted = raw_want_vinted and ms.vinted_enabled
+    raw_want_ebay = _form_bool(publish_to_ebay) and not sold_flag
+
+    stream_path = f"/articles/{article.id}/vinted-progress"
+    want_both_server = (
+        want_vinted
+        and not vinted_local_desktop
+        and raw_want_ebay
+        and ms.ebay_enabled
+        and ebay_listing_config_complete(ms)
+        and bool(decrypt_ebay_token(user.ebay_refresh_token))
+        and any(str(u).startswith("https://") for u in stored_sources)
+    )
 
     if raw_want_vinted and not ms.vinted_enabled:
         vinted_result = {"published": False, "skipped": True, "detail": "vinted_disabled"}
+    elif want_both_server:
+        vinted_progress_hub.register(article.id)
+        background_tasks.add_task(
+            CombinedMarketplaceService.run_vinted_then_ebay,
+            article.id,
+            user.id,
+            stored_sources,
+        )
+        vinted_result = {"status": "running", "stream_path": stream_path}
+        ebay_result = {"status": "running", "stream_path": stream_path}
     elif want_vinted and vinted_local_desktop:
         vinted_result = {
             "status": "pending",
-            "stream_path": f"/articles/{article.id}/vinted-progress",
+            "stream_path": stream_path,
             "desktop_local": True,
         }
     elif want_vinted:
@@ -460,29 +485,30 @@ async def create_article(
         )
         vinted_result = {
             "status": "running",
-            "stream_path": f"/articles/{article.id}/vinted-progress",
+            "stream_path": stream_path,
         }
     else:
         vinted_result = {"published": False, "skipped": True, "detail": "not_requested"}
 
-    raw_want_ebay = _form_bool(publish_to_ebay) and not sold_flag
-    ebay_result: dict[str, Any] = {"published": False, "skipped": True, "detail": "not_requested"}
-    if raw_want_ebay:
-        if not ms.ebay_enabled:
-            ebay_result = {"skipped": True, "detail": "ebay_disabled"}
-        elif not ebay_listing_config_complete(ms):
-            ebay_result = {"skipped": True, "detail": "ebay_listing_config_incomplete"}
-        elif not decrypt_ebay_token(user.ebay_refresh_token):
-            ebay_result = {"skipped": True, "detail": "ebay_not_connected"}
-        elif not any(str(u).startswith("https://") for u in stored_sources):
-            ebay_result = {"skipped": True, "detail": "ebay_requires_https_images"}
-        else:
-            background_tasks.add_task(
-                EbayBackgroundService.run_ebay_publish_job,
-                article.id,
-                user.id,
-            )
-            ebay_result = {"status": "running"}
+    if not want_both_server:
+        ebay_result = {"published": False, "skipped": True, "detail": "not_requested"}
+        if raw_want_ebay:
+            if not ms.ebay_enabled:
+                ebay_result = {"skipped": True, "detail": "ebay_disabled"}
+            elif not ebay_listing_config_complete(ms):
+                ebay_result = {"skipped": True, "detail": "ebay_listing_config_incomplete"}
+            elif not decrypt_ebay_token(user.ebay_refresh_token):
+                ebay_result = {"skipped": True, "detail": "ebay_not_connected"}
+            elif not any(str(u).startswith("https://") for u in stored_sources):
+                ebay_result = {"skipped": True, "detail": "ebay_requires_https_images"}
+            else:
+                vinted_progress_hub.register(article.id)
+                background_tasks.add_task(
+                    EbayBackgroundService.run_ebay_publish_job,
+                    article.id,
+                    user.id,
+                )
+                ebay_result = {"status": "running", "stream_path": stream_path}
 
     return {
         "article": article_service.article_to_dict(article),

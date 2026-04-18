@@ -6,12 +6,12 @@ definePageMeta({
 })
 
 useGoupixPageSeo(
-  'Automatisez vos ventes de cartes Pokémon TCG sur Vinted',
-  'Scannez vos cartes Pokémon TCG, récupérez les prix Cardmarket et TCGPlayer, générez vos annonces et publiez sur Vinted. GoupixDex couvre scan, pricing, stock, marges et suivi des ventes.'
+  'Scannez vos cartes Pokémon — mise en ligne automatisée sur Vinted et eBay | GoupixDex',
+  'Scan photo, prix Cardmarket & TCGPlayer, annonces générées et publication sur Vinted et eBay. Synchronisez aussi votre dressing Vinted (collection, annonces en ligne, ventes) dans votre espace. Tableau de bord et marges.'
 )
 
 useSeoMeta({
-  keywords: 'pokémon tcg, vinted, automatisation, cardmarket, tcgplayer, vente cartes pokémon, scan carte pokémon, prix pokémon, annonce vinted automatique, goupixdex'
+  keywords: 'pokémon tcg, vinted, synchronisation dressing vinted, ebay, automatisation, cardmarket, tcgplayer, vente cartes pokémon, scan carte pokémon, annonce vinted, annonce ebay, goupixdex'
 })
 
 const { isLoggedIn, authResolved } = useAuth()
@@ -21,14 +21,17 @@ const formFill = ref(0)
 const mobileMenuOpen = ref(false)
 
 const heroRef = ref<HTMLElement>()
-const stepsRefs = ref<HTMLElement[]>([])
+const sectionRefs = ref<(HTMLElement | undefined)[]>([])
 const sellingRef = ref<HTMLElement>()
 const ctaRef = ref<HTMLElement>()
 
 let formFillTimers: ReturnType<typeof setTimeout>[] = []
+let gsapMatchMediaRevert: (() => void) | undefined
 
-function setStepRef(el: any, idx: number) {
-  if (el) stepsRefs.value[idx] = el as HTMLElement
+function setSectionRef(el: Element | null, idx: number) {
+  if (el) {
+    sectionRefs.value[idx] = el as HTMLElement
+  }
 }
 
 function startFormFillLoop() {
@@ -69,6 +72,10 @@ onMounted(() => {
   if (reduceMotion.value) return
 
   const mm = gsap.matchMedia()
+  gsapMatchMediaRevert = () => {
+    mm.revert()
+    gsapMatchMediaRevert = undefined
+  }
 
   mm.add('(prefers-reduced-motion: no-preference)', () => {
     if (heroRef.value) {
@@ -88,7 +95,7 @@ onMounted(() => {
       }, 0.1)
     }
 
-    stepsRefs.value.forEach((el) => {
+    sectionRefs.value.forEach((el) => {
       if (!el) return
       const visual = el.querySelector('[data-gsap="visual"]')
       const text = el.querySelector('[data-gsap="text"]')
@@ -138,12 +145,14 @@ onMounted(() => {
       })
     }
   })
+})
 
-  onBeforeUnmount(() => {
-    stopFormFillLoop()
-    mm.revert()
-    ScrollTrigger.getAll().forEach(t => t.kill())
-  })
+onBeforeUnmount(() => {
+  stopFormFillLoop()
+  gsapMatchMediaRevert?.()
+  const { $ScrollTrigger } = useNuxtApp()
+  const ScrollTrigger = $ScrollTrigger as typeof import('gsap/ScrollTrigger')['ScrollTrigger']
+  ScrollTrigger.getAll().forEach(t => t.kill())
 })
 
 const steps = [
@@ -160,31 +169,31 @@ const steps = [
   },
   {
     id: 'form',
-    badge: 'Étape 2',
-    title: 'Annonce Vinted préremplie',
-    desc: 'Titre optimisé, description détaillée, prix conseillé basé sur Cardmarket et marge bénéficiaire : tout est calculé et prérempli. Vous n\'avez plus qu\'à valider.',
+    badge: 'Étape 3',
+    title: 'Annonce préremplie (Vinted & eBay)',
+    desc: 'Titre optimisé, description détaillée, prix conseillé basé sur Cardmarket et marge : tout est calculé et prérempli selon la place de marché visée. Il ne reste plus qu\'à valider.',
     bullets: [
       'Prix basé sur les données Cardmarket',
       'Marge bénéficiaire automatiquement calculée',
-      'Description optimisée pour les acheteurs Vinted'
+      'Textes adaptés à Vinted ou aux exigences eBay'
     ]
   },
   {
     id: 'list',
-    badge: 'Étape 3',
-    title: 'Publication automatique sur Vinted',
-    desc: 'En un clic, votre annonce est publiée sur Vinted avec photos, prix, description et frais de port. Plus de copier-coller entre plateformes.',
+    badge: 'Étape 4',
+    title: 'Publication sur Vinted ou eBay',
+    desc: 'En un clic, votre annonce part sur la plateforme choisie avec photos, prix et description. Fini le copier-coller entre outils et marketplaces.',
     bullets: [
-      'Photos et texte synchronisés automatiquement',
-      'Prix et frais de port appliqués',
-      'Publication instantanée sur Vinted'
+      'Automatisation Vinted (navigateur) ou flux eBay (API)',
+      'Photos et champs alignés avec chaque canal',
+      'Une seule base article pour plusieurs canaux'
     ]
   },
   {
     id: 'stats',
     badge: 'Étape 4',
     title: 'Analytics et suivi des performances',
-    desc: 'Tableau de bord complet avec chiffre d\'affaires, marges par carte, état du stock et évolution des prix Cardmarket. Pilotez votre activité TCG comme un pro.',
+    desc: 'Tableau de bord complet avec chiffre d\'affaires, marges par carte, état du stock et évolution des prix Cardmarket — y compris après import depuis votre dressing Vinted.',
     bullets: [
       'Chiffre d\'affaires et marges en temps réel',
       'Suivi de l\'évolution des prix du marché',
@@ -193,9 +202,9 @@ const steps = [
   },
   {
     id: 'sale',
-    badge: 'Étape 5',
+    badge: 'Étape 6',
     title: 'Vente confirmée, stock mis à jour',
-    desc: 'Dès qu\'un acheteur Vinted confirme, GoupixDex met à jour votre stock, calcule la marge nette et enregistre la transaction dans votre historique.',
+    desc: 'Dès qu\'une vente est confirmée (Vinted ou recoupement avec votre activité), GoupixDex met à jour votre stock, calcule la marge nette et enregistre la transaction.',
     bullets: [
       'Mise à jour du stock automatique',
       'Marge nette calculée par transaction',
@@ -203,6 +212,34 @@ const steps = [
     ]
   }
 ]
+
+const syncLanding = {
+  badge: 'Étape 2',
+  title: 'Synchronisez votre dressing Vinted',
+  desc: "Importez votre collection, vos annonces en ligne et l'historique des ventes pour aligner tableau de bord, stock et marges — sans double saisie.",
+  bullets: [
+    'Connexion entre votre dressing Vinted et GoupixDex',
+    "Vue d'ensemble : pièces, annonces actives et ventes passées",
+    'Base unique pour suivre et publier ensuite sur Vinted ou eBay'
+  ]
+} as const
+
+type StepDef = (typeof steps)[number]
+
+type LandingBlock =
+  | { kind: 'step'; step: StepDef }
+  | { kind: 'sync' }
+
+const landingSections = computed<LandingBlock[]>(() => {
+  const out: LandingBlock[] = []
+  for (const step of steps) {
+    out.push({ kind: 'step', step })
+    if (step.id === 'scan') {
+      out.push({ kind: 'sync' })
+    }
+  }
+  return out
+})
 </script>
 
 <template>
@@ -215,7 +252,7 @@ const steps = [
           class="inline-flex items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-elevated/50"
         >
           <span class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-elevated/60 ring-1 ring-default/40">
-            <img :src="logoUrl" alt="GoupixDex — automatisation vente cartes Pokémon TCG" class="size-7 object-contain" width="28" height="28">
+            <img :src="logoUrl" alt="GoupixDex — cartes Pokémon TCG, Vinted et eBay" class="size-7 object-contain" width="28" height="28">
           </span>
           <span class="text-lg font-semibold tracking-tight text-highlighted">GoupixDex</span>
         </NuxtLink>
@@ -344,8 +381,8 @@ const steps = [
       <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_30%,var(--color-default))]" />
 
       <div class="relative z-10 mx-auto max-w-4xl text-center">
-        <div data-gsap="hero" class="mb-8">
-          <span class="inline-flex items-center gap-2.5 rounded-full border border-primary/25 bg-primary/[0.08] px-5 py-2.5 text-sm font-medium text-primary shadow-sm shadow-primary/5 backdrop-blur-sm">
+        <div data-gsap="hero" class="mb-8 max-sm:mb-0">
+          <span class="hidden items-center gap-2.5 rounded-full border border-primary/25 bg-primary/[0.08] px-5 py-2.5 text-sm font-medium text-primary shadow-sm shadow-primary/5 backdrop-blur-sm sm:inline-flex">
             <span class="relative flex size-2">
               <span class="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
               <span class="relative inline-flex size-2 rounded-full bg-primary" />
@@ -358,8 +395,8 @@ const steps = [
           data-gsap="hero"
           class="text-[32px] font-extrabold leading-[1.28] tracking-tight text-highlighted sm:text-4xl sm:leading-[1.1] lg:text-5xl"
         >
-          Scannez vos cartes Pokémon,<br class="hidden sm:block" aria-hidden="true"><span class="sm:hidden"> </span><span class="bg-linear-to-r from-primary via-secondary-500 to-primary bg-[length:200%_auto] bg-clip-text text-transparent">
-            vendez sur Vinted automatiquement
+          Scannez vos cartes Pokémon,<br class="hidden sm:block" aria-hidden="true"><span class="sm:hidden"> </span>          <span class="bg-linear-to-r from-primary via-secondary-500 to-primary bg-[length:200%_auto] bg-clip-text text-transparent">
+            mise en ligne automatisée sur Vinted &amp; eBay
           </span>
         </h1>
 
@@ -367,10 +404,10 @@ const steps = [
           data-gsap="hero"
           class="mx-auto mt-9 max-w-2xl text-base leading-relaxed text-muted sm:mt-6 sm:text-lg"
         >
-          GoupixDex automatise tout le processus : scan de vos cartes TCG, récupération des prix
-          <strong class="text-highlighted">Cardmarket</strong> et <strong class="text-highlighted">TCGPlayer</strong>,
-          génération d'annonces optimisées et publication directe sur
-          <strong class="text-highlighted">Vinted</strong>.
+          Importez votre dressing <strong class="text-highlighted">Vinted</strong> ou scannez vos cartes :
+          <strong class="text-highlighted">GoupixDex</strong> automatise la récupération des prix
+          <strong class="text-highlighted">Cardmarket</strong>, la génération d'annonces optimisées et la publication sur
+          <strong class="text-highlighted">Vinted</strong> et <strong class="text-highlighted">eBay</strong>.
         </p>
 
         <div
@@ -420,10 +457,10 @@ const steps = [
       </div>
     </section>
 
-    <!-- Step sections -->
-    <template v-for="(step, idx) in steps" :key="step.id">
+    <!-- Step sections (+ sync after scan) -->
+    <template v-for="(block, idx) in landingSections" :key="block.kind === 'sync' ? 'landing-sync' : block.step.id">
       <section
-        :ref="(el) => setStepRef(el, idx)"
+        :ref="(el) => setSectionRef(el, idx)"
         :data-reverse="idx % 2 === 1"
         class="relative border-t border-default/40 px-5 py-20 sm:px-8 sm:py-28 lg:py-32"
         :class="idx % 2 === 0 ? 'bg-default' : 'bg-elevated/20'"
@@ -453,24 +490,30 @@ const steps = [
 
               <div class="relative overflow-hidden rounded-xl border border-default/50 bg-elevated/70 shadow-2xl shadow-default/20 ring-1 ring-default/30">
                 <div class="relative min-h-[20rem] w-full sm:min-h-[24rem]">
-                  <FlowScanStep
-                    v-if="step.id === 'scan'"
-                    :reduce-motion="reduceMotion"
-                  />
-                  <FlowFormStep
-                    v-if="step.id === 'form'"
-                    :form-fill="formFill"
-                  />
-                  <FlowListStep
-                    v-if="step.id === 'list'"
-                    :reduce-motion="reduceMotion"
-                  />
-                  <FlowStatsStep
-                    v-if="step.id === 'stats'"
-                    :reduce-motion="reduceMotion"
-                  />
-                  <FlowSaleStep
-                    v-if="step.id === 'sale'"
+                  <template v-if="block.kind === 'step'">
+                    <FlowScanStep
+                      v-if="block.step.id === 'scan'"
+                      :reduce-motion="reduceMotion"
+                    />
+                    <FlowFormStep
+                      v-if="block.step.id === 'form'"
+                      :form-fill="formFill"
+                    />
+                    <FlowPublishLoopStep
+                      v-if="block.step.id === 'list'"
+                      :reduce-motion="reduceMotion"
+                    />
+                    <FlowStatsStep
+                      v-if="block.step.id === 'stats'"
+                      :reduce-motion="reduceMotion"
+                    />
+                    <FlowSaleStep
+                      v-if="block.step.id === 'sale'"
+                      :reduce-motion="reduceMotion"
+                    />
+                  </template>
+                  <FlowSyncStep
+                    v-else
                     :reduce-motion="reduceMotion"
                   />
                 </div>
@@ -483,27 +526,52 @@ const steps = [
             data-gsap="text"
             class="lg:[direction:ltr]"
           >
-            <span class="inline-flex items-center rounded-full bg-primary/10 px-4 py-1.5 text-xs font-semibold tracking-wide text-primary ring-1 ring-primary/20">
-              {{ step.badge }}
-            </span>
-            <h2 class="mt-6 text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
-              {{ step.title }}
-            </h2>
-            <p class="mt-5 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
-              {{ step.desc }}
-            </p>
-            <ul class="mt-8 space-y-4">
-              <li
-                v-for="bullet in step.bullets"
-                :key="bullet"
-                class="flex items-start gap-3 text-sm text-muted sm:text-base"
-              >
-                <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
-                  <UIcon name="i-lucide-check" class="size-3.5" />
-                </span>
-                {{ bullet }}
-              </li>
-            </ul>
+            <template v-if="block.kind === 'sync'">
+              <span class="inline-flex items-center rounded-full bg-primary/10 px-4 py-1.5 text-xs font-semibold tracking-wide text-primary ring-1 ring-primary/20">
+                {{ syncLanding.badge }}
+              </span>
+              <h2 class="mt-6 text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
+                {{ syncLanding.title }}
+              </h2>
+              <p class="mt-5 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
+                {{ syncLanding.desc }}
+              </p>
+              <ul class="mt-8 space-y-4">
+                <li
+                  v-for="bullet in syncLanding.bullets"
+                  :key="bullet"
+                  class="flex items-start gap-3 text-sm text-muted sm:text-base"
+                >
+                  <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+                    <UIcon name="i-lucide-check" class="size-3.5" />
+                  </span>
+                  {{ bullet }}
+                </li>
+              </ul>
+            </template>
+            <template v-else>
+              <span class="inline-flex items-center rounded-full bg-primary/10 px-4 py-1.5 text-xs font-semibold tracking-wide text-primary ring-1 ring-primary/20">
+                {{ block.step.badge }}
+              </span>
+              <h2 class="mt-6 text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
+                {{ block.step.title }}
+              </h2>
+              <p class="mt-5 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
+                {{ block.step.desc }}
+              </p>
+              <ul class="mt-8 space-y-4">
+                <li
+                  v-for="bullet in block.step.bullets"
+                  :key="bullet"
+                  class="flex items-start gap-3 text-sm text-muted sm:text-base"
+                >
+                  <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+                    <UIcon name="i-lucide-check" class="size-3.5" />
+                  </span>
+                  {{ bullet }}
+                </li>
+              </ul>
+            </template>
           </div>
         </div>
       </section>
@@ -525,8 +593,8 @@ const steps = [
             Un flux de vente continu
           </h2>
           <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted sm:text-lg">
-            De la pile de cartes à la vente Vinted, chaque carte passe par le scan, le pricing Cardmarket
-            et la publication — puis est marquée vendue automatiquement.
+            Du scan à la vente sur Vinted ou eBay, chaque carte suit le même fil : pricing Cardmarket,
+            publication sur la marketplace choisie, puis mise à jour du stock lorsque la vente est connue.
           </p>
         </div>
 
@@ -536,10 +604,10 @@ const steps = [
             <div class="grid gap-5 sm:grid-cols-2">
               <div
                 v-for="item in [
-                  { icon: 'i-lucide-layers', title: 'Gestion du stock', desc: 'Chaque carte est tracée de l\'entrée en stock à la vente finale sur Vinted.' },
-                  { icon: 'i-lucide-badge-check', title: 'Marquage automatique', desc: 'Overlay « Vendu » en temps réel dès que la transaction Vinted est confirmée.' },
-                  { icon: 'i-lucide-calculator', title: 'Calcul des marges', desc: 'Prix d\'achat, prix Cardmarket, frais Vinted : la marge nette est calculée automatiquement.' },
-                  { icon: 'i-lucide-repeat', title: 'Rotation continue', desc: 'Scannez de nouvelles cartes TCG, elles intègrent le flux de vente automatiquement.' }
+                  { icon: 'i-lucide-refresh-cw', title: 'Dressing Vinted à jour', desc: 'Import catalogue, annonces actives et ventes passées pour aligner GoupixDex sur votre activité réelle.' },
+                  { icon: 'i-lucide-layers', title: 'Gestion du stock', desc: 'Chaque carte est suivie du scan à la vente, avec une vision unique sur Vinted et eBay.' },
+                  { icon: 'i-lucide-badge-check', title: 'Marquage automatique', desc: 'État « vendu » dès que la transaction est confirmée côté Vinted ou recoupée avec vos données.' },
+                  { icon: 'i-lucide-calculator', title: 'Calcul des marges', desc: 'Prix d\'achat, référence Cardmarket, frais marketplace : marge nette calculée automatiquement.' }
                 ]"
                 :key="item.title"
                 class="rounded-xl border border-default/50 bg-elevated p-5 ring-1 ring-default/30 transition-all duration-300 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5"
@@ -576,7 +644,7 @@ const steps = [
         </h2>
         <p data-gsap="cta" class="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
           Rejoignez les premiers utilisateurs de GoupixDex et transformez votre collection TCG
-          en business automatisé. Scan, pricing Cardmarket, publication Vinted — tout est inclus.
+          en activité pilotée : import dressing, scan, pricing Cardmarket, publications Vinted et eBay — dans un seul espace.
         </p>
         <div data-gsap="cta" class="mt-10">
           <UButton

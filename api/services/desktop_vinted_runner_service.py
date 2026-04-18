@@ -32,7 +32,7 @@ class DesktopVintedRunnerService:
                 ar.raise_for_status()
                 article_d = ar.json()
                 if article_d.get("user_id") != user_id:
-                    await vp.finish(article_id, {"published": False, "detail": "forbidden"})
+                    await vp.finish(article_id, {"vinted": {"published": False, "detail": "forbidden"}})
                     return
                 cr = await client.get(f"{remote_base}/users/me/vinted-decrypted", headers=hdrs)
                 cr.raise_for_status()
@@ -66,10 +66,10 @@ class DesktopVintedRunnerService:
                         r.raise_for_status()
                     except httpx.HTTPError as exc:
                         logger.warning("confirm-vinted-publish failed article_id=%s: %s", article_id, exc)
-            await vp.finish(article_id, result)
+            await vp.finish(article_id, {"vinted": result})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Desktop Vinted publish failed article_id=%s", article_id)
-            await vp.finish(article_id, {"published": False, "detail": str(exc)})
+            await vp.finish(article_id, {"vinted": {"published": False, "detail": str(exc)}})
         finally:
             vp.cleanup_later(article_id)
 
@@ -111,7 +111,7 @@ class DesktopVintedRunnerService:
                     {
                         "type": "log",
                         "step": "error",
-                        "message": "Aucun article valide (introuvable ou sans image).",
+                        "message": "No valid articles (missing or no images).",
                         "form_step": "failed",
                     },
                 )

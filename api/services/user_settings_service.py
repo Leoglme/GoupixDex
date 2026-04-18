@@ -19,7 +19,7 @@ def get_or_create_user_settings(db: Session, user_id: int) -> MarginSettings:
 
 
 def effective_ebay_category_id(ms: MarginSettings) -> str:
-    """Surcharge utilisateur si renseignée, sinon catégorie feuille France intégrée à l’application."""
+    """User override when set; otherwise the application default France leaf category."""
     user_cat = (ms.ebay_category_id or "").strip()
     if user_cat:
         return user_cat

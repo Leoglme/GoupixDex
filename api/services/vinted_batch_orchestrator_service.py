@@ -53,7 +53,7 @@ class VintedBatchOrchestratorService:
             await VintedBatchOrchestratorService._emit_job(
                 job_id,
                 "auth",
-                "Identifiants Vinted manquants — abandon du lot.",
+                "Missing Vinted credentials — aborting batch.",
                 form_step="auth_missing",
             )
             await batch_hub.finish_job(
@@ -75,24 +75,24 @@ class VintedBatchOrchestratorService:
         n = len(items)
         try:
             await VintedBatchOrchestratorService._emit_job(
-                job_id, "prep", "Préparation du navigateur pour le lot…", form_step="prep"
+                job_id, "prep", "Preparing browser for batch…", form_step="prep"
             )
             await VintedBatchOrchestratorService._emit_job(
-                job_id, "browser", "Démarrage de Chrome…", form_step="browser_start"
+                job_id, "browser", "Starting Chrome…", form_step="browser_start"
             )
             await VintedService.init_browser()
             browser_started = True
             await VintedBatchOrchestratorService._emit_job(
-                job_id, "browser", "Navigateur prêt.", form_step="browser_ready"
+                job_id, "browser", "Browser ready.", form_step="browser_ready"
             )
             await VintedService.init_page()
             await TimerService.wait(80)
             await VintedBatchOrchestratorService._emit_job(
-                job_id, "auth", "Connexion à Vinted…", form_step="auth_start"
+                job_id, "auth", "Signing in to Vinted…", form_step="auth_start"
             )
             await VintedService.ensure_sign_in(email, password, form_progress=forward_progress)
             await VintedBatchOrchestratorService._emit_job(
-                job_id, "auth", "Connecté — enchaînement des annonces.", form_step="auth_ok"
+                job_id, "auth", "Signed in — processing listings.", form_step="auth_ok"
             )
 
         except Exception as exc:  # noqa: BLE001
@@ -100,7 +100,7 @@ class VintedBatchOrchestratorService:
             await VintedBatchOrchestratorService._emit_job(
                 job_id,
                 "error",
-                f"Arrêt du lot : {exc}",
+                f"Batch stopped: {exc}",
                 form_step="failed",
             )
         else:

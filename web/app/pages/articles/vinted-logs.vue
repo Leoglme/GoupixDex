@@ -4,8 +4,8 @@ import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPref
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Journal publication Vinted',
-  "Suivez en direct les étapes de connexion et de publication Vinted dans GoupixDex : logs détaillés et captures d'écran (application desktop)."
+  'Journal des publications',
+  "Suivez en direct la mise en ligne Vinted (captures) et eBay (étapes API) dans GoupixDex, sur le web ou l'application desktop."
 )
 
 const route = useRoute()
@@ -19,7 +19,7 @@ const { isDesktopApp } = useDesktopRuntime()
 const streamMode = ref<'none' | 'batch' | 'single' | 'wardrobe'>('none')
 
 const navbarTitle = computed(() =>
-  streamMode.value === 'wardrobe' ? 'Journal import Vinted' : 'Journal publication Vinted'
+  streamMode.value === 'wardrobe' ? 'Journal import Vinted' : 'Journal des publications'
 )
 
 const logScrollEl = ref<HTMLElement | null>(null)
@@ -150,12 +150,6 @@ async function connectSingleArticle(articleId: number) {
 }
 
 async function bootstrap() {
-  if (!isDesktopApp.value) {
-    loading.value = false
-    streamMode.value = 'none'
-    idleMessage.value = "Le journal Vinted est disponible uniquement dans l'application desktop."
-    return
-  }
   const qJob = route.query.job
   const qArticle = route.query.article
   const qWardrobe = route.query.wardrobe_job
@@ -165,6 +159,13 @@ async function bootstrap() {
   const articleId = articleIdRaw ? Number.parseInt(articleIdRaw, 10) : NaN
 
   if (wardrobeJobId) {
+    if (!isDesktopApp.value) {
+      loading.value = false
+      streamMode.value = 'none'
+      idleMessage.value =
+        "L'import garde-robe Vinted nécessite l'application desktop (navigateur local sur votre machine)."
+      return
+    }
     await connectWardrobeJob(wardrobeJobId)
     return
   }
@@ -187,7 +188,7 @@ async function bootstrap() {
       await connectBatchJob(active.job_id)
     } else {
       idleMessage.value =
-        "Aucune publication en cours. Lancez une mise en ligne depuis la liste d'articles ou créez un article avec publication Vinted, puis ouvrez à nouveau ce journal (vous serez redirigé automatiquement)."
+        "Aucune publication en cours. Lancez une mise en ligne eBay ou Vinted depuis la liste ou la création d'article — vous serez redirigé ici automatiquement — ou ouvrez ce journal avec ?article=ID."
     }
   } catch {
     idleMessage.value = "Impossible de récupérer l'état du lot (réseau ou session)."
@@ -255,11 +256,11 @@ onBeforeUnmount(() => {
         >
           <template #description>
             <span v-if="!isDesktopApp" class="text-sm text-muted">
-              Ouvrez
+              Pour l'import garde-robe ou certains lots Vinted, installez aussi
               <NuxtLink to="/downloads" class="underline underline-offset-2">
-                la page de téléchargement
+                l'application desktop
               </NuxtLink>
-              pour installer l'app.
+              .
             </span>
           </template>
         </UAlert>
@@ -326,7 +327,7 @@ onBeforeUnmount(() => {
             :ui="{ body: 'py-3' }"
           >
             <p class="text-center text-sm text-muted">
-              Connexion au flux de publication (article unique)…
+              Connexion au flux de publication (Vinted et/ou eBay)…
             </p>
             <UProgress size="md" class="mt-2 w-full" animation="carousel" />
           </UCard>
@@ -368,7 +369,7 @@ onBeforeUnmount(() => {
                   color="neutral"
                   variant="subtle"
                 >
-                  Article unique
+                  Article (Vinted / eBay)
                 </UBadge>
                 <UIcon
                   v-if="loading"
@@ -395,7 +396,7 @@ onBeforeUnmount(() => {
                     {{ entry.text }}
                   </p>
                   <img
-                    v-if="entry.screenshot"
+                    v-if="'screenshot' in entry && typeof entry.screenshot === 'string'"
                     :src="entry.screenshot"
                     alt="Capture navigateur Vinted"
                     class="max-h-64 max-w-full rounded-lg border border-default/60 object-contain object-top shadow-sm ring-1 ring-default/30"

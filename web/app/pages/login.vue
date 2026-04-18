@@ -45,7 +45,7 @@ useGoupixPageSeo(
             Bienvenue
           </h1>
           <p class="max-w-md text-pretty text-base leading-relaxed text-muted">
-            Automatise ded [test] ta collection, la mise en ligne et l'évolution des prix : il te suffit de scanner tes cartes Pokémon TCG.
+            Automatise ta collection, la mise en ligne et l'évolution des prix : il te suffit de scanner tes cartes Pokémon TCG.
           </p>
         </div>
       </div>

@@ -52,15 +52,15 @@ const statusTitle = computed(() => {
 const statusDescription = computed(() => {
   if (status.value === 'available') {
     if (nextVersion.value && currentVersion.value) {
-      return `Passez de la version ${currentVersion.value} à ${nextVersion.value} en un clic. L’application se fermera brièvement pour finaliser l’installation.`
+      return `Passez de la version ${currentVersion.value} à ${nextVersion.value} en un clic. L'application se fermera brièvement pour finaliser l'installation.`
     }
     if (nextVersion.value) {
-      return `La version ${nextVersion.value} est prête. L’application se fermera brièvement pour finaliser l’installation.`
+      return `La version ${nextVersion.value} est prête. L'application se fermera brièvement pour finaliser l'installation.`
     }
-    return 'Une nouvelle version est prête. L’application se fermera brièvement pour finaliser l’installation.'
+    return "Une nouvelle version est prête. L'application se fermera brièvement pour finaliser l'installation."
   }
   if (status.value === 'downloading') {
-    return 'Ne fermez pas GoupixDex pendant cette étape. Une fois terminé, vous pourrez redémarrer l’application pour appliquer la nouvelle version.'
+    return "Ne fermez pas GoupixDex pendant cette étape. Une fois terminé, vous pourrez redémarrer l'application pour appliquer la nouvelle version."
   }
   if (status.value === 'installed') {
     return 'Redémarrez GoupixDex pour charger la nouvelle version. Vos données et votre session locale sont conservées.'
@@ -106,7 +106,7 @@ async function installUpdate() {
     status.value = 'installed'
   } catch (error) {
     status.value = 'error'
-    errorMessage.value = error instanceof Error ? error.message : 'Échec du téléchargement ou de l’installation.'
+    errorMessage.value = error instanceof Error ? error.message : "Échec du téléchargement ou de l'installation."
   }
 }
 

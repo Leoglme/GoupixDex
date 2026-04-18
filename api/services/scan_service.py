@@ -57,7 +57,7 @@ def _strip_set_code_prefix_from_expansion_name(set_name: str, set_code: str | No
 
 
 def _listing_language_label(ocr: GroqVisionCardCollectorResult) -> str:
-    """``Français`` when the printed name matches the French dex name (French-language card), else ``Japonais``."""
+    """Return ``Français`` when the printed name matches the French dex name, else ``Japonais``."""
     fr = (ocr.get("pokemon_name_french") or "").strip()
     printed = (ocr.get("pokemon_name") or "").strip()
     if fr and printed and fr == printed:

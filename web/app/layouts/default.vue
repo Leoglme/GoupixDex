@@ -7,8 +7,7 @@ const open = ref(false)
 const { isDesktopApp } = useDesktopRuntime()
 
 /**
- * Journal Vinted : desktop uniquement.
- * Télécharger l'app : web uniquement (sur l'exe, /downloads redirige vers le dashboard).
+ * Journal des publications : Vinted + eBay (SSE). Télécharger l'app : web uniquement.
  */
 const links = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
@@ -23,17 +22,14 @@ const links = computed<NavigationMenuItem[][]>(() => {
       icon: 'i-lucide-layers',
       to: '/articles',
       onSelect: () => { open.value = false }
-    }
-  ]
-
-  if (isDesktopApp.value) {
-    items.push({
-      label: 'Journal Vinted',
+    },
+    {
+      label: 'Journal des publications',
       icon: 'i-lucide-scroll-text',
       to: '/articles/vinted-logs',
       onSelect: () => { open.value = false }
-    })
-  }
+    }
+  ]
 
   if (!isDesktopApp.value) {
     items.push({

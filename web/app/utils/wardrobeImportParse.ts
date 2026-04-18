@@ -72,7 +72,7 @@ export function parseFractionFromNumeroLine(raw: string): string {
   return m?.[1]?.replace(/\s*\/\s*/, '/') ?? raw.trim()
 }
 
-/** Codes type ``sv11w``, ``sv7``, ``m1l`` (contiennent un chiffre) — pas le nom d’extension « White Flare ». */
+/** Codes type ``sv11w``, ``sv7``, ``m1l`` (contiennent un chiffre) — pas le nom d'extension « White Flare ». */
 function looksLikeSetCodeToken(s: string): boolean {
   const t = s.trim()
   if (!t || /\s/.test(t) || t.includes('/')) {

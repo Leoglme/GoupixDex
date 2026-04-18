@@ -96,6 +96,7 @@ export function useVintedPublishStream() {
             detail?: string
             screenshot?: string
             vinted?: { published?: boolean, detail?: string }
+            ebay?: { published?: boolean, detail?: string, listing_id?: string }
           }
           if (data.type === 'log') {
             pushLog(data)
@@ -103,24 +104,41 @@ export function useVintedPublishStream() {
             settled = true
             close()
             const v = data.vinted
+            const eb = data.ebay
             if (context !== 'logs') {
-              if (v?.published) {
-                toast.add({
-                  title:
-                    context === 'create'
-                      ? 'Article créé et publié sur Vinted'
-                      : 'Publié sur Vinted',
-                  color: 'success'
-                })
-              } else {
-                toast.add({
-                  title: context === 'create' ? 'Article créé' : 'Publication Vinted',
-                  description:
-                    v?.detail === 'missing_vinted_credentials'
-                      ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
-                      : String(v?.detail ?? 'Publication non confirmée.'),
-                  color: 'warning'
-                })
+              if (v) {
+                if (v.published) {
+                  toast.add({
+                    title:
+                      context === 'create'
+                        ? 'Article créé et publié sur Vinted'
+                        : 'Publié sur Vinted',
+                    color: 'success'
+                  })
+                } else {
+                  toast.add({
+                    title: context === 'create' ? 'Article créé' : 'Publication Vinted',
+                    description:
+                      v?.detail === 'missing_vinted_credentials'
+                        ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
+                        : String(v?.detail ?? 'Publication non confirmée.'),
+                    color: 'warning'
+                  })
+                }
+              }
+              if (eb && typeof eb.published === 'boolean') {
+                if (eb.published) {
+                  toast.add({
+                    title: context === 'create' ? 'Article créé et publié sur eBay' : 'Publié sur eBay',
+                    color: 'success'
+                  })
+                } else {
+                  toast.add({
+                    title: 'Publication eBay',
+                    description: String(eb.detail ?? 'Échec ou annulation.'),
+                    color: 'warning'
+                  })
+                }
               }
             }
             resolve()

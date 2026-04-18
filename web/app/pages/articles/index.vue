@@ -17,7 +17,7 @@ const { isDesktopApp } = useDesktopRuntime()
 const { startJob } = useWardrobeLocalSync()
 
 const wardrobeSyncing = ref(false)
-/** Affiche l’action « Mettre en ligne sur eBay » (canal activé + compte prêt dans les paramètres). */
+/** Affiche l'action « Mettre en ligne sur eBay » (canal activé + compte prêt dans les paramètres). */
 const ebayPublishAvailable = ref(false)
 
 const articles = ref<Article[]>([])
@@ -147,7 +147,7 @@ async function onWardrobeImportFromVinted() {
     toast.add({
       title: 'Application desktop requise',
       description:
-        'La synchronisation Vinted utilise le worker local (Chrome). Installez l’app pour Windows ou macOS.',
+        "La synchronisation Vinted utilise le worker local (Chrome). Installez l'app pour Windows ou macOS.",
       color: 'warning'
     })
     await navigateTo('/downloads')
@@ -173,7 +173,14 @@ async function onWardrobeImportFromVinted() {
 
 async function onPublishEbay(a: Article) {
   try {
-    await publishArticleToEbay(a.id)
+    const { ebay } = await publishArticleToEbay(a.id)
+    if (ebay?.status === 'running' && ebay?.stream_path) {
+      await navigateTo({
+        path: '/articles/vinted-logs',
+        query: { article: String(a.id) }
+      })
+      return
+    }
     toast.add({
       title: 'Mise en ligne sur eBay',
       description: 'La publication est lancée. La liste se mettra à jour dans quelques instants.',
@@ -279,11 +286,11 @@ async function onPublishVinted(a: Article) {
         >
           <div class="space-y-2">
             <p class="text-sm font-medium text-highlighted">
-              Aucun article pour l’instant
+              Aucun article pour l'instant
             </p>
             <p class="text-sm text-muted leading-relaxed">
               Si vous vendez déjà sur Vinted, vous pouvez importer vos annonces actives et vendues dans GoupixDex.
-              Une fenêtre Chrome s’ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
+              Une fenêtre Chrome s'ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-3">
@@ -300,8 +307,8 @@ async function onPublishVinted(a: Article) {
             </UButton>
           </div>
           <p v-if="!isDesktopApp" class="text-xs text-muted">
-            L’import Vinted n’est disponible que dans
-            <NuxtLink to="/downloads" class="underline underline-offset-2">l’application desktop</NuxtLink>
+            L'import Vinted n'est disponible que dans
+            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>
             (worker local sur ce poste).
           </p>
         </UCard>

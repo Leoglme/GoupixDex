@@ -14,7 +14,7 @@ from models.user import User
 from services.ebay_oauth_service import _api_base_url
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.ebay_seller_metadata_service import (
-    fetch_fulfillment_policies,
+    ensure_goupixdex_fr_fulfillment_policy,
     fetch_inventory_locations,
     fetch_payment_policies,
     fetch_return_policies,
@@ -89,49 +89,11 @@ async def _create_inventory_location(
     resp.raise_for_status()
 
 
-async def _create_fulfillment_policy_fr(token: str, *, app: AppSettings | None = None) -> str:
-    s = app or get_settings()
-    root = _api_base_url(s)
-    carrier = (s.ebay_fr_fulfillment_carrier_code or "Colissimo").strip()
-    service = (s.ebay_fr_fulfillment_service_code or "FR_ColiposteColissimo").strip()
-    payload: dict[str, Any] = {
-        "name": "GoupixDex — Envoi France",
-        "marketplaceId": MARKETPLACE_FR,
-        "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
-        "handlingTime": {"value": 2, "unit": "DAY"},
-        "shippingOptions": [
-            {
-                "costType": "FLAT_RATE",
-                "optionType": "DOMESTIC",
-                "shippingServices": [
-                    {
-                        "sortOrder": 1,
-                        "shippingCarrierCode": carrier,
-                        "shippingServiceCode": service,
-                        "freeShipping": True,
-                        "buyerResponsibleForShipping": False,
-                    },
-                ],
-            },
-        ],
-    }
-    url = f"{root}/sell/account/v1/fulfillment_policy"
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(url, json=payload, headers=_fr_account_headers(token))
-    if resp.status_code not in (200, 201):
-        raise RuntimeError(f"eBay createFulfillmentPolicy: {resp.status_code} {resp.text[:2000]}")
-    data = resp.json()
-    fid = data.get("fulfillmentPolicyId")
-    if not fid:
-        raise RuntimeError(f"eBay createFulfillmentPolicy missing id: {str(data)[:1500]}")
-    return str(fid)
-
-
 async def _create_payment_policy_fr(token: str, *, app: AppSettings | None = None) -> str:
     s = app or get_settings()
     root = _api_base_url(s)
-    # Paiements gérés par eBay (Managed Payments) : ne pas envoyer ``paymentMethods`` / cartes.
-    # Les marques CREDIT_CARD provoquent 20403 PAYMENT_METHOD_NOT_ALLOWED en prod FR.
+    # Managed Payments: do not send ``paymentMethods`` / card brands (CREDIT_CARD can trigger
+    # 20403 PAYMENT_METHOD_NOT_ALLOWED on FR production).
     payload: dict[str, Any] = {
         "name": "GoupixDex — Paiement",
         "marketplaceId": MARKETPLACE_FR,
@@ -217,11 +179,7 @@ async def run_ebay_onboarding(
             raise RuntimeError("eBay inventory location was not created or is not visible yet.")
         ms.ebay_merchant_location_key = str(locs2[0].get("merchantLocationKey") or "").strip()
 
-    ful = await fetch_fulfillment_policies(token, MARKETPLACE_FR, app=s)
-    if ful:
-        ms.ebay_fulfillment_policy_id = str(ful[0].get("fulfillmentPolicyId") or "").strip()
-    else:
-        ms.ebay_fulfillment_policy_id = await _create_fulfillment_policy_fr(token, app=s)
+    ms.ebay_fulfillment_policy_id = await ensure_goupixdex_fr_fulfillment_policy(token, app=s)
 
     pay = await fetch_payment_policies(token, MARKETPLACE_FR, app=s)
     if pay:

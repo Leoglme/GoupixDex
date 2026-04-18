@@ -4,7 +4,7 @@ export interface AppSettings {
   ebay_enabled: boolean
   ebay_marketplace_id: string
   ebay_category_id: string | null
-  /** Catégorie feuille France intégrée à l’API ; lecture seule (surcharge possible via ebay_category_id). */
+  /** Catégorie feuille France intégrée à l'API ; lecture seule (surcharge possible via ebay_category_id). */
   ebay_default_category_id: string
   ebay_merchant_location_key: string | null
   ebay_fulfillment_policy_id: string | null

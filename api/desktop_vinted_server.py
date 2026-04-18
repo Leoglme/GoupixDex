@@ -127,7 +127,7 @@ async def get_user_id_introspected(
     if not r.is_success:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Impossible de joindre l'API distante pour valider la session.",
+            detail="Could not reach the remote API to validate the session.",
         )
     uid = int(r.json()["id"])
     _introspect_cache[key] = (now, uid)
@@ -196,9 +196,9 @@ async def vinted_batch_stream(
 ) -> StreamingResponse:
     owner = vinted_batch_hub.get_job_user_id(job_id)
     if owner is None:
-        raise HTTPException(status_code=404, detail="Job introuvable ou expiré.")
+        raise HTTPException(status_code=404, detail="Job not found or expired.")
     if owner != user_id:
-        raise HTTPException(status_code=403, detail="Accès refusé à ce job.")
+        raise HTTPException(status_code=403, detail="Access denied for this job.")
 
     async def generate():
         async for ev in vinted_batch_hub.event_stream(job_id):
@@ -227,7 +227,7 @@ async def start_vinted_batch(
     if not vinted_batch_hub.try_register_job(job_id, user_id):
         raise HTTPException(
             status_code=409,
-            detail="Une publication Vinted groupée est déjà en cours pour ce compte.",
+            detail="A batch Vinted publish is already running for this account.",
         )
     asyncio.create_task(
         DesktopVintedRunnerService.run_desktop_vinted_batch_job(
@@ -274,17 +274,17 @@ async def wardrobe_sync_job_stream(
     job_id: str,
     user_id: Annotated[int, Depends(get_user_id_introspected)],
 ) -> StreamingResponse:
-    """SSE : journal texte + ``done`` avec ``result`` ou ``error`` (comme publication Vinted)."""
+    """SSE: text log + ``done`` with ``result`` or ``error`` (same pattern as Vinted publish)."""
 
     async def generate():
         last_i = 0
         while True:
             row = wardrobe_jobs.get_job(job_id)
             if row is None:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Job introuvable'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
                 return
             if int(row["user_id"]) != user_id:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Accès refusé'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Access denied'})}\n\n"
                 return
             logs = row.get("logs") or []
             while last_i < len(logs):
@@ -295,7 +295,7 @@ async def wardrobe_sync_job_stream(
                 yield f"data: {json.dumps({'type': 'done', 'result': row.get('result')})}\n\n"
                 return
             if st == "error":
-                yield f"data: {json.dumps({'type': 'error', 'message': row.get('error') or 'Erreur'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': row.get('error') or 'Error'})}\n\n"
                 return
             await asyncio.sleep(0.28)
 
@@ -315,12 +315,12 @@ async def wardrobe_listing_image_proxy(
     url: Annotated[str, Query(min_length=12, max_length=2048)],
     _: Annotated[int, Depends(get_user_id_introspected)],
 ) -> Response:
-    """Proxy CDN Vinted pour l’app desktop (évite CORS ``fetch`` depuis le WebView)."""
+    """Proxy Vinted CDN images for the desktop app (avoids CORS ``fetch`` from the WebView)."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL invalide.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL.")
     if not _allowed_listing_image_host(parsed.hostname):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hôte image non autorisé.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Image host not allowed.")
     async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
         r = await client.get(
             url,
@@ -332,15 +332,15 @@ async def wardrobe_listing_image_proxy(
     if r.status_code != 200:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Téléchargement image impossible.",
+            detail="Image download failed.",
         )
     if len(r.content) > _MAX_LISTING_IMAGE_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image trop volumineuse.")
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image too large.")
     ct_raw = (r.headers.get("content-type") or "image/jpeg").split(";")[0].strip()
     if not ct_raw.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="La ressource n’est pas une image.",
+            detail="The resource is not an image.",
         )
     return Response(content=r.content, media_type=ct_raw)
 
@@ -352,9 +352,9 @@ async def wardrobe_sync_job_status(
 ) -> dict[str, object]:
     row = wardrobe_jobs.get_job(job_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="Job introuvable.")
+        raise HTTPException(status_code=404, detail="Job not found.")
     if int(row["user_id"]) != user_id:
-        raise HTTPException(status_code=403, detail="Accès refusé à ce job.")
+        raise HTTPException(status_code=403, detail="Access denied for this job.")
     out: dict[str, object] = {"status": row["status"]}
     if row.get("error"):
         out["error"] = row["error"]

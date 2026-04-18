@@ -1,8 +1,8 @@
 """Execute SQL migration files in order (``001_*.sql``, ``002_*.sql``, ...).
 
-Chaque fichier n'est exécuté qu'une fois : le nom du fichier est enregistré dans
-``schema_migrations``. Les fichiers SQL doivent rester idempotents lorsque c'est
-possible (ex. ``CREATE TABLE IF NOT EXISTS``, ``ADD COLUMN IF NOT EXISTS``).
+Each file runs at most once: the filename is recorded in ``schema_migrations``.
+SQL files should stay idempotent when possible (e.g. ``CREATE TABLE IF NOT EXISTS``,
+``ADD COLUMN IF NOT EXISTS``).
 """
 
 from __future__ import annotations

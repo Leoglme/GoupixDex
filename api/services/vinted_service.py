@@ -477,12 +477,12 @@ class VintedService:
         await cls._scroll_selector_into_view('[data-testid="catalog-select-dropdown-input"]')
         inp = await tab.select('[data-testid="catalog-select-dropdown-input"]', timeout=15)
         if inp is None:
-            logger.error("catalog-select-dropdown-input introuvable.")
+            logger.error("catalog-select-dropdown-input not found.")
             return False
         try:
             await inp.click()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Clic input catégorie: %s", exc)
+            logger.warning("Category input click: %s", exc)
         await tab.sleep(0.35)
 
         def _panel_ready_js() -> str:
@@ -516,7 +516,7 @@ class VintedService:
                 return True
             await asyncio.sleep(0.08)
 
-        logger.info("Panneau catégorie pas prêt après clic input — tentative chevron.")
+        logger.info("Category panel not ready after input click — trying chevron.")
         clicked = await tab.evaluate(
             """
             (() => {
@@ -769,7 +769,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_skip_se_connecter",
-                "Panneau connexion déjà affiché (champ identifiant visible).",
+                "Login panel already visible (username field visible).",
                 tab,
                 detail=(tab.target.url or "")[:400],
             )
@@ -798,7 +798,7 @@ class VintedService:
         await cls._emit_auth_log(
             form_progress,
             "auth_se_connecter_clicked",
-            "« Se connecter » activé — attente du champ identifiant (max 4 s).",
+            "\"Se connecter\" activated — waiting for username field (max 4s).",
             tab,
             detail=(tab.target.url or "")[:400],
         )
@@ -813,7 +813,7 @@ class VintedService:
                 await cls._emit_auth_log(
                     form_progress,
                     "auth_username_visible",
-                    "Champ identifiant visible après « Se connecter ».",
+                    "Username field visible after \"Se connecter\".",
                     tab,
                     detail=(tab.target.url or "")[:400],
                 )
@@ -827,7 +827,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_username_wait",
-                "Champ identifiant toujours absent après attente — capture d'écran.",
+                "Username field still missing after wait — screenshot.",
                 tab,
                 detail=(tab.target.url or "")[:500],
                 with_screenshot=True,
@@ -851,7 +851,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_skip_login_email",
-                "Connexion par e-mail inutile — champ identifiant déjà visible.",
+                "E-mail login not needed — username field already visible.",
                 tab,
                 detail=(tab.target.url or "")[:400],
             )
@@ -876,7 +876,7 @@ class VintedService:
         await cls._emit_auth_log(
             form_progress,
             "auth_login_email_clicked",
-            "Option « Connexion par e-mail » activée.",
+            "\"Connexion par e-mail\" option activated.",
             tab,
             detail=(tab.target.url or "")[:400],
         )
@@ -906,7 +906,7 @@ class VintedService:
                 await cls._emit_auth_log(
                     form_progress,
                     "auth_username_ready",
-                    "Champ identifiant visible — remplissage des identifiants.",
+                    "Username field visible — filling credentials.",
                     tab,
                     detail=(tab.target.url or "")[:400],
                 )
@@ -917,7 +917,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_username_missing",
-                "Champ identifiant non visible avant saisie — capture d'écran.",
+                "Username field not visible before typing — screenshot.",
                 tab,
                 detail=(tab.target.url or "")[:500],
                 with_screenshot=True,
@@ -927,9 +927,9 @@ class VintedService:
         await cls._emit_auth_log(
             form_progress,
             "auth_fill_start",
-            "Saisie de l'identifiant / mot de passe…",
+            "Entering username / password…",
             tab,
-            detail="Champs username + password",
+            detail="username + password fields",
         )
         if not await cls._set_input_value_for_react(tab, "input#username", email):
             await cls._set_input_value_for_react(tab, 'input[name="username"]', email)
@@ -974,7 +974,7 @@ class VintedService:
         await cls._emit_auth_log(
             form_progress,
             "auth_submit_sent",
-            "Formulaire de connexion envoyé (Continuer / submit).",
+            "Login form submitted (Continuer / submit).",
             tab,
             detail=(tab.target.url or "")[:400],
             with_screenshot=True,
@@ -1088,7 +1088,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_nav_home",
-                "Ouverture de vinted.fr (accueil)…",
+                "Opening vinted.fr (home)…",
                 tab,
                 detail="https://www.vinted.fr",
             )
@@ -1099,7 +1099,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_member_entry",
-                "Page d'authentification membre chargée.",
+                "Member auth page loaded.",
                 tab,
                 detail=(tab.target.url or "")[:500],
                 with_screenshot=True,
@@ -1108,7 +1108,7 @@ class VintedService:
             await cls._emit_auth_log(
                 form_progress,
                 "auth_retry_url",
-                "Rechargement direct de l'URL de connexion membre (retry).",
+                "Direct reload of member login URL (retry).",
                 tab,
                 detail=VINTED_MEMBER_AUTH_URL,
             )
@@ -1157,7 +1157,7 @@ class VintedService:
             if ok is True:
                 return
             await asyncio.sleep(0.04)
-        logger.warning("Formulaire vendre : timeout après %ss (photos/catalogue).", timeout_sec)
+        logger.warning("Sell form: timeout after %ss (photos/catalog).", timeout_sec)
 
     @classmethod
     async def add_photos_to_item(cls, photo_names: list[str]) -> None:
@@ -1227,12 +1227,12 @@ class VintedService:
                     "type": "log",
                     "step": "vinted_form",
                     "form_step": "category_open",
-                    "message": "Ouverture du sélecteur de catégorie…",
+                    "message": "Opening category picker…",
                 }
             )
         opened = await cls._ensure_catalog_dropdown_open()
         if not opened:
-            logger.error("Impossible d'ouvrir le panneau catalogue (input + chevron).")
+            logger.error("Could not open catalog panel (input + chevron).")
             await cls._catalog_debug_probe()
             raise RuntimeError("Catalog dropdown did not open or has no category rows")
         await TimerService.wait(180)
@@ -1245,7 +1245,7 @@ class VintedService:
                         "type": "log",
                         "step": "vinted_form",
                         "form_step": "category_segment",
-                        "message": f'Recherche du niveau catalogue : « {want} »',
+                        "message": f'Finding catalog level: « {want} »',
                         "detail": want,
                     }
                 )
@@ -1371,7 +1371,7 @@ class VintedService:
                 result = _parse_eval_dict_result(raw, context=f"catalog:{want}")
             except (TypeError, json.JSONDecodeError) as exc:
                 logger.error(
-                    "Catalog evaluate inutilisable pour %r: %s raw=%r",
+                    "Catalog evaluate unusable for %r: %s raw=%r",
                     want,
                     exc,
                     raw,
@@ -1382,7 +1382,7 @@ class VintedService:
                 titles = result.get("titles")
                 err = result.get("err")
                 logger.error(
-                    "Catalog: %r introuvable. Titres visibles (extrait): %s err=%s brut=%s",
+                    "Catalog: %r not found. Visible titles (sample): %s err=%s raw=%s",
                     want,
                     titles,
                     err,
@@ -1391,14 +1391,14 @@ class VintedService:
                 await cls._catalog_debug_probe()
                 raise RuntimeError(f"Category {want!r} not found in Vinted catalog UI")
             if result.get("skipped"):
-                logger.info("Catalog step %r → déjà dans ce niveau (en-tête)", want)
+                logger.info("Catalog step %r → already at this level (header)", want)
                 if form_progress:
                     await form_progress(
                         {
                             "type": "log",
                             "step": "vinted_form",
                             "form_step": "category_skip",
-                            "message": f'Déjà au bon niveau : « {want} »',
+                            "message": f'Already at the right level: « {want} »',
                             "detail": want,
                         }
                     )
@@ -1410,7 +1410,7 @@ class VintedService:
                             "type": "log",
                             "step": "vinted_form",
                             "form_step": "category_ok",
-                            "message": f'Niveau sélectionné : « {want} »',
+                            "message": f'Level selected: « {want} »',
                             "detail": want,
                         }
                     )
@@ -1479,8 +1479,8 @@ class VintedService:
 
         if trigger is None:
             raise RuntimeError(
-                "Champ « état » introuvable (attendu: "
-                "[data-testid=category-condition-single-list-input] ou #condition).",
+                "Condition field not found (expected "
+                "[data-testid=category-condition-single-list-input] or #condition).",
             )
 
         if isinstance(trigger, str):
@@ -1498,7 +1498,7 @@ class VintedService:
                 return_by_value=True,
             )
             if open_ok is not True:
-                raise RuntimeError("Clic sur le sélecteur d'état (JS) sans effet")
+                raise RuntimeError("Condition selector click (JS) had no effect")
         else:
             if used_sel and used_sel != "js_resolve":
                 await cls._scroll_selector_into_view(used_sel)
@@ -1777,75 +1777,75 @@ class VintedService:
             ev.update(extra)
             await progress(ev)
 
-        await emit_step("form_ready", "Synchronisation avec le formulaire Vinted…")
+        await emit_step("form_ready", "Syncing with the Vinted form…")
         await cls.wait_for_listing_form()
-        await emit_step("form_ready", "Formulaire prêt — début du remplissage.")
+        await emit_step("form_ready", "Form ready — starting to fill fields.")
 
         try:
-            await emit_step("photos", "Envoi des photos…")
+            await emit_step("photos", "Uploading photos…")
             await cls.add_photos_to_item(vinted_item["images"])
-            await emit_step("photos_ok", "Photos importées.")
+            await emit_step("photos_ok", "Photos imported.")
         except Exception as exc:  # noqa: BLE001
             logger.error("Error adding photos: %s", exc)
 
         await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
         await cls._scroll_selector_into_view("#title")
-        await emit_step("title", "Saisie du titre…")
+        await emit_step("title", "Entering title…")
         await cls._fill_item_field("#title", vinted_item["title"])
-        await emit_step("title_ok", "Titre renseigné.")
+        await emit_step("title_ok", "Title filled.")
         await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
         desc = (vinted_item.get("description") or "").strip()
         if desc:
             await cls._scroll_selector_into_view("#description")
-            await emit_step("description", "Saisie de la description…")
+            await emit_step("description", "Entering description…")
             await cls._fill_item_field("#description", desc)
-            await emit_step("description_ok", "Description renseignée.")
+            await emit_step("description_ok", "Description filled.")
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
         await cls._scroll_selector_into_view('[data-testid="catalog-select-dropdown-input"]')
         await TimerService.wait(400)
 
         try:
-            await emit_step("category", "Sélection de la catégorie (plusieurs niveaux)…")
+            await emit_step("category", "Selecting category (multiple levels)…")
             await cls.select_category(category_path, form_progress=progress)
-            await emit_step("category_done", "Catégorie validée.")
+            await emit_step("category_done", "Category confirmed.")
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
             await cls._scroll_selector_into_view('[data-testid="brand-select-dropdown-input"]')
-            await emit_step("brand", "Sélection de la marque…")
+            await emit_step("brand", "Selecting brand…")
             await cls.select_brand(brand)
-            await emit_step("brand_ok", f'Marque « {brand} » sélectionnée.')
+            await emit_step("brand_ok", f'Brand « {brand} » selected.')
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
             await cls._scroll_selector_into_view("#status_id")
-            await emit_step("condition", "Sélection de l'état…")
+            await emit_step("condition", "Selecting condition…")
             await cls.select_condition(vinted_item["condition"])
-            await emit_step("condition_ok", "État sélectionné.")
+            await emit_step("condition_ok", "Condition selected.")
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
             await cls._scroll_selector_into_view("#price")
             price = vinted_item["price"]
             price_str = str(int(price)) if price == int(price) else str(price)
-            await emit_step("price", "Saisie du prix…")
+            await emit_step("price", "Entering price…")
             await cls._fill_item_field("#price", price_str)
-            await emit_step("price_ok", f"Prix : {price_str} €.")
+            await emit_step("price_ok", f"Price: {price_str} €.")
             await TimerService.wait(cls._VINTED_TIMEOUT_MS)
 
             await cls._scroll_selector_into_view('[data-testid$="-package-size--cell"]')
-            await emit_step("package", "Choix de la taille du colis…")
+            await emit_step("package", "Selecting parcel size…")
             await cls.select_package_size(package_size)
-            await emit_step("package_ok", f"Colis : {package_size}.")
+            await emit_step("package_ok", f"Parcel: {package_size}.")
         except Exception as exc:  # noqa: BLE001
             logger.error("Error during Vinted form (category → colis): %s", exc)
-            await emit_step("form_error", f"Échec sur le formulaire : {exc}", detail=str(exc))
+            await emit_step("form_error", f"Form step failed: {exc}", detail=str(exc))
             raise
 
         shot = await cls._tab_screenshot_data_url(cls._require_tab())
         await emit_step(
             "form_done",
-            "Formulaire entièrement rempli — prêt pour publication.",
+            "Form complete — ready to publish.",
             screenshot=shot,
         )
         logger.info("Filling in the remaining item details — done")
@@ -1853,8 +1853,8 @@ class VintedService:
     @classmethod
     async def _read_member_articles_count(cls, tab: Tab) -> int | None:
         """
-        Lit le compteur d'articles visible sur l'interface membre (ex. ``48 articles``).
-        Renvoie ``None`` si non disponible.
+        Read the article count shown on the member UI (e.g. ``48 articles``).
+        Returns ``None`` if unavailable.
         """
         raw = await tab.evaluate(
             """
@@ -1912,7 +1912,7 @@ class VintedService:
                     "type": "log",
                     "step": "publish",
                     "form_step": "publish_submitted",
-                    "message": "Bouton « Ajouter » cliqué — attente de confirmation côté profil…",
+                    "message": "\"Ajouter\" clicked — waiting for profile confirmation…",
                 }
             )
 
@@ -1936,16 +1936,16 @@ class VintedService:
                 )
                 if progress:
                     detail = (
-                        f"Profil membre confirmé — compteur {before_count} -> {after_count}."
+                        f"Member profile confirmed — count {before_count} -> {after_count}."
                         if before_count is not None and after_count is not None
-                        else "Profil membre confirmé après publication."
+                        else "Member profile confirmed after publish."
                     )
                     await progress(
                         {
                             "type": "log",
                             "step": "publish",
                             "form_step": "publish_confirmed",
-                            "message": "Annonce publiée avec succès sur Vinted.",
+                            "message": "Listing published successfully on Vinted.",
                             "detail": detail,
                             "screenshot": shot,
                         }
@@ -1960,8 +1960,8 @@ class VintedService:
                     "type": "log",
                     "step": "publish",
                     "form_step": "publish_wait_failed",
-                    "message": "Publication non confirmée : pas de redirection profil ou compteur inchangé.",
-                    "detail": f"compteur_avant={before_count}",
+                    "message": "Publish not confirmed: no profile redirect or count unchanged.",
+                    "detail": f"count_before={before_count}",
                     "screenshot": shot,
                 }
             )

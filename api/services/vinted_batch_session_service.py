@@ -34,7 +34,7 @@ class _VintedBatchChannel:
                     try:
                         await asyncio.wait_for(self._condition.wait(), timeout=3600.0)
                     except asyncio.TimeoutError:
-                        yield {"type": "error", "message": "Délai dépassé (1 h)"}
+                        yield {"type": "error", "message": "Timed out (1 h)"}
                         return
                 while i < len(self._logs):
                     ev = self._logs[i]
@@ -98,7 +98,7 @@ class VintedBatchSessionService:
     async def event_stream(cls, job_id: str) -> AsyncIterator[dict[str, Any]]:
         s = cls._sessions.get(job_id)
         if s is None:
-            yield {"type": "error", "message": "Job introuvable ou expiré."}
+            yield {"type": "error", "message": "Job not found or expired."}
             return
         async for ev in s.iter_events():
             yield ev

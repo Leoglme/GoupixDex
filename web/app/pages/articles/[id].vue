@@ -31,7 +31,14 @@ onMounted(load)
 async function publishEbay() {
   publishingEbay.value = true
   try {
-    await publishArticleToEbay(id.value)
+    const { ebay } = await publishArticleToEbay(id.value)
+    if (ebay?.status === 'running' && ebay?.stream_path) {
+      await navigateTo({
+        path: '/articles/vinted-logs',
+        query: { article: String(id.value) }
+      })
+      return
+    }
     toast.add({
       title: 'Publication eBay démarrée',
       description: 'Traitement en arrière-plan — rafraîchissez la liste dans quelques instants.',

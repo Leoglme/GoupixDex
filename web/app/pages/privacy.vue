@@ -53,7 +53,7 @@ useGoupixPageSeo(
               2. Données traitées
             </h2>
             <p>
-              Nous pouvons traiter des données de compte (email, mot de passe chiffré), des données d’inventaire
+              Nous pouvons traiter des données de compte (email, mot de passe chiffré), des données d'inventaire
               (articles, photos, prix), des paramètres de publication (Vinted / eBay) et des jetons OAuth
               nécessaires à la connexion aux services tiers.
             </p>
@@ -64,7 +64,7 @@ useGoupixPageSeo(
               3. Finalités
             </h2>
             <p>
-              Ces données sont utilisées pour authentifier les utilisateurs, gérer l’inventaire, proposer des
+              Ces données sont utilisées pour authentifier les utilisateurs, gérer l'inventaire, proposer des
               suggestions de prix, publier des annonces sur les marketplaces activées et assurer le support technique.
             </p>
           </section>
@@ -74,9 +74,9 @@ useGoupixPageSeo(
               4. Conservation et sécurité
             </h2>
             <p>
-              Les données sont conservées pendant l’utilisation du compte, puis supprimées dans un délai raisonnable
+              Les données sont conservées pendant l'utilisation du compte, puis supprimées dans un délai raisonnable
               après demande, sauf obligation légale contraire. Des mesures techniques de sécurité sont appliquées
-              (contrôles d’accès, chiffrement des secrets sensibles, supervision).
+              (contrôles d'accès, chiffrement des secrets sensibles, supervision).
             </p>
           </section>
 
@@ -85,7 +85,7 @@ useGoupixPageSeo(
               5. Vos droits
             </h2>
             <p>
-              Vous pouvez demander l’accès, la rectification ou la suppression de vos données, ainsi que la limitation
+              Vous pouvez demander l'accès, la rectification ou la suppression de vos données, ainsi que la limitation
               de certains traitements, selon la réglementation applicable.
             </p>
           </section>

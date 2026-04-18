@@ -73,7 +73,7 @@ class GoupixVintedWardrobeSyncService:
 
     @classmethod
     def _is_vinted_boilerplate_description(cls, text: str) -> bool:
-        """Bloc marketing Vinted parfois présent à la place de la vraie description."""
+        """Vinted marketing blurb sometimes shown instead of the real listing description."""
         t = text.strip().lower()
         if len(t) < 20:
             return False
@@ -220,13 +220,13 @@ class GoupixVintedWardrobeSyncService:
         self._on_progress: Callable[[str], None] | None = on_progress
 
     def _emit_progress(self, message: str) -> None:
-        """Journal utilisateur (ex. SSE garde-robe) + logs serveur."""
+        """User-facing log (e.g. wardrobe SSE) + server logs."""
         logger.info(message)
         if self._on_progress:
             try:
                 self._on_progress(message)
             except Exception:
-                logger.debug("on_progress a échoué", exc_info=True)
+                logger.debug("on_progress failed", exc_info=True)
 
     @staticmethod
     def _description_worker_count() -> int:
@@ -437,7 +437,7 @@ class GoupixVintedWardrobeSyncService:
             "VINTED_FETCH_SOLD_DESCRIPTIONS", "1"
         ).strip().lower() not in ("0", "false", "no")
 
-        self._emit_progress("Préparation des appels API Vinted (catalogue, session)…")
+        self._emit_progress("Preparing Vinted API calls (catalog, session)…")
 
         cookie_resolution_note: str | None = None
         try:
@@ -456,7 +456,7 @@ class GoupixVintedWardrobeSyncService:
         cat_err: str | None = None
         try:
             self._emit_progress(
-                "Téléchargement du catalogue (toutes les pages d’annonces en ligne)…",
+                "Downloading catalog (all pages of active listings)…",
             )
             raw, pagination = self._catalog.fetch_all_raw_items(client, self._user_id)
             active = [self._catalog.serialize_catalog_item(x) for x in raw]
@@ -475,11 +475,11 @@ class GoupixVintedWardrobeSyncService:
             if os.environ.get("VINTED_ACTIVE_ITEMS_SORT", "display").strip().lower() != "api":
                 self._catalog.apply_active_items_display_order(active)
             logger.info("Catalog active listings: %s", len(active))
-            self._emit_progress(f"Catalogue : {len(active)} annonce(s) en ligne récupérée(s).")
+            self._emit_progress(f"Catalog: {len(active)} active listing(s) fetched.")
         except Exception as exc:
             cat_err = str(exc)
             logger.warning("Catalog error: %s", cat_err)
-            self._emit_progress(f"Erreur catalogue : {cat_err[:180]}")
+            self._emit_progress(f"Catalog error: {cat_err[:180]}")
         finally:
             closer = getattr(client, "__exit__", None)
             if callable(closer):
@@ -492,23 +492,23 @@ class GoupixVintedWardrobeSyncService:
         sold_errors: list[str] = []
         if header:
             self._emit_progress(
-                "Récupération de l’historique des ventes (vue vendeur / commandes)…",
+                "Fetching sales history (seller / orders view)…",
             )
             sold, sold_errors = self._sold.fetch_sold_rows_as_seller(
                 self._base_url, self._user_id, header
             )
             logger.info("Sold rows (seller): %s", len(sold))
-            self._emit_progress(f"Ventes : {len(sold)} ligne(s) récupérée(s).")
+            self._emit_progress(f"Sales: {len(sold)} row(s) fetched.")
             if sold_errors:
                 logger.warning("Sold fetch warnings: %s", sold_errors[:5])
-                self._emit_progress(f"Avertissement ventes : {sold_errors[0][:160]}…")
+                self._emit_progress(f"Sales warning: {sold_errors[0][:160]}…")
         else:
             logger.warning(
                 "No seller session cookie — sold_items skipped. %s",
                 self._SESSION_HELP_EN,
             )
             self._emit_progress(
-                "Session vendeur absente — pas d’historique de ventes (catalogue seul).",
+                "No seller session — sales history skipped (catalog only).",
             )
 
         drop_sold_if_same_id_active: bool = os.environ.get(
@@ -526,7 +526,7 @@ class GoupixVintedWardrobeSyncService:
 
         if sold and active:
             self._emit_progress(
-                "Rapprochement des photos et des liens entre annonces actives et articles vendus…",
+                "Matching photos and links between active listings and sold items…",
             )
             origin: str = self._base_url.rstrip("/")
             # Cheap merge first (id / title); HTTP redirect only for rows still bare + no photos.
@@ -601,7 +601,6 @@ class GoupixVintedWardrobeSyncService:
 
         if to_desc_active or to_desc_sold:
             mode_en = "parallel" if workers > 1 else f"sequential (delay={delay}s)"
-            mode_fr = "parallèle" if workers > 1 else "séquentielle"
             logger.info(
                 "HTML descriptions [%s, workers=%s]: %s active, %s sold",
                 mode_en,
@@ -610,20 +609,20 @@ class GoupixVintedWardrobeSyncService:
                 len(to_desc_sold),
             )
             self._emit_progress(
-                f"Récupération des descriptions sur les pages publiques ({mode_fr}, "
-                f"{len(to_desc_active)} actif(s), {len(to_desc_sold)} vendu(s)) — étape la plus longue…",
+                f"Fetching descriptions from public pages ({mode_en}, "
+                f"{len(to_desc_active)} active, {len(to_desc_sold)} sold) — slowest step…",
             )
             if to_desc_active:
                 self._fill_descriptions(
-                    to_desc_active, delay, workers, label="annonces en ligne"
+                    to_desc_active, delay, workers, label="active listings"
                 )
             if to_desc_sold:
                 self._fill_descriptions(
-                    to_desc_sold, delay, workers, label="articles vendus"
+                    to_desc_sold, delay, workers, label="sold items"
                 )
         elif fetch_active_desc or fetch_sold_desc:
             self._emit_progress(
-                "Étape descriptions : aucune annonce à traiter (liste vide après filtres).",
+                "Description step: nothing to process (empty list after filters).",
             )
 
         for row in active:
@@ -635,7 +634,7 @@ class GoupixVintedWardrobeSyncService:
                 row["description"] = ""
                 row["description_source"] = None
 
-        self._emit_progress("Finalisation du résultat (compteurs, métadonnées)…")
+        self._emit_progress("Finalizing result (counts, metadata)…")
 
         ok: bool = cat_err is None and len(active) > 0
         sync_payload: dict[str, Any] = {

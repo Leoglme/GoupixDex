@@ -97,7 +97,7 @@ async function submitOnboarding() {
     toast.add({
       title: 'Champs requis',
       description: phone.value.trim()
-        ? 'Renseignez l’adresse et le code postal.'
+        ? "Renseignez l'adresse et le code postal."
         : 'Indiquez un numéro de téléphone mobile valide (avec indicatif pays).',
       color: 'warning'
     })
@@ -182,7 +182,7 @@ onMounted(async () => {
           </p>
         </template>
         <div class="space-y-4">
-          <UCheckbox v-model="s.vinted_enabled" label="Vinted activé (publication depuis l’app desktop)" />
+          <UCheckbox v-model="s.vinted_enabled" label="Vinted activé (publication depuis l'app desktop)" />
           <UCheckbox v-model="s.ebay_enabled" label="eBay activé (France — compte connecté requis)" />
           <p class="text-sm text-muted">
             eBay est configuré pour <strong>eBay France</strong> uniquement (cartes Pokémon, envoi depuis votre adresse).
@@ -233,7 +233,7 @@ onMounted(async () => {
           Prêt pour eBay
         </p>
         <p class="text-sm text-muted mt-1">
-          Vos annonces peuvent être publiées sur eBay France depuis les formulaires d’articles.
+          Vos annonces peuvent être publiées sur eBay France depuis les formulaires d'articles.
         </p>
       </UCard>
 
@@ -252,10 +252,10 @@ onMounted(async () => {
             <p>Vous êtes connecté à eBay. Nous utilisons votre compte uniquement pour publier vos cartes.</p>
 
             <p class="font-medium text-highlighted pt-2">
-              Étape 2 — Adresse d’expédition
+              Étape 2 — Adresse d'expédition
             </p>
             <p>
-              Indiquez l’adresse d’où vous postez vos colis. Nous créons automatiquement l’emplacement et les règles eBay
+              Indiquez l'adresse d'où vous postez vos colis. Nous créons automatiquement l'emplacement et les règles eBay
               (livraison France, paiement, retours) sans que vous alliez sur le site eBay.
             </p>
           </div>
@@ -268,7 +268,7 @@ onMounted(async () => {
               label="Téléphone mobile"
               required
               class="min-w-0 sm:col-span-2"
-              description="Indicatif pays + numéro. Le clavier numérique s’ouvre sur mobile."
+              description="Indicatif pays + numéro. Le clavier numérique s'ouvre sur mobile."
             >
               <PhoneInput v-model="phone" name="phone" default-country-code="FR" class="w-full" />
             </UFormField>
@@ -316,7 +316,7 @@ onMounted(async () => {
 
       <UCard v-else-if="s.ebay_enabled && !s.ebay_connected">
         <p class="text-sm text-muted">
-          Connectez votre compte eBay ci-dessus pour lancer l’assistant.
+          Connectez votre compte eBay ci-dessus pour lancer l'assistant.
         </p>
       </UCard>
 

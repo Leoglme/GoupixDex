@@ -74,57 +74,60 @@ class DesktopWardrobeSyncRunnerService:
         email = creds.get("vinted_email")
         password = creds.get("vinted_password")
         if not email or not password:
-            raise RuntimeError("Identifiants Vinted manquants (profil utilisateur).")
+            raise RuntimeError("Missing Vinted credentials (user profile).")
 
         base_url = "https://www.vinted.fr"
         browser_started = False
         member_id: int = 0
         cookie_header = ""
         try:
-            await _job_log(job_id, "Démarrage du navigateur Vinted (nodriver)…")
+            await _job_log(job_id, "Starting Vinted browser (nodriver)…")
             await VintedService.init_browser()
             browser_started = True
             await VintedService.init_page()
             await TimerService.wait(80)
-            await _job_log(job_id, "Connexion / session Vinted…")
+            await _job_log(job_id, "Vinted sign-in / session…")
             await VintedService.ensure_sign_in(str(email), str(password))
-            await _job_log(job_id, "Lecture de l'identifiant membre Vinted…")
+            await _job_log(job_id, "Reading Vinted member id…")
             member_id = await VintedService.fetch_logged_in_vinted_user_numeric_id()
-            await _job_log(job_id, f"Identifiant membre : {member_id}.")
+            await _job_log(job_id, f"Member id: {member_id}.")
             cookie_header = await VintedService.export_vinted_session_cookie_header()
             if not cookie_header.strip() and not settings.vinted_browser_ephemeral:
                 await _job_log(
                     job_id,
-                    "Export CDP ignoré — lecture des cookies depuis le profil Chromium après fermeture…",
+                    "CDP export skipped — reading cookies from Chromium profile after shutdown…",
                 )
         finally:
             if browser_started:
-                await _job_log(job_id, "Fermeture du navigateur Vinted…")
+                await _job_log(job_id, "Closing Vinted browser…")
                 VintedService.close_browser()
 
         if not cookie_header.strip():
             if settings.vinted_browser_ephemeral:
-                raise RuntimeError("Impossible d'exporter les cookies de session Vinted (profil éphémère).")
+                raise RuntimeError("Could not export Vinted session cookies (ephemeral profile).")
             profile_dir = resolve_vinted_nodriver_user_data_dir(settings.vinted_user_data_dir)
             cookie_header = VintedChromiumProfileCookieService.read_cookie_header_from_profile(
                 profile_dir,
             )
             await _job_log(
                 job_id,
-                "Cookies lus depuis le fichier profil." if cookie_header.strip() else "Échec lecture cookies disque.",
+                "Cookies read from profile file." if cookie_header.strip() else "Failed to read cookies from disk.",
             )
 
         if not cookie_header.strip():
-            raise RuntimeError("Impossible d'exporter les cookies de session Vinted.")
+            raise RuntimeError("Could not export Vinted session cookies.")
         if not VintedHttpService.my_orders_session_ok(base_url, cookie_header):
             logger.warning(
-                "Session cookie nodriver: my_orders non OK — sold_items peut être vide.",
+                "Session cookie nodriver: my_orders not OK — sold_items may be empty.",
             )
-            await _job_log(job_id, "Avertissement : session « mes commandes » non confirmée (soldes possiblement vides).")
+            await _job_log(
+                job_id,
+                "Warning: my orders session not confirmed (sold items may be empty).",
+            )
 
         await _job_log(
             job_id,
-            "Démarrage de la synchronisation catalogue + vendus (plusieurs minutes possibles)…",
+            "Starting catalogue + sold sync (may take several minutes)…",
         )
         loop = asyncio.get_running_loop()
 

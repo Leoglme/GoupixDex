@@ -1,63 +1,61 @@
-# eBay — configuration OAuth et mise en ligne (GoupixDex)
+# eBay — OAuth setup and publishing (GoupixDex)
 
-Ce document décrit comment préparer un compte [eBay Developers Program](https://developer.ebay.com/), configurer l’écran **Your eBay Sign-in Settings** (RuName / URLs de redirection), renseigner les variables d’environnement de l’API GoupixDex, puis connecter un vendeur depuis l’interface **Paramètres → Places de marché**.
+This document explains how to prepare an [eBay Developers Program](https://developer.ebay.com/) account, configure **Your eBay Sign-in Settings** (RuName / redirect URLs), set GoupixDex API environment variables, and connect a seller from **Settings → Marketplaces**.
 
-## 1. Compte développeur et clés
+## 1. Developer account and keys
 
-1. Créez un compte sur [developer.ebay.com](https://developer.ebay.com/) et une **Application Keyset** (sandbox pour les tests, production quand vous êtes prêt).
-2. Notez l’**App ID (Client ID)** et le **Cert ID (Client Secret)** — ce ne sont pas les jetons d’accès API ; ils servent uniquement à l’échange OAuth côté serveur.
+1. Create an account on [developer.ebay.com](https://developer.ebay.com/) and an **Application Keyset** (sandbox for tests, production when ready).
+2. Note the **App ID (Client ID)** and **Cert ID (Client Secret)** — these are not API access tokens; they are only used for OAuth on the server.
 
-## 2. « Your eBay Sign-in Settings » (RuName)
+## 2. “Your eBay Sign-in Settings” (RuName)
 
-Dans le portail développeur, configurez la page OAuth :
+In the developer portal, configure OAuth:
 
-| Champ | Rôle |
+| Field | Role |
 |--------|------|
-| **Display Title** | Nom affiché sur la page de consentement (ex. `GoupixDex`). |
-| **Your privacy policy URL** | URL accessible d’une politique de confidentialité (exigence programme développeur). |
-| **Your auth accepted URL** | **URL de callback OAuth** : eBay y redirige avec `?code=...&state=...` après accord. Elle doit être **identique** à la valeur `EBAY_REDIRECT_URI` / à l’URL utilisée dans l’app. Exemple : `https://votre-domaine.fr/settings/marketplaces` ou en local `http://localhost:3000/settings/marketplaces` (sandbox accepte souvent l’HTTP en dev). |
-| **Your auth declined URL** | Page si l’utilisateur refuse (ex. retour dashboard ou message simple). |
+| **Display Title** | Name shown on the consent page (e.g. `GoupixDex`). |
+| **Your privacy policy URL** | URL of a privacy policy (developer program requirement). |
+| **Your auth accepted URL** | **OAuth callback URL**: eBay redirects here with `?code=...&state=...` after approval. It must **match** `EBAY_REDIRECT_URI` / the URL opened in the app. Example: `https://your-domain.fr/settings/marketplaces` or locally `http://localhost:3000/settings/marketplaces` (sandbox often allows HTTP in dev). |
+| **Your auth declined URL** | Page if the user declines (e.g. return to dashboard). |
 
-**Important :** pas de différence de slash final, de `http` vs `https`, ou de host (`localhost` vs `127.0.0.1`) entre le portail eBay, `EBAY_REDIRECT_URI` et l’URL réellement ouverte dans le navigateur.
+**Important:** no mismatch in trailing slash, `http` vs `https`, or host (`localhost` vs `127.0.0.1`) between the eBay portal, `EBAY_REDIRECT_URI`, and the URL actually opened in the browser.
 
-## 3. Scopes utilisés par GoupixDex
+## 3. Scopes used by GoupixDex
 
-L’API demande les scopes suivants (déjà codés côté backend) :
+The API requests these scopes (already set in the backend):
 
-- `https://api.ebay.com/oauth/api_scope/sell.inventory` — création d’annonces (Inventory API).
-- `https://api.ebay.com/oauth/api_scope/sell.account` — lecture des politiques d’expédition, paiement et retours.
+- `https://api.ebay.com/oauth/api_scope/sell.inventory` — listings (Inventory API).
+- `https://api.ebay.com/oauth/api_scope/sell.account` — fulfillment, payment, and return policies.
 
-## 4. Variables d’environnement (API)
+## 4. Environment variables (API)
 
-Ajoutez dans `api/.env` (voir `api/.env.example`) :
+Add to `api/.env` (see `api/.env.example`):
 
 | Variable | Description |
 |----------|-------------|
-| `EBAY_CLIENT_ID` | App ID (Client ID) — **sandbox ou prod** selon `EBAY_USE_SANDBOX`. |
+| `EBAY_CLIENT_ID` | App ID (Client ID) — **sandbox or prod** depending on `EBAY_USE_SANDBOX`. |
 | `EBAY_CLIENT_SECRET` | Cert ID (Client Secret). |
-| `EBAY_REDIRECT_URI` | **Exactement** la même URL que *Your auth accepted URL* (ex. `https://.../settings/marketplaces`). |
-| `EBAY_USE_SANDBOX` | `true` pour `auth.sandbox.ebay.com` / `api.sandbox.ebay.com`, `false` pour la production. |
-| `EBAY_FR_FULFILLMENT_CARRIER_CODE` | *(Optionnel, défaut `Colissimo`)* Transporteur pour la politique d’expédition créée automatiquement. |
-| `EBAY_FR_FULFILLMENT_SERVICE_CODE` | *(Optionnel, défaut `FR_ColiposteColissimo`)* Code service d’affranchissement ; à ajuster si eBay renvoie une erreur sur la création de politique. |
+| `EBAY_REDIRECT_URI` | **Exactly** the same URL as *Your auth accepted URL* (e.g. `https://.../settings/marketplaces`). |
+| `EBAY_USE_SANDBOX` | `true` for `auth.sandbox.ebay.com` / `api.sandbox.ebay.com`, `false` for production. |
 
-Redémarrez l’API après modification.
+Restart the API after changes.
 
-## 5. Flux dans l’application web
+Fulfillment shipping options (multiple domestic rates, international, handling time) are created or updated via the Account API when you run onboarding or `POST /ebay/policies/fulfillment/ensure` — no manual policy setup on ebay.fr is required in the default flow.
 
-1. **Paramètres → Marketplace** : activez **eBay**, enregistrez si besoin.
-2. Cliquez **Se connecter à eBay** : redirection vers la page de consentement eBay.
-3. Après acceptation, eBay renvoie vers `/settings/marketplaces?code=...&state=...` : le front envoie le `code` au backend (`POST /ebay/oauth/exchange`), qui stocke les jetons (chiffrés) sur l’utilisateur.
-4. **Assistant** : après connexion, l’app propose de saisir **l’adresse d’expédition** puis appelle `POST /ebay/onboarding/setup`, qui inscrit le compte aux politiques métier si besoin, crée un **emplacement inventaire** et des **politiques** par défaut (eBay France) lorsqu’ils manquent, et enregistre les IDs côté GoupixDex. Aucune configuration manuelle sur ebay.fr n’est nécessaire dans le flux normal.
-5. **Catégorie** : l’ID de catégorie feuille pour les annonces (cartes JCC / Pokémon à l’unité sur **eBay France**) est défini dans le code (`EBAY_FR_DEFAULT_LEAF_CATEGORY_ID` dans `api/config.py`). Une valeur différente peut encore être enregistrée par utilisateur dans `ebay_category_id` si besoin.
+## 5. Flow in the web app
 
-Si la création automatique de la politique d’**expédition** échoue (service postal invalide), ajustez `EBAY_FR_FULFILLMENT_CARRIER_CODE` et `EBAY_FR_FULFILLMENT_SERVICE_CODE` (valeurs attendues par eBay pour `EBAY_FR`).
+1. **Settings → Marketplace**: enable **eBay**, save if needed.
+2. Click **Connect to eBay**: redirect to eBay consent.
+3. After approval, eBay redirects to `/settings/marketplaces?code=...&state=...`: the frontend sends `code` to the backend (`POST /ebay/oauth/exchange`), which stores encrypted tokens on the user row.
+4. **Onboarding**: after connection, enter the **ship-from address** and call `POST /ebay/onboarding/setup`, which opts into business policies if needed, creates a default **inventory location** and **policies** for eBay France when missing, and saves IDs in GoupixDex.
+5. **Category**: the default leaf category for listings (single JCC / Pokémon cards on **eBay France**) is defined in code (`EBAY_FR_DEFAULT_LEAF_CATEGORY_ID` in `api/config.py`). A different value can still be stored per user in `ebay_category_id` if needed.
 
-## 6. Images et sandbox
+## 6. Images and sandbox
 
-- Les images d’annonce doivent être en **HTTPS** (ex. URLs Supabase) — exigence eBay Inventory API.
-- En **sandbox**, utilisez des comptes / annonces de test ; les IDs de catégories et politiques doivent exister pour le marketplace choisi (ex. `EBAY_FR`).
+- Listing images must be **HTTPS** (e.g. Supabase URLs) — required by the eBay Inventory API.
+- In **sandbox**, use test accounts and listings; category and policy IDs must exist for the chosen marketplace (e.g. `EBAY_FR`).
 
-## 7. Références officielles
+## 7. Official references
 
 - [Authorization code grant](https://developer.ebay.com/api-docs/static/oauth-authorization-code-grant.html)
 - [Getting user consent](https://developer.ebay.com/api-docs/static/oauth-consent-request.html)
@@ -65,8 +63,8 @@ Si la création automatique de la politique d’**expédition** échoue (service
 - [Inventory API — createOrReplaceInventoryItem](https://developer.ebay.com/api-docs/sell/inventory/resources/inventory_item/methods/createOrReplaceInventoryItem)
 - [createOffer / publishOffer](https://developer.ebay.com/api-docs/sell/inventory/resources/offer/methods/createOffer)
 
-## 8. Dépannage rapide
+## 8. Quick troubleshooting
 
-- **Erreur à l’échange de code** : `redirect_uri` différent de celui enregistré chez eBay, ou `code` déjà consommé / expiré (les codes sont à usage unique et très courts).
-- **« User is not eligible for Business Policy »** (logs : erreur 20403 sur `fulfillment_policy`) : le compte doit être inscrit au programme **politiques métier**. L’API appelle automatiquement [`optInToProgram`](https://developer.ebay.com/api-docs/sell/account/resources/program/methods/optInToProgram) avec `SELLING_POLICY_MANAGEMENT` avant de charger les politiques ; eBay peut mettre **jusqu’à ~24 h** à activer — réessayez plus tard ou vérifiez avec `getOptedInPrograms`.
-- **Erreur à la publication** : catégorie incorrecte, politiques incompatibles avec le marketplace, ou **descripteurs d’état** obligatoires pour certaines catégories cartes — consultez les messages d’erreur dans les logs API (`ebay_body`).
+- **Token exchange error**: `redirect_uri` does not match what is registered at eBay, or `code` already used / expired (codes are single-use and short-lived).
+- **“User is not eligible for Business Policy”** (logs: error 20403 on `fulfillment_policy`): the account must be enrolled in **business policies**. The API calls [`optInToProgram`](https://developer.ebay.com/api-docs/sell/account/resources/program/methods/optInToProgram) with `SELLING_POLICY_MANAGEMENT` before loading policies; eBay can take **up to ~24 h** to activate — retry later or check with `getOptedInPrograms`.
+- **Publishing error**: wrong category, policies incompatible with the marketplace, or **condition descriptors** required for some card categories — see API logs (`ebay_body`).

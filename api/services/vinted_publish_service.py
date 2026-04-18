@@ -139,7 +139,7 @@ async def run_single_vinted_listing(
     await _emit(
         progress,
         "start",
-        f"{prefix}Préparation des images (article #{article.id})…",
+        f"{prefix}Preparing images (article #{article.id})…",
         form_step="prep",
     )
 
@@ -148,9 +148,9 @@ async def run_single_vinted_listing(
     await _emit(
         progress,
         "images",
-        f"{prefix}{len(basenames)} image(s) prête(s) pour l'annonce.",
+        f"{prefix}{len(basenames)} image(s) ready for the listing.",
         form_step="images_copy",
-        detail=f"{len(basenames)} fichier(s)",
+        detail=f"{len(basenames)} file(s)",
     )
 
     price = float(article.sell_price if article.sell_price is not None else article.purchase_price)
@@ -162,12 +162,12 @@ async def run_single_vinted_listing(
         "images": basenames,
     }
 
-    await _emit(progress, "page", f"{prefix}Ouverture de la page « vendre »…", form_step="sell_page")
+    await _emit(progress, "page", f"{prefix}Opening the sell page…", form_step="sell_page")
     await VintedService.open_sell_item_page()
     await _emit(
         progress,
         "form",
-        f"{prefix}Remplissage du formulaire Vinted…",
+        f"{prefix}Filling the Vinted listing form…",
         form_step="form_batch",
     )
 
@@ -183,7 +183,7 @@ async def run_single_vinted_listing(
         progress=_form_payload,
     )
     await TimerService.wait(400)
-    await _emit(progress, "publish", f"{prefix}Envoi de l'annonce…", form_step="publish_click")
+    await _emit(progress, "publish", f"{prefix}Submitting the listing…", form_step="publish_click")
     await VintedService.publish(progress=progress)
     await TimerService.wait(500)
     return {"published": True, "detail": "published", "article_id": article.id}
@@ -213,28 +213,28 @@ async def publish_article_to_vinted(
 
     if not email or not password:
         logger.warning("Vinted publish skipped: missing credentials article_id=%s", article.id)
-        await _emit(progress, "auth", "Identifiants Vinted manquants — abandon.", form_step="auth_missing")
+        await _emit(progress, "auth", "Missing Vinted credentials — aborting.", form_step="auth_missing")
         return {"published": False, "detail": "missing_vinted_credentials"}
 
-    await _emit(progress, "start", "Préparation des images et du navigateur…", form_step="prep")
+    await _emit(progress, "start", "Preparing images and browser…", form_step="prep")
 
     browser_started = False
     try:
-        await _emit(progress, "browser", "Démarrage de Chrome…", form_step="browser_start")
+        await _emit(progress, "browser", "Starting Chrome…", form_step="browser_start")
         await VintedService.init_browser()
         browser_started = True
-        await _emit(progress, "browser", "Navigateur prêt.", form_step="browser_ready")
+        await _emit(progress, "browser", "Browser ready.", form_step="browser_ready")
         await VintedService.init_page()
         await TimerService.wait(80)
-        await _emit(progress, "auth", "Connexion à Vinted…", form_step="auth_start")
+        await _emit(progress, "auth", "Signing in to Vinted…", form_step="auth_start")
         await VintedService.ensure_sign_in(email, password, form_progress=progress)
-        await _emit(progress, "auth", "Connecté.", form_step="auth_ok")
+        await _emit(progress, "auth", "Signed in.", form_step="auth_ok")
         await run_single_vinted_listing(article, user, stored_image_sources, progress)
-        await _emit(progress, "browser", "Fermeture du navigateur…", form_step="browser_close")
+        await _emit(progress, "browser", "Closing browser…", form_step="browser_close")
         return {"published": True, "detail": "published"}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Vinted publish failed article_id=%s", article.id)
-        await _emit(progress, "error", f"Erreur : {exc}", form_step="failed", detail=str(exc))
+        await _emit(progress, "error", f"Error: {exc}", form_step="failed", detail=str(exc))
         return {"published": False, "detail": str(exc)}
     finally:
         if browser_started:

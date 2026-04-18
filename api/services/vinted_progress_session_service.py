@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from typing import Any, ClassVar
-
-logger = logging.getLogger(__name__)
 
 
 class _VintedProgressChannel:
@@ -23,10 +20,11 @@ class _VintedProgressChannel:
             self._logs.append(event)
             self._condition.notify_all()
 
-    async def finish(self, vinted: dict[str, Any]) -> None:
+    async def finish(self, payload: dict[str, Any]) -> None:
+        """``payload``: keys such as ``vinted`` / ``ebay`` merged into the ``done`` event."""
         async with self._condition:
-            payload = {"type": "done", "vinted": vinted}
-            self._logs.append(payload)
+            done_ev = {"type": "done", **payload}
+            self._logs.append(done_ev)
             self._done = True
             self._condition.notify_all()
 
@@ -39,7 +37,7 @@ class _VintedProgressChannel:
                     try:
                         await asyncio.wait_for(self._condition.wait(), timeout=600.0)
                     except asyncio.TimeoutError:
-                        yield {"type": "error", "message": "Délai dépassé (10 min)"}
+                        yield {"type": "error", "message": "Timed out (10 min)"}
                         return
                 while i < len(self._logs):
                     ev = self._logs[i]
@@ -58,11 +56,9 @@ class VintedProgressSessionService:
 
     @classmethod
     def register(cls, article_id: int) -> None:
-        if article_id in cls._sessions:
-            logger.warning(
-                "Vinted progress: replacing existing session article_id=%s", article_id
-            )
-        cls._sessions[article_id] = _VintedProgressChannel()
+        """Create a session if missing (Vinted + eBay may share the same SSE stream)."""
+        if article_id not in cls._sessions:
+            cls._sessions[article_id] = _VintedProgressChannel()
 
     @classmethod
     def get_session(cls, article_id: int) -> _VintedProgressChannel | None:
@@ -76,11 +72,11 @@ class VintedProgressSessionService:
         await s.emit(event)
 
     @classmethod
-    async def finish(cls, article_id: int, vinted: dict[str, Any]) -> None:
+    async def finish(cls, article_id: int, payload: dict[str, Any]) -> None:
         s = cls._sessions.get(article_id)
         if s is None:
             return
-        await s.finish(vinted)
+        await s.finish(payload)
 
     @classmethod
     async def event_stream(cls, article_id: int) -> AsyncIterator[dict[str, Any]]:

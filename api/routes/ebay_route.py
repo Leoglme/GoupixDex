@@ -22,6 +22,7 @@ from services.ebay_oauth_service import (
 )
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.ebay_seller_metadata_service import (
+    ensure_goupixdex_fr_fulfillment_policy,
     fetch_fulfillment_policies,
     fetch_inventory_locations,
     fetch_payment_policies,
@@ -144,6 +145,44 @@ def ebay_oauth_disconnect(
     return {"ok": True}
 
 
+@router.post("/policies/fulfillment/ensure", status_code=status.HTTP_200_OK)
+async def ebay_ensure_fulfillment_policy(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Creates or updates the « GoupixDex — Envoi » shipping policy (FR: four paid domestic options,
+    two international, 3-day handling) via the Account API, then saves the ID on user settings.
+    """
+    if not decrypt_ebay_token(user.ebay_refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect eBay first (OAuth).",
+        )
+    ms = get_or_create_user_settings(db, user.id)
+    try:
+        token = await ensure_ebay_access_token(db, user)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await opt_in_selling_policy_management(token)
+    try:
+        fid = await ensure_goupixdex_fr_fulfillment_policy(token)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    ms.ebay_fulfillment_policy_id = fid
+    db.add(ms)
+    db.commit()
+    db.refresh(ms)
+    return {
+        "ok": True,
+        "fulfillment_policy_id": fid,
+        "ebay_listing_config_complete": ebay_listing_config_complete(ms),
+    }
+
+
 @router.get("/status")
 def ebay_status(
     db: Annotated[Session, Depends(get_db)],
@@ -161,7 +200,7 @@ async def ebay_onboarding_setup(
 ) -> dict[str, Any]:
     """
     Create default EBAY_FR inventory location + business policies when missing, then save IDs on the user settings row.
-    Requires OAuth and ``sell.account`` / ``sell.inventory`` scopes. La catégorie feuille France est fixée dans l’application.
+    Requires OAuth and ``sell.account`` / ``sell.inventory`` scopes. The default France leaf category is set in application config.
     """
     if not decrypt_ebay_token(user.ebay_refresh_token):
         raise HTTPException(
