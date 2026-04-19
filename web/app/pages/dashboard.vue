@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { DashboardStats } from '~/composables/useStats'
+import { sub } from 'date-fns'
+import type { DashboardPeriod, DashboardRange, DashboardStats } from '~/composables/useStats'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -16,6 +17,12 @@ const loading = ref(true)
 const fetchMarketData = ref(false)
 const toast = useToast()
 
+const range = shallowRef<DashboardRange>({
+  start: sub(new Date(), { days: 14 }),
+  end: new Date()
+})
+const period = ref<DashboardPeriod>('daily')
+
 const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
   currency: 'EUR',
@@ -29,19 +36,24 @@ const eur2 = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2
 })
 
-/** Couleurs du camembert (pas de jaune — bleu / vert / violet) */
-const PIE = {
-  vinted: '#e76112',
-  cost: '#fcaa79',
-  cardmarket: '#e08804'
+const numberFmt = new Intl.NumberFormat('fr-FR')
+
+/** Vinted vs eBay channel colors (per the spec). */
+const CHANNEL_COLORS = {
+  vinted: 'rgb(0, 131, 143)',
+  ebay: 'rgb(134, 184, 23)'
 } as const
 
-type PieSegment = { value: number, label: string, color: string }
+type PieSegment = { value: number, label: string, color: string, count: number }
 
 async function load() {
   loading.value = true
   try {
-    stats.value = await fetchDashboard(fetchMarketData.value)
+    stats.value = await fetchDashboard({
+      includeMarket: fetchMarketData.value,
+      range: range.value,
+      period: period.value
+    })
   } catch {
     toast.add({ title: 'Impossible de charger les statistiques', color: 'error' })
   } finally {
@@ -53,31 +65,39 @@ onMounted(() => {
   load()
 })
 
-watch(fetchMarketData, () => load())
+watch([fetchMarketData, range, period], () => load())
 
-const pieSegments = computed<PieSegment[]>(() => {
-  const s = stats.value
-  if (!s) {
+const channelSegments = computed<PieSegment[]>(() => {
+  const split = stats.value?.channel_split_total
+  if (!split) {
     return []
   }
-  const v = Math.max(0, s.vinted_revenue_eur)
-  const p = Math.max(0, s.inventory_purchase_total_eur)
-  const m = fetchMarketData.value ? Math.max(0, s.estimated_cardmarket_unsold_eur ?? 0) : 0
   const out: PieSegment[] = []
-  if (v > 0) {
-    out.push({ value: v, label: 'CA cumulé (ventes)', color: PIE.vinted })
+  if (split.vinted_revenue_eur > 0 || split.vinted_count > 0) {
+    out.push({
+      label: 'Vinted',
+      value: split.vinted_revenue_eur,
+      count: split.vinted_count,
+      color: CHANNEL_COLORS.vinted
+    })
   }
-  if (p > 0) {
-    out.push({ value: p, label: 'Coût d\'achat du stock en vente', color: PIE.cost })
-  }
-  if (fetchMarketData.value && m > 0) {
-    out.push({ value: m, label: 'Ref. Cardmarket (stock seulement)', color: PIE.cardmarket })
+  if (split.ebay_revenue_eur > 0 || split.ebay_count > 0) {
+    out.push({
+      label: 'eBay',
+      value: split.ebay_revenue_eur,
+      count: split.ebay_count,
+      color: CHANNEL_COLORS.ebay
+    })
   }
   return out
 })
 
+const channelTotal = computed(() =>
+  channelSegments.value.reduce((acc, s) => acc + s.value, 0)
+)
+
 const pieStyle = computed(() => {
-  const segs = pieSegments.value
+  const segs = channelSegments.value
   const total = segs.reduce((a, b) => a + b.value, 0)
   if (total <= 0) {
     return { background: 'conic-gradient(var(--ui-border) 0% 100%)' }
@@ -91,6 +111,13 @@ const pieStyle = computed(() => {
   })
   return { background: `conic-gradient(${parts.join(', ')})` }
 })
+
+function pct(value: number): string {
+  if (channelTotal.value <= 0) {
+    return '0%'
+  }
+  return `${Math.round((value / channelTotal.value) * 100)}%`
+}
 </script>
 
 <template>
@@ -110,33 +137,42 @@ const pieStyle = computed(() => {
           />
         </template>
       </UDashboardNavbar>
+
+      <UDashboardToolbar>
+        <template #left>
+          <DashboardDateRangePicker v-model="range" class="-ms-1" />
+          <DashboardPeriodSelect v-model="period" :range="range" />
+        </template>
+        <template #right>
+          <div class="flex items-center gap-2">
+            <USwitch v-model="fetchMarketData" />
+            <span class="text-xs text-muted">
+              Données Cardmarket (plus lent)
+            </span>
+          </div>
+        </template>
+      </UDashboardToolbar>
     </template>
 
     <template #body>
       <div class="space-y-8 p-4 sm:p-6">
-        <div class="flex flex-wrap items-center gap-3">
-          <USwitch v-model="fetchMarketData" />
-          <span class="text-sm text-muted">
-            Récupérer les données Cardmarket / PokéWallet (plus lent)
-          </span>
-        </div>
-
         <div v-if="loading && !stats" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="size-8 animate-spin text-primary" />
         </div>
 
         <template v-else-if="stats">
-          <!-- Profit / revenue stat cards: single band (Nuxt UI dashboard style) -->
+          <!-- Profit / revenue stat cards -->
           <UPageGrid class="lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-px">
             <StatsCard
-              title="Bénéfice (7 j)"
-              :value="eur.format(stats.profit_week_eur)"
+              title="Bénéfice de la période"
+              :value="eur.format(stats.profit_period_eur)"
               icon="i-lucide-trending-up"
             />
             <StatsCard
-              title="Bénéfice (30 j)"
-              :value="eur.format(stats.profit_month_eur)"
-              icon="i-lucide-calendar"
+              title="Vente de la période"
+              :value="eur.format(stats.revenue_period_eur)"
+              :description="`${numberFmt.format(stats.period_sales_count)} vente${stats.period_sales_count > 1 ? 's' : ''}`"
+              icon="i-lucide-shopping-bag"
             />
             <StatsCard
               title="Bénéfice total"
@@ -144,9 +180,9 @@ const pieStyle = computed(() => {
               icon="i-lucide-piggy-bank"
             />
             <StatsCard
-              title="CA vendus (toutes sources)"
+              title="Vente total"
               :value="eur.format(stats.vinted_revenue_eur)"
-              icon="i-lucide-shopping-bag"
+              icon="i-lucide-coins"
             />
           </UPageGrid>
 
@@ -158,7 +194,7 @@ const pieStyle = computed(() => {
                   Stock en vente
                 </p>
                 <p class="text-xs text-muted">
-                  Cartes non vendues — totaux demandés, coût d'achat et ref. marché
+                  Cartes non vendues — totaux demandés, coût d'achat, marché et bénéfice estimé
                 </p>
               </template>
               <dl class="grid gap-4 sm:grid-cols-2">
@@ -188,7 +224,15 @@ const pieStyle = computed(() => {
                 </div>
                 <div>
                   <dt class="text-xs text-muted uppercase tracking-wide">
-                    Ref. Cardmarket
+                    Bénéfice estimé
+                  </dt>
+                  <dd class="text-xl font-semibold tabular-nums text-primary">
+                    {{ eur2.format(stats.inventory_estimated_profit_eur) }}
+                  </dd>
+                </div>
+                <div class="sm:col-span-2">
+                  <dt class="text-xs text-muted uppercase tracking-wide">
+                    Prix Cardmarket
                   </dt>
                   <dd class="text-xl font-semibold tabular-nums">
                     {{
@@ -207,17 +251,14 @@ const pieStyle = computed(() => {
               </p>
             </UCard>
 
-            <!-- Pie chart + legend with dots -->
+            <!-- Vinted vs eBay sales pie -->
             <UCard>
               <template #header>
                 <p class="text-sm font-medium text-highlighted">
-                  Ventes vs stock
+                  Ventes Vinted vs eBay
                 </p>
                 <p class="text-xs text-muted">
-                  CA réalisé comparé au coût du stock restant
-                  <template v-if="fetchMarketData">
-                    et à l'estimation Cardmarket du stock
-                  </template>
+                  Répartition du chiffre d'affaires par canal (toutes périodes)
                 </p>
               </template>
               <div class="flex flex-col sm:flex-row gap-6 items-center">
@@ -227,7 +268,7 @@ const pieStyle = computed(() => {
                 />
                 <ul class="text-sm space-y-3 flex-1 w-full min-w-0">
                   <li
-                    v-for="seg in pieSegments"
+                    v-for="seg in channelSegments"
                     :key="seg.label"
                     class="flex items-start justify-between gap-x-4"
                   >
@@ -236,23 +277,29 @@ const pieStyle = computed(() => {
                         class="size-2.5 rounded-full shrink-0 mt-1.5"
                         :style="{ backgroundColor: seg.color }"
                       />
-                      <span class="text-muted leading-snug">{{ seg.label }}</span>
+                      <span class="leading-snug">
+                        <span class="text-highlighted font-medium">{{ seg.label }}</span>
+                        <span class="text-muted"> · {{ numberFmt.format(seg.count) }} vente{{ seg.count > 1 ? 's' : '' }}</span>
+                      </span>
                     </span>
-                    <span class="font-semibold tabular-nums shrink-0">{{ eur.format(seg.value) }}</span>
+                    <span class="text-right shrink-0">
+                      <span class="font-semibold tabular-nums block">{{ eur.format(seg.value) }}</span>
+                      <span class="text-xs text-muted tabular-nums">{{ pct(seg.value) }}</span>
+                    </span>
                   </li>
                   <li
-                    v-if="!pieSegments.length"
+                    v-if="!channelSegments.length"
                     class="text-muted text-sm"
                   >
-                    Aucune donnée à afficher (pas encore de ventes ni de stock valorisé).
+                    Aucune vente enregistrée sur Vinted ou eBay.
                   </li>
                 </ul>
               </div>
             </UCard>
           </div>
 
-          <!-- Cumulative revenue chart (full width) -->
-          <DashboardRevenueChart :stats="stats" />
+          <!-- Revenue chart driven by period + range -->
+          <DashboardRevenueChart :stats="stats" :period="period" />
 
           <!-- Recent sales -->
           <DashboardSalesTable :sales="stats.recent_sales" />

@@ -1,12 +1,22 @@
 <script setup lang="ts">
-import { parse, format } from 'date-fns'
+import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { VisXYContainer, VisLine, VisAxis, VisArea, VisCrosshair, VisTooltip } from '@unovis/vue'
-import type { DashboardStats } from '~/composables/useStats'
+import type { DashboardPeriod, DashboardStats } from '~/composables/useStats'
+
+const cardRef = useTemplateRef<HTMLElement | null>('cardRef')
 
 const props = defineProps<{
   stats: DashboardStats | null
+  period: DashboardPeriod
 }>()
+
+const { width } = useElementSize(cardRef)
+
+type DataRecord = {
+  date: Date
+  amount: number
+}
 
 const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -14,71 +24,43 @@ const eur = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0
 })
 
-/** At least 2 points to draw a segment; baseline at 0 for cumulative. */
-const chartData = computed(() => {
-  const t = props.stats?.revenue_timeline ?? []
-  if (!t.length) {
-    return [] as Array<{
-      x: number
-      label: string
-      cumulative: number
-      month: number
-    }>
-  }
-  if (t.length === 1) {
-    const row = t[0]!
-    const d = parse(`${row.month}-01`, 'yyyy-MM-dd', new Date())
-    const label = format(d, 'MMM yyyy', { locale: fr })
-    const cum = row.revenue_cumulative_eur
-    return [
-      { x: 0, label: '', cumulative: 0, month: 0 },
-      { x: 1, label, cumulative: cum, month: row.revenue_month_eur }
-    ]
-  }
-  return t.map((row, i) => {
-    const d = parse(`${row.month}-01`, 'yyyy-MM-dd', new Date())
-    return {
-      x: i,
-      label: format(d, 'MMM yyyy', { locale: fr }),
-      cumulative: row.revenue_cumulative_eur,
-      month: row.revenue_month_eur
-    }
-  })
+const data = computed<DataRecord[]>(() => {
+  const points = props.stats?.revenue_timeline ?? []
+  return points.map(p => ({
+    date: new Date(p.date),
+    amount: p.revenue_eur
+  }))
 })
 
-const x = (d: { x: number }) => d.x
-const y = (d: { cumulative: number }) => d.cumulative
+const x = (_: DataRecord, i: number) => i
+const y = (d: DataRecord) => d.amount
 
-const totalCa = computed(
-  () => chartData.value[chartData.value.length - 1]?.cumulative ?? 0
-)
+const total = computed(() => data.value.reduce((acc, { amount }) => acc + amount, 0))
 
-const yMax = computed(() => {
-  const vals = chartData.value.map((d) => d.cumulative)
-  const m = vals.length ? Math.max(...vals) : 0
-  return Math.max(Math.ceil(m * 1.12), 5)
-})
+const formatDate = (date: Date): string => {
+  if (props.period === 'monthly') {
+    return format(date, 'LLL yyyy', { locale: fr })
+  }
+  return format(date, 'd MMM', { locale: fr })
+}
 
-const yDomain = computed((): [number, number] => [0, yMax.value])
+const xTicks = (i: number) => {
+  if (!data.value.length) {
+    return ''
+  }
+  if (i === 0 || i === data.value.length - 1 || !data.value[i]) {
+    return ''
+  }
+  return formatDate(data.value[i].date)
+}
 
-const formatTick = (i: number) => chartData.value[i]?.label ?? ''
-
-const template = (d: {
-  label: string
-  cumulative: number
-  month: number
-}) =>
-  `${d.label || 'Début'} — CA cumulé : ${eur.format(d.cumulative)}` +
-  (d.month > 0 ? ` (+${eur.format(d.month)} ce mois)` : '')
+const template = (d: DataRecord) => `${formatDate(d.date)} : ${eur.format(d.amount)}`
 </script>
 
 <template>
   <UCard
-    :ui="{
-      root: 'overflow-visible',
-      header: 'px-4 sm:px-6 pt-6 pb-3 border-b border-default/60',
-      body: 'px-4 sm:px-6 pb-6 pt-4'
-    }"
+    ref="cardRef"
+    :ui="{ root: 'overflow-visible', body: 'px-0! pt-0! pb-3!' }"
   >
     <template #header>
       <div>
@@ -86,55 +68,48 @@ const template = (d: {
           Chiffre d'affaires (ventes)
         </p>
         <p class="text-3xl text-highlighted font-semibold">
-          {{ eur.format(totalCa) }}
+          {{ eur.format(total) }}
         </p>
         <p class="text-xs text-muted mt-1">
-          Cumul depuis la première vente enregistrée
+          Sur la période sélectionnée
         </p>
       </div>
     </template>
 
-    <div
-      v-if="chartData.length"
-      class="w-full min-w-0 min-h-96"
+    <VisXYContainer
+      v-if="data.length"
+      :data="data"
+      :padding="{ top: 40 }"
+      class="h-96 unovis-xy-container"
+      :width="width"
     >
-      <VisXYContainer
-        :data="chartData"
-        :y-domain="yDomain"
-        :prevent-empty-domain="true"
-        :padding="{ top: 24, left: 52, right: 16, bottom: 36 }"
-        class="h-96 w-full unovis-xy-container"
-      >
-        <VisLine
-          :x="x"
-          :y="y"
-          color="var(--ui-primary)"
-        />
-        <VisArea
-          :x="x"
-          :y="y"
-          color="var(--ui-primary)"
-          :opacity="0.12"
-        />
-        <VisAxis
-          type="x"
-          :x="x"
-          :tick-format="formatTick"
-        />
-        <VisAxis
-          type="y"
-          :y="y"
-          :tick-format="(v: number) => eur.format(v)"
-        />
-        <VisCrosshair
-          color="var(--ui-primary)"
-          :template="template"
-        />
-        <VisTooltip />
-      </VisXYContainer>
-    </div>
+      <VisLine
+        :x="x"
+        :y="y"
+        color="var(--ui-primary)"
+      />
+      <VisArea
+        :x="x"
+        :y="y"
+        color="var(--ui-primary)"
+        :opacity="0.1"
+      />
+
+      <VisAxis
+        type="x"
+        :x="x"
+        :tick-format="xTicks"
+      />
+
+      <VisCrosshair
+        color="var(--ui-primary)"
+        :template="template"
+      />
+
+      <VisTooltip />
+    </VisXYContainer>
     <p v-else class="text-sm text-muted py-12 text-center">
-      Aucune vente enregistrée — le graphique apparaîtra après vos premières ventes.
+      Aucune vente sur la période sélectionnée.
     </p>
   </UCard>
 </template>

@@ -10,6 +10,18 @@ const eur = new Intl.NumberFormat('fr-FR', {
   currency: 'EUR',
   maximumFractionDigits: 0
 })
+
+function formatTimeToSell(hours: number): string {
+  if (!Number.isFinite(hours) || hours < 0) {
+    return '—'
+  }
+  if (hours < 24) {
+    const rounded = Math.max(1, Math.round(hours))
+    return `${rounded} h`
+  }
+  const days = Math.round(hours / 24)
+  return `${days} j`
+}
 </script>
 
 <template>
@@ -29,7 +41,7 @@ const eur = new Intl.NumberFormat('fr-FR', {
           :key="r.article_id"
           class="flex justify-between gap-2 py-2.5 text-sm"
         >
-          <span class="truncate text-highlighted">{{ r.pokemon_name || r.title }}</span>
+          <span class="truncate text-highlighted">{{ r.title }}</span>
           <span class="shrink-0 font-semibold text-primary">{{ eur.format(r.profit_eur) }}</span>
         </li>
       </ul>
@@ -53,8 +65,8 @@ const eur = new Intl.NumberFormat('fr-FR', {
           :key="r.article_id"
           class="flex justify-between gap-2 py-2.5 text-sm"
         >
-          <span class="truncate">{{ r.pokemon_name || r.title }}</span>
-          <span class="shrink-0 tabular-nums text-muted">{{ r.hours_to_sell }} h</span>
+          <span class="truncate">{{ r.title }}</span>
+          <span class="shrink-0 tabular-nums text-muted">{{ formatTimeToSell(r.hours_to_sell) }}</span>
         </li>
       </ul>
       <p v-else class="text-sm text-muted py-6 text-center">
