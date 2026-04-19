@@ -4,6 +4,8 @@ export interface MeUser {
   id: number
   email: string
   vinted_email: string | null
+  is_admin: boolean
+  status: 'pending' | 'approved' | 'rejected' | 'banned'
   created_at: string
 }
 

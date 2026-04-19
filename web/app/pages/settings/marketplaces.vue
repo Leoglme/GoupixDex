@@ -193,6 +193,8 @@ onMounted(async () => {
         </div>
       </UCard>
 
+      <VintedAccountCard v-if="s.vinted_enabled" />
+
       <UCard v-if="s.ebay_enabled && s.ebay_oauth_configured">
         <template #header>
           <p class="font-medium text-highlighted">

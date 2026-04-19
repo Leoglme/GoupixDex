@@ -7,7 +7,6 @@ const links = computed(() => {
   const path = route.path
   const isConfig = path === '/settings' || path === '/settings/'
   const isMarketplaces = path.startsWith('/settings/marketplaces')
-  const isUsers = path.startsWith('/settings/users')
   return [[{
     label: 'Configuration',
     icon: 'i-lucide-user',
@@ -19,11 +18,6 @@ const links = computed(() => {
     icon: 'i-lucide-store',
     to: '/settings/marketplaces',
     active: isMarketplaces
-  }, {
-    label: 'Utilisateurs',
-    icon: 'i-lucide-users',
-    to: '/settings/users',
-    active: isUsers
   }]] as NavigationMenuItem[][]
 })
 </script>

@@ -48,7 +48,11 @@ def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
-    """Require a valid Bearer JWT and return the ``User`` row."""
+    """Require a valid Bearer JWT and return the ``User`` row.
+
+    Tokens belonging to non-approved users (banned, rejected, pending) are
+    rejected so revoking access takes effect on every API call.
+    """
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
@@ -59,6 +63,8 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if user.status != "approved":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access revoked")
     return user
 
 
@@ -75,3 +81,12 @@ def get_current_user_optional(
     except (JWTError, ValueError):
         return None
     return db.get(User, user_id)
+
+
+def get_current_admin(
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Require a logged-in user with the admin flag."""
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return user

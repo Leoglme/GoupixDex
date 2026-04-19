@@ -45,17 +45,23 @@ def main() -> None:
     try:
         existing = db.query(User).filter(User.email == email.lower()).first()
         if existing:
+            # Make sure the seeded admin always remains admin + approved across redeploys.
+            changed = False
+            if not existing.is_admin:
+                existing.is_admin = True
+                changed = True
+            if existing.status != "approved":
+                existing.status = "approved"
+                changed = True
             if vinted_email and vinted_password:
                 existing.vinted_email = vinted_email
                 existing.vinted_password = store_user_vinted_password(vinted_password)
+                changed = True
+            if changed:
                 db.commit()
-                print(f"User already exists: {email}")
-                print("Updated vinted_email / vinted_password from VINTED_EMAIL_OR_USERNAME / VINTED_PASSWORD.")
+                print(f"User already exists: {email} (admin + approved ensured).")
             else:
                 print(f"User already exists: {email}")
-                print(
-                    "Vinted columns unchanged (set VINTED_EMAIL_OR_USERNAME and VINTED_PASSWORD in .env to sync).",
-                )
             return
         create_user(
             db,
@@ -63,8 +69,10 @@ def main() -> None:
             password=password,
             vinted_email=vinted_email,
             vinted_password=vinted_password,
+            is_admin=True,
+            status="approved",
         )
-        print(f"Seeded user: {email}")
+        print(f"Seeded admin user: {email}")
         if vinted_email and vinted_password:
             print("Stored Vinted credentials from .env on the user row.")
         elif vinted_email or vinted_password:

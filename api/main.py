@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
+from routes import access_requests as access_requests_routes
 from routes import articles as articles_routes
 from routes import auth as auth_routes
 from routes import ebay_route
@@ -95,6 +96,7 @@ def health() -> dict[str, str]:
 
 app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(users_routes.router)
+app.include_router(access_requests_routes.router)
 app.include_router(articles_routes.router)
 app.include_router(settings_route.router)
 app.include_router(ebay_route.router)

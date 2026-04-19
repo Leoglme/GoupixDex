@@ -11,9 +11,15 @@ from models.user import User
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    """Return the user if email/password match, else None."""
+    """Return the user if email/password match, else None.
+
+    Users without a stored password (access request not finalized) cannot log in.
+    Status checks (approved / banned / …) are performed by the caller / dependency.
+    """
     user = db.query(User).filter(User.email == email.strip().lower()).first()
     if user is None:
+        return None
+    if not user.password:
         return None
     if not verify_password(password, user.password):
         return None
@@ -24,17 +30,27 @@ def create_user(
     db: Session,
     *,
     email: str,
-    password: str,
+    password: str | None,
     vinted_email: str | None = None,
     vinted_password: str | None = None,
+    is_admin: bool = False,
+    status: str = "approved",
+    request_message: str | None = None,
 ) -> User:
-    """Create a user, hash login password, encrypt Vinted password, and create margin settings."""
+    """Create a user, hash login password, encrypt Vinted password, and create margin settings.
+
+    ``password`` may be ``None`` for users created from a public access request:
+    they will set it later via the password-setup link the admin sends them.
+    """
     normalized = email.strip().lower()
     u = User(
         email=normalized,
-        password=hash_password(password),
+        password=hash_password(password) if password else None,
         vinted_email=vinted_email.strip() if vinted_email else None,
         vinted_password=store_user_vinted_password(vinted_password),
+        is_admin=is_admin,
+        status=status,
+        request_message=(request_message or "").strip() or None,
     )
     db.add(u)
     db.flush()

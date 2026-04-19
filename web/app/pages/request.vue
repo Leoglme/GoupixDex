@@ -14,13 +14,27 @@ const email = ref('')
 const message = ref('')
 const submitted = ref(false)
 const loading = ref(false)
+const errorMsg = ref<string | null>(null)
+
+const { submitAccessRequest } = useAccessRequests()
 
 async function handleSubmit() {
-  if (!email.value) return
+  if (!email.value) {
+    return
+  }
+  errorMsg.value = null
   loading.value = true
-  await new Promise(r => setTimeout(r, 1200))
-  loading.value = false
-  submitted.value = true
+  try {
+    await submitAccessRequest({
+      email: email.value.trim(),
+      message: message.value.trim() || null
+    })
+    submitted.value = true
+  } catch (e) {
+    errorMsg.value = apiErrorMessage(e)
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -135,6 +149,15 @@ async function handleSubmit() {
                 Remplissez le formulaire ci-dessous, nous reviendrons vers vous rapidement.
               </p>
             </div>
+
+            <UAlert
+              v-if="errorMsg"
+              color="error"
+              variant="subtle"
+              icon="i-lucide-circle-alert"
+              :title="errorMsg"
+              class="mb-5"
+            />
 
             <form class="space-y-5" @submit.prevent="handleSubmit">
               <UFormField label="Adresse email" required>

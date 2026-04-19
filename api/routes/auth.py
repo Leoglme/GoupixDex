@@ -21,5 +21,12 @@ def login(body: LoginRequest, db: Annotated[Session, Depends(get_db)]) -> TokenR
     user = auth_service.authenticate_user(db, body.email, body.password)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if user.status == "banned":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account banned")
+    if user.status == "rejected":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access request rejected")
+    if user.status != "approved":
+        # 'pending' or any unknown intermediate state.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access not granted yet")
     token = create_access_token(user.id)
     return TokenResponse(access_token=token)

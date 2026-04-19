@@ -5,9 +5,15 @@ useDashboard()
 
 const open = ref(false)
 const { isDesktopApp } = useDesktopRuntime()
+const { me, refreshMe } = useAuth()
+
+if (import.meta.client && !me.value) {
+  refreshMe()
+}
 
 /**
  * Journal des publications : Vinted + eBay (SSE). Télécharger l'app : web uniquement.
+ * Le lien Utilisateurs n'apparaît que pour l'admin.
  */
 const links = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
@@ -30,6 +36,15 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: () => { open.value = false }
     }
   ]
+
+  if (me.value?.is_admin) {
+    items.push({
+      label: 'Utilisateurs',
+      icon: 'i-lucide-users',
+      to: '/users',
+      onSelect: () => { open.value = false }
+    })
+  }
 
   if (!isDesktopApp.value) {
     items.push({

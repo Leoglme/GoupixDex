@@ -71,6 +71,8 @@ export default defineNuxtConfig({
           '/articles/**',
           '/settings',
           '/settings/**',
+          '/users',
+          '/setup-password/**',
           '/login'
         ]
       }
@@ -93,11 +95,15 @@ export default defineNuxtConfig({
     '/api/**': {
       cors: true
     },
-    '/settings/members': { redirect: '/settings/users' },
+    '/settings/members': { redirect: '/users' },
+    '/settings/users': { redirect: '/users' },
+    '/settings/users/create': { redirect: '/users' },
     '/dashboard': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/downloads': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/articles/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/settings/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/users': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/setup-password/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/login': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } }
   },
 
