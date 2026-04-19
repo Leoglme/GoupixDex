@@ -3,7 +3,29 @@
 Single frontend shared between:
 
 - the **web** version (Nuxt 4),
-- the **desktop** version (Tauri, Windows + macOS).
+- the **desktop** version (Tauri, Windows + macOS) — required for **Vinted** features (publishing + wardrobe sync).
+
+## Pages overview
+
+| Route | Access | Purpose |
+|-------|--------|---------|
+| `/` | Public | Marketing landing (Vinted + eBay + wardrobe sync pitch). |
+| `/request` | Public | Submit an access request (`POST /access-requests`). |
+| `/login` | Public | JWT sign-in (rejects `pending` / `rejected` / `banned`). |
+| `/setup-password/[token]` | Public | One-time password setup from an admin-issued link. |
+| `/dashboard` | Auth | KPIs, revenue timeline, channel split (Vinted vs eBay). |
+| `/articles`, `/articles/**` | Auth | Inventory CRUD, scan flow, batch publish. |
+| `/settings` | Auth | Profile, notifications, security. |
+| `/settings/marketplaces` | Auth | Toggle Vinted/eBay, link Vinted account (`VintedAccountCard`), eBay OAuth + onboarding. |
+| `/users` | **Admin** | User list (avatar via PokeAPI, status, margin, Vinted/eBay flags) + approve / reject / ban / generate password link. |
+| `/downloads` | Auth | Download the Tauri desktop bundle (Windows / macOS). |
+
+The **admin** is the user seeded from the API (`SEED_USER_EMAIL`). The sidebar conditionally shows the *Utilisateurs* link when `is_admin` is true (`useAuth().user`). Admin-only pages are guarded by [`app/middleware/admin.ts`](app/middleware/admin.ts).
+
+## Vinted behavior
+
+- **Web**: Vinted publishing & wardrobe sync are disabled — the UI points users to `/downloads`.
+- **Desktop (Tauri)**: Vinted features call the local Python worker on `127.0.0.1:18766` (configurable via `NUXT_PUBLIC_VINTED_LOCAL_BASE`). Composables: `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeLocalSync`, `useWardrobeSyncStream`. The runtime is detected through the Tauri WebView.
 
 ## Prerequisites
 
@@ -21,10 +43,12 @@ npm install
 
 Example in `.env.example`:
 
-- `NUXT_PUBLIC_API_BASE`: remote API URL (prod or local)
-- `NUXT_PUBLIC_GITHUB_REPO`: `owner/repo` slug for the Download page
-- `NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL`: `latest` or a GitHub Release tag
-- `NUXT_PUBLIC_GITHUB_API_BASE`: GitHub API base (default `https://api.github.com`)
+- `NUXT_PUBLIC_SITE_URL`: canonical site URL (used for SEO + sitemap).
+- `NUXT_PUBLIC_API_BASE`: remote GoupixDex API URL (prod or local).
+- `NUXT_PUBLIC_VINTED_LOCAL_BASE`: local desktop worker URL (default `http://127.0.0.1:18766`, Tauri only).
+- `NUXT_PUBLIC_GITHUB_REPO`: `owner/repo` slug for the `/downloads` page.
+- `NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL`: `latest` or a GitHub Release tag.
+- `NUXT_PUBLIC_GITHUB_API_BASE`: GitHub API base (default `https://api.github.com`).
 
 ## Web development
 
@@ -80,14 +104,12 @@ npm run tauri:build
 
 The command first builds the Nuxt frontend in desktop mode (`NUXT_DESKTOP_BUILD=1`), then bundles the app with Tauri.
 
-## Vinted behavior
-
-- **Web**: Vinted publishing features are disabled, with a message pointing users to the download page.
-- **Desktop**: Vinted features are available (runtime detected through Tauri WebView).
+The desktop bundle ships a Python sidecar (`api/desktop_vinted_server.py`) that exposes the local Vinted worker the frontend talks to.
 
 ## CI/CD
 
 - `deploy-web.yml` — web build and deploy (Nitro + PM2).
+- `deploy-api.yml` — backend build / VPS deployment (systemd + Xvfb for Vinted).
 - `desktop-release.yml` — Windows/macOS desktop **release** builds (Windows binary without console) and a stable GitHub Release **per version** (`v0.1.x`, not prerelease).
 
 ## Tauri updater: key generation and GitHub secrets
