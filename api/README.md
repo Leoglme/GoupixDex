@@ -186,6 +186,15 @@ python desktop_vinted_server.py
 | `GOUPIX_VINTED_LOCAL_PORT` | `18766` | Port listening on `127.0.0.1` (Tauri dev overrides to `18767` by default to avoid conflicts with installed desktop app) |
 | `GOUPIX_REMOTE_API` | (none) | Remote API URL (used when the client does not send `X-Goupix-Remote-Api`) |
 
+**Installed desktop worker — Vinted (Chrome) env files:** on startup the sidecar loads dotenv files in order (later files override earlier keys):
+
+1. `worker_bundled.env` — embedded in the PyInstaller binary (defaults in-repo; the **Desktop build & release** workflow may overwrite this file before PyInstaller from optional secrets `VINTED_DESKTOP_BROWSER_*`).
+2. `.env` in the install directory next to `goupix-vinted-worker` (same folder as the sidecar executable).
+3. `%LOCALAPPDATA%\GoupixDex\.env` on Windows (and the equivalent user-data paths on macOS/Linux).
+4. `.env` in the process current working directory (typical in dev when running `python desktop_vinted_server.py` from `api/`).
+
+Optional GitHub secrets for the Desktop workflow (same variable names as in `worker_bundled.env`): `VINTED_DESKTOP_BROWSER_HEADLESS`, `VINTED_DESKTOP_BROWSER_DISCREET`, `VINTED_DESKTOP_BROWSER_DISCREET_MINIMIZE`, `VINTED_DESKTOP_BROWSER_DISCREET_X`, `VINTED_DESKTOP_BROWSER_DISCREET_Y`. If unset, the CI step writes defaults `false` / `0` matching `api/worker_bundled.env`.
+
 It exposes job-style endpoints used by the Nuxt frontend (`useWardrobeLocalSync`, `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeSyncStream`):
 
 - `POST /vinted/wardrobe-sync/jobs` + `GET /vinted/wardrobe-sync/jobs/{id}` (poll)

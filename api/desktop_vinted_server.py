@@ -13,12 +13,18 @@ the client does not send ``X-Goupix-Remote-Api``).
 
 from __future__ import annotations
 
+import os
+import sys
+
+# Load dotenv before any import that triggers ``config.get_settings()`` (cached singleton).
+from worker_env_bootstrap import load_worker_dotenv
+
+load_worker_dotenv()
+
 import asyncio
 import hashlib
 import json
 import logging
-import os
-import sys
 import time
 import uuid
 from typing import Annotated
@@ -83,6 +89,15 @@ def _configure_logging() -> None:
 _configure_logging()
 logger = logging.getLogger("goupixdex.vinted_local")
 
+try:
+    from worker_env_bootstrap import loaded_env_sources
+
+    _src = loaded_env_sources()
+    if _src:
+        logger.info("Worker .env loaded from: %s", " | ".join(_src))
+except Exception:  # noqa: BLE001
+    pass
+
 _LISTING_IMAGE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0"
 )
@@ -98,14 +113,6 @@ def _allowed_listing_image_host(hostname: str) -> bool:
     if h.endswith("vinted.fr") or h.endswith("vinted.co.uk") or h.endswith("vinted.com"):
         return True
     return False
-
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
 
 
 def get_remote_base_flexible(

@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'web/**'
+      - 'api/desktop_vinted_server.py'
+      - 'api/desktop_vinted_server.spec'
+      - 'api/worker_bundled.env'
+      - 'api/worker_env_bootstrap.py'
       - '.github/workflows/desktop-release.yml'
   workflow_dispatch:
 
@@ -84,6 +88,33 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller==6.11.1
           python -c "import platform, sys; print('Python', sys.version, 'arch=', platform.machine())"
+
+      # Optional GitHub secrets override bundled defaults (same keys as worker_bundled.env).
+      - name: Write worker_bundled.env for PyInstaller
+        shell: bash
+        working-directory: api
+        env:
+          VINTED_BROWSER_HEADLESS: ${{ secrets.VINTED_DESKTOP_BROWSER_HEADLESS }}
+          VINTED_BROWSER_DISCREET: ${{ secrets.VINTED_DESKTOP_BROWSER_DISCREET }}
+          VINTED_BROWSER_DISCREET_MINIMIZE: ${{ secrets.VINTED_DESKTOP_BROWSER_DISCREET_MINIMIZE }}
+          VINTED_BROWSER_DISCREET_X: ${{ secrets.VINTED_DESKTOP_BROWSER_DISCREET_X }}
+          VINTED_BROWSER_DISCREET_Y: ${{ secrets.VINTED_DESKTOP_BROWSER_DISCREET_Y }}
+        run: |
+          set -euo pipefail
+          headless="${VINTED_BROWSER_HEADLESS:-false}"
+          discreet="${VINTED_BROWSER_DISCREET:-false}"
+          minimize="${VINTED_BROWSER_DISCREET_MINIMIZE:-false}"
+          x="${VINTED_BROWSER_DISCREET_X:-0}"
+          y="${VINTED_BROWSER_DISCREET_Y:-0}"
+          {
+            echo "VINTED_BROWSER_HEADLESS=${headless}"
+            echo "VINTED_BROWSER_DISCREET=${discreet}"
+            echo "VINTED_BROWSER_DISCREET_MINIMIZE=${minimize}"
+            echo "VINTED_BROWSER_DISCREET_X=${x}"
+            echo "VINTED_BROWSER_DISCREET_Y=${y}"
+          } > worker_bundled.env
+          echo "--- worker_bundled.env (desktop sidecar) ---"
+          cat worker_bundled.env
 
       - name: Build Vinted local worker (PyInstaller)
         shell: bash

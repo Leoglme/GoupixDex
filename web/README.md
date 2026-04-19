@@ -87,7 +87,7 @@ To avoid collisions with a production desktop app running at the same time, `tau
 
 - frontend local worker base: `http://127.0.0.1:18767`
 - worker listening port: `18767`
-- nodriver profile directory: `vinted-nodriver-profile-dev`
+- nodriver profile directory (outside the repo): on Windows `%LOCALAPPDATA%\GoupixDex\vinted-nodriver-profile-dev` (see `dev_vinted_nodriver_user_data_dir` in `web/src-tauri/src/lib.rs`)
 
 If you see a Cargo error like:
 

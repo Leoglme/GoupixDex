@@ -50,6 +50,11 @@ hiddenimports += [
 
 datas = []
 datas += collect_data_files("nodriver", include_py_files=False)
+# `vinted_scraper` ships JSON data (e.g. utils/agents.json); PyInstaller does not include it by default.
+datas += collect_data_files("vinted_scraper", include_py_files=False)
+# Bundled Vinted (Chrome) defaults for the sidecar; CI may overwrite before PyInstaller.
+if (SPEC_DIR / "worker_bundled.env").is_file():
+    datas += [(str(SPEC_DIR / "worker_bundled.env"), ".")]
 
 block_cipher = None
 

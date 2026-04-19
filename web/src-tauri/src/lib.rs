@@ -133,13 +133,64 @@ fn dev_repo_api_dir() -> Option<PathBuf> {
     }
 }
 
-/// Construit la commande qui lance le worker, en injectant `VINTED_CHROME_EXECUTABLE`
-/// avec le chemin de Chrome (ou Edge en fallback) lorsque connu.
+/// Nodriver Chromium profile directory for `tauri dev`: under the OS user data folder,
+/// not inside the repo `api/` tree (avoids creating `vinted-nodriver-profile-dev/` there).
+fn dev_vinted_nodriver_user_data_dir() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let local = std::env::var("LOCALAPPDATA").ok()?;
+        if local.is_empty() {
+            return None;
+        }
+        Some(
+            PathBuf::from(local)
+                .join("GoupixDex")
+                .join("vinted-nodriver-profile-dev")
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").ok()?;
+        if home.is_empty() {
+            return None;
+        }
+        Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("GoupixDex")
+                .join("vinted-nodriver-profile-dev")
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let home = std::env::var("HOME").ok()?;
+        if home.is_empty() {
+            return None;
+        }
+        Some(
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("GoupixDex")
+                .join("vinted-nodriver-profile-dev")
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
+
+/// Builds the shell command for the Vinted worker, injecting `VINTED_CHROME_EXECUTABLE`
+/// when Chrome or Edge is found.
 fn build_worker_command(
     app: &tauri::AppHandle,
 ) -> Result<tauri_plugin_shell::process::Command, String> {
     let info = detect_browsers();
-    // Préférence : Chrome > Edge > rien (nodriver tentera la détection auto).
+    // Prefer Chrome, then Edge; otherwise nodriver may auto-detect.
     let chrome_path = info.chrome_path.clone().or(info.edge_path.clone());
 
     #[cfg(debug_assertions)]
@@ -158,7 +209,9 @@ fn build_worker_command(
                 cmd = cmd.env("GOUPIX_VINTED_LOCAL_PORT", "18767");
             }
             if std::env::var("VINTED_USER_DATA_DIR").is_err() {
-                cmd = cmd.env("VINTED_USER_DATA_DIR", "vinted-nodriver-profile-dev");
+                if let Some(p) = dev_vinted_nodriver_user_data_dir() {
+                    cmd = cmd.env("VINTED_USER_DATA_DIR", p);
+                }
             }
             if let Some(p) = chrome_path {
                 cmd = cmd.env("VINTED_CHROME_EXECUTABLE", p);
