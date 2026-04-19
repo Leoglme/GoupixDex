@@ -28,6 +28,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "externalBin": ["binaries/goupix-vinted-worker"],
     "icon": [
       "../public/favicon.ico",
       "../public/favicon-32x32.png",

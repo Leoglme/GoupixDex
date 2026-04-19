@@ -123,5 +123,7 @@ function navMenuUi(collapsed: boolean) {
     <UDashboardSearch :groups="groups" />
 
     <slot />
+
+    <BrowserMissingModal v-if="isDesktopApp" />
   </UDashboardGroup>
 </template>

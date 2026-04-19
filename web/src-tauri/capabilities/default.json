@@ -6,6 +6,10 @@
   "permissions": [
     "core:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [{ "url": "https://**" }]
+    }
   ]
 }

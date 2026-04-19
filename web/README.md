@@ -26,6 +26,17 @@ The **admin** is the user seeded from the API (`SEED_USER_EMAIL`). The sidebar c
 
 - **Web**: Vinted publishing & wardrobe sync are disabled — the UI points users to `/downloads`.
 - **Desktop (Tauri)**: Vinted features call the local Python worker on `127.0.0.1:18766` (configurable via `NUXT_PUBLIC_VINTED_LOCAL_BASE`). Composables: `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeLocalSync`, `useWardrobeSyncStream`. The runtime is detected through the Tauri WebView.
+  - The desktop installer bundles the worker as a **PyInstaller sidecar** (`bundle.externalBin = ["binaries/goupix-vinted-worker"]`). End users do **not** need a system-wide Python install.
+  - The worker is spawned by `web/src-tauri/src/lib.rs` on app startup and killed on exit. In dev (`tauri:dev`), `lib.rs` falls back to `python desktop_vinted_server.py` from the local `api/` folder so you can iterate without rebuilding the sidecar (set `GOUPIX_PYTHON` to override the interpreter).
+  - Worker logs are written to `%LOCALAPPDATA%\GoupixDex\logs\vinted-worker.log` (Windows) / `~/Library/Logs/GoupixDex/vinted-worker.log` (macOS) so they survive `--noconsole` PyInstaller mode.
+
+## Browser requirement (desktop)
+
+The Vinted worker drives a **Chrome** install via [`nodriver`](https://github.com/ultrafunkamsterdam/nodriver). At app startup the Tauri command `check_browser_availability` (Rust, see `lib.rs`) probes the standard install paths and:
+
+- if **Chrome** is found → it is passed to the worker via `VINTED_CHROME_EXECUTABLE`,
+- otherwise if **Edge** is found (always present on Win 10/11) → Edge is used as a fallback,
+- otherwise the frontend mounts [`BrowserMissingModal.vue`](app/components/BrowserMissingModal.vue) (composable: [`useBrowserAvailability`](app/composables/useBrowserAvailability.ts)) blocking the UI until the user installs Chrome.
 
 ## Prerequisites
 
@@ -70,6 +81,8 @@ npm run build
 npm run tauri:dev
 ```
 
+The script first runs `vinted-worker:stub` which writes an empty placeholder under `web/src-tauri/binaries/goupix-vinted-worker-<host-triple>(.exe)` so Tauri's `bundle.externalBin` validation passes. In `cfg(debug_assertions)` builds, `lib.rs` ignores the placeholder and spawns `python desktop_vinted_server.py` from `api/` instead. The folder `web/src-tauri/binaries/` is `.gitignore`d.
+
 If you see a Cargo error like:
 
 `this version of Cargo is older than the 2024 edition`
@@ -104,13 +117,13 @@ npm run tauri:build
 
 The command first builds the Nuxt frontend in desktop mode (`NUXT_DESKTOP_BUILD=1`), then bundles the app with Tauri.
 
-The desktop bundle ships a Python sidecar (`api/desktop_vinted_server.py`) that exposes the local Vinted worker the frontend talks to.
+The desktop bundle ships a Python sidecar built from `api/desktop_vinted_server.py` via PyInstaller (`api/desktop_vinted_server.spec`) — see the *CI/CD* section below for the per-OS build steps.
 
 ## CI/CD
 
 - `deploy-web.yml` — web build and deploy (Nitro + PM2).
 - `deploy-api.yml` — backend build / VPS deployment (systemd + Xvfb for Vinted).
-- `desktop-release.yml` — Windows/macOS desktop **release** builds (Windows binary without console) and a stable GitHub Release **per version** (`v0.1.x`, not prerelease).
+- `desktop-release.yml` — Windows/macOS desktop **release** builds (Windows binary without console) and a stable GitHub Release **per version** (`v0.1.x`, not prerelease). For each OS the workflow first sets up Python 3.11, installs `api/requirements.txt` + PyInstaller, and runs `pyinstaller desktop_vinted_server.spec` to produce `goupix-vinted-worker-<rust-triple>(.exe)` under `web/src-tauri/binaries/` before invoking `tauri-action`. The macOS Intel target uses the `macos-13` runner so the produced sidecar is x86_64.
 
 ## Tauri updater: key generation and GitHub secrets
 

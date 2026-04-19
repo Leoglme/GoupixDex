@@ -24,12 +24,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - platform: macos-13
             args: --target x86_64-apple-darwin
+            rust_triple: x86_64-apple-darwin
           - platform: macos-latest
             args: --target aarch64-apple-darwin
+            rust_triple: aarch64-apple-darwin
           - platform: windows-latest
             args: ""
+            rust_triple: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
 
     defaults:
@@ -60,6 +63,39 @@ jobs:
         run: |
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-apple-darwin
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps + PyInstaller
+        shell: bash
+        working-directory: api
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.11.1
+
+      - name: Build Vinted local worker (PyInstaller)
+        shell: bash
+        working-directory: api
+        env:
+          MATRIX_TRIPLE: ${{ matrix.rust_triple }}
+        run: |
+          set -e
+          pyinstaller desktop_vinted_server.spec --noconfirm --clean
+          mkdir -p ../web/src-tauri/binaries
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            mv "dist/goupix-vinted-worker.exe" \
+               "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}.exe"
+            ls -la "../web/src-tauri/binaries/"
+          else
+            mv "dist/goupix-vinted-worker" \
+               "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}"
+            chmod +x "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}"
+            ls -la "../web/src-tauri/binaries/"
+          fi
 
       - name: Install frontend dependencies
         run: npm ci

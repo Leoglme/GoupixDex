@@ -41,7 +41,46 @@ from services.vinted_progress_session_service import VintedProgressSessionServic
 
 ensure_proactor_event_loop()
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+
+def _resolve_log_dir() -> str:
+    """Local logs directory (also writable when packaged via PyInstaller `--noconsole`)."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "GoupixDex", "logs")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Logs", "GoupixDex")
+    return os.path.join(os.path.expanduser("~"), ".local", "share", "GoupixDex", "logs")
+
+
+def _configure_logging() -> None:
+    """Console + rotating file. The file handler is the only useful sink when the
+    worker is packaged via PyInstaller with `--noconsole` (no stdout / stderr)."""
+    from logging.handlers import RotatingFileHandler
+
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    try:
+        log_dir = _resolve_log_dir()
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            os.path.join(log_dir, "vinted-worker.log"),
+            maxBytes=2_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(fmt)
+        root.addHandler(file_handler)
+    except OSError:
+        pass
+
+
+_configure_logging()
 logger = logging.getLogger("goupixdex.vinted_local")
 
 _LISTING_IMAGE_UA = (

@@ -31,4 +31,11 @@
   [role='button']:not([aria-disabled='true']):not([data-disabled]) {
     cursor: pointer;
   }
+
+  /* Masque l'œil natif d'Edge / WebView2 (Tauri Windows) sur les <input type="password">,
+     pour ne garder que notre toggle custom dans PasswordInput.vue. */
+  input[type='password']::-ms-reveal,
+  input[type='password']::-ms-clear {
+    display: none;
+  }
 }
