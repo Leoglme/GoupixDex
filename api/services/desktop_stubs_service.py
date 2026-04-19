@@ -26,6 +26,9 @@ class DesktopStubsService:
         a.purchase_price = Decimal(str(d["purchase_price"]))
         sp = d.get("sell_price")
         a.sell_price = Decimal(str(sp)) if sp is not None else None
+        sdp = d.get("sold_price")
+        a.sold_price = Decimal(str(sdp)) if sdp is not None else None
+        a.sale_source = d.get("sale_source")
         a.is_sold = bool(d.get("is_sold", False))
         return a
 

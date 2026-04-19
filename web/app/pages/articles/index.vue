@@ -17,7 +17,7 @@ const { isDesktopApp } = useDesktopRuntime()
 const { startJob } = useWardrobeLocalSync()
 
 const wardrobeSyncing = ref(false)
-/** Affiche l'action « Mettre en ligne sur eBay » (canal activé + compte prêt dans les paramètres). */
+/** Show “Publish on eBay” when the channel is enabled and the account is ready in settings. */
 const ebayPublishAvailable = ref(false)
 
 const articles = ref<Article[]>([])
@@ -29,7 +29,7 @@ const fetchMarketData = ref(false)
 
 const soldOpen = ref(false)
 const soldArticle = ref<Article | null>(null)
-const sellPriceInput = ref('')
+const soldSubmitting = ref(false)
 
 const deleteOpen = ref(false)
 const deleteId = ref<number | null>(null)
@@ -78,26 +78,26 @@ watch(fetchMarketData, () => {
 
 function openSold(a: Article) {
   soldArticle.value = a
-  sellPriceInput.value = a.sell_price != null ? String(a.sell_price) : ''
   soldOpen.value = true
 }
 
-async function confirmSold() {
+async function confirmSold(payload: { soldPrice: number, saleSource: 'vinted' | 'ebay' }) {
   if (!soldArticle.value) {
     return
   }
-  const p = Number(sellPriceInput.value.replace(',', '.'))
-  if (Number.isNaN(p) || p < 0) {
-    toast.add({ title: 'Prix de vente invalide', color: 'error' })
-    return
-  }
+  soldSubmitting.value = true
   try {
-    await markSold(soldArticle.value.id, p)
+    await markSold(soldArticle.value.id, {
+      sold_price: payload.soldPrice,
+      sale_source: payload.saleSource
+    })
     toast.add({ title: 'Article marqué comme vendu', color: 'success' })
     soldOpen.value = false
     await refresh()
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    soldSubmitting.value = false
   }
 }
 
@@ -321,6 +321,7 @@ async function onPublishVinted(a: Article) {
               :pricing-by-id="pricingById"
               :loading="loading"
               :pricing-loading="pricingLoading"
+              :show-ebay-column="ebayPublishAvailable"
               :ebay-publish-available="ebayPublishAvailable"
               @edit="(id: number) => navigateTo(`/articles/${id}`)"
               @delete="(id: number) => { deleteId = id; deleteOpen = true }"
@@ -335,28 +336,13 @@ async function onPublishVinted(a: Article) {
     </template>
   </UDashboardPanel>
 
-  <UModal
+  <ArticleMarkSoldModal
     v-model:open="soldOpen"
-    title="Marquer comme vendu"
-    description="Indiquez le prix de vente final (€)."
-  >
-    <template #body>
-      <UInput
-        v-model="sellPriceInput"
-        type="text"
-        inputmode="decimal"
-        class="w-full"
-      />
-      <div class="flex justify-end gap-2 mt-4">
-        <UButton color="neutral" variant="subtle" @click="soldOpen = false">
-          Annuler
-        </UButton>
-        <UButton @click="confirmSold">
-          Valider
-        </UButton>
-      </div>
-    </template>
-  </UModal>
+    :article="soldArticle"
+    :ebay-enabled="ebayPublishAvailable"
+    :loading="soldSubmitting"
+    @confirm="confirmSold"
+  />
 
   <UModal
     v-model:open="bulkDeleteOpen"

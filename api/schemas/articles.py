@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +16,10 @@ class ArticleUpdate(BaseModel):
 
 
 class SoldPatch(BaseModel):
-    sell_price: Decimal = Field(ge=0)
+    """Mark as sold: actual proceeds and channel (listing price ``sell_price`` is unchanged)."""
+
+    sold_price: Decimal = Field(ge=0)
+    sale_source: Literal["vinted", "ebay"] = "vinted"
 
 
 class BulkIdsBody(BaseModel):

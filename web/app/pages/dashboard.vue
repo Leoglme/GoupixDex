@@ -65,7 +65,7 @@ const pieSegments = computed<PieSegment[]>(() => {
   const m = fetchMarketData.value ? Math.max(0, s.estimated_cardmarket_unsold_eur ?? 0) : 0
   const out: PieSegment[] = []
   if (v > 0) {
-    out.push({ value: v, label: 'CA cumulé (ventes Vinted)', color: PIE.vinted })
+    out.push({ value: v, label: 'CA cumulé (ventes)', color: PIE.vinted })
   }
   if (p > 0) {
     out.push({ value: p, label: 'Coût d\'achat du stock en vente', color: PIE.cost })
@@ -144,7 +144,7 @@ const pieStyle = computed(() => {
               icon="i-lucide-piggy-bank"
             />
             <StatsCard
-              title="CA Vinted (vendus)"
+              title="CA vendus (toutes sources)"
               :value="eur.format(stats.vinted_revenue_eur)"
               icon="i-lucide-shopping-bag"
             />

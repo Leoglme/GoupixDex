@@ -7,3 +7,4 @@ api/.env
 web/.env
 web/goupixdex.key
 web/goupixdex.key.pub
+dashboard-main

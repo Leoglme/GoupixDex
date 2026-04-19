@@ -15,8 +15,12 @@ export interface Article {
   condition: string
   purchase_price: number
   sell_price: number | null
+  /** Actual proceeds (may differ from listed price if negotiated). */
+  sold_price: number | null
+  /** Sales channel recorded at checkout. */
+  sale_source: 'vinted' | 'ebay' | null
   is_sold: boolean
-  /** Mis à jour côté serveur après une publication Vinted réussie. */
+  /** Updated server-side after a successful Vinted listing. */
   published_on_vinted?: boolean
   vinted_published_at?: string | null
   published_on_ebay?: boolean
@@ -31,10 +35,10 @@ export interface CreateArticleVintedResult {
   published?: boolean
   skipped?: boolean
   detail?: string
-  /** Publication lancée en arrière-plan ; suivre ``stream_path`` en SSE. */
+  /** Publish runs in the background; follow ``stream_path`` via SSE. */
   status?: 'running' | 'pending'
   stream_path?: string
-  /** Création sur l'API distante ; publication nodriver sur le worker local (Tauri). */
+  /** Remote API create; nodriver publish on the local worker (Tauri). */
   desktop_local?: boolean
 }
 
@@ -43,7 +47,7 @@ export interface CreateArticleEbayResult {
   skipped?: boolean
   detail?: string
   status?: 'running'
-  /** Suivi temps réel (même endpoint SSE que Vinted). */
+  /** Real-time progress (same SSE endpoint as Vinted). */
   stream_path?: string
 }
 
@@ -143,10 +147,11 @@ export function useArticles() {
     return data
   }
 
-  async function markSold(id: number, sellPrice: number) {
-    const { data } = await $api.patch<Article>(`/articles/${id}/sold`, {
-      sell_price: sellPrice
-    })
+  async function markSold(
+    id: number,
+    body: { sold_price: number, sale_source: 'vinted' | 'ebay' }
+  ) {
+    const { data } = await $api.patch<Article>(`/articles/${id}/sold`, body)
     return data
   }
 

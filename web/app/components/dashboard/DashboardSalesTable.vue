@@ -24,6 +24,16 @@ function formatDate(raw: string | null) {
     minute: '2-digit'
   })
 }
+
+function sourceLabel(src: RecentSaleRow['sale_source']) {
+  if (src === 'ebay') {
+    return 'eBay'
+  }
+  if (src === 'vinted') {
+    return 'Vinted'
+  }
+  return '—'
+}
 </script>
 
 <template>
@@ -57,11 +67,17 @@ function formatDate(raw: string | null) {
             <th class="text-left font-medium text-muted py-2.5 px-4">
               Carte
             </th>
+            <th class="text-left font-medium text-muted py-2.5 px-4">
+              Canal
+            </th>
             <th class="text-right font-medium text-muted py-2.5 px-4">
               Achat
             </th>
             <th class="text-right font-medium text-muted py-2.5 px-4">
-              Vente
+              Prix affiché
+            </th>
+            <th class="text-right font-medium text-muted py-2.5 px-4">
+              Prix réalisé
             </th>
             <th class="text-right font-medium text-muted py-2.5 px-4">
               Marge
@@ -81,11 +97,17 @@ function formatDate(raw: string | null) {
             <td class="py-2.5 px-4 max-w-[200px]">
               <span class="truncate block font-medium text-highlighted">{{ r.pokemon_name || r.title }}</span>
             </td>
+            <td class="py-2.5 px-4 text-muted">
+              {{ sourceLabel(r.sale_source) }}
+            </td>
             <td class="py-2.5 px-4 text-right tabular-nums">
               {{ eur.format(r.purchase_price_eur) }}
             </td>
+            <td class="py-2.5 px-4 text-right tabular-nums text-muted">
+              {{ r.listing_price_eur != null ? eur.format(r.listing_price_eur) : '—' }}
+            </td>
             <td class="py-2.5 px-4 text-right tabular-nums font-medium">
-              {{ r.sell_price_eur != null ? eur.format(r.sell_price_eur) : '—' }}
+              {{ r.realized_price_eur != null ? eur.format(r.realized_price_eur) : '—' }}
             </td>
             <td class="py-2.5 px-4 text-right tabular-nums font-semibold text-primary">
               {{ eur.format(r.profit_eur) }}

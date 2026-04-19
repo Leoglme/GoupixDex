@@ -7,7 +7,9 @@ const props = defineProps<{
   pricingById: Map<number, PricingLookup>
   loading?: boolean
   pricingLoading?: boolean
-  /** eBay activé + compte connecté + assistant terminé (paramètres). Sinon le bouton eBay est masqué. */
+  /** Show the “listed on eBay” column (same gate as eBay publish actions). */
+  showEbayColumn?: boolean
+  /** eBay enabled + account connected + listing wizard complete (settings); hides eBay actions otherwise. */
   ebayPublishAvailable?: boolean
 }>()
 
@@ -24,9 +26,49 @@ function ebayRowDisabled(row: Article) {
   return row.is_sold || (row.published_on_ebay ?? false) || !(row.images?.length)
 }
 
+function soldStatusLabel(row: Article) {
+  if (!row.is_sold) {
+    return 'Non'
+  }
+  if (row.sale_source === 'ebay') {
+    return 'eBay'
+  }
+  if (row.sale_source === 'vinted') {
+    return 'Vinted'
+  }
+  return 'Oui'
+}
+
+function realizedSalePrice(row: Article): number | null {
+  if (!row.is_sold) {
+    return null
+  }
+  if (row.sold_price != null) {
+    return row.sold_price
+  }
+  return row.sell_price
+}
+
+/** Vinted / eBay brand colors for the sold-status badge when source is known */
+const SOLD_BADGE_VINTED = '#00838f'
+const SOLD_BADGE_EBAY = '#86b817'
+
+function soldStatusBrandStyle(row: Article): { backgroundColor: string, color: string } | null {
+  if (!row.is_sold) {
+    return null
+  }
+  if (row.sale_source === 'vinted') {
+    return { backgroundColor: SOLD_BADGE_VINTED, color: '#ffffff' }
+  }
+  if (row.sale_source === 'ebay') {
+    return { backgroundColor: SOLD_BADGE_EBAY, color: '#ffffff' }
+  }
+  return null
+}
+
 const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
 const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
-/** Text filter: Pokémon, set code, set name, card #, title. */
+/** Text filter: name, set code, set name, card #, title. */
 const searchQuery = ref('')
 const { isDesktopApp } = useDesktopRuntime()
 
@@ -196,7 +238,7 @@ const UAvatar = resolveComponent('UAvatar')
       <UInput
         v-model="searchQuery"
         icon="i-lucide-search"
-        placeholder="Rechercher : Pokémon, set, série, n°…"
+        placeholder="Rechercher : nom, set, série, n°…"
         class="w-full min-w-0 md:max-w-xl md:flex-1"
       />
 
@@ -275,7 +317,10 @@ const UAvatar = resolveComponent('UAvatar')
             </th>
             <th class="w-12 px-3 py-2 font-medium border-b border-default" />
             <th class="px-3 py-2 font-medium border-b border-default">
-              Pokémon
+              Nom de l'article
+            </th>
+            <th class="px-3 py-2 font-medium border-b border-default">
+              Vendu
             </th>
             <th class="px-3 py-2 font-medium border-b border-default">
               Série / set
@@ -284,22 +329,28 @@ const UAvatar = resolveComponent('UAvatar')
               N°
             </th>
             <th class="px-3 py-2 font-medium border-b border-default">
-              Achat
+              Prix d'achat
+            </th>
+            <th class="px-3 py-2 font-medium border-b border-default">
+              Prix de vente
+            </th>
+            <th class="px-3 py-2 font-medium border-b border-default">
+              Prix réalisé
+            </th>
+            <th class="px-3 py-2 font-medium border-b border-default">
+              Vinted
+            </th>
+            <th
+              v-if="showEbayColumn"
+              class="px-3 py-2 font-medium border-b border-default"
+            >
+              eBay
             </th>
             <th class="px-3 py-2 font-medium border-b border-default">
               Cardmarket
             </th>
             <th class="px-3 py-2 font-medium border-b border-default">
               TCGPlayer
-            </th>
-            <th class="px-3 py-2 font-medium border-b border-default">
-              Vendu
-            </th>
-            <th class="px-3 py-2 font-medium border-b border-default">
-              Vinted
-            </th>
-            <th class="px-3 py-2 font-medium border-b border-default">
-              Vente
             </th>
             <th class="px-3 py-2 font-medium border-b border-default">
               Dates
@@ -347,6 +398,31 @@ const UAvatar = resolveComponent('UAvatar')
                 </span>
               </div>
             </td>
+            <td class="px-3 py-3 align-middle border-b border-default">
+              <UBadge
+                v-if="!row.is_sold"
+                color="error"
+                variant="subtle"
+                class="max-w-[10rem] whitespace-normal text-center leading-snug"
+              >
+                {{ soldStatusLabel(row) }}
+              </UBadge>
+              <span
+                v-else-if="soldStatusBrandStyle(row)"
+                class="inline-flex max-w-[10rem] whitespace-normal rounded-md px-2 py-0.5 text-center text-xs font-semibold leading-snug ring-1 ring-black/10"
+                :style="soldStatusBrandStyle(row)!"
+              >
+                {{ soldStatusLabel(row) }}
+              </span>
+              <UBadge
+                v-else
+                color="success"
+                variant="subtle"
+                class="max-w-[10rem] whitespace-normal text-center leading-snug"
+              >
+                {{ soldStatusLabel(row) }}
+              </UBadge>
+            </td>
             <td class="px-3 py-3 text-muted align-middle border-b border-default">
               {{ pricingById.get(row.id)?.set_name || row.set_code || '—' }}
             </td>
@@ -355,6 +431,34 @@ const UAvatar = resolveComponent('UAvatar')
             </td>
             <td class="px-3 py-3 align-middle border-b border-default">
               {{ eur.format(row.purchase_price) }}
+            </td>
+            <td class="px-3 py-3 align-middle border-b border-default">
+              {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+            </td>
+            <td class="px-3 py-3 align-middle border-b border-default">
+              <span v-if="realizedSalePrice(row) != null">
+                {{ eur.format(realizedSalePrice(row)!) }}
+              </span>
+              <span v-else class="text-muted">—</span>
+            </td>
+            <td class="px-3 py-3 align-middle border-b border-default">
+              <UBadge
+                :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
+                variant="subtle"
+              >
+                {{ (row.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
+              </UBadge>
+            </td>
+            <td
+              v-if="showEbayColumn"
+              class="px-3 py-3 align-middle border-b border-default"
+            >
+              <UBadge
+                :color="(row.published_on_ebay ?? false) ? 'success' : 'neutral'"
+                variant="subtle"
+              >
+                {{ (row.published_on_ebay ?? false) ? 'Oui' : 'Non' }}
+              </UBadge>
             </td>
             <td class="px-3 py-3 align-middle border-b border-default">
               <span v-if="pricingById.get(row.id)?.cardmarket_eur != null">
@@ -368,29 +472,10 @@ const UAvatar = resolveComponent('UAvatar')
               </span>
               <span v-else class="text-muted">—</span>
             </td>
-            <td class="px-3 py-3 align-middle border-b border-default">
-              <UBadge
-                :color="row.is_sold ? 'success' : 'error'"
-                variant="subtle"
-              >
-                {{ row.is_sold ? 'Oui' : 'Non' }}
-              </UBadge>
-            </td>
-            <td class="px-3 py-3 align-middle border-b border-default">
-              <UBadge
-                :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
-                variant="subtle"
-              >
-                {{ (row.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
-              </UBadge>
-            </td>
-            <td class="px-3 py-3 align-middle border-b border-default">
-              {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
-            </td>
             <td class="px-3 py-3 text-muted text-xs whitespace-nowrap align-middle border-b border-default">
-              <div>C : {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}</div>
+              <div>Créé le {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}</div>
               <div v-if="row.sold_at">
-                V : {{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}
+                Vendu le {{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}
               </div>
             </td>
             <td class="px-3 py-3 text-end align-middle border-b border-default">
@@ -466,10 +551,25 @@ const UAvatar = resolveComponent('UAvatar')
                   </p>
                   <div class="flex flex-wrap gap-1.5 text-[11px]">
                     <UBadge
-                      :color="row.is_sold ? 'success' : 'error'"
+                      v-if="!row.is_sold"
+                      color="error"
                       variant="subtle"
                     >
-                      {{ row.is_sold ? 'Vendu' : 'En stock' }}
+                      {{ soldStatusLabel(row) }}
+                    </UBadge>
+                    <span
+                      v-else-if="soldStatusBrandStyle(row)"
+                      class="inline-flex rounded-md px-1.5 py-0.5 font-semibold ring-1 ring-black/10"
+                      :style="soldStatusBrandStyle(row)!"
+                    >
+                      {{ soldStatusLabel(row) }}
+                    </span>
+                    <UBadge
+                      v-else
+                      color="success"
+                      variant="subtle"
+                    >
+                      {{ soldStatusLabel(row) }}
                     </UBadge>
                     <UBadge
                       :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'"
@@ -477,11 +577,24 @@ const UAvatar = resolveComponent('UAvatar')
                     >
                       Vinted {{ (row.published_on_vinted ?? false) ? 'oui' : 'non' }}
                     </UBadge>
+                    <UBadge
+                      v-if="showEbayColumn"
+                      :color="(row.published_on_ebay ?? false) ? 'success' : 'neutral'"
+                      variant="subtle"
+                    >
+                      eBay {{ (row.published_on_ebay ?? false) ? 'oui' : 'non' }}
+                    </UBadge>
                     <span class="text-muted">
                       Achat {{ eur.format(row.purchase_price) }}
                     </span>
                     <span class="text-muted">
-                      Vente {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+                      Prix affiché {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+                    </span>
+                    <span
+                      v-if="row.is_sold"
+                      class="text-muted"
+                    >
+                      Réalisé {{ realizedSalePrice(row) != null ? eur.format(realizedSalePrice(row)!) : '—' }}
                     </span>
                   </div>
                 </div>

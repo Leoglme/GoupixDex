@@ -25,6 +25,9 @@ class Article(Base):
     condition: Mapped[str] = mapped_column(String(64), default="Near Mint")
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     sell_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Actual proceeds; sale_source is vinted | ebay
+    sold_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    sale_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_sold: Mapped[bool] = mapped_column(Boolean(), default=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),

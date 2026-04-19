@@ -42,6 +42,8 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "condition": article.condition,
         "purchase_price": float(article.purchase_price),
         "sell_price": float(article.sell_price) if article.sell_price is not None else None,
+        "sold_price": float(article.sold_price) if article.sold_price is not None else None,
+        "sale_source": article.sale_source,
         "is_sold": article.is_sold,
         "published_on_vinted": bool(article.published_on_vinted),
         "vinted_published_at": article.vinted_published_at.isoformat()

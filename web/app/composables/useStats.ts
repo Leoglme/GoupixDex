@@ -9,7 +9,13 @@ export interface RecentSaleRow {
   title: string
   pokemon_name: string | null
   sold_at: string | null
-  sell_price_eur: number | null
+  /** Listed asking price on the listing. */
+  listing_price_eur: number | null
+  /** Actual proceeds when captured separately. */
+  sold_price_eur: number | null
+  /** Amount used for revenue / margin (sold_price or legacy sell_price). */
+  realized_price_eur: number | null
+  sale_source: 'vinted' | 'ebay' | null
   purchase_price_eur: number
   profit_eur: number
 }

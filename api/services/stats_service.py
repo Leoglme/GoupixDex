@@ -20,10 +20,22 @@ def _as_utc(value: dt.datetime | None) -> dt.datetime | None:
     return value.astimezone(dt.UTC)
 
 
+def _sale_proceeds_eur(article: Article) -> float | None:
+    """Proceeds: ``sold_price`` when set, otherwise legacy fallback to ``sell_price``."""
+    if article.sold_price is not None:
+        return float(article.sold_price)
+    if article.sell_price is not None:
+        return float(article.sell_price)
+    return None
+
+
 def _profit_eur(article: Article) -> float:
-    if not article.is_sold or article.sell_price is None:
+    if not article.is_sold:
         return 0.0
-    return float(article.sell_price - article.purchase_price)
+    proceeds = _sale_proceeds_eur(article)
+    if proceeds is None:
+        return 0.0
+    return proceeds - float(article.purchase_price)
 
 
 def _hours_to_sell(article: Article) -> float | None:
@@ -62,7 +74,7 @@ def compute_dashboard_stats(
     profit_total = sum(_profit_eur(a) for a in sold)
 
     vinted_revenue = sum(
-        float(a.sell_price) for a in sold if a.sell_price is not None
+        p for a in sold for p in [_sale_proceeds_eur(a)] if p is not None
     )
 
     top_profitable = sorted(sold, key=_profit_eur, reverse=True)[:5]
@@ -81,10 +93,11 @@ def compute_dashboard_stats(
     monthly_revenue: dict[str, float] = {}
     for a in sold:
         sold_at = _as_utc(a.sold_at)
-        if sold_at is None or a.sell_price is None:
+        proceeds = _sale_proceeds_eur(a)
+        if sold_at is None or proceeds is None:
             continue
         key = sold_at.strftime("%Y-%m")
-        monthly_revenue[key] = monthly_revenue.get(key, 0.0) + float(a.sell_price)
+        monthly_revenue[key] = monthly_revenue.get(key, 0.0) + proceeds
     revenue_timeline: list[dict[str, Any]] = []
     cumulative_rev = 0.0
     for month_key in sorted(monthly_revenue.keys()):
@@ -103,18 +116,23 @@ def compute_dashboard_stats(
         key=lambda a: _as_utc(a.sold_at) or now,
         reverse=True,
     )[:30]
-    recent_sales_payload = [
-        {
-            "article_id": a.id,
-            "title": a.title,
-            "pokemon_name": a.pokemon_name,
-            "sold_at": a.sold_at.isoformat() if a.sold_at else None,
-            "sell_price_eur": float(a.sell_price) if a.sell_price is not None else None,
-            "purchase_price_eur": float(a.purchase_price),
-            "profit_eur": round(_profit_eur(a), 2),
-        }
-        for a in recent_sales
-    ]
+    recent_sales_payload = []
+    for a in recent_sales:
+        proceeds = _sale_proceeds_eur(a)
+        recent_sales_payload.append(
+            {
+                "article_id": a.id,
+                "title": a.title,
+                "pokemon_name": a.pokemon_name,
+                "sold_at": a.sold_at.isoformat() if a.sold_at else None,
+                "listing_price_eur": float(a.sell_price) if a.sell_price is not None else None,
+                "sold_price_eur": float(a.sold_price) if a.sold_price is not None else None,
+                "realized_price_eur": round(proceeds, 2) if proceeds is not None else None,
+                "sale_source": a.sale_source,
+                "purchase_price_eur": float(a.purchase_price),
+                "profit_eur": round(_profit_eur(a), 2),
+            }
+        )
 
     market_sum: float | None = None
     market_sum_unsold: float | None = None

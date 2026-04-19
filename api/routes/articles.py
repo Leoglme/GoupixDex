@@ -555,7 +555,8 @@ def mark_sold(
         raise HTTPException(status_code=404, detail="Article not found")
     article.is_sold = True
     article.sold_at = dt.datetime.now(dt.UTC)
-    article.sell_price = body.sell_price
+    article.sold_price = body.sold_price
+    article.sale_source = body.sale_source
     db.commit()
     db.refresh(article)
     return article_service.article_to_dict(article)
