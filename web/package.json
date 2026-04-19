@@ -9,7 +9,7 @@
     "generate": "nuxt generate",
     "desktop:generate": "cross-env NUXT_DESKTOP_BUILD=1 nuxt generate",
     "vinted-worker:stub": "node scripts/ensure-vinted-worker-stub.mjs",
-    "tauri:dev": "npm run vinted-worker:stub && tauri dev",
+    "tauri:dev": "npm run vinted-worker:stub && cross-env NUXT_PUBLIC_VINTED_LOCAL_BASE=http://127.0.0.1:18767 tauri dev",
     "tauri:build": "tauri build",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",

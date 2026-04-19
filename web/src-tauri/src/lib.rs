@@ -151,6 +151,15 @@ fn build_worker_command(
                 .command(bin)
                 .args(["desktop_vinted_server.py"])
                 .current_dir(api_dir);
+            // Local dev should not collide with an installed desktop app:
+            // - dedicated worker port (18767)
+            // - dedicated nodriver profile folder
+            if std::env::var("GOUPIX_VINTED_LOCAL_PORT").is_err() {
+                cmd = cmd.env("GOUPIX_VINTED_LOCAL_PORT", "18767");
+            }
+            if std::env::var("VINTED_USER_DATA_DIR").is_err() {
+                cmd = cmd.env("VINTED_USER_DATA_DIR", "vinted-nodriver-profile-dev");
+            }
             if let Some(p) = chrome_path {
                 cmd = cmd.env("VINTED_CHROME_EXECUTABLE", p);
             }

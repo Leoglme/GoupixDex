@@ -183,7 +183,7 @@ python desktop_vinted_server.py
 
 | Variable | Default | Role |
 |----------|---------|------|
-| `GOUPIX_VINTED_LOCAL_PORT` | `18766` | Port listening on `127.0.0.1` |
+| `GOUPIX_VINTED_LOCAL_PORT` | `18766` | Port listening on `127.0.0.1` (Tauri dev overrides to `18767` by default to avoid conflicts with installed desktop app) |
 | `GOUPIX_REMOTE_API` | (none) | Remote API URL (used when the client does not send `X-Goupix-Remote-Api`) |
 
 It exposes job-style endpoints used by the Nuxt frontend (`useWardrobeLocalSync`, `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeSyncStream`):

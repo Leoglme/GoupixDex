@@ -25,7 +25,7 @@ The **admin** is the user seeded from the API (`SEED_USER_EMAIL`). The sidebar c
 ## Vinted behavior
 
 - **Web**: Vinted publishing & wardrobe sync are disabled — the UI points users to `/downloads`.
-- **Desktop (Tauri)**: Vinted features call the local Python worker on `127.0.0.1:18766` (configurable via `NUXT_PUBLIC_VINTED_LOCAL_BASE`). Composables: `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeLocalSync`, `useWardrobeSyncStream`. The runtime is detected through the Tauri WebView.
+- **Desktop (Tauri)**: Vinted features call the local Python worker on `127.0.0.1:18766` (configurable via `NUXT_PUBLIC_VINTED_LOCAL_BASE`). Composables: `useVintedPublishStream`, `useVintedBatchStream`, `useWardrobeLocalSync`, `useWardrobeSyncStream`. The runtime is detected through the Tauri WebView. In `tauri:dev`, the app uses `127.0.0.1:18767` by default to avoid conflicts with an installed desktop app.
   - The desktop installer bundles the worker as a **PyInstaller sidecar** (`bundle.externalBin = ["binaries/goupix-vinted-worker"]`). End users do **not** need a system-wide Python install.
   - The worker is spawned by `web/src-tauri/src/lib.rs` on app startup and killed on exit. In dev (`tauri:dev`), `lib.rs` falls back to `python desktop_vinted_server.py` from the local `api/` folder so you can iterate without rebuilding the sidecar (set `GOUPIX_PYTHON` to override the interpreter).
   - Worker logs are written to `%LOCALAPPDATA%\GoupixDex\logs\vinted-worker.log` (Windows) / `~/Library/Logs/GoupixDex/vinted-worker.log` (macOS) so they survive `--noconsole` PyInstaller mode.
@@ -82,6 +82,12 @@ npm run tauri:dev
 ```
 
 The script first runs `vinted-worker:stub` which writes an empty placeholder under `web/src-tauri/binaries/goupix-vinted-worker-<host-triple>(.exe)` so Tauri's `bundle.externalBin` validation passes. In `cfg(debug_assertions)` builds, `lib.rs` ignores the placeholder and spawns `python desktop_vinted_server.py` from `api/` instead. The folder `web/src-tauri/binaries/` is `.gitignore`d.
+
+To avoid collisions with a production desktop app running at the same time, `tauri:dev` defaults to:
+
+- frontend local worker base: `http://127.0.0.1:18767`
+- worker listening port: `18767`
+- nodriver profile directory: `vinted-nodriver-profile-dev`
 
 If you see a Cargo error like:
 
