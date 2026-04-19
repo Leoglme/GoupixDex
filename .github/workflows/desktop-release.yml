@@ -24,15 +24,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-13
+          # Mac Intel : Tauri cross-compile depuis le runner ARM, et on installe un Python x86_64
+          # (exécuté via Rosetta 2, préinstallée sur les runners macos-latest) pour que PyInstaller
+          # produise un sidecar Intel natif. Évite la queue infinie sur macos-13.
+          - platform: macos-latest
             args: --target x86_64-apple-darwin
             rust_triple: x86_64-apple-darwin
+            python_arch: x64
           - platform: macos-latest
             args: --target aarch64-apple-darwin
             rust_triple: aarch64-apple-darwin
+            python_arch: arm64
           - platform: windows-latest
             args: ""
             rust_triple: x86_64-pc-windows-msvc
+            python_arch: x64
     runs-on: ${{ matrix.platform }}
 
     defaults:
@@ -68,6 +74,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          architecture: ${{ matrix.python_arch }}
 
       - name: Install Python deps + PyInstaller
         shell: bash
@@ -76,6 +83,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller==6.11.1
+          python -c "import platform, sys; print('Python', sys.version, 'arch=', platform.machine())"
 
       - name: Build Vinted local worker (PyInstaller)
         shell: bash
@@ -89,13 +97,14 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             mv "dist/goupix-vinted-worker.exe" \
                "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}.exe"
-            ls -la "../web/src-tauri/binaries/"
           else
             mv "dist/goupix-vinted-worker" \
                "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}"
             chmod +x "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}"
-            ls -la "../web/src-tauri/binaries/"
+            # Vérifie que l'arch produite correspond bien à la cible Tauri
+            file "../web/src-tauri/binaries/goupix-vinted-worker-${MATRIX_TRIPLE}" || true
           fi
+          ls -la "../web/src-tauri/binaries/"
 
       - name: Install frontend dependencies
         run: npm ci

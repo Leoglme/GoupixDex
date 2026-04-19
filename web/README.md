@@ -123,7 +123,7 @@ The desktop bundle ships a Python sidecar built from `api/desktop_vinted_server.
 
 - `deploy-web.yml` — web build and deploy (Nitro + PM2).
 - `deploy-api.yml` — backend build / VPS deployment (systemd + Xvfb for Vinted).
-- `desktop-release.yml` — Windows/macOS desktop **release** builds (Windows binary without console) and a stable GitHub Release **per version** (`v0.1.x`, not prerelease). For each OS the workflow first sets up Python 3.11, installs `api/requirements.txt` + PyInstaller, and runs `pyinstaller desktop_vinted_server.spec` to produce `goupix-vinted-worker-<rust-triple>(.exe)` under `web/src-tauri/binaries/` before invoking `tauri-action`. The macOS Intel target uses the `macos-13` runner so the produced sidecar is x86_64.
+- `desktop-release.yml` — Windows/macOS desktop **release** builds (Windows binary without console) and a stable GitHub Release **per version** (`v0.1.x`, not prerelease). For each OS the workflow first sets up Python 3.11, installs `api/requirements.txt` + PyInstaller, and runs `pyinstaller desktop_vinted_server.spec` to produce `goupix-vinted-worker-<rust-triple>(.exe)` under `web/src-tauri/binaries/` before invoking `tauri-action`. Both macOS targets (`x86_64-apple-darwin` and `aarch64-apple-darwin`) run on `macos-latest` (Apple Silicon); the Intel job uses `actions/setup-python` with `architecture: x64` so PyInstaller runs under Rosetta 2 (preinstalled on GitHub macOS runners) and produces a native Intel sidecar.
 
 ## Tauri updater: key generation and GitHub secrets
 
