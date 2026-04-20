@@ -11,7 +11,57 @@ useGoupixPageSeo(
 const formRef = ref<{
   applyScanPrefill: (s: ScanCardResponse) => void
   addImageFiles: (files: File[]) => void
+  applyEbayPrefill: (p: {
+    title?: string
+    description?: string
+    pokemonName?: string
+    setCode?: string
+    cardNumber?: string
+    condition?: string
+    purchasePrice?: string
+    sellPrice?: string
+    imageUrl?: string | null
+  }) => Promise<void>
 } | null>(null)
+
+const route = useRoute()
+
+function qs(key: string): string | undefined {
+  const raw = route.query[key]
+  if (Array.isArray(raw)) {
+    return raw[0] ?? undefined
+  }
+  return typeof raw === 'string' ? raw : undefined
+}
+
+onMounted(async () => {
+  const title = qs('title')
+  const purchasePrice = qs('purchase_price')
+  if (!title && !purchasePrice) {
+    return
+  }
+  await nextTick()
+  try {
+    await formRef.value?.applyEbayPrefill({
+      title,
+      description: qs('description'),
+      pokemonName: qs('pokemon_name'),
+      setCode: qs('set_code'),
+      cardNumber: qs('card_number'),
+      condition: qs('condition'),
+      purchasePrice,
+      sellPrice: qs('sell_price'),
+      imageUrl: qs('image_url') ?? null
+    })
+    toast.add({
+      title: 'Formulaire prérempli depuis eBay',
+      description: 'Vérifiez le Pokémon, le set, le numéro et le prix avant de valider.',
+      color: 'success'
+    })
+  } catch {
+    /* best effort */
+  }
+})
 
 const { scan } = useScanCard()
 const { createArticle, publishArticleToVinted } = useArticles()

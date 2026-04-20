@@ -246,11 +246,11 @@ const bulkBothDisabledReason = computed(() => {
 
 const showBulkVinted = computed(() => props.vintedChannelEnabled === true)
 const showBulkEbay = computed(() => props.ebayPublishAvailable === true)
+/** Visible dès que les deux canaux sont prêts (désactivé sur le web : message dans bulkBothDisabledReason). */
 const showBulkBoth = computed(
   () =>
     props.vintedChannelEnabled === true
     && props.ebayPublishAvailable === true
-    && isDesktopApp.value
 )
 
 const selectedCount = computed(() => selectedIds.value.length)
@@ -389,11 +389,25 @@ const UAvatar = resolveComponent('UAvatar')
           Tout désélectionner
         </UButton>
         <UButton
-          v-if="showBulkVinted"
+          v-if="showBulkBoth"
           size="sm"
           color="primary"
-          variant="subtle"
+          icon="i-lucide-upload-cloud"
+          class="shadow-sm"
+          :disabled="!!bulkBothDisabledReason || bulkPublishing"
+          :title="bulkBothDisabledReason || undefined"
+          :loading="bulkPublishing"
+          @click="emit('bulk-publish-both', [...selectedIds])"
+        >
+          Mettre en ligne
+        </UButton>
+        <UButton
+          v-if="showBulkVinted"
+          size="sm"
+          color="neutral"
+          variant="solid"
           icon="i-lucide-store"
+          class="border-0 !bg-[rgb(0,131,143)] !text-white hover:!bg-[rgb(0,118,129)] disabled:opacity-50"
           :disabled="!!bulkVintedDisabledReason || bulkPublishing"
           :title="bulkVintedDisabledReason || undefined"
           :loading="bulkPublishing"
@@ -404,27 +418,16 @@ const UAvatar = resolveComponent('UAvatar')
         <UButton
           v-if="showBulkEbay"
           size="sm"
-          color="primary"
-          variant="subtle"
+          color="neutral"
+          variant="solid"
           icon="i-lucide-shopping-bag"
+          class="border-0 !bg-[rgb(134,184,23)] !text-neutral-950 hover:!bg-[rgb(124,174,20)] disabled:opacity-50"
           :disabled="!!bulkEbayDisabledReason || bulkPublishing"
           :title="bulkEbayDisabledReason || undefined"
           :loading="bulkPublishing"
           @click="emit('bulk-publish-ebay', [...selectedIds])"
         >
           Mettre en ligne sur eBay
-        </UButton>
-        <UButton
-          v-if="showBulkBoth"
-          size="sm"
-          color="primary"
-          icon="i-lucide-upload-cloud"
-          :disabled="!!bulkBothDisabledReason || bulkPublishing"
-          :title="bulkBothDisabledReason || undefined"
-          :loading="bulkPublishing"
-          @click="emit('bulk-publish-both', [...selectedIds])"
-        >
-          Mettre en ligne (eBay + Vinted)
         </UButton>
         <UButton
           size="sm"

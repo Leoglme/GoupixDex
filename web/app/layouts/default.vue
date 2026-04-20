@@ -36,6 +36,12 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: () => { open.value = false }
     },
     {
+      label: 'Prix du marché',
+      icon: 'i-lucide-trending-up',
+      to: '/market',
+      onSelect: () => { open.value = false }
+    },
+    {
       label: "Étiquettes d'envoi",
       icon: 'i-lucide-mailbox',
       to: '/shipping-labels',

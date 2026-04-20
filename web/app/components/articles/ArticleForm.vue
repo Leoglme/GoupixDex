@@ -175,6 +175,62 @@ function applyScanPrefill(scan: {
   wardrobeImportSoldPrice.value = null
 }
 
+/**
+ * Prefill used by the market-search page (``/market``): we only know a subset
+ * of the fields (title, price, condition, …) and optionally a remote image URL
+ * that we try to fetch as a File so it is bundled with the article creation.
+ */
+async function applyEbayPrefill(p: {
+  title?: string
+  description?: string
+  pokemonName?: string
+  setCode?: string
+  cardNumber?: string
+  condition?: string
+  purchasePrice?: string
+  sellPrice?: string
+  imageUrl?: string | null
+}) {
+  if (p.title) {
+    title.value = p.title
+  }
+  if (p.description) {
+    description.value = p.description
+  }
+  if (p.pokemonName) {
+    pokemonName.value = p.pokemonName
+  }
+  if (p.setCode) {
+    setCode.value = p.setCode
+  }
+  if (p.cardNumber) {
+    cardNumber.value = p.cardNumber
+  }
+  if (p.condition && conditionOptions.some(o => o.value === p.condition)) {
+    condition.value = p.condition
+  }
+  if (p.purchasePrice) {
+    purchasePrice.value = p.purchasePrice
+  }
+  if (p.sellPrice) {
+    sellPrice.value = p.sellPrice
+  }
+  if (p.imageUrl) {
+    try {
+      const blob = await blobFromVintedPhotoUrl(p.imageUrl)
+      if (blob) {
+        const ext = blob.type.includes('png') ? 'png' : 'jpg'
+        const file = new File([blob], `ebay-${Date.now()}.${ext}`, {
+          type: blob.type || 'image/jpeg'
+        })
+        addImageFiles([file])
+      }
+    } catch {
+      /* image facultative : on ignore si le téléchargement échoue (CORS) */
+    }
+  }
+}
+
 async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   while (previews.value.length) {
     removePreview(0)
@@ -215,7 +271,13 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   }
 }
 
-defineExpose({ applyScanPrefill, addImageFiles, buildCreateFormData, applyWardrobeSlot })
+defineExpose({
+  applyScanPrefill,
+  addImageFiles,
+  buildCreateFormData,
+  applyWardrobeSlot,
+  applyEbayPrefill
+})
 
 function buildCreateFormData(): FormData {
   const fd = new FormData()
