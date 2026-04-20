@@ -2,6 +2,7 @@
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { invoke } from '@tauri-apps/api/core'
 
 type UpdaterStatus = 'idle' | 'available' | 'downloading' | 'installed' | 'error'
 
@@ -102,6 +103,20 @@ async function installUpdate() {
     status.value = 'downloading'
     errorMessage.value = null
     resetDownloadProgress()
+
+    // Sur Windows, l'installeur NSIS réécrit `goupix-vinted-worker.exe` :
+    // il faut impérativement tuer le sidecar (et ses enfants Chromium lancés
+    // par nodriver) AVANT, sinon l'install échoue avec « Error opening file
+    // for writing ». Le kill côté Rust propage un taskkill /F /T sur l'arbre.
+    try {
+      await invoke('stop_local_worker')
+    } catch (killError) {
+      console.warn('[Updater] stop_local_worker a échoué, on tente quand même l\'install :', killError)
+    }
+    // Laisse Windows libérer les handles sur le .exe et ses DLLs avant que
+    // NSIS ne commence l'extraction.
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
     await pendingUpdate.value.downloadAndInstall(onDownloadEvent)
     status.value = 'installed'
   } catch (error) {

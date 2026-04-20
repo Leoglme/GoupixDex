@@ -34,7 +34,12 @@
       "../public/favicon-32x32.png",
       "../public/android-chrome-192x192.png",
       "../public/android-chrome-512x512.png"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "nsis-hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "updater": {

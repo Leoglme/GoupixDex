@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -120,6 +122,39 @@ fn detect_browsers() -> BrowserInfo {
 #[tauri::command]
 fn check_browser_availability() -> BrowserInfo {
     detect_browsers()
+}
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Tue le worker local et toute son arborescence de sous-processus (Chromium
+/// lancés par nodriver notamment). Indispensable avant un remplacement sur
+/// disque de `goupix-vinted-worker.exe` (mise à jour NSIS) pour ne pas se
+/// retrouver avec un fichier verrouillé.
+fn kill_worker_tree(child: CommandChild) {
+    #[cfg(target_os = "windows")]
+    {
+        let pid = child.pid();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    let _ = child.kill();
+}
+
+/// Commande exposée au front-end pour fermer proprement le worker avant une
+/// mise à jour Tauri (voir `DesktopUpdaterPanel.vue`).
+#[tauri::command]
+fn stop_local_worker(state: tauri::State<'_, VintedLocalChild>) -> Result<(), String> {
+    let child_opt = match state.0.lock() {
+        Ok(mut guard) => guard.take(),
+        Err(_) => None,
+    };
+    if let Some(child) = child_opt {
+        kill_worker_tree(child);
+    }
+    Ok(())
 }
 
 #[cfg(debug_assertions)]
@@ -276,7 +311,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .manage(VintedLocalChild(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![check_browser_availability])
+        .invoke_handler(tauri::generate_handler![
+            check_browser_availability,
+            stop_local_worker
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             match spawn_worker(&handle) {
@@ -304,7 +342,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Ok(mut guard) = app.state::<VintedLocalChild>().0.lock() {
                     if let Some(child) = guard.take() {
-                        let _ = child.kill();
+                        kill_worker_tree(child);
                     }
                 }
             }
