@@ -285,9 +285,15 @@ async def publish_article_to_ebay(
     try:
         await _emit_ebay(progress, "auth", "Connecting to the eBay API…")
         token = await ensure_ebay_access_token(db, user, app=s)
-    except RuntimeError as exc:
-        await _emit_ebay(progress, "error", "Could not obtain an eBay token.", detail=str(exc))
-        return {"ok": False, "detail": str(exc)}
+    except Exception as exc:
+        # Inclut RuntimeError (ebay_not_connected, ebay_oauth_not_configured, …)
+        # et EbayOAuthError (invalid_scope, invalid_grant, …). On ne laisse plus
+        # fuir httpx.HTTPStatusError : le log « auth → error » doit toujours être
+        # émis pour que le Journal des publications affiche la vraie raison.
+        logger.warning("eBay token acquisition failed for user=%s: %s", user.id, exc)
+        detail = str(exc) or exc.__class__.__name__
+        await _emit_ebay(progress, "error", "Could not obtain an eBay token.", detail=detail)
+        return {"ok": False, "detail": detail}
 
     await _emit_ebay(progress, "auth", "eBay token obtained.")
     root = _api_base_url(s)

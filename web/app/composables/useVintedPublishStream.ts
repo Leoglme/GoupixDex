@@ -112,6 +112,21 @@ export function useVintedPublishStream() {
             close()
             const v = data.vinted
             const eb = data.ebay
+            if (context === 'logs') {
+              // Journal des publications : on matérialise les échecs dans la
+              // liste de logs (sinon l'utilisateur ne voit qu'un `done` muet).
+              if (v && v.published === false) {
+                const detail
+                  = v.detail === 'missing_vinted_credentials'
+                    ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
+                    : String(v.detail ?? 'Publication non confirmée.')
+                logEntries.value.push({ text: `[Vinted · Erreur] ${detail}` })
+              }
+              if (eb && eb.published === false) {
+                const detail = String(eb.detail ?? 'Échec ou annulation.')
+                logEntries.value.push({ text: `[eBay · Erreur] ${detail}` })
+              }
+            }
             if (context !== 'logs') {
               if (v) {
                 if (v.published) {
