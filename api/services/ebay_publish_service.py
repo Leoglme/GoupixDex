@@ -56,27 +56,43 @@ _CONDITION_TO_EBAY: dict[str, str] = {
 _TCG_LEAF_CATEGORY_IDS = frozenset({"183050", "183454", "261328"})
 # Card condition descriptor (non-graded cards) — eBay name + value IDs.
 _CARD_CONDITION_DESCRIPTOR_NAME = "40001"
-# Maps article form « Condition » (ArticleForm.vue) + legacy DB values.
+# Maps article form « Condition » (ArticleForm.vue) + legacy DB values to the
+# value IDs used by the eBay.fr listing editor for the "Card Condition"
+# descriptor (name=40001) on TCG leaf categories:
+#   400010 → Near Mint or Better (Quasi neuf ou mieux)
+#   400015 → Lightly Played / Excellent (légers défauts)
+#   400016 → Moderately Played / Very Good (état moyen)
+#   400017 → Heavily Played / Poor (très abîmée)
 _APP_TO_CARD_CONDITION_VALUE_ID: dict[str, str] = {
     "Mint": "400010",
     "Near Mint": "400010",
     "NM": "400010",
-    "Excellent": "400011",
-    "Good": "400012",
+    "Excellent": "400015",
     "Lightly Played": "400015",
-    "Played": "400016",
+    "Good": "400016",
+    "Moderately Played": "400016",
+    "Very Good": "400016",
+    "Played": "400017",
+    "Heavily Played": "400017",
     "Poor": "400017",
 }
-# Inventory item condition (conditionId) for TCG categories — from ``article.condition``.
+# Inventory item condition (``condition`` enum) for TCG leaf categories. eBay
+# only accepts "Ungraded" (conditionId 4000 / USED_VERY_GOOD) for non-graded
+# cards in these categories — other enums (USED_GOOD=5000, USED_ACCEPTABLE=6000)
+# are rejected with errorId 25059 ("condition 5000 is not valid for category
+# 183454"). The fine-grained state is carried by the conditionDescriptor above.
 _TCG_ITEM_CONDITION_ENUM: dict[str, str] = {
     "Mint": "USED_VERY_GOOD",
     "Near Mint": "USED_VERY_GOOD",
     "NM": "USED_VERY_GOOD",
     "Excellent": "USED_VERY_GOOD",
-    "Good": "USED_GOOD",
-    "Lightly Played": "USED_GOOD",
-    "Played": "USED_ACCEPTABLE",
-    "Poor": "USED_ACCEPTABLE",
+    "Lightly Played": "USED_VERY_GOOD",
+    "Good": "USED_VERY_GOOD",
+    "Moderately Played": "USED_VERY_GOOD",
+    "Very Good": "USED_VERY_GOOD",
+    "Played": "USED_VERY_GOOD",
+    "Heavily Played": "USED_VERY_GOOD",
+    "Poor": "USED_VERY_GOOD",
 }
 
 _MARKETPLACE_CURRENCY: dict[str, str] = {
