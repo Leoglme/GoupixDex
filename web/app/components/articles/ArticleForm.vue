@@ -54,6 +54,11 @@ const { getSettings } = useSettings()
 /** Vinted wardrobe import (create): sold status + date on API side. */
 const importIsSold = ref(false)
 const importSoldAt = ref<string | null>(null)
+/** Import garde-robe : annonce déjà sur Vinted (active ou vendue). */
+const wardrobeVintedListed = ref(false)
+const wardrobeVintedPublishedAtIso = ref<string | null>(null)
+/** Prix réalisé importé (ventes Vinted). */
+const wardrobeImportSoldPrice = ref<string | null>(null)
 const { isDesktopApp } = useDesktopRuntime()
 const { fetchBlob: fetchVintedListingImageBlob } = useVintedListingImage()
 const canUseVinted = computed(
@@ -165,6 +170,9 @@ function applyScanPrefill(scan: {
   }
   importIsSold.value = false
   importSoldAt.value = null
+  wardrobeVintedListed.value = false
+  wardrobeVintedPublishedAtIso.value = null
+  wardrobeImportSoldPrice.value = null
 }
 
 async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
@@ -173,6 +181,9 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   }
   importIsSold.value = p.isSold
   importSoldAt.value = p.soldAt
+  wardrobeVintedListed.value = p.wardrobeVintedListed
+  wardrobeVintedPublishedAtIso.value = p.vintedPublishedAtIso
+  wardrobeImportSoldPrice.value = p.importSoldPrice
   title.value = p.title
   description.value = p.description
   purchasePrice.value = p.purchasePrice || '0'
@@ -232,6 +243,18 @@ function buildCreateFormData(): FormData {
   fd.append('is_sold', importIsSold.value ? 'true' : 'false')
   if (importIsSold.value && importSoldAt.value) {
     fd.append('sold_at', importSoldAt.value)
+  }
+  if (wardrobeVintedListed.value) {
+    fd.append('wardrobe_vinted_listed', 'true')
+    if (wardrobeVintedPublishedAtIso.value) {
+      fd.append('vinted_published_at', wardrobeVintedPublishedAtIso.value)
+    }
+  }
+  if (importIsSold.value && wardrobeVintedListed.value) {
+    fd.append('sale_source', 'vinted')
+    if (wardrobeImportSoldPrice.value?.trim()) {
+      fd.append('sold_price', wardrobeImportSoldPrice.value.trim())
+    }
   }
   return fd
 }

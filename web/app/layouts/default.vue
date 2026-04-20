@@ -32,7 +32,13 @@ const links = computed<NavigationMenuItem[][]>(() => {
     {
       label: 'Journal des publications',
       icon: 'i-lucide-scroll-text',
-      to: '/articles/vinted-logs',
+      to: '/articles/listing-logs',
+      onSelect: () => { open.value = false }
+    },
+    {
+      label: "Étiquettes d'envoi",
+      icon: 'i-lucide-mailbox',
+      to: '/shipping-labels',
       onSelect: () => { open.value = false }
     }
   ]

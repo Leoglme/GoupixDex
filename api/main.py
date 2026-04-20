@@ -24,6 +24,7 @@ from routes import ebay_route
 from routes import pricing_route
 from routes import scan as scan_routes
 from routes import settings_route
+from routes import shipping_route
 from routes import stats_route
 from routes import users as users_routes
 
@@ -103,3 +104,4 @@ app.include_router(ebay_route.router)
 app.include_router(pricing_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
+app.include_router(shipping_route.router)

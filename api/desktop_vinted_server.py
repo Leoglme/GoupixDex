@@ -199,13 +199,14 @@ async def publish_vinted_for_article(
     return {
         "vinted": {
             "status": "running",
-            "stream_path": f"/articles/{article_id}/vinted-progress",
+            "stream_path": f"/articles/{article_id}/listing-progress",
         },
     }
 
 
-@router.get("/{article_id}/vinted-progress")
-async def vinted_progress_stream(
+@router.get("/{article_id}/listing-progress")
+@router.get("/{article_id}/vinted-progress", include_in_schema=False)
+async def article_listing_progress_stream(
     article_id: int,
     _: Annotated[int, Depends(get_user_id_introspected)],
 ) -> StreamingResponse:

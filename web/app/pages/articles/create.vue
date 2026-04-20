@@ -124,8 +124,8 @@ async function onSubmitCreate(fd: FormData) {
       }
       notifyEbayOutcome()
       await navigateTo({
-        path: '/articles/vinted-logs',
-        query: { article: String(article.id) }
+        path: '/articles/listing-logs',
+        query: { article: String(article.id), progress: 'local' }
       })
       return
     }
@@ -133,7 +133,7 @@ async function onSubmitCreate(fd: FormData) {
     if (vinted.status === 'running' && vinted.stream_path) {
       notifyEbayOutcome()
       await navigateTo({
-        path: '/articles/vinted-logs',
+        path: '/articles/listing-logs',
         query: { article: String(article.id) }
       })
       return
@@ -143,7 +143,7 @@ async function onSubmitCreate(fd: FormData) {
 
     if (ebay?.status === 'running' && ebay?.stream_path) {
       await navigateTo({
-        path: '/articles/vinted-logs',
+        path: '/articles/listing-logs',
         query: { article: String(article.id) }
       })
       return

@@ -24,3 +24,6 @@ supabase>=2.0.0
 requests>=2.31.0
 browser-cookie3>=0.19.0
 vinted-scraper>=3.0.0
+
+# Shipping label PDF generation (Avery L7173 — 8 labels per A4)
+reportlab>=4.0.0

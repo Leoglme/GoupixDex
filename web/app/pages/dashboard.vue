@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { sub } from 'date-fns'
 import type { DashboardPeriod, DashboardRange, DashboardStats } from '~/composables/useStats'
+import {
+  dashboardPrefsToRange,
+  loadDashboardPrefs,
+  saveDashboardPrefs
+} from '~/composables/useUiPrefsLocalStorage'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -18,10 +23,12 @@ const fetchMarketData = ref(false)
 const toast = useToast()
 
 const range = shallowRef<DashboardRange>({
-  start: sub(new Date(), { days: 14 }),
+  start: sub(new Date(), { days: 30 }),
   end: new Date()
 })
 const period = ref<DashboardPeriod>('daily')
+
+const suppressDashboardPrefsWatch = ref(false)
 
 const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -62,10 +69,41 @@ async function load() {
 }
 
 onMounted(() => {
+  suppressDashboardPrefsWatch.value = true
+  try {
+    const saved = loadDashboardPrefs()
+    if (saved?.range) {
+      const r = dashboardPrefsToRange({
+        startIso: saved.range.startIso,
+        endIso: saved.range.endIso
+      })
+      if (r) {
+        range.value = r
+      }
+    }
+    if (saved?.period) {
+      period.value = saved.period
+    }
+    if (typeof saved?.fetchMarketData === 'boolean') {
+      fetchMarketData.value = saved.fetchMarketData
+    }
+  } finally {
+    suppressDashboardPrefsWatch.value = false
+  }
   load()
 })
 
-watch([fetchMarketData, range, period], () => load())
+watch([fetchMarketData, range, period], () => {
+  if (suppressDashboardPrefsWatch.value) {
+    return
+  }
+  saveDashboardPrefs({
+    range: range.value,
+    period: period.value,
+    fetchMarketData: fetchMarketData.value
+  })
+  load()
+})
 
 const channelSegments = computed<PieSegment[]>(() => {
   const split = stats.value?.channel_split_total

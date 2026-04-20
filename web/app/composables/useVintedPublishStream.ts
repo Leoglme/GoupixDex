@@ -1,13 +1,17 @@
 /**
- * Connexion au flux SSE `/articles/:id/vinted-progress` après lancement d'une publication.
+ * Connexion au flux SSE ``GET /articles/:id/listing-progress`` après une mise en ligne
+ * (Vinted et/ou eBay). La session d’événements vit sur l’API distante ; le worker local
+ * n’est utilisé que pour la publication Vinted desktop (``sseBase: 'local'``).
  */
-export type VintedStreamContext = 'create' | 'list' | 'logs'
+export type ListingStreamContext = 'create' | 'list' | 'logs'
 
 export interface VintedLogEntry {
   text: string
   /** Data URL image/jpeg (capture navigateur). */
   screenshot?: string
 }
+
+export type ListingProgressSseBase = 'api' | 'local'
 
 export function useVintedPublishStream() {
   const config = useRuntimeConfig()
@@ -58,10 +62,12 @@ export function useVintedPublishStream() {
 
   /**
    * Ouvre le flux jusqu'à l'événement ``done`` ou ``error``.
+   * @param sseBase ``api`` (défaut) : hub sur l’API distante (eBay, Vinted serveur). ``local`` : worker desktop uniquement.
    */
   function followStream(
     streamPath: string,
-    context: VintedStreamContext = 'list'
+    context: ListingStreamContext = 'list',
+    options?: { sseBase?: ListingProgressSseBase }
   ): Promise<void> {
     close()
     logEntries.value = []
@@ -76,8 +82,9 @@ export function useVintedPublishStream() {
       /\/$/,
       ''
     )
-    const base = isDesktopApp.value ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value
+    const useLocal = options?.sseBase === 'local' && isDesktopApp.value
+    const base = useLocal ? localBase : remoteBase
+    const remoteParam = isDesktopApp.value && useLocal
       ? `&remote_api=${encodeURIComponent(remoteBase)}`
       : ''
     const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
@@ -143,6 +150,9 @@ export function useVintedPublishStream() {
             }
             resolve()
           } else if (data.type === 'error') {
+            if (context === 'logs' && typeof data.message === 'string') {
+              logEntries.value.push({ text: `[Erreur] ${data.message}` })
+            }
             settled = true
             close()
             if (context !== 'logs') {
@@ -165,7 +175,7 @@ export function useVintedPublishStream() {
         }
         settled = true
         close()
-        reject(new Error('Connexion au flux Vinted interrompue'))
+        reject(new Error('Connexion au flux de publication interrompue'))
       }
     })
   }

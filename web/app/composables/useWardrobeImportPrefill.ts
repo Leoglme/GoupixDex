@@ -24,6 +24,12 @@ export interface WardrobeSlotPrefill {
   photoUrls: string[]
   isSold: boolean
   soldAt: string | null
+  /** Annonce déjà présente sur Vinted (import garde-robe) — à refléter en base. */
+  wardrobeVintedListed: boolean
+  /** Date de mise en ligne côté Vinted (ISO), annonces actives. */
+  vintedPublishedAtIso: string | null
+  /** Prix encaissé / alloué pour une vente importée (champ sold_price). */
+  importSoldPrice: string | null
 }
 
 const VINTED_STATUS_TO_CONDITION: Record<string, string> = {
@@ -92,6 +98,16 @@ function rowPriceAmount(row: Record<string, unknown>): string {
   return String(price.amount).replace(',', '.').trim()
 }
 
+/** Prix réalisé côté vendeur pour une ligne vendue (allocation transaction). */
+function rowSoldProceedsAmount(row: Record<string, unknown>): string | null {
+  const total = row.total_item_price as { amount?: unknown } | undefined
+  if (total?.amount != null && String(total.amount).trim()) {
+    return String(total.amount).replace(',', '.').trim()
+  }
+  const p = rowPriceAmount(row)
+  return p || null
+}
+
 function rowPhotoUrls(row: Record<string, unknown>): string[] {
   const urls = row.photo_urls
   if (!Array.isArray(urls)) {
@@ -114,6 +130,11 @@ function rowToSlot(row: Record<string, unknown>): WardrobeSlotPrefill {
   if (isSold && row.transaction_debit_processed_at) {
     soldAt = normalizeSoldAt(String(row.transaction_debit_processed_at))
   }
+  const listedUtc
+    = typeof row.listed_at_utc === 'string' && row.listed_at_utc.trim()
+      ? row.listed_at_utc.trim()
+      : null
+  const importSold = isSold ? rowSoldProceedsAmount(row) : null
   return {
     title: title || 'Annonce Vinted',
     description: desc || title,
@@ -125,7 +146,10 @@ function rowToSlot(row: Record<string, unknown>): WardrobeSlotPrefill {
     cardNumber: pickCardNumberForForm(title, numeroLine),
     photoUrls: rowPhotoUrls(row),
     isSold,
-    soldAt
+    soldAt,
+    wardrobeVintedListed: true,
+    vintedPublishedAtIso: !isSold ? listedUtc : null,
+    importSoldPrice: importSold
   }
 }
 

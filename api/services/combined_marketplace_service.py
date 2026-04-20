@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class CombinedMarketplaceService:
-    """Vinted then eBay in the same ``/articles/{id}/vinted-progress`` session."""
+    """Vinted then eBay in the same ``/articles/{id}/listing-progress`` session."""
 
     @staticmethod
     async def run_vinted_then_ebay(article_id: int, user_id: int, image_sources: list[str]) -> None:

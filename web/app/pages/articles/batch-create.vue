@@ -292,7 +292,7 @@ async function submitAll() {
       try {
         const { job_id } = await startVintedBatch(createdIds)
         await navigateTo({
-          path: '/articles/vinted-logs',
+          path: '/articles/listing-logs',
           query: { job: job_id }
         })
       } catch (e) {

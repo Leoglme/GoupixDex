@@ -66,6 +66,21 @@ def _parse_sold_at_iso(value: str | None) -> dt.datetime | None:
         ) from exc
 
 
+def _parse_optional_iso_dt(value: str | None) -> dt.datetime | None:
+    """Parse ISO-ish datetime without raising (e.g. wardrobe import)."""
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        return dt.datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=dt.UTC)
+    except ValueError:
+        return None
+
+
 @router.post("/bulk-delete", status_code=status.HTTP_200_OK)
 def bulk_delete_articles(
     body: BulkIdsBody,
@@ -218,14 +233,16 @@ def list_articles(
     return [article_service.article_to_dict(a) for a in rows]
 
 
-@router.get("/{article_id}/vinted-progress")
-async def vinted_progress_stream(
+@router.get("/{article_id}/listing-progress")
+@router.get("/{article_id}/vinted-progress", include_in_schema=False)
+async def article_listing_progress_stream(
     article_id: int,
     user: Annotated[User, Depends(get_current_user_from_token_str)],
     db: Annotated[Session, Depends(get_db)],
 ) -> StreamingResponse:
     """
     SSE stream for Vinted and/or eBay publish steps (JWT via ``Authorization`` or ``?token=``).
+    Legacy path: ``/vinted-progress`` (alias).
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -267,7 +284,7 @@ def publish_vinted_for_article(
 ) -> dict[str, Any]:
     """
     Start Vinted publish for an existing article (images already stored).
-    Follow SSE ``GET /articles/{id}/vinted-progress``.
+    Follow SSE ``GET /articles/{id}/listing-progress``.
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
@@ -300,7 +317,7 @@ def publish_vinted_for_article(
     return {
         "vinted": {
             "status": "running",
-            "stream_path": f"/articles/{article_id}/vinted-progress",
+            "stream_path": f"/articles/{article_id}/listing-progress",
         },
     }
 
@@ -368,7 +385,7 @@ def publish_ebay_for_article(
     return {
         "ebay": {
             "status": "running",
-            "stream_path": f"/articles/{article_id}/vinted-progress",
+            "stream_path": f"/articles/{article_id}/listing-progress",
         },
     }
 
@@ -387,10 +404,14 @@ async def create_article(
     card_number: str | None = Form(None),
     condition: str = Form("Near Mint"),
     sell_price: str | None = Form(None),
+    sold_price: str | None = Form(None),
+    sale_source: str | None = Form(None),
     publish_to_vinted: str | None = Form(None),
     publish_to_ebay: str | None = Form(None),
     is_sold: str | None = Form(None),
     sold_at: str | None = Form(None),
+    wardrobe_vinted_listed: str | None = Form(None),
+    vinted_published_at: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -398,6 +419,19 @@ async def create_article(
     sold_at_dt = _parse_sold_at_iso(sold_at) if sold_flag else None
     if sold_flag and sold_at_dt is None:
         sold_at_dt = dt.datetime.now(dt.UTC)
+
+    sell_dec = _parse_decimal(sell_price)
+    proceeds_dec = _parse_decimal(sold_price) if sold_flag and sold_price else None
+    if sold_flag and proceeds_dec is None:
+        proceeds_dec = sell_dec
+
+    sale_src: str | None = None
+    if sold_flag:
+        raw_ss = (sale_source or "").strip().lower()
+        if raw_ss in ("vinted", "ebay"):
+            sale_src = raw_ss[:16]
+        elif _form_bool(wardrobe_vinted_listed):
+            sale_src = "vinted"
 
     article = Article(
         user_id=user.id,
@@ -408,10 +442,20 @@ async def create_article(
         card_number=card_number.strip() if card_number else None,
         condition=condition.strip() or "Near Mint",
         purchase_price=_parse_decimal_required(purchase_price),
-        sell_price=_parse_decimal(sell_price),
+        sell_price=sell_dec,
+        sold_price=proceeds_dec if sold_flag else None,
+        sale_source=sale_src,
         is_sold=sold_flag,
         sold_at=sold_at_dt if sold_flag else None,
     )
+
+    if _form_bool(wardrobe_vinted_listed):
+        article.published_on_vinted = True
+        vp = _parse_optional_iso_dt(vinted_published_at)
+        if vp is not None:
+            article.vinted_published_at = vp
+        elif not sold_flag:
+            article.vinted_published_at = dt.datetime.now(dt.UTC)
     db.add(article)
     db.flush()
 
@@ -446,7 +490,7 @@ async def create_article(
     want_vinted = raw_want_vinted and ms.vinted_enabled
     raw_want_ebay = _form_bool(publish_to_ebay) and not sold_flag
 
-    stream_path = f"/articles/{article.id}/vinted-progress"
+    stream_path = f"/articles/{article.id}/listing-progress"
     want_both_server = (
         want_vinted
         and not vinted_local_desktop

@@ -8,8 +8,16 @@ useGoupixPageSeo(
   "Liste de vos annonces et cartes Pokémon TCG dans GoupixDex : recherche, édition, vente et mise en ligne Vinted depuis l'app desktop."
 )
 
-const { listArticles, deleteArticle, deleteArticlesBulk, markSold, publishArticleToVinted, publishArticleToEbay } =
-  useArticles()
+const {
+  listArticles,
+  deleteArticle,
+  deleteArticlesBulk,
+  markSold,
+  publishArticleToVinted,
+  publishArticleToEbay,
+  startVintedBatch,
+  startEbayBatch
+} = useArticles()
 const { getSettings } = useSettings()
 const { lookupMany } = usePricing()
 const toast = useToast()
@@ -19,6 +27,8 @@ const { startJob } = useWardrobeLocalSync()
 const wardrobeSyncing = ref(false)
 /** Show “Publish on eBay” when the channel is enabled and the account is ready in settings. */
 const ebayPublishAvailable = ref(false)
+/** Vinted activé dans les réglages marché (l’API refuse sinon). */
+const vintedChannelEnabled = ref(false)
 
 const articles = ref<Article[]>([])
 const pricingById = ref<Map<number, PricingLookup>>(new Map())
@@ -36,6 +46,34 @@ const deleteId = ref<number | null>(null)
 
 const bulkDeleteOpen = ref(false)
 const bulkDeleteIds = ref<number[]>([])
+const bulkPublishBusy = ref(false)
+
+function articleById(id: number): Article | undefined {
+  return articles.value.find(a => a.id === id)
+}
+
+function hasHttpsImage(a: Article) {
+  return a.images?.some(img => (img.image_url || '').startsWith('https://')) ?? false
+}
+
+function eligibleIdsForVintedBulk(ids: number[]) {
+  return ids.filter((id) => {
+    const a = articleById(id)
+    return a && !a.is_sold && (a.images?.length ?? 0) > 0
+  })
+}
+
+function eligibleIdsForEbayBulk(ids: number[]) {
+  return ids.filter((id) => {
+    const a = articleById(id)
+    return a && !a.is_sold && !(a.published_on_ebay ?? false) && hasHttpsImage(a)
+  })
+}
+
+function eligibleIdsForDualBulk(ids: number[]) {
+  const v = new Set(eligibleIdsForVintedBulk(ids))
+  return eligibleIdsForEbayBulk(ids).filter(id => v.has(id))
+}
 
 async function refresh() {
   loading.value = true
@@ -55,21 +93,23 @@ async function refresh() {
   }
 }
 
-async function loadEbayAvailability() {
+async function loadMarketplaceAvailability() {
   try {
     const s = await getSettings()
+    vintedChannelEnabled.value = s.vinted_enabled === true
     ebayPublishAvailable.value =
       s.ebay_enabled === true
       && s.ebay_oauth_configured === true
       && s.ebay_connected === true
       && s.ebay_listing_config_complete === true
   } catch {
+    vintedChannelEnabled.value = false
     ebayPublishAvailable.value = false
   }
 }
 
 onMounted(async () => {
-  await Promise.all([refresh(), loadEbayAvailability()])
+  await Promise.all([refresh(), loadMarketplaceAvailability()])
 })
 
 watch(fetchMarketData, () => {
@@ -157,7 +197,7 @@ async function onWardrobeImportFromVinted() {
   try {
     const jobId = await startJob()
     await navigateTo({
-      path: '/articles/vinted-logs',
+      path: '/articles/listing-logs',
       query: { wardrobe_job: jobId }
     })
   } catch (e) {
@@ -176,7 +216,7 @@ async function onPublishEbay(a: Article) {
     const { ebay } = await publishArticleToEbay(a.id)
     if (ebay?.status === 'running' && ebay?.stream_path) {
       await navigateTo({
-        path: '/articles/vinted-logs',
+        path: '/articles/listing-logs',
         query: { article: String(a.id) }
       })
       return
@@ -196,6 +236,188 @@ async function onPublishEbay(a: Article) {
   }
 }
 
+async function onBulkPublishVinted(ids: number[]) {
+  const eligible = eligibleIdsForVintedBulk(ids)
+  if (!eligible.length) {
+    toast.add({
+      title: 'Sélection invalide',
+      description:
+        'Choisissez des articles non vendus avec au moins une photo, et utilisez l’application desktop pour Vinted.',
+      color: 'warning'
+    })
+    return
+  }
+  if (!isDesktopApp.value) {
+    toast.add({
+      title: 'Application desktop requise',
+      description: 'La mise en ligne groupée Vinted s’exécute sur votre machine.',
+      color: 'warning'
+    })
+    await navigateTo('/downloads')
+    return
+  }
+  if (eligible.length < ids.length) {
+    toast.add({
+      title: 'Certains articles sont ignorés',
+      description: 'Seuls les articles non vendus avec photos sont inclus dans le lot.',
+      color: 'warning'
+    })
+  }
+  bulkPublishBusy.value = true
+  try {
+    const { job_id, stream_path } = await startVintedBatch(eligible)
+    if (job_id && stream_path) {
+      await navigateTo({
+        path: '/articles/listing-logs',
+        query: { job: job_id }
+      })
+      return
+    }
+    toast.add({ title: 'Lot Vinted', description: 'Réponse inattendue (pas de job).', color: 'warning' })
+    await refresh()
+  } catch (e) {
+    toast.add({
+      title: 'Impossible de lancer le lot Vinted',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
+  } finally {
+    bulkPublishBusy.value = false
+  }
+}
+
+async function onBulkPublishEbay(ids: number[]) {
+  const eligible = eligibleIdsForEbayBulk(ids)
+  if (!eligible.length) {
+    toast.add({
+      title: 'Sélection invalide',
+      description:
+        'Choisissez des articles non vendus, pas déjà sur eBay, avec au moins une image en HTTPS.',
+      color: 'warning'
+    })
+    return
+  }
+  if (eligible.length < ids.length) {
+    toast.add({
+      title: 'Certains articles sont ignorés',
+      description: 'Seuls les articles éligibles pour eBay (image HTTPS, pas déjà publié) sont inclus.',
+      color: 'warning'
+    })
+  }
+  bulkPublishBusy.value = true
+  try {
+    const { queued } = await startEbayBatch(eligible)
+    toast.add({
+      title: 'Mise en ligne eBay',
+      description: `${queued} publication(s) mise(s) en file d’attente (traitement séquentiel).`,
+      color: 'success'
+    })
+    await navigateTo({
+      path: '/articles/listing-logs',
+      query: { article: String(eligible[0]) }
+    })
+    await refresh()
+  } catch (e) {
+    toast.add({
+      title: 'Impossible de lancer le lot eBay',
+      description: apiErrorMessage(e),
+      color: 'error'
+    })
+  } finally {
+    bulkPublishBusy.value = false
+  }
+}
+
+async function onBulkPublishBoth(ids: number[]) {
+  const eligible = eligibleIdsForDualBulk(ids)
+  if (!eligible.length) {
+    toast.add({
+      title: 'Sélection invalide',
+      description:
+        'Pour les deux canaux : articles non vendus, avec photos (Vinted) et au moins une image HTTPS pour eBay, sans annonce eBay déjà créée.',
+      color: 'warning'
+    })
+    return
+  }
+  if (!isDesktopApp.value) {
+    toast.add({
+      title: 'Application desktop requise',
+      description: 'Vinted nécessite l’application desktop ; eBay peut être lancé seul depuis la liste.',
+      color: 'warning'
+    })
+    await navigateTo('/downloads')
+    return
+  }
+  if (eligible.length < ids.length) {
+    toast.add({
+      title: 'Certains articles sont ignorés',
+      description: 'Seuls les articles éligibles pour eBay et Vinted sont inclus.',
+      color: 'warning'
+    })
+  }
+  bulkPublishBusy.value = true
+  try {
+    const [vintedR, ebayR] = await Promise.allSettled([
+      startVintedBatch(eligible),
+      startEbayBatch(eligible)
+    ])
+
+    if (vintedR.status === 'fulfilled' && vintedR.value.job_id) {
+      if (ebayR.status === 'fulfilled') {
+        toast.add({
+          title: 'Lots lancés',
+          description: `Vinted : suivi du lot. eBay : ${ebayR.value.queued} article(s) en file (API).`,
+          color: 'success'
+        })
+      } else {
+        toast.add({
+          title: 'Lot Vinted lancé',
+          description: `eBay : ${apiErrorMessage(ebayR.reason)}`,
+          color: 'warning'
+        })
+      }
+      await navigateTo({
+        path: '/articles/listing-logs',
+        query: { job: vintedR.value.job_id }
+      })
+      await refresh()
+      return
+    }
+
+    if (ebayR.status === 'fulfilled') {
+      toast.add({
+        title: 'Lot eBay lancé',
+        description:
+          vintedR.status === 'rejected'
+            ? `Vinted : ${apiErrorMessage(vintedR.reason)}`
+            : `${ebayR.value.queued} article(s) en file.`,
+        color: vintedR.status === 'rejected' ? 'warning' : 'success'
+      })
+      await navigateTo({
+        path: '/articles/listing-logs',
+        query: { article: String(eligible[0]) }
+      })
+      await refresh()
+      return
+    }
+
+    const parts: string[] = []
+    if (vintedR.status === 'rejected') {
+      parts.push(`Vinted : ${apiErrorMessage(vintedR.reason)}`)
+    }
+    if (ebayR.status === 'rejected') {
+      parts.push(`eBay : ${apiErrorMessage(ebayR.reason)}`)
+    }
+    toast.add({
+      title: 'Impossible de lancer les lots',
+      description: parts.length ? parts.join(' · ') : 'Erreur inconnue',
+      color: 'error'
+    })
+  } finally {
+    bulkPublishBusy.value = false
+  }
+}
+
 async function onPublishVinted(a: Article) {
   if (!isDesktopApp.value) {
     toast.add({
@@ -210,8 +432,8 @@ async function onPublishVinted(a: Article) {
     const { vinted } = await publishArticleToVinted(a.id)
     if (vinted.status === 'running' && vinted.stream_path) {
       await navigateTo({
-        path: '/articles/vinted-logs',
-        query: { article: String(a.id) }
+        path: '/articles/listing-logs',
+        query: { article: String(a.id), progress: 'local' }
       })
       return
     }
@@ -323,12 +545,17 @@ async function onPublishVinted(a: Article) {
               :pricing-loading="pricingLoading"
               :show-ebay-column="ebayPublishAvailable"
               :ebay-publish-available="ebayPublishAvailable"
+              :vinted-channel-enabled="vintedChannelEnabled"
+              :bulk-publishing="bulkPublishBusy"
               @edit="(id: number) => navigateTo(`/articles/${id}`)"
               @delete="(id: number) => { deleteId = id; deleteOpen = true }"
               @sold="openSold"
               @publish-vinted="onPublishVinted"
               @publish-ebay="onPublishEbay"
               @bulk-delete="openBulkDelete"
+              @bulk-publish-vinted="onBulkPublishVinted"
+              @bulk-publish-ebay="onBulkPublishEbay"
+              @bulk-publish-both="onBulkPublishBoth"
             />
           </div>
         </UCard>

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { Article } from '~/composables/useArticles'
 import type { PricingLookup } from '~/composables/usePricing'
+import {
+  loadArticleListPrefs,
+  saveArticleListPrefs,
+  type ArticleListFilterSold,
+  type ArticleListSortKey
+} from '~/composables/useUiPrefsLocalStorage'
 
 const props = defineProps<{
   articles: Article[]
@@ -11,6 +17,10 @@ const props = defineProps<{
   showEbayColumn?: boolean
   /** eBay enabled + account connected + listing wizard complete (settings); hides eBay actions otherwise. */
   ebayPublishAvailable?: boolean
+  /** Vinted activé dans Paramètres → marchés (sinon l’API refuse la publication). */
+  vintedChannelEnabled?: boolean
+  /** Désactive les boutons de mise en ligne groupée pendant un appel API. */
+  bulkPublishing?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,10 +30,27 @@ const emit = defineEmits<{
   'publish-vinted': [article: Article]
   'publish-ebay': [article: Article]
   'bulk-delete': [ids: number[]]
+  'bulk-publish-vinted': [ids: number[]]
+  'bulk-publish-ebay': [ids: number[]]
+  'bulk-publish-both': [ids: number[]]
 }>()
+
+const { isDesktopApp } = useDesktopRuntime()
 
 function ebayRowDisabled(row: Article) {
   return row.is_sold || (row.published_on_ebay ?? false) || !(row.images?.length)
+}
+
+function hasHttpsImage(row: Article) {
+  return row.images?.some(img => (img.image_url || '').startsWith('https://')) ?? false
+}
+
+function canBulkVinted(row: Article) {
+  return !row.is_sold && (row.images?.length ?? 0) > 0
+}
+
+function canBulkEbay(row: Article) {
+  return !row.is_sold && !(row.published_on_ebay ?? false) && hasHttpsImage(row)
 }
 
 function soldStatusLabel(row: Article) {
@@ -66,11 +93,31 @@ function soldStatusBrandStyle(row: Article): { backgroundColor: string, color: s
   return null
 }
 
-const filterSold = ref<'all' | 'sold' | 'unsold'>('all')
-const sortKey = ref<'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'>('created_desc')
+const filterSold = ref<ArticleListFilterSold>('unsold')
+const sortKey = ref<ArticleListSortKey>('created_desc')
 /** Text filter: name, set code, set name, card #, title. */
 const searchQuery = ref('')
-const { isDesktopApp } = useDesktopRuntime()
+
+onMounted(() => {
+  const s = loadArticleListPrefs()
+  if (s?.filterSold) {
+    filterSold.value = s.filterSold
+  }
+  if (s?.sortKey) {
+    sortKey.value = s.sortKey
+  }
+  if (s?.searchQuery != null) {
+    searchQuery.value = s.searchQuery
+  }
+})
+
+watch([filterSold, sortKey, searchQuery], () => {
+  saveArticleListPrefs({
+    filterSold: filterSold.value,
+    sortKey: sortKey.value,
+    searchQuery: searchQuery.value
+  })
+})
 
 function normalizeSearch(s: string) {
   return s
@@ -155,6 +202,55 @@ watch(
     const valid = new Set(props.articles.map(a => a.id))
     selectedIds.value = selectedIds.value.filter(id => valid.has(id))
   }
+)
+
+const selectedRows = computed(() =>
+  props.articles.filter(a => selectedIds.value.includes(a.id))
+)
+
+const bulkVintedDisabledReason = computed(() => {
+  if (!props.vintedChannelEnabled) {
+    return 'Activez Vinted dans les paramètres marché.'
+  }
+  if (!isDesktopApp.value) {
+    return 'La publication Vinted groupée nécessite l’application desktop.'
+  }
+  if (selectedRows.value.some(a => !canBulkVinted(a))) {
+    return 'Tous les articles sélectionnés doivent être non vendus et avoir au moins une photo.'
+  }
+  return ''
+})
+
+const bulkEbayDisabledReason = computed(() => {
+  if (!props.ebayPublishAvailable) {
+    return 'eBay n’est pas prêt (connexion OAuth et configuration des annonces).'
+  }
+  if (selectedRows.value.some(a => !canBulkEbay(a))) {
+    return 'Articles non vendus, pas déjà sur eBay, avec au moins une image en HTTPS.'
+  }
+  return ''
+})
+
+const bulkBothDisabledReason = computed(() => {
+  if (!props.vintedChannelEnabled || !props.ebayPublishAvailable) {
+    return 'Activez Vinted et eBay dans les paramètres, et terminez la configuration eBay.'
+  }
+  if (!isDesktopApp.value) {
+    return 'Le duo eBay + Vinted nécessite l’application desktop pour Vinted.'
+  }
+  if (selectedRows.value.some(a => !canBulkVinted(a) || !canBulkEbay(a))) {
+    return 'Chaque article doit être éligible à la fois pour Vinted (photos) et pour eBay (HTTPS, pas déjà publié).'
+  }
+  return ''
+})
+
+const showBulkVinted = computed(() => props.vintedChannelEnabled === true)
+const showBulkEbay = computed(() => props.ebayPublishAvailable === true)
+const showBulkBoth = computed(
+  () =>
+    props.vintedChannelEnabled === true
+    && props.ebayPublishAvailable === true
+    && isDesktopApp.value
 )
 
 const selectedCount = computed(() => selectedIds.value.length)
@@ -293,9 +389,48 @@ const UAvatar = resolveComponent('UAvatar')
           Tout désélectionner
         </UButton>
         <UButton
+          v-if="showBulkVinted"
+          size="sm"
+          color="primary"
+          variant="subtle"
+          icon="i-lucide-store"
+          :disabled="!!bulkVintedDisabledReason || bulkPublishing"
+          :title="bulkVintedDisabledReason || undefined"
+          :loading="bulkPublishing"
+          @click="emit('bulk-publish-vinted', [...selectedIds])"
+        >
+          Mettre en ligne sur Vinted
+        </UButton>
+        <UButton
+          v-if="showBulkEbay"
+          size="sm"
+          color="primary"
+          variant="subtle"
+          icon="i-lucide-shopping-bag"
+          :disabled="!!bulkEbayDisabledReason || bulkPublishing"
+          :title="bulkEbayDisabledReason || undefined"
+          :loading="bulkPublishing"
+          @click="emit('bulk-publish-ebay', [...selectedIds])"
+        >
+          Mettre en ligne sur eBay
+        </UButton>
+        <UButton
+          v-if="showBulkBoth"
+          size="sm"
+          color="primary"
+          icon="i-lucide-upload-cloud"
+          :disabled="!!bulkBothDisabledReason || bulkPublishing"
+          :title="bulkBothDisabledReason || undefined"
+          :loading="bulkPublishing"
+          @click="emit('bulk-publish-both', [...selectedIds])"
+        >
+          Mettre en ligne (eBay + Vinted)
+        </UButton>
+        <UButton
           size="sm"
           color="error"
           icon="i-lucide-trash-2"
+          :disabled="bulkPublishing"
           @click="emit('bulk-delete', [...selectedIds])"
         >
           Supprimer la sélection

@@ -34,7 +34,7 @@ async function publishEbay() {
     const { ebay } = await publishArticleToEbay(id.value)
     if (ebay?.status === 'running' && ebay?.stream_path) {
       await navigateTo({
-        path: '/articles/vinted-logs',
+        path: '/articles/listing-logs',
         query: { article: String(id.value) }
       })
       return
