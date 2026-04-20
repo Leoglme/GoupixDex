@@ -216,6 +216,15 @@ def start_ebay_batch(
                 detail=f"Article {aid} needs at least one HTTPS image for eBay.",
             )
 
+    # Enregistre les canaux SSE **avant** de retourner 202 : `BackgroundTasks`
+    # ne démarre qu'après l'envoi de la réponse, et le front ouvre
+    # `GET /articles/{id}/listing-progress` dès réception → sans ces registers
+    # upfront, l'ouverture du SSE gagne la course et on renvoie l'erreur
+    # « Aucune session de publication pour cet article. » alors que la publication
+    # va en fait se dérouler juste après sans logs visibles côté UI.
+    for aid in unique_ids:
+        vinted_progress_hub.register(aid)
+
     background_tasks.add_task(
         EbayBackgroundService.run_ebay_batch_sequential,
         user.id,
