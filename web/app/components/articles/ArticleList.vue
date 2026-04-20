@@ -379,7 +379,7 @@ const UAvatar = resolveComponent('UAvatar')
 
     <div
       v-if="selectedCount > 0"
-      class="flex flex-col gap-2 rounded-lg border border-default bg-elevated/60 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
+      class="sticky top-0 z-30 flex flex-col gap-2 rounded-lg border border-default bg-elevated/95 px-3 py-2.5 shadow-md shadow-black/5 backdrop-blur supports-[backdrop-filter]:bg-elevated/85 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
     >
       <p class="text-sm text-highlighted">
         {{ selectedCount }} article{{ selectedCount > 1 ? 's' : '' }} sélectionné{{ selectedCount > 1 ? 's' : '' }}
@@ -445,7 +445,7 @@ const UAvatar = resolveComponent('UAvatar')
       <table class="min-w-full text-sm border-separate border-spacing-0">
         <thead class="bg-elevated/60 text-left text-muted uppercase text-xs">
           <tr>
-            <th class="w-10 px-3 py-2 font-medium align-middle border-b border-default">
+            <th class="sticky left-0 z-20 w-10 px-3 py-2 font-medium align-middle border-b border-r border-default bg-elevated">
               <UCheckbox
                 :model-value="allFilteredSelected"
                 :indeterminate="someFilteredSelected && !allFilteredSelected"
@@ -502,9 +502,9 @@ const UAvatar = resolveComponent('UAvatar')
           <tr
             v-for="row in filtered"
             :key="row.id"
-            class="border-t border-default hover:bg-elevated/40"
+            class="group border-t border-default hover:bg-elevated/40"
           >
-            <td class="px-3 py-3 align-middle border-b border-default">
+            <td class="sticky left-0 z-10 px-3 py-3 align-middle border-b border-r border-default bg-default transition-colors group-hover:bg-elevated/40">
               <UCheckbox
                 :model-value="isSelected(row.id)"
                 :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"

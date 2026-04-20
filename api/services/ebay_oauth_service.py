@@ -22,7 +22,7 @@ EBAY_SCOPES = [
 
 
 class EbayOAuthError(RuntimeError):
-    """Erreur OAuth eBay exploitable côté UI (code + message lisibles)."""
+    """User-facing eBay OAuth error (stable code + human-readable message)."""
 
     def __init__(self, code: str, message: str, *, status: int | None = None) -> None:
         super().__init__(code)
@@ -35,8 +35,9 @@ class EbayOAuthError(RuntimeError):
 
 
 def _describe_ebay_oauth_error(status: int, body: str) -> EbayOAuthError:
-    """Transforme un body 4xx eBay (`{"error": "...", "error_description": "..."}`)
-    en exception `RuntimeError` lisible, avec un code applicatif stable pour l'UI."""
+    """Turn an eBay 4xx body (`{"error": "...", "error_description": "..."}`)
+    into a readable `RuntimeError` with a stable application code for the UI.
+    User-facing messages are kept in French (shown verbatim in the app UI)."""
     payload: dict[str, Any] = {}
     try:
         parsed = json.loads(body) if body else {}
@@ -135,15 +136,14 @@ async def exchange_authorization_code(code: str, *, app: AppSettings | None = No
 
 
 async def refresh_user_access_token(refresh_token: str, *, app: AppSettings | None = None) -> dict[str, Any]:
-    """Rafraîchit l'access token utilisateur.
+    """Refresh the user access token.
 
-    On ne force **volontairement pas** le paramètre ``scope`` : eBay renvoie alors
-    un token portant les scopes tels qu'ils ont été consentis au moment de la
-    connexion. C'est indispensable quand ``EBAY_SCOPES`` évolue (ajout de
-    ``sell.fulfillment`` par exemple) : les utilisateurs déjà connectés avant
-    l'ajout continuent de publier (inventory + account) sans reconsentement ;
-    les fonctionnalités nécessitant le nouveau scope détecteront son absence et
-    proposeront la reconnexion.
+    We intentionally do **not** send the ``scope`` parameter: eBay then returns
+    a token with the scopes as originally consented. This is required when
+    ``EBAY_SCOPES`` evolves (e.g. when ``sell.fulfillment`` was added): users
+    already connected before the change keep publishing (inventory + account)
+    without re-consenting; features that need the new scope detect its absence
+    and prompt the user to reconnect.
     """
     s = app or get_settings()
     if not ebay_oauth_configured(s):

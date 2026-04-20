@@ -80,11 +80,11 @@ class VintedProgressSessionService:
 
     @classmethod
     async def event_stream(cls, article_id: int) -> AsyncIterator[dict[str, Any]]:
-        # Petit filet de sécurité : si une route a enregistré la session via
-        # `BackgroundTasks` (donc après le retour HTTP) ou si le front ouvre le
-        # SSE très vite après un POST 202, on laisse jusqu'à ~1,5 s pour que
-        # `register()` soit appelé. Au-delà on considère qu'il n'y a vraiment
-        # pas de publication en cours pour cet article.
+        # Small safety net: if a route registers the session via
+        # `BackgroundTasks` (i.e. after the HTTP response) or if the front opens
+        # the SSE right after a 202, allow up to ~1.5s for `register()` to be
+        # called. After that we consider that no publish is actually running
+        # for this article.
         s = cls._sessions.get(article_id)
         if s is None:
             for _ in range(15):

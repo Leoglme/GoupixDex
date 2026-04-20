@@ -104,17 +104,17 @@ async function installUpdate() {
     errorMessage.value = null
     resetDownloadProgress()
 
-    // Sur Windows, l'installeur NSIS réécrit `goupix-vinted-worker.exe` :
-    // il faut impérativement tuer le sidecar (et ses enfants Chromium lancés
-    // par nodriver) AVANT, sinon l'install échoue avec « Error opening file
-    // for writing ». Le kill côté Rust propage un taskkill /F /T sur l'arbre.
+    // On Windows, the NSIS installer overwrites `goupix-vinted-worker.exe`:
+    // the sidecar (and its Chromium children spawned by nodriver) must be
+    // killed BEFORE, otherwise the install fails with "Error opening file for
+    // writing". The Rust side runs a `taskkill /F /T` on the whole tree.
     try {
       await invoke('stop_local_worker')
     } catch (killError) {
-      console.warn('[Updater] stop_local_worker a échoué, on tente quand même l\'install :', killError)
+      console.warn('[Updater] stop_local_worker failed, proceeding with install anyway:', killError)
     }
-    // Laisse Windows libérer les handles sur le .exe et ses DLLs avant que
-    // NSIS ne commence l'extraction.
+    // Give Windows a moment to release handles on the .exe and its DLLs
+    // before NSIS starts extracting.
     await new Promise((resolve) => setTimeout(resolve, 600))
 
     await pendingUpdate.value.downloadAndInstall(onDownloadEvent)

@@ -127,10 +127,9 @@ fn check_browser_availability() -> BrowserInfo {
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Tue le worker local et toute son arborescence de sous-processus (Chromium
-/// lancés par nodriver notamment). Indispensable avant un remplacement sur
-/// disque de `goupix-vinted-worker.exe` (mise à jour NSIS) pour ne pas se
-/// retrouver avec un fichier verrouillé.
+/// Kill the local worker and its whole child process tree (Chromium spawned by
+/// nodriver in particular). Required before overwriting
+/// `goupix-vinted-worker.exe` on disk (NSIS update) to avoid a locked file.
 fn kill_worker_tree(child: CommandChild) {
     #[cfg(target_os = "windows")]
     {
@@ -143,8 +142,8 @@ fn kill_worker_tree(child: CommandChild) {
     let _ = child.kill();
 }
 
-/// Commande exposée au front-end pour fermer proprement le worker avant une
-/// mise à jour Tauri (voir `DesktopUpdaterPanel.vue`).
+/// Tauri command called from the front-end to shut the worker down cleanly
+/// before a Tauri update (see `DesktopUpdaterPanel.vue`).
 #[tauri::command]
 fn stop_local_worker(state: tauri::State<'_, VintedLocalChild>) -> Result<(), String> {
     let child_opt = match state.0.lock() {

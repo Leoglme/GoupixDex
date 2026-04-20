@@ -113,8 +113,8 @@ export function useVintedPublishStream() {
             const v = data.vinted
             const eb = data.ebay
             if (context === 'logs') {
-              // Journal des publications : on matérialise les échecs dans la
-              // liste de logs (sinon l'utilisateur ne voit qu'un `done` muet).
+              // Publish journal: surface failures as log entries (otherwise
+              // the user only sees a silent `done`).
               if (v && v.published === false) {
                 const detail
                   = v.detail === 'missing_vinted_credentials'

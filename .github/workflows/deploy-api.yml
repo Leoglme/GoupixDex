@@ -177,7 +177,7 @@ jobs:
             WorkingDirectory=${APP_ROOT}
             EnvironmentFile=${APP_ROOT}/.env
             # Affichage virtuel : Chromium avec VINTED_BROWSER_HEADLESS=false a besoin d'un DISPLAY (xauth requis pour xvfb-run).
-            ExecStart=/usr/bin/xvfb-run -a --server-args="-screen 0 1920x1080x24" ${APP_ROOT}/.venv/bin/uvicorn main:app --host 127.0.0.1 --port ${PORT} --workers 2 --proxy-headers
+            ExecStart=/usr/bin/xvfb-run -a --server-args="-screen 0 1920x1080x24" ${APP_ROOT}/.venv/bin/uvicorn main:app --host 127.0.0.1 --port ${PORT} --workers 1 --proxy-headers
             Restart=always
             RestartSec=5
 
