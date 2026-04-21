@@ -148,3 +148,10 @@ def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
         else:
             c = str(cert).strip()[:30]
             article.graded_cert_number = c or None
+    if data.get("clear_vinted_publication") is True:
+        article.published_on_vinted = False
+        article.vinted_published_at = None
+    if data.get("clear_ebay_publication") is True:
+        article.published_on_ebay = False
+        article.ebay_listing_id = None
+        article.ebay_published_at = None

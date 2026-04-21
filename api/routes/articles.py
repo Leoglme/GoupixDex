@@ -19,7 +19,13 @@ from core.security import decrypt_ebay_token
 from models.article import Article
 from models.image import Image as ImageModel
 from models.user import User
-from schemas.articles import ArticleUpdate, BulkIdsBody, SoldPatch, VintedBatchStartBody
+from schemas.articles import (
+    ARTICLE_TITLE_MAX_LEN_VINTED,
+    ArticleUpdate,
+    BulkIdsBody,
+    SoldPatch,
+    VintedBatchStartBody,
+)
 from services import article_service
 from services.combined_marketplace_service import CombinedMarketplaceService
 from services.ebay_background_service import EbayBackgroundService
@@ -68,6 +74,25 @@ def _parse_sold_at_iso(value: str | None) -> dt.datetime | None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid sold_at (expected ISO 8601 or YYYY-MM-DD).",
         ) from exc
+
+
+def _validate_create_title_or_raise(raw_title: str) -> str:
+    """Titre requis, longueur max alignée sur Vinted (espaces inclus après trim côté annonce)."""
+    t = raw_title.strip()
+    if not t:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le titre est requis.",
+        )
+    if len(t) > ARTICLE_TITLE_MAX_LEN_VINTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Le titre ne doit pas dépasser {ARTICLE_TITLE_MAX_LEN_VINTED} caractères "
+                f"(limite Vinted, espaces inclus). Longueur : {len(t)}."
+            ),
+        )
+    return t
 
 
 def _validate_graded_article_or_raise(article: Article) -> None:
@@ -472,9 +497,11 @@ async def create_article(
         grade_vid = None
         cert_norm = None
 
+    title_clean = _validate_create_title_or_raise(title)
+
     article = Article(
         user_id=user.id,
-        title=title.strip(),
+        title=title_clean,
         description=description,
         pokemon_name=pokemon_name.strip() if pokemon_name else None,
         set_code=set_code.strip() if set_code else None,

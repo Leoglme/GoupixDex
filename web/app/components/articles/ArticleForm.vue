@@ -27,6 +27,9 @@ const emit = defineEmits<{
   submitEdit: [body: ArticleUpdateBody]
 }>()
 
+/** Limite titre Vinted : espaces comptés comme un caractère. */
+const VINTED_TITLE_MAX_CHARS = 100
+
 const title = ref('')
 const description = ref('')
 const pokemonName = ref('')
@@ -45,6 +48,9 @@ const isGraded = ref(false)
 const gradedGraderValueId = ref('')
 const gradedGradeValueId = ref('')
 const gradedCertNumber = ref('')
+/** Édition : cocher pour enregistrer l’article comme non publié sur le canal (suivi GoupixDex uniquement). */
+const clearVintedPublication = ref(false)
+const clearEbayPublication = ref(false)
 const purchasePrice = ref('')
 const sellPrice = ref('')
 const toast = useToast()
@@ -82,6 +88,23 @@ const canPublishEbay = computed(
     && svcSettings.value?.ebay_connected === true
     && svcSettings.value?.ebay_listing_config_complete === true
 )
+
+const titleLenVinted = computed(() => title.value.trim().length)
+
+function titleWithinVintedLimit(): boolean {
+  return titleLenVinted.value <= VINTED_TITLE_MAX_CHARS
+}
+
+function assignTitleFromExternal(raw: string) {
+  title.value = raw.trim().slice(0, VINTED_TITLE_MAX_CHARS)
+}
+
+const titleFieldDescription = computed(() => {
+  const n = titleLenVinted.value
+  const max = VINTED_TITLE_MAX_CHARS
+  const base = `${n} / ${max} caractères (limite Vinted, espaces inclus)`
+  return n > max ? `${base} — raccourcissez avant enregistrement` : base
+})
 
 onMounted(async () => {
   try {
@@ -139,6 +162,8 @@ watch(
         ? a.graded_grade_value_id
         : ''
     gradedCertNumber.value = a.graded_cert_number ?? ''
+    clearVintedPublication.value = false
+    clearEbayPublication.value = false
   },
   { immediate: true }
 )
@@ -175,7 +200,7 @@ function applyScanPrefill(scan: {
   ocr: Record<string, unknown>
   pricing: { cardmarket_eur: number | null, tcgplayer_usd: number | null }
 }) {
-  title.value = scan.listing_preview.title
+  assignTitleFromExternal(scan.listing_preview.title)
   description.value = scan.listing_preview.description
   const o = scan.ocr
   const en = typeof o.pokemon_name_english === 'string' ? o.pokemon_name_english : ''
@@ -214,7 +239,7 @@ async function applyEbayPrefill(p: {
   imageUrl?: string | null
 }) {
   if (p.title) {
-    title.value = p.title
+    assignTitleFromExternal(p.title)
   }
   if (p.description) {
     description.value = p.description
@@ -262,7 +287,7 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   wardrobeVintedListed.value = p.wardrobeVintedListed
   wardrobeVintedPublishedAtIso.value = p.vintedPublishedAtIso
   wardrobeImportSoldPrice.value = p.importSoldPrice
-  title.value = p.title
+  assignTitleFromExternal(p.title)
   description.value = p.description
   purchasePrice.value = p.purchasePrice || '0'
   sellPrice.value = p.sellPrice
@@ -306,6 +331,9 @@ defineExpose({
 })
 
 function buildCreateFormData(): FormData {
+  if (!titleWithinVintedLimit()) {
+    throw new Error('ARTICLE_TITLE_TOO_LONG')
+  }
   const fd = new FormData()
   fd.append('title', title.value.trim())
   fd.append('description', description.value)
@@ -369,6 +397,22 @@ function imageSrc(url: string) {
 }
 
 function submit() {
+  if (!title.value.trim()) {
+    toast.add({
+      title: 'Titre requis',
+      description: 'Indiquez un titre pour l’article.',
+      color: 'error'
+    })
+    return
+  }
+  if (!titleWithinVintedLimit()) {
+    toast.add({
+      title: 'Titre trop long',
+      description: `Vinted : maximum ${VINTED_TITLE_MAX_CHARS} caractères (espaces inclus). Actuellement : ${title.value.trim().length}.`,
+      color: 'error'
+    })
+    return
+  }
   if (isGraded.value) {
     if (!gradedGraderValueId.value || !gradedGradeValueId.value) {
       toast.add({
@@ -383,7 +427,7 @@ function submit() {
     emit('submitCreate', buildCreateFormData())
     return
   }
-  emit('submitEdit', {
+  const editBody: ArticleUpdateBody = {
     title: title.value.trim(),
     description: description.value,
     pokemon_name: pokemonName.value.trim() || null,
@@ -400,15 +444,30 @@ function submit() {
     sell_price: sellPrice.value.trim()
       ? Number(sellPrice.value.replace(',', '.'))
       : null
-  })
+  }
+  if (clearVintedPublication.value) {
+    editBody.clear_vinted_publication = true
+  }
+  if (clearEbayPublication.value) {
+    editBody.clear_ebay_publication = true
+  }
+  emit('submitEdit', editBody)
 }
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="grid gap-4 sm:grid-cols-2">
-      <UFormField label="Titre" required>
-        <UInput v-model="title" class="w-full" />
+      <UFormField
+        label="Titre"
+        required
+        :description="titleFieldDescription"
+      >
+        <UInput
+          v-model="title"
+          class="w-full"
+          :maxlength="mode === 'create' ? VINTED_TITLE_MAX_CHARS : undefined"
+        />
       </UFormField>
       <UFormField v-if="!isGraded" label="État">
         <USelect
@@ -626,6 +685,34 @@ function submit() {
           class="size-24 rounded-lg object-cover ring ring-default"
         >
       </div>
+    </div>
+
+    <div
+      v-if="
+        mode === 'edit'
+          && article
+          && !article.is_sold
+          && ((article.published_on_vinted ?? false) || (article.published_on_ebay ?? false))
+      "
+      class="rounded-lg border border-default p-4 space-y-3"
+    >
+      <p class="text-sm font-medium text-highlighted">
+        Statut de publication dans GoupixDex
+      </p>
+      <p class="text-xs text-muted leading-relaxed">
+        Cochez pour indiquer que l’article n’est plus « en ligne » dans l’app. Cela ne retire pas l’annonce sur Vinted ou eBay :
+        supprimez-la sur le site si besoin. Utile pour relancer une publication depuis GoupixDex.
+      </p>
+      <UCheckbox
+        v-if="article.published_on_vinted ?? false"
+        v-model="clearVintedPublication"
+        label="Ne plus marquer comme publié sur Vinted"
+      />
+      <UCheckbox
+        v-if="article.published_on_ebay ?? false"
+        v-model="clearEbayPublication"
+        label="Ne plus marquer comme publié sur eBay"
+      />
     </div>
 
     <UButton

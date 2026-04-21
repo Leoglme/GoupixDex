@@ -56,6 +56,7 @@ async function onSubmitEdit(body: ArticleUpdateBody) {
   submitting.value = true
   try {
     const updated = await updateArticle(id.value, body)
+    article.value = updated
     toast.add({ title: 'Article mis à jour', color: 'success' })
     const listed =
       Boolean(updated.published_on_vinted ?? false) || Boolean(updated.published_on_ebay ?? false)

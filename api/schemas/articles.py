@@ -1,7 +1,10 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Limite champ titre Vinted (espaces comptés comme un caractère).
+ARTICLE_TITLE_MAX_LEN_VINTED = 100
 
 
 class ArticleUpdate(BaseModel):
@@ -17,6 +20,23 @@ class ArticleUpdate(BaseModel):
     graded_cert_number: str | None = None
     purchase_price: Decimal | None = None
     sell_price: Decimal | None = None
+    #: Remet l’article en « non publié » côté GoupixDex (ne supprime pas l’annonce sur Vinted).
+    clear_vinted_publication: bool | None = None
+    #: Idem eBay : efface le suivi local et l’identifiant d’annonce enregistré.
+    clear_ebay_publication: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def title_vinted_max_length(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = v.strip()
+        if len(s) > ARTICLE_TITLE_MAX_LEN_VINTED:
+            raise ValueError(
+                f"Le titre ne doit pas dépasser {ARTICLE_TITLE_MAX_LEN_VINTED} caractères "
+                f"(limite Vinted, espaces inclus). Longueur : {len(s)}."
+            )
+        return s
 
 
 class SoldPatch(BaseModel):

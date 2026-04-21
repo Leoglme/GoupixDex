@@ -102,6 +102,10 @@ export interface ArticleUpdateBody {
   graded_cert_number?: string | null
   purchase_price?: number
   sell_price?: number | null
+  /** Édition : remet le suivi Vinted à « non publié » dans GoupixDex. */
+  clear_vinted_publication?: boolean
+  /** Édition : remet le suivi eBay à « non publié » dans GoupixDex. */
+  clear_ebay_publication?: boolean
 }
 
 export function useArticles() {

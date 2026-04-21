@@ -250,7 +250,20 @@ async function submitAll() {
         })
         return
       }
-      const fd = comp.buildCreateFormData()
+      let fd: FormData
+      try {
+        fd = comp.buildCreateFormData()
+      } catch (e) {
+        if (e instanceof Error && e.message === 'ARTICLE_TITLE_TOO_LONG') {
+          toast.add({
+            title: `Article ${i + 1} — titre trop long`,
+            description: 'Maximum 100 caractères pour Vinted (espaces inclus). Raccourcissez le titre.',
+            color: 'error'
+          })
+          return
+        }
+        throw e
+      }
       const title = fd.get('title')?.toString()?.trim()
       const purchase = fd.get('purchase_price')?.toString()?.trim()
       const images = fd.getAll('images') as File[]
