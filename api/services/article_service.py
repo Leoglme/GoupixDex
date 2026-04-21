@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from core.database import SessionLocal
 from models.article import Article
+from schemas.articles import ArticleUpdate
 
 
 def list_articles_for_user(db: Session, user_id: int) -> list[Article]:
@@ -40,6 +41,10 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "set_code": article.set_code,
         "card_number": article.card_number,
         "condition": article.condition,
+        "is_graded": bool(article.is_graded),
+        "graded_grader_value_id": article.graded_grader_value_id,
+        "graded_grade_value_id": article.graded_grade_value_id,
+        "graded_cert_number": article.graded_cert_number,
         "purchase_price": float(article.purchase_price),
         "sell_price": float(article.sell_price) if article.sell_price is not None else None,
         "sold_price": float(article.sold_price) if article.sold_price is not None else None,
@@ -105,31 +110,41 @@ def delete_articles_by_ids(db: Session, user_id: int, ids: list[int]) -> int:
     return int(deleted)
 
 
-def update_article_fields(
-    article: Article,
-    *,
-    title: str | None = None,
-    description: str | None = None,
-    pokemon_name: str | None = None,
-    set_code: str | None = None,
-    card_number: str | None = None,
-    condition: str | None = None,
-    purchase_price: Decimal | None = None,
-    sell_price: Decimal | None = None,
-) -> None:
-    if title is not None:
-        article.title = title
-    if description is not None:
-        article.description = description
-    if pokemon_name is not None:
-        article.pokemon_name = pokemon_name
-    if set_code is not None:
-        article.set_code = set_code
-    if card_number is not None:
-        article.card_number = card_number
-    if condition is not None:
-        article.condition = condition
-    if purchase_price is not None:
-        article.purchase_price = purchase_price
-    if sell_price is not None:
-        article.sell_price = sell_price
+def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
+    """Apply a partial update from ``ArticleUpdate`` (only set fields are changed)."""
+    data = body.model_dump(exclude_unset=True)
+    if "is_graded" in data:
+        article.is_graded = bool(data["is_graded"])
+        if not article.is_graded:
+            article.graded_grader_value_id = None
+            article.graded_grade_value_id = None
+            article.graded_cert_number = None
+    if "title" in data and data["title"] is not None:
+        article.title = data["title"]
+    if "description" in data and data["description"] is not None:
+        article.description = data["description"]
+    if "pokemon_name" in data:
+        article.pokemon_name = data["pokemon_name"]
+    if "set_code" in data:
+        article.set_code = data["set_code"]
+    if "card_number" in data:
+        article.card_number = data["card_number"]
+    if "condition" in data and data["condition"] is not None:
+        article.condition = data["condition"]
+    if "purchase_price" in data and data["purchase_price"] is not None:
+        article.purchase_price = data["purchase_price"]
+    if "sell_price" in data:
+        article.sell_price = data["sell_price"]
+    if "graded_grader_value_id" in data:
+        gid = data["graded_grader_value_id"]
+        article.graded_grader_value_id = (gid.strip() if isinstance(gid, str) else None) or None
+    if "graded_grade_value_id" in data:
+        tid = data["graded_grade_value_id"]
+        article.graded_grade_value_id = (tid.strip() if isinstance(tid, str) else None) or None
+    if "graded_cert_number" in data:
+        cert = data["graded_cert_number"]
+        if cert is None:
+            article.graded_cert_number = None
+        else:
+            c = str(cert).strip()[:30]
+            article.graded_cert_number = c or None

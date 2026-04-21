@@ -23,6 +23,10 @@ class DesktopStubsService:
         a.set_code = d.get("set_code")
         a.card_number = d.get("card_number")
         a.condition = d.get("condition") or "Near Mint"
+        a.is_graded = bool(d.get("is_graded", False))
+        a.graded_grader_value_id = d.get("graded_grader_value_id")
+        a.graded_grade_value_id = d.get("graded_grade_value_id")
+        a.graded_cert_number = d.get("graded_cert_number")
         a.purchase_price = Decimal(str(d["purchase_price"]))
         sp = d.get("sell_price")
         a.sell_price = Decimal(str(sp)) if sp is not None else None

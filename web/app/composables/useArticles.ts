@@ -13,6 +13,10 @@ export interface Article {
   set_code: string | null
   card_number: string | null
   condition: string
+  is_graded?: boolean
+  graded_grader_value_id?: string | null
+  graded_grade_value_id?: string | null
+  graded_cert_number?: string | null
   purchase_price: number
   sell_price: number | null
   /** Actual proceeds (may differ from listed price if negotiated). */
@@ -92,6 +96,10 @@ export interface ArticleUpdateBody {
   set_code?: string | null
   card_number?: string | null
   condition?: string | null
+  is_graded?: boolean
+  graded_grader_value_id?: string | null
+  graded_grade_value_id?: string | null
+  graded_cert_number?: string | null
   purchase_price?: number
   sell_price?: number | null
 }

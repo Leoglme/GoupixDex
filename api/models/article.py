@@ -23,6 +23,15 @@ class Article(Base):
     set_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     card_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     condition: Mapped[str] = mapped_column(String(64), default="Near Mint")
+    is_graded: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    graded_grader_value_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    graded_grade_value_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    graded_cert_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     sell_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Actual proceeds; sale_source is vinted | ebay

@@ -2,6 +2,7 @@
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 import type { AppSettings } from '~/composables/useSettings'
 import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
+import { EBAY_GRADE_OPTIONS, EBAY_PROFESSIONAL_GRADER_OPTIONS } from '~/utils/ebayTradingCardGrading'
 
 const props = withDefaults(
   defineProps<{
@@ -40,8 +41,13 @@ const conditionOptions: { label: string, value: string }[] = [
 ]
 
 const condition = ref('Near Mint')
+const isGraded = ref(false)
+const gradedGraderValueId = ref('')
+const gradedGradeValueId = ref('')
+const gradedCertNumber = ref('')
 const purchasePrice = ref('')
 const sellPrice = ref('')
+const toast = useToast()
 
 const imageFiles = ref<File[]>([])
 const previews = ref<string[]>([])
@@ -121,6 +127,18 @@ watch(
         : 'Near Mint'
     purchasePrice.value = String(a.purchase_price)
     sellPrice.value = a.sell_price != null ? String(a.sell_price) : ''
+    isGraded.value = Boolean(a.is_graded)
+    gradedGraderValueId.value =
+      a.graded_grader_value_id
+      && EBAY_PROFESSIONAL_GRADER_OPTIONS.some(o => o.value === a.graded_grader_value_id)
+        ? a.graded_grader_value_id
+        : ''
+    gradedGradeValueId.value =
+      a.graded_grade_value_id
+      && EBAY_GRADE_OPTIONS.some(o => o.value === a.graded_grade_value_id)
+        ? a.graded_grade_value_id
+        : ''
+    gradedCertNumber.value = a.graded_cert_number ?? ''
   },
   { immediate: true }
 )
@@ -168,6 +186,10 @@ function applyScanPrefill(scan: {
   if (scan.listing_preview.suggested_price != null) {
     purchasePrice.value = String(scan.listing_preview.suggested_price)
   }
+  isGraded.value = false
+  gradedGraderValueId.value = ''
+  gradedGradeValueId.value = ''
+  gradedCertNumber.value = ''
   importIsSold.value = false
   importSoldAt.value = null
   wardrobeVintedListed.value = false
@@ -252,6 +274,10 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
     : 'Near Mint'
   publishToVinted.value = false
   publishToEbay.value = false
+  isGraded.value = false
+  gradedGraderValueId.value = ''
+  gradedGradeValueId.value = ''
+  gradedCertNumber.value = ''
 
   for (let i = 0; i < p.photoUrls.length; i++) {
     const url = p.photoUrls[i]!
@@ -285,6 +311,18 @@ function buildCreateFormData(): FormData {
   fd.append('description', description.value)
   fd.append('purchase_price', purchasePrice.value.trim())
   fd.append('condition', condition.value.trim() || 'Near Mint')
+  fd.append('is_graded', isGraded.value ? 'true' : 'false')
+  if (isGraded.value) {
+    if (gradedGraderValueId.value) {
+      fd.append('graded_grader_value_id', gradedGraderValueId.value)
+    }
+    if (gradedGradeValueId.value) {
+      fd.append('graded_grade_value_id', gradedGradeValueId.value)
+    }
+    if (gradedCertNumber.value.trim()) {
+      fd.append('graded_cert_number', gradedCertNumber.value.trim().slice(0, 30))
+    }
+  }
   if (pokemonName.value.trim()) {
     fd.append('pokemon_name', pokemonName.value.trim())
   }
@@ -331,6 +369,16 @@ function imageSrc(url: string) {
 }
 
 function submit() {
+  if (isGraded.value) {
+    if (!gradedGraderValueId.value || !gradedGradeValueId.value) {
+      toast.add({
+        title: 'Carte gradée',
+        description: 'Choisissez une société de grading et une note (requis pour eBay).',
+        color: 'error'
+      })
+      return
+    }
+  }
   if (props.mode === 'create') {
     emit('submitCreate', buildCreateFormData())
     return
@@ -342,6 +390,12 @@ function submit() {
     set_code: setCode.value.trim() || null,
     card_number: cardNumber.value.trim() || null,
     condition: condition.value.trim() || 'Near Mint',
+    is_graded: isGraded.value,
+    graded_grader_value_id: isGraded.value ? gradedGraderValueId.value : null,
+    graded_grade_value_id: isGraded.value ? gradedGradeValueId.value : null,
+    graded_cert_number: isGraded.value && gradedCertNumber.value.trim()
+      ? gradedCertNumber.value.trim().slice(0, 30)
+      : null,
     purchase_price: Number(purchasePrice.value.replace(',', '.')),
     sell_price: sellPrice.value.trim()
       ? Number(sellPrice.value.replace(',', '.'))
@@ -356,7 +410,7 @@ function submit() {
       <UFormField label="Titre" required>
         <UInput v-model="title" class="w-full" />
       </UFormField>
-      <UFormField label="État">
+      <UFormField v-if="!isGraded" label="État">
         <USelect
           v-model="condition"
           :items="conditionOptions"
@@ -365,6 +419,58 @@ function submit() {
           class="w-full"
         />
       </UFormField>
+    </div>
+    <UCheckbox
+      v-model="isGraded"
+      label="Carte gradée (slab — PSA, CGC, BGS…)"
+      class="mt-1"
+    />
+    <div v-if="isGraded" class="space-y-4 rounded-lg border border-default p-4">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <UFormField label="Société de grading" required>
+          <USelect
+            v-model="gradedGraderValueId"
+            :items="EBAY_PROFESSIONAL_GRADER_OPTIONS"
+            value-key="value"
+            label-key="label"
+            class="w-full"
+            placeholder="Choisir…"
+          />
+        </UFormField>
+        <UFormField label="Note" required>
+          <USelect
+            v-model="gradedGradeValueId"
+            :items="EBAY_GRADE_OPTIONS"
+            value-key="value"
+            label-key="label"
+            class="w-full"
+            placeholder="Choisir…"
+          />
+        </UFormField>
+      </div>
+      <UFormField
+        label="N° de certification (optionnel)"
+        description="eBay : 30 caractères max. Précisez aussi la note dans le titre ou la description si besoin."
+      >
+        <UInput
+          v-model="gradedCertNumber"
+          class="w-full max-w-md"
+          maxlength="30"
+        />
+      </UFormField>
+      <UAlert
+        color="info"
+        variant="subtle"
+        icon="i-lucide-info"
+        title="Places de marché"
+      >
+        <template #description>
+          <p class="text-sm leading-relaxed">
+            <strong>Vinted</strong> utilisera l’état « Neuf avec étiquette » pour une carte sous slab.
+            <strong>eBay</strong> enverra la condition « Gradée par un professionnel » avec la société et la note choisies.
+          </p>
+        </template>
+      </UAlert>
     </div>
     <UFormField label="Description" required>
       <UTextarea v-model="description" :rows="4" class="w-full" />

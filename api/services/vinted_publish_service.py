@@ -36,8 +36,11 @@ _CONDITION_TO_VINTED: dict[str, str] = {
 }
 
 
-def _vinted_condition(app_condition: str) -> str:
-    return _CONDITION_TO_VINTED.get(app_condition.strip(), "Neuf sans étiquette")
+def _vinted_condition(article: Article) -> str:
+    if article.is_graded:
+        return "Neuf avec étiquette"
+    key = (article.condition or "").strip()
+    return _CONDITION_TO_VINTED.get(key, "Neuf sans étiquette")
 
 
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
@@ -158,7 +161,7 @@ async def run_single_vinted_listing(
         "title": article.title,
         "description": article.description,
         "price": price,
-        "condition": _vinted_condition(article.condition),
+        "condition": _vinted_condition(article),
         "images": basenames,
     }
 

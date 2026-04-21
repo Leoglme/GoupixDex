@@ -24,8 +24,14 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: () => { open.value = false }
     },
     {
+      label: 'Mon stock',
+      icon: 'i-lucide-package',
+      to: '/articles/stock',
+      onSelect: () => { open.value = false }
+    },
+    {
       label: 'Articles',
-      icon: 'i-lucide-layers',
+      icon: 'i-lucide-store',
       to: '/articles',
       onSelect: () => { open.value = false }
     },

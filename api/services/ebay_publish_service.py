@@ -19,6 +19,12 @@ from models.article import Article
 from models.margin_settings import MarginSettings
 from models.user import User
 from services.ebay_oauth_service import _api_base_url, refresh_user_access_token
+from services.ebay_trading_card_grading import (
+    EBAY_CONDITION_GRADED,
+    graded_condition_descriptor_payloads,
+    is_valid_grade_value_id,
+    is_valid_grader_value_id,
+)
 from services.user_settings_service import ebay_listing_config_complete, effective_ebay_category_id
 
 logger = logging.getLogger(__name__)
@@ -321,15 +327,55 @@ async def publish_article_to_ebay(
     price_str = f"{price.quantize(Decimal('0.01'))}"
 
     category_id = effective_ebay_category_id(ms).strip()
+    if article.is_graded:
+        if category_id not in _TCG_LEAF_CATEGORY_IDS:
+            await _emit_ebay(
+                progress,
+                "error",
+                "Carte gradée : la catégorie eBay doit être une feuille « cartes à jouer / TCG » (183050, 183454 ou 261328).",
+                detail="ebay_graded_requires_tcg_leaf_category",
+            )
+            return {"ok": False, "detail": "ebay_graded_requires_tcg_leaf_category"}
+        if not is_valid_grader_value_id(article.graded_grader_value_id) or not is_valid_grade_value_id(
+            article.graded_grade_value_id
+        ):
+            await _emit_ebay(
+                progress,
+                "error",
+                "Carte gradée incomplète : société et note requis.",
+                detail="ebay_graded_incomplete",
+            )
+            return {"ok": False, "detail": "ebay_graded_incomplete"}
+
     core_aspects = _product_aspects_core(article, category_id=category_id, marketplace_id=marketplace_id)
     optional_fr_aspects = _product_aspects_optional_fr(
         article, category_id=category_id, marketplace_id=marketplace_id
     )
 
+    if article.is_graded and category_id in _TCG_LEAF_CATEGORY_IDS:
+        list_condition = EBAY_CONDITION_GRADED
+        list_desc = "Carte professionnellement gradée (slab)."
+        cond_descriptors: list[dict[str, Any]] = graded_condition_descriptor_payloads(
+            grader_value_id=str(article.graded_grader_value_id),
+            grade_value_id=str(article.graded_grade_value_id),
+            certification_text=article.graded_cert_number,
+        )
+    else:
+        list_condition = _ebay_condition_for_category(category_id, article.condition)
+        list_desc = (article.condition or "")[:1000]
+        cond_descriptors = []
+        if category_id in _TCG_LEAF_CATEGORY_IDS:
+            cond_descriptors = [
+                {
+                    "name": _CARD_CONDITION_DESCRIPTOR_NAME,
+                    "values": [_card_condition_descriptor_value_id(article.condition)],
+                }
+            ]
+
     inv_payload: dict[str, Any] = {
         "availability": {"shipToLocationAvailability": {"quantity": 1}},
-        "condition": _ebay_condition_for_category(category_id, article.condition),
-        "conditionDescription": html.escape((article.condition or "")[:1000]),
+        "condition": list_condition,
+        "conditionDescription": html.escape(list_desc),
         "product": {
             "title": title,
             "description": _description_html(article),
@@ -338,13 +384,8 @@ async def publish_article_to_ebay(
         },
     }
 
-    if category_id in _TCG_LEAF_CATEGORY_IDS:
-        inv_payload["conditionDescriptors"] = [
-            {
-                "name": _CARD_CONDITION_DESCRIPTOR_NAME,
-                "values": [_card_condition_descriptor_value_id(article.condition)],
-            }
-        ]
+    if cond_descriptors:
+        inv_payload["conditionDescriptors"] = cond_descriptors
 
     headers = {
         "Authorization": f"Bearer {token}",

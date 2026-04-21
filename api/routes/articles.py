@@ -27,6 +27,10 @@ from services.user_settings_service import ebay_listing_config_complete, get_or_
 from services.vinted_batch_session_service import VintedBatchSessionService as vinted_batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as vinted_progress_hub
 from services import supabase_storage_service
+from services.ebay_trading_card_grading import (
+    is_valid_grade_value_id,
+    is_valid_grader_value_id,
+)
 from services.vinted_background_service import VintedBackgroundService
 from services.vinted_batch_background_service import VintedBatchBackgroundService
 
@@ -64,6 +68,18 @@ def _parse_sold_at_iso(value: str | None) -> dt.datetime | None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid sold_at (expected ISO 8601 or YYYY-MM-DD).",
         ) from exc
+
+
+def _validate_graded_article_or_raise(article: Article) -> None:
+    if not article.is_graded:
+        return
+    if not is_valid_grader_value_id(article.graded_grader_value_id) or not is_valid_grade_value_id(
+        article.graded_grade_value_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Carte gradée : choisissez une société de grading et une note (identifiants eBay).",
+        )
 
 
 def _parse_optional_iso_dt(value: str | None) -> dt.datetime | None:
@@ -421,6 +437,10 @@ async def create_article(
     sold_at: str | None = Form(None),
     wardrobe_vinted_listed: str | None = Form(None),
     vinted_published_at: str | None = Form(None),
+    is_graded: str | None = Form(None),
+    graded_grader_value_id: str | None = Form(None),
+    graded_grade_value_id: str | None = Form(None),
+    graded_cert_number: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -442,6 +462,16 @@ async def create_article(
         elif _form_bool(wardrobe_vinted_listed):
             sale_src = "vinted"
 
+    graded_flag = _form_bool(is_graded)
+    grader_vid = (graded_grader_value_id or "").strip() or None
+    grade_vid = (graded_grade_value_id or "").strip() or None
+    cert_raw = (graded_cert_number or "").strip()
+    cert_norm = cert_raw[:30] if cert_raw else None
+    if not graded_flag:
+        grader_vid = None
+        grade_vid = None
+        cert_norm = None
+
     article = Article(
         user_id=user.id,
         title=title.strip(),
@@ -450,6 +480,10 @@ async def create_article(
         set_code=set_code.strip() if set_code else None,
         card_number=card_number.strip() if card_number else None,
         condition=condition.strip() or "Near Mint",
+        is_graded=graded_flag,
+        graded_grader_value_id=grader_vid,
+        graded_grade_value_id=grade_vid,
+        graded_cert_number=cert_norm,
         purchase_price=_parse_decimal_required(purchase_price),
         sell_price=sell_dec,
         sold_price=proceeds_dec if sold_flag else None,
@@ -457,6 +491,7 @@ async def create_article(
         is_sold=sold_flag,
         sold_at=sold_at_dt if sold_flag else None,
     )
+    _validate_graded_article_or_raise(article)
 
     if _form_bool(wardrobe_vinted_listed):
         article.published_on_vinted = True
@@ -580,17 +615,8 @@ def update_article(
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    article_service.update_article_fields(
-        article,
-        title=body.title,
-        description=body.description,
-        pokemon_name=body.pokemon_name,
-        set_code=body.set_code,
-        card_number=body.card_number,
-        condition=body.condition,
-        purchase_price=body.purchase_price,
-        sell_price=body.sell_price,
-    )
+    article_service.update_article_from_body(article, body)
+    _validate_graded_article_or_raise(article)
     db.commit()
     db.refresh(article)
     return article_service.article_to_dict(article)

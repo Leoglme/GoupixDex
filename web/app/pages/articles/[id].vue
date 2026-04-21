@@ -55,9 +55,11 @@ async function publishEbay() {
 async function onSubmitEdit(body: ArticleUpdateBody) {
   submitting.value = true
   try {
-    await updateArticle(id.value, body)
+    const updated = await updateArticle(id.value, body)
     toast.add({ title: 'Article mis à jour', color: 'success' })
-    await navigateTo('/articles')
+    const listed =
+      Boolean(updated.published_on_vinted ?? false) || Boolean(updated.published_on_ebay ?? false)
+    await navigateTo(listed ? '/articles' : '/articles/stock')
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -106,8 +108,8 @@ useSeoMeta({
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton to="/articles" color="neutral" variant="ghost">
-            Retour
+          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package">
+            Mon stock
           </UButton>
         </template>
       </UDashboardNavbar>

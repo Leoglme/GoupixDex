@@ -20,6 +20,8 @@ export interface ArticleListPrefs {
   filterSold: ArticleListFilterSold
   sortKey: ArticleListSortKey
   searchQuery: string
+  /** Page Mon stock : afficher aussi les articles déjà en vente (Vinted / eBay). */
+  stockIncludeListed?: boolean
 }
 
 const SORT_KEYS: ArticleListSortKey[] = [
@@ -51,18 +53,24 @@ export function loadArticleListPrefs(): Partial<ArticleListPrefs> | null {
     if (typeof p.searchQuery === 'string') {
       out.searchQuery = p.searchQuery
     }
+    if (typeof p.stockIncludeListed === 'boolean') {
+      out.stockIncludeListed = p.stockIncludeListed
+    }
     return Object.keys(out).length ? out : null
   } catch {
     return null
   }
 }
 
-export function saveArticleListPrefs(prefs: ArticleListPrefs) {
+export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>) {
   if (!import.meta.client) {
     return
   }
   try {
-    localStorage.setItem(ARTICLES_LIST_KEY, JSON.stringify(prefs))
+    const prevRaw = localStorage.getItem(ARTICLES_LIST_KEY)
+    const prev = prevRaw ? (JSON.parse(prevRaw) as Record<string, unknown>) : {}
+    const next = { ...prev, ...prefs } as Record<string, unknown>
+    localStorage.setItem(ARTICLES_LIST_KEY, JSON.stringify(next))
   } catch {
     /* quota / private mode */
   }

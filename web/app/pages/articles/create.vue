@@ -169,7 +169,7 @@ async function onSubmitCreate(fd: FormData) {
           description: apiErrorMessage(err),
           color: 'error'
         })
-        await navigateTo('/articles')
+        await navigateTo('/articles/stock')
         return
       }
       notifyEbayOutcome()
@@ -220,7 +220,7 @@ async function onSubmitCreate(fd: FormData) {
     } else if (!ebayNotified) {
       toast.add({ title: 'Article créé', color: 'success' })
     }
-    await navigateTo('/articles')
+    await navigateTo('/articles/stock')
   } catch (err) {
     toast.add({
       title: 'Création impossible',
@@ -242,8 +242,8 @@ async function onSubmitCreate(fd: FormData) {
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-list">
-            Retour à la liste
+          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package">
+            Mon stock
           </UButton>
         </template>
       </UDashboardNavbar>

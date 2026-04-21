@@ -11,6 +11,10 @@ class ArticleUpdate(BaseModel):
     set_code: str | None = None
     card_number: str | None = None
     condition: str | None = None
+    is_graded: bool | None = None
+    graded_grader_value_id: str | None = None
+    graded_grade_value_id: str | None = None
+    graded_cert_number: str | None = None
     purchase_price: Decimal | None = None
     sell_price: Decimal | None = None
 

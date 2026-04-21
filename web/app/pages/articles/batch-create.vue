@@ -301,10 +301,10 @@ async function submitAll() {
           description: apiErrorMessage(e),
           color: 'warning'
         })
-        await navigateTo('/articles')
+        await navigateTo('/articles/stock')
       }
     } else {
-      await navigateTo('/articles')
+      await navigateTo('/articles/stock')
     }
   } catch (e) {
     toast.add({
@@ -330,10 +330,10 @@ async function submitAll() {
             <UButton
               color="neutral"
               variant="ghost"
-              icon="i-lucide-list"
-              to="/articles"
+              icon="i-lucide-package"
+              to="/articles/stock"
             >
-              Retour à la liste
+              Mon stock
             </UButton>
             <UButton
               color="neutral"

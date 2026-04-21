@@ -2,15 +2,17 @@
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Articles en vente',
-  'Annonces déjà en ligne sur Vinted ou eBay : suivi, mise à jour et vente dans GoupixDex.'
+  'Mon stock',
+  'Inventaire GoupixDex : cartes pas encore en ligne sur Vinted et eBay, publication et création d’annonces.'
 )
 
 const { isDesktopApp } = useDesktopRuntime()
 
 const {
+  stockIncludeListed,
   displayedArticles,
   hasAnyArticles,
+  stockAllListed,
   pricingById,
   loading,
   pricingLoading,
@@ -37,25 +39,25 @@ const {
   onBulkPublishBoth,
   onPublishVinted,
   openSold
-} = useArticlesListPageCore('listed')
+} = useArticlesListPageCore('stock')
 </script>
 
 <template>
-  <UDashboardPanel id="articles">
+  <UDashboardPanel id="articles-stock">
     <template #header>
-      <UDashboardNavbar title="Articles">
+      <UDashboardNavbar title="Mon stock">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
           <div class="flex flex-wrap items-center gap-2">
             <UButton
-              to="/articles/stock"
+              to="/articles"
               color="neutral"
               variant="subtle"
-              icon="i-lucide-package"
+              icon="i-lucide-store"
             >
-              Mon stock
+              Articles en vente
             </UButton>
             <UButton
               to="/articles/batch-create"
@@ -76,21 +78,39 @@ const {
     <template #body>
       <div class="w-full px-4 sm:px-6 py-6 sm:py-8 space-y-4 sm:space-y-6">
         <UCard class="ring-1 ring-default/60 shadow-sm" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-3">
-              <USwitch v-model="fetchMarketData" />
-              <div class="space-y-0.5">
-                <p class="text-sm text-highlighted">
-                  Afficher les prix marché
-                </p>
-                <p class="text-xs text-muted">
-                  Récupération des prix Cardmarket / PokéWallet pour chaque carte (plus lent mais plus précis).
-                </p>
+          <div class="flex flex-col gap-6">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-center gap-3">
+                <USwitch v-model="fetchMarketData" />
+                <div class="space-y-0.5">
+                  <p class="text-sm text-highlighted">
+                    Afficher les prix marché
+                  </p>
+                  <p class="text-xs text-muted">
+                    Récupération des prix Cardmarket / PokéWallet (plus lent).
+                  </p>
+                </div>
               </div>
+              <p class="text-xs text-muted max-w-sm sm:text-right">
+                Désactivez pour une liste plus rapide.
+              </p>
             </div>
-            <p class="text-xs text-muted max-w-sm">
-              Désactivez cette option si vous voulez simplement mettre à jour vos fiches sans attendre les prix externes.
-            </p>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-default pt-4">
+              <div class="flex items-center gap-3">
+                <USwitch v-model="stockIncludeListed" />
+                <div class="space-y-0.5">
+                  <p class="text-sm text-highlighted">
+                    Inclure les articles en vente
+                  </p>
+                  <p class="text-xs text-muted">
+                    Affiche aussi les fiches déjà publiées sur Vinted ou eBay. Préférence enregistrée sur cet appareil.
+                  </p>
+                </div>
+              </div>
+              <p class="text-xs text-muted max-w-sm sm:text-right">
+                Désactivé : seules les cartes sans annonce active sur les deux canaux restent visibles ici.
+              </p>
+            </div>
           </div>
         </UCard>
 
@@ -104,8 +124,7 @@ const {
               Aucun article pour l'instant
             </p>
             <p class="text-sm text-muted leading-relaxed">
-              Si vous vendez déjà sur Vinted, vous pouvez importer vos annonces actives et vendues dans GoupixDex.
-              Une fenêtre Chrome s'ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
+              Créez une fiche ou importez votre garde-robe Vinted pour remplir votre stock.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-3">
@@ -118,34 +137,38 @@ const {
               Importer depuis Vinted
             </UButton>
             <UButton to="/articles/create" color="neutral" variant="subtle" icon="i-lucide-plus">
-              Créer un article manuellement
+              Créer un article
             </UButton>
           </div>
           <p v-if="!isDesktopApp" class="text-xs text-muted">
             L'import Vinted n'est disponible que dans
-            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>
-            (worker local sur ce poste).
+            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>.
           </p>
         </UCard>
 
         <UCard
-          v-else-if="!loading && hasAnyArticles && displayedArticles.length === 0"
+          v-else-if="!loading && stockAllListed"
           class="ring-1 ring-default/60 shadow-sm"
           :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
         >
           <p class="text-sm font-medium text-highlighted">
-            Aucune annonce en ligne sur Vinted ni eBay
+            Tout votre inventaire est déjà en ligne
           </p>
           <p class="text-sm text-muted leading-relaxed">
-            Les fiches pas encore publiées se trouvent dans
-            <NuxtLink to="/articles/stock" class="font-medium text-primary underline underline-offset-2">
-              Mon stock
-            </NuxtLink>.
-            Dès qu’une mise en ligne réussit, l’article apparaît ici.
+            Aucune fiche « hors ligne » sur Vinted et eBay en même temps. Consultez
+            <NuxtLink to="/articles" class="font-medium text-primary underline underline-offset-2">
+              Articles en vente
+            </NuxtLink>
+            ou activez « Inclure les articles en vente » pour tout voir ici.
           </p>
-          <UButton to="/articles/stock" icon="i-lucide-package" color="neutral" variant="subtle">
-            Ouvrir Mon stock
-          </UButton>
+          <div class="flex flex-wrap gap-2">
+            <UButton to="/articles" icon="i-lucide-store">
+              Articles en vente
+            </UButton>
+            <UButton color="neutral" variant="subtle" @click="stockIncludeListed = true">
+              Inclure les articles en vente
+            </UButton>
+          </div>
         </UCard>
 
         <UCard v-else class="ring-1 ring-default/60 shadow-sm" :ui="{ body: 'p-0 sm:p-0' }">
