@@ -144,21 +144,21 @@ watch(
     pokemonName.value = a.pokemon_name ?? ''
     setCode.value = a.set_code ?? ''
     cardNumber.value = a.card_number ?? ''
-    condition.value =
-      a.condition && conditionOptions.some((o) => o.value === a.condition)
+    condition.value
+      = a.condition && conditionOptions.some(o => o.value === a.condition)
         ? a.condition
         : 'Near Mint'
     purchasePrice.value = String(a.purchase_price)
     sellPrice.value = a.sell_price != null ? String(a.sell_price) : ''
     isGraded.value = Boolean(a.is_graded)
-    gradedGraderValueId.value =
-      a.graded_grader_value_id
-      && EBAY_PROFESSIONAL_GRADER_OPTIONS.some(o => o.value === a.graded_grader_value_id)
+    gradedGraderValueId.value
+      = a.graded_grader_value_id
+        && EBAY_PROFESSIONAL_GRADER_OPTIONS.some(o => o.value === a.graded_grader_value_id)
         ? a.graded_grader_value_id
         : ''
-    gradedGradeValueId.value =
-      a.graded_grade_value_id
-      && EBAY_GRADE_OPTIONS.some(o => o.value === a.graded_grade_value_id)
+    gradedGradeValueId.value
+      = a.graded_grade_value_id
+        && EBAY_GRADE_OPTIONS.some(o => o.value === a.graded_grade_value_id)
         ? a.graded_grade_value_id
         : ''
     gradedCertNumber.value = a.graded_cert_number ?? ''
@@ -227,6 +227,53 @@ function applyScanPrefill(scan: {
  * of the fields (title, price, condition, …) and optionally a remote image URL
  * that we try to fetch as a File so it is bundled with the article creation.
  */
+/**
+ * Prefill from TCGdex catalog + server ``/catalog/card-preview`` (PokéWallet pricing).
+ */
+async function applyCatalogPrefill(p: {
+  display_pokemon_name?: string
+  listing_preview: { title: string, description: string, suggested_price: number | null }
+  pokewallet: { set_code: string, card_number: string }
+  tcgdex: { names: { en: string, fr: string, ja: string | null } }
+  image_url_high?: string | null
+}) {
+  assignTitleFromExternal(p.listing_preview.title)
+  description.value = p.listing_preview.description
+  pokemonName.value = p.display_pokemon_name?.trim()
+    || p.tcgdex.names.ja?.trim()
+    || p.tcgdex.names.en
+    || p.tcgdex.names.fr
+  setCode.value = p.pokewallet.set_code
+  cardNumber.value = p.pokewallet.card_number
+  if (p.listing_preview.suggested_price != null) {
+    purchasePrice.value = String(p.listing_preview.suggested_price)
+  }
+  isGraded.value = false
+  gradedGraderValueId.value = ''
+  gradedGradeValueId.value = ''
+  gradedCertNumber.value = ''
+  importIsSold.value = false
+  importSoldAt.value = null
+  wardrobeVintedListed.value = false
+  wardrobeVintedPublishedAtIso.value = null
+  wardrobeImportSoldPrice.value = null
+  const img = p.image_url_high
+  if (img) {
+    try {
+      const blob = await blobFromVintedPhotoUrl(img)
+      if (blob) {
+        const ext = blob.type.includes('png') ? 'png' : 'webp'
+        const file = new File([blob], `tcgdex-${Date.now()}.${ext}`, {
+          type: blob.type || 'image/webp'
+        })
+        addImageFiles([file])
+      }
+    } catch {
+      /* optional image */
+    }
+  }
+}
+
 async function applyEbayPrefill(p: {
   title?: string
   description?: string
@@ -327,7 +374,8 @@ defineExpose({
   addImageFiles,
   buildCreateFormData,
   applyWardrobeSlot,
-  applyEbayPrefill
+  applyEbayPrefill,
+  applyCatalogPrefill
 })
 
 function buildCreateFormData(): FormData {
