@@ -272,6 +272,15 @@ async function onSubmitCreate(fd: FormData) {
             </div>
             <div class="flex flex-row lg:flex-col gap-2 lg:items-end shrink-0">
               <UButton
+                to="/articles/catalog"
+                size="sm"
+                color="neutral"
+                variant="soft"
+                icon="i-lucide-library"
+              >
+                Par catalogue
+              </UButton>
+              <UButton
                 to="/articles/batch-create"
                 size="sm"
                 color="neutral"

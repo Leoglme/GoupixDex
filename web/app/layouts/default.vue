@@ -12,8 +12,8 @@ if (import.meta.client && !me.value) {
 }
 
 /**
- * Journal des publications : Vinted + eBay (SSE). Télécharger l'app : web uniquement.
- * Le lien Utilisateurs n'apparaît que pour l'admin.
+ * Journal des publications : Vinted + eBay (SSE). Catalogue : extensions / cartes (création).
+ * Télécharger l'app : web uniquement. Le lien Utilisateurs n'apparaît que pour l'admin.
  */
 const links = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
@@ -27,6 +27,12 @@ const links = computed<NavigationMenuItem[][]>(() => {
       label: 'Mon stock',
       icon: 'i-lucide-package',
       to: '/articles/stock',
+      onSelect: () => { open.value = false }
+    },
+    {
+      label: 'Catalogue',
+      icon: 'i-lucide-library',
+      to: '/articles/catalog',
       onSelect: () => { open.value = false }
     },
     {
@@ -48,7 +54,7 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: () => { open.value = false }
     },
     {
-      label: "Étiquettes d'envoi",
+      label: 'Étiquettes d\'envoi',
       icon: 'i-lucide-mailbox',
       to: '/shipping-labels',
       onSelect: () => { open.value = false }
@@ -66,7 +72,7 @@ const links = computed<NavigationMenuItem[][]>(() => {
 
   if (!isDesktopApp.value) {
     items.push({
-      label: "Télécharger l'app",
+      label: 'Télécharger l\'app',
       icon: 'i-lucide-download',
       to: '/downloads',
       onSelect: () => { open.value = false }

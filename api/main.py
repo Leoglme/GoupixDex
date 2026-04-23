@@ -20,6 +20,7 @@ from config import get_settings
 from routes import access_requests as access_requests_routes
 from routes import articles as articles_routes
 from routes import auth as auth_routes
+from routes import catalog_route
 from routes import ebay_market_route
 from routes import ebay_route
 from routes import pricing_route
@@ -104,6 +105,7 @@ app.include_router(settings_route.router)
 app.include_router(ebay_route.router)
 app.include_router(ebay_market_route.router)
 app.include_router(pricing_route.router)
+app.include_router(catalog_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
 app.include_router(shipping_route.router)
