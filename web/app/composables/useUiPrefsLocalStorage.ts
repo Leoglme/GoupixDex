@@ -20,7 +20,7 @@ export interface ArticleListPrefs {
   filterSold: ArticleListFilterSold
   sortKey: ArticleListSortKey
   searchQuery: string
-  /** Page Mon stock : afficher aussi les articles déjà en vente (Vinted / eBay). */
+  /** Page Mon stock : afficher aussi les articles déjà en vente (défaut faux si absent). */
   stockIncludeListed?: boolean
 }
 

@@ -38,8 +38,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const pricingLoading = ref(false)
   const fetchMarketData = ref(false)
 
-  /** Mon stock : inclure les annonces déjà en ligne (persisté, coché par défaut). */
-  const stockIncludeListed = variant === 'stock' ? ref(true) : ref(false)
+  /** Mon stock : inclure les annonces déjà en ligne (persisté ; défaut : non). */
+  const stockIncludeListed = ref(false)
 
   const soldOpen = ref(false)
   const soldArticle = ref<Article | null>(null)

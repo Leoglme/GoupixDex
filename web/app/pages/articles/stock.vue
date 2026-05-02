@@ -103,12 +103,13 @@ const {
                     Inclure les articles en vente
                   </p>
                   <p class="text-xs text-muted">
-                    Affiche aussi les fiches déjà publiées sur Vinted ou eBay. Préférence enregistrée sur cet appareil.
+                    Par défaut désactivé : la liste ne montre que l’inventaire pas encore en ligne sur Vinted ni eBay.
+                    Activez pour afficher aussi les fiches déjà publiées. Préférence enregistrée sur cet appareil.
                   </p>
                 </div>
               </div>
               <p class="text-xs text-muted max-w-sm sm:text-right">
-                Désactivé : seules les cartes sans annonce active sur les deux canaux restent visibles ici.
+                Avec l’option activée, votre stock inclut les mêmes articles que la page « Articles en vente ».
               </p>
             </div>
           </div>

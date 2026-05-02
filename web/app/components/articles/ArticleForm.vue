@@ -457,19 +457,20 @@ function submit() {
 
 <template>
   <div class="space-y-6">
-    <div class="grid gap-4 sm:grid-cols-2">
-      <UFormField
-        label="Titre"
-        required
-        :description="titleFieldDescription"
-      >
-        <UInput
-          v-model="title"
-          class="w-full"
-          :maxlength="mode === 'create' ? VINTED_TITLE_MAX_CHARS : undefined"
-        />
-      </UFormField>
-      <UFormField v-if="!isGraded" label="État">
+    <div class="grid gap-4 sm:grid-cols-2 sm:items-start">
+      <div class="min-w-0 space-y-1.5">
+        <UFormField label="Titre" required>
+          <UInput
+            v-model="title"
+            class="w-full"
+            :maxlength="mode === 'create' ? VINTED_TITLE_MAX_CHARS : undefined"
+          />
+        </UFormField>
+        <p class="text-xs text-muted leading-snug">
+          {{ titleFieldDescription }}
+        </p>
+      </div>
+      <UFormField v-if="!isGraded" label="État" class="min-w-0">
         <USelect
           v-model="condition"
           :items="conditionOptions"
