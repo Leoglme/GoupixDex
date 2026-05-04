@@ -427,9 +427,29 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "goupixdex-vinted-local"}
 
 
+def _tcp_port_has_listener(host: str, port: int) -> bool:
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(0.4)
+        return sock.connect_ex((host, port)) == 0
+    finally:
+        sock.close()
+
+
 if __name__ == "__main__":
     from core.nodriver_uvicorn_loop import UVICORN_WINDOWS_NODRIVER_LOOP
 
     port = int(os.environ.get("GOUPIX_VINTED_LOCAL_PORT", "18766"))
+    host = "127.0.0.1"
+    if _tcp_port_has_listener(host, port):
+        print(
+            f"\n[goupix-vinted-worker] Le port {port} est déjà utilisé.\n"
+            "  Arrêtez l’autre instance (python desktop_vinted_server.py ou ancien processus).\n"
+            f"  PowerShell : Get-NetTCPConnection -LocalPort {port} | Select-Object OwningProcess\n",
+            flush=True,
+        )
+        raise SystemExit(1)
     loop = UVICORN_WINDOWS_NODRIVER_LOOP if sys.platform == "win32" else "auto"
-    uvicorn.run(app, host="127.0.0.1", port=port, loop=loop, log_level="info")
+    uvicorn.run(app, host=host, port=port, loop=loop, log_level="info")

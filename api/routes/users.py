@@ -91,7 +91,7 @@ def me(current: Annotated[User, Depends(get_current_user)]) -> UserResponse:
 
 @router.get("/me/vinted-decrypted", response_model=VintedDecryptedResponse)
 def me_vinted_decrypted(current: Annotated[User, Depends(get_current_user)]) -> VintedDecryptedResponse:
-    """Expose les identifiants Vinted en clair pour le worker Python local (app desktop)."""
+    """Expose plaintext Vinted credentials for the local Python desktop worker."""
     plain = decrypt_vinted_credential(current.vinted_password)
     return VintedDecryptedResponse(
         vinted_email=current.vinted_email,

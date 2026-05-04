@@ -1,0 +1,8 @@
+.nuxt
+.output
+node_modules
+dist
+public
+src-tauri
+coverage
+*.min.js

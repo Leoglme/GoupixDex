@@ -1,108 +1,3 @@
-<script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
-
-useDashboard()
-
-const open = ref(false)
-const { isDesktopApp } = useDesktopRuntime()
-const { me, refreshMe } = useAuth()
-
-if (import.meta.client && !me.value) {
-  refreshMe()
-}
-
-/**
- * Journal des publications : Vinted + eBay (SSE). Télécharger l'app : web uniquement.
- * Le lien Utilisateurs n'apparaît que pour l'admin.
- */
-const links = computed<NavigationMenuItem[][]>(() => {
-  const items: NavigationMenuItem[] = [
-    {
-      label: 'Tableau de bord',
-      icon: 'i-lucide-layout-dashboard',
-      to: '/dashboard',
-      onSelect: () => { open.value = false }
-    },
-    {
-      label: 'Mon stock',
-      icon: 'i-lucide-package',
-      to: '/articles/stock',
-      onSelect: () => { open.value = false }
-    },
-    {
-      label: 'Articles',
-      icon: 'i-lucide-store',
-      to: '/articles',
-      onSelect: () => { open.value = false }
-    },
-    {
-      label: 'Journal des publications',
-      icon: 'i-lucide-scroll-text',
-      to: '/articles/listing-logs',
-      onSelect: () => { open.value = false }
-    },
-    {
-      label: 'Prix du marché',
-      icon: 'i-lucide-trending-up',
-      to: '/market',
-      onSelect: () => { open.value = false }
-    },
-    {
-      label: "Étiquettes d'envoi",
-      icon: 'i-lucide-mailbox',
-      to: '/shipping-labels',
-      onSelect: () => { open.value = false }
-    }
-  ]
-
-  if (me.value?.is_admin) {
-    items.push({
-      label: 'Utilisateurs',
-      icon: 'i-lucide-users',
-      to: '/users',
-      onSelect: () => { open.value = false }
-    })
-  }
-
-  if (!isDesktopApp.value) {
-    items.push({
-      label: "Télécharger l'app",
-      icon: 'i-lucide-download',
-      to: '/downloads',
-      onSelect: () => { open.value = false }
-    })
-  }
-
-  items.push({
-    label: 'Paramètres',
-    icon: 'i-lucide-settings',
-    to: '/settings',
-    onSelect: () => { open.value = false }
-  })
-
-  return [items]
-})
-
-const groups = computed(() => [{
-  id: 'links',
-  label: 'Navigation',
-  items: links.value.flat().map(item => ({
-    label: item.label,
-    icon: item.icon,
-    to: item.to
-  }))
-}])
-
-function navMenuUi(collapsed: boolean) {
-  return {
-    root: 'gap-2',
-    list: 'flex flex-col gap-y-2.5',
-    item: 'shrink-0',
-    link: collapsed ? 'justify-center' : ''
-  }
-}
-</script>
-
 <template>
   <UDashboardGroup unit="rem">
     <UDashboardSidebar
@@ -114,11 +9,11 @@ function navMenuUi(collapsed: boolean) {
       :ui="{
         header: 'shrink-0',
         body: 'min-h-0',
-        footer: 'lg:border-t lg:border-default shrink-0'
+        footer: 'lg:border-t lg:border-default shrink-0',
       }"
     >
       <template #header="{ collapsed }">
-        <BrandHeader :collapsed="collapsed" />
+        <GoupixDexBrandHeader :collapsed="collapsed" />
       </template>
 
       <template #default="{ collapsed }">
@@ -134,7 +29,7 @@ function navMenuUi(collapsed: boolean) {
       </template>
 
       <template #footer="{ collapsed }">
-        <UserMenu :collapsed="collapsed" />
+        <GoupixDexUserMenu :collapsed="collapsed" />
       </template>
     </UDashboardSidebar>
 
@@ -142,6 +37,173 @@ function navMenuUi(collapsed: boolean) {
 
     <slot />
 
-    <BrowserMissingModal v-if="isDesktopApp" />
+    <GoupixDexBrowserMissingModal v-if="isDesktopApp" />
+
+    <div
+      v-if="showDevWorkerControls"
+      class="border-default bg-elevated/95 fixed right-3 bottom-3 z-[100] flex items-center gap-2 rounded-lg border px-2 py-1.5 shadow-lg"
+    >
+      <span class="text-muted hidden text-xs sm:inline">Dev · workers</span>
+      <UButton size="xs" color="neutral" variant="soft" :loading="workersRestarting" @click="onRestartWorkers">
+        Redémarrer workers
+      </UButton>
+    </div>
   </UDashboardGroup>
 </template>
+
+<script setup lang="ts">
+import type { NavigationMenuItem } from '@nuxt/ui'
+import type { ComputedRef, Ref } from 'vue'
+
+useDashboard()
+
+const open: Ref<boolean> = ref(false)
+const { isDesktopApp, restartLocalWorkers } = useDesktopRuntime()
+const toast = useToast()
+const workersRestarting: Ref<boolean> = ref(false)
+
+const showDevWorkerControls = computed(() => import.meta.dev && Boolean(isDesktopApp.value))
+
+async function onRestartWorkers(): Promise<void> {
+  workersRestarting.value = true
+  try {
+    await restartLocalWorkers()
+    toast.add({ title: 'Workers locaux redémarrés', color: 'success' })
+  } catch (e: unknown) {
+    toast.add({
+      title: 'Redémarrage workers',
+      description: e instanceof Error ? e.message : String(e),
+      color: 'error',
+    })
+  } finally {
+    workersRestarting.value = false
+  }
+}
+
+const { me, refreshMe } = useAuth()
+
+if (import.meta.client && !me.value) {
+  refreshMe()
+}
+
+const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
+  const items: NavigationMenuItem[] = [
+    {
+      label: 'Tableau de bord',
+      icon: 'i-lucide-layout-dashboard',
+      to: '/dashboard',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Mon stock',
+      icon: 'i-lucide-package',
+      to: '/articles/stock',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Articles',
+      icon: 'i-lucide-store',
+      to: '/articles',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Journal des publications',
+      icon: 'i-lucide-scroll-text',
+      to: '/articles/listing-logs',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Prix du marché',
+      icon: 'i-lucide-trending-up',
+      to: '/market',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Invitations Amazon',
+      icon: 'i-simple-icons-amazon',
+      to: '/amazon-invites',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: "Étiquettes d'envoi",
+      icon: 'i-lucide-mailbox',
+      to: '/shipping-labels',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+  ]
+
+  if (me.value?.is_admin) {
+    items.push({
+      label: 'Utilisateurs',
+      icon: 'i-lucide-users',
+      to: '/users',
+      onSelect: () => {
+        open.value = false
+      },
+    })
+  }
+
+  if (!isDesktopApp.value) {
+    items.push({
+      label: "Télécharger l'app",
+      icon: 'i-lucide-download',
+      to: '/downloads',
+      onSelect: () => {
+        open.value = false
+      },
+    })
+  }
+
+  items.push({
+    label: 'Paramètres',
+    icon: 'i-lucide-settings',
+    to: '/settings',
+    onSelect: () => {
+      open.value = false
+    },
+  })
+
+  return [items]
+})
+
+type SidebarSearchGroup = {
+  id: string
+  label: string
+  items: Array<Pick<NavigationMenuItem, 'label' | 'icon' | 'to'>>
+}
+
+const groups: ComputedRef<SidebarSearchGroup[]> = computed(() => [
+  {
+    id: 'links',
+    label: 'Navigation',
+    items: links.value.flat().map((item) => ({
+      label: item.label,
+      icon: item.icon,
+      to: item.to,
+    })),
+  },
+])
+
+function navMenuUi(collapsed: boolean): { root: string; list: string; item: string; link: string } {
+  return {
+    root: 'gap-2',
+    list: 'flex flex-col gap-y-2.5',
+    item: 'shrink-0',
+    link: collapsed ? 'justify-center' : '',
+  }
+}
+</script>

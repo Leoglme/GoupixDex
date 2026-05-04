@@ -12,18 +12,21 @@ export default defineNuxtPlugin(() => {
 
   const api = axios.create({
     baseURL: config.public.apiBase as string,
-    headers: { Accept: 'application/json' }
+    headers: { Accept: 'application/json' },
   })
 
   const vintedLocal = axios.create({
     baseURL: (config.public.vintedLocalBase as string).replace(/\/$/, ''),
-    headers: { Accept: 'application/json' }
+    headers: { Accept: 'application/json' },
+  })
+
+  const amazonLocal = axios.create({
+    baseURL: (config.public.amazonLocalBase as string).replace(/\/$/, ''),
+    headers: { Accept: 'application/json' },
   })
 
   const attachAuth = (req: import('axios').InternalAxiosRequestConfig) => {
-    const t
-      = token.value
-        ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
+    const t = token.value ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
     if (t) {
       if (!req.headers) {
         req.headers = new axios.AxiosHeaders()
@@ -47,8 +50,17 @@ export default defineNuxtPlugin(() => {
     return req
   })
 
+  amazonLocal.interceptors.request.use((req) => {
+    attachAuth(req)
+    const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
+    if (apiBase) {
+      req.headers['X-Goupix-Remote-Api'] = apiBase
+    }
+    return req
+  })
+
   api.interceptors.response.use(
-    r => r,
+    (r) => r,
     (err) => {
       if (import.meta.client && err?.response?.status === 401) {
         localStorage.removeItem(TOKEN_KEY)
@@ -59,11 +71,11 @@ export default defineNuxtPlugin(() => {
         }
       }
       return Promise.reject(err)
-    }
+    },
   )
 
   vintedLocal.interceptors.response.use(
-    r => r,
+    (r) => r,
     (err) => {
       if (import.meta.client && err?.response?.status === 401) {
         localStorage.removeItem(TOKEN_KEY)
@@ -74,13 +86,29 @@ export default defineNuxtPlugin(() => {
         }
       }
       return Promise.reject(err)
-    }
+    },
+  )
+
+  amazonLocal.interceptors.response.use(
+    (r) => r,
+    (err) => {
+      if (import.meta.client && err?.response?.status === 401) {
+        localStorage.removeItem(TOKEN_KEY)
+        token.value = null
+        const path = window.location.pathname
+        if (path !== '/login' && !path.startsWith('/login')) {
+          navigateTo('/login')
+        }
+      }
+      return Promise.reject(err)
+    },
   )
 
   return {
     provide: {
       api,
-      vintedLocal
-    }
+      vintedLocal,
+      amazonLocal,
+    },
   }
 })

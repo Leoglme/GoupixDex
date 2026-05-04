@@ -1,5 +1,5 @@
-@import "tailwindcss" theme(static);
-@import "@nuxt/ui";
+@import 'tailwindcss' theme(static);
+@import '@nuxt/ui';
 
 @theme static {
   --font-sans: 'Public Sans', sans-serif;
@@ -22,7 +22,7 @@
   --color-secondary-600: #d98716;
 }
 
-/* Curseur main sur les actions cliquables (complète UButton via app.config) */
+/* Pointer cursor on clickable controls (complements UButton via app.config) */
 @layer base {
   button:enabled:not([aria-disabled='true']) {
     cursor: pointer;
@@ -32,10 +32,172 @@
     cursor: pointer;
   }
 
-  /* Masque l'œil natif d'Edge / WebView2 (Tauri Windows) sur les <input type="password">,
-     pour ne garder que notre toggle custom dans PasswordInput.vue. */
+  /* Hide Edge / WebView2 native password reveal on `<input type="password">` (Tauri Windows),
+     so only the custom toggle from PasswordInput.vue remains visible. */
   input[type='password']::-ms-reveal,
   input[type='password']::-ms-clear {
     display: none;
+  }
+}
+
+/* Marketing animations (auth flow) + Unovis chart theme variables — kept out of .vue files */
+@layer components {
+  @keyframes goupix-flow-scan {
+    0% {
+      top: 0.25rem;
+      opacity: 0.85;
+    }
+    50% {
+      top: calc(100% - 0.35rem);
+      opacity: 1;
+    }
+    100% {
+      top: 0.25rem;
+      opacity: 0.85;
+    }
+  }
+
+  .goupix-flow-scan-line {
+    animation: goupix-flow-scan 1.6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .goupix-flow-scan-line {
+      animation: none;
+      top: 50%;
+    }
+  }
+
+  @keyframes goupix-flow-bar {
+    0%,
+    100% {
+      opacity: 0.75;
+      transform: scaleY(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scaleY(1.06);
+    }
+  }
+
+  .goupix-flow-bar-pulse {
+    transform-origin: bottom;
+    animation: goupix-flow-bar 1.2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .goupix-flow-bar-pulse {
+      animation: none;
+    }
+  }
+
+  @keyframes goupix-flow-sync-pulse {
+    0% {
+      left: -35%;
+      opacity: 0.85;
+    }
+    50% {
+      left: 100%;
+      opacity: 1;
+    }
+    100% {
+      left: -35%;
+      opacity: 0.85;
+    }
+  }
+
+  .goupix-flow-sync-pulse {
+    animation: goupix-flow-sync-pulse 2.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .goupix-flow-sync-pulse {
+      animation: none;
+      left: 32%;
+      opacity: 1;
+    }
+  }
+
+  @keyframes goupix-flow-sale-card {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-0.75deg);
+    }
+    50% {
+      transform: translateY(-6px) rotate(0.75deg);
+    }
+  }
+
+  @keyframes goupix-flow-sale-overlay-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes goupix-flow-sale-check {
+    0%,
+    100% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 rgb(34 197 94 / 0.35);
+    }
+    50% {
+      transform: scale(1.06);
+      box-shadow: 0 0 0 10px rgb(34 197 94 / 0);
+    }
+  }
+
+  @keyframes goupix-flow-sale-badge {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-2px);
+    }
+  }
+
+  .goupix-flow-sale-card--motion {
+    animation: goupix-flow-sale-card 2.4s ease-in-out infinite;
+  }
+
+  .goupix-flow-sale-overlay--motion {
+    animation: goupix-flow-sale-overlay-in 0.55s ease-out both;
+  }
+
+  .goupix-flow-sale-check--motion {
+    animation: goupix-flow-sale-check 1.8s ease-in-out infinite;
+    animation-delay: 0.35s;
+  }
+
+  .goupix-flow-sale-badge--motion {
+    animation: goupix-flow-sale-badge 2s ease-in-out infinite;
+    animation-delay: 0.2s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .goupix-flow-sale-card--motion,
+    .goupix-flow-sale-overlay--motion,
+    .goupix-flow-sale-check--motion,
+    .goupix-flow-sale-badge--motion {
+      animation: none;
+    }
+
+    .goupix-flow-sale-overlay--motion {
+      opacity: 1;
+    }
+  }
+
+  .unovis-xy-container {
+    --vis-crosshair-line-stroke-color: var(--ui-primary);
+    --vis-crosshair-circle-stroke-color: var(--ui-bg);
+    --vis-axis-grid-color: var(--ui-border);
+    --vis-axis-tick-color: var(--ui-border);
+    --vis-axis-tick-label-color: var(--ui-text-dimmed);
+    --vis-tooltip-background-color: var(--ui-bg);
+    --vis-tooltip-border-color: var(--ui-border);
+    --vis-tooltip-text-color: var(--ui-text-highlighted);
   }
 }

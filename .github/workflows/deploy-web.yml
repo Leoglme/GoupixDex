@@ -1,5 +1,5 @@
-# Déploie le frontend Nuxt 4 (dossier web/) sur le VPS — Nitro node-server + PM2.
-# Secrets requis : voir README déploiement ou message de configuration du dépôt.
+# Deploy Nuxt 4 frontend (web/) to the VPS — Nitro node-server + PM2.
+# Required secrets: see deploy README or repo configuration message.
 
 name: Deploy web (Nuxt)
 

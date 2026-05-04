@@ -55,7 +55,7 @@ class AdminUserResponse(BaseModel):
 
 class VintedDecryptedResponse(BaseModel):
     """
-    Mot de passe Vinted en clair — réservé au worker desktop local (HTTPS + JWT).
+    Plaintext Vinted password — for the local desktop worker only (HTTPS + JWT).
     """
 
     vinted_email: str | None

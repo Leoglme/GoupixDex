@@ -66,9 +66,9 @@ _CARD_CONDITION_DESCRIPTOR_NAME = "40001"
 # value IDs used by the eBay.fr listing editor for the "Card Condition"
 # descriptor (name=40001) on TCG leaf categories:
 #   400010 → Near Mint or Better (Quasi neuf ou mieux)
-#   400015 → Lightly Played / Excellent (légers défauts)
-#   400016 → Moderately Played / Very Good (état moyen)
-#   400017 → Heavily Played / Poor (très abîmée)
+#   400015 → Lightly Played / Excellent (minor flaws)
+#   400016 → Moderately Played / Very Good (average wear)
+#   400017 → Heavily Played / Poor (heavily worn)
 _APP_TO_CARD_CONDITION_VALUE_ID: dict[str, str] = {
     "Mint": "400010",
     "Near Mint": "400010",

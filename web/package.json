@@ -9,10 +9,19 @@
     "generate": "nuxt generate",
     "desktop:generate": "cross-env NUXT_DESKTOP_BUILD=1 nuxt generate",
     "vinted-worker:stub": "node scripts/ensure-vinted-worker-stub.mjs",
-    "tauri:dev": "npm run vinted-worker:stub && cross-env NUXT_PUBLIC_VINTED_LOCAL_BASE=http://127.0.0.1:18767 tauri dev",
+    "amazon-worker:stub": "node scripts/ensure-amazon-worker-stub.mjs",
+    "amazon-worker:sync-dist": "node scripts/sync-amazon-worker-from-dist.mjs",
+    "desktop-workers:stubs": "npm run vinted-worker:stub && npm run amazon-worker:stub",
+    "tauri:dev": "npm run desktop-workers:stubs && cross-env NUXT_PUBLIC_VINTED_LOCAL_BASE=http://127.0.0.1:18767 tauri dev",
     "tauri:build": "tauri build",
     "postinstall": "nuxt prepare",
-    "lint": "eslint .",
+    "lint:prettier": "prettier --check .",
+    "lint:prettier:fix": "prettier --write .",
+    "lint:eslint": "eslint .",
+    "lint:eslint:fix": "eslint . --fix",
+    "lint:ts": "vue-tsc --noEmit",
+    "lint": "npm run lint:prettier && npm run lint:eslint && npm run lint:ts",
+    "lint:fix": "npm run lint:prettier:fix && npm run lint:eslint:fix",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
@@ -42,13 +51,25 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.2",
+    "@commitlint/config-conventional": "^20.5.0",
     "@nuxt/eslint": "^1.15.2",
     "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^25.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
     "cross-env": "^10.1.0",
-    "eslint": "^10.2.0",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsdoc": "^62.9.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "eslint-plugin-vue": "^10.9.0",
+    "prettier": "^3.8.3",
+    "prettier-plugin-tailwindcss": "^0.7.3",
     "typescript": "^6.0.2",
-    "vue-tsc": "^3.2.6"
+    "vue-eslint-parser": "^10.4.0",
+    "vue-tsc": "^3.2.7"
   },
   "packageManager": "pnpm@10.33.0"
 }

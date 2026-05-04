@@ -8,25 +8,40 @@ export interface PricingLookup {
   error: string | null
 }
 
+/**
+ * Card pricing lookups (`GET /pricing/lookup`) with optional batched enrichment.
+ *
+ * @returns `lookup` for one article key and `lookupMany` with concurrency + in-memory cache.
+ */
 export function usePricing() {
   const { $api } = useNuxtApp()
 
-  async function lookup(
-    setCode: string,
-    cardNumber: string,
-    pokemonName?: string | null
-  ) {
+  /**
+   * Fetch pricing stats for a single card identity.
+   *
+   * @param setCode - Pokémon TCG set code.
+   * @param cardNumber - Collector number within the set.
+   * @param pokemonName - Optional name hint for disambiguation.
+   * @returns {Promise<PricingLookup>} Normalized pricing payload from the API.
+   */
+  async function lookup(setCode: string, cardNumber: string, pokemonName?: string | null) {
     const { data } = await $api.get<PricingLookup>('/pricing/lookup', {
       params: {
         set_code: setCode,
         card_number: cardNumber,
-        pokemon_name: pokemonName || undefined
-      }
+        pokemon_name: pokemonName || undefined,
+      },
     })
     return data
   }
 
-  /** Enrichit plusieurs articles avec la même clé (cache mémoire). */
+  /**
+   * Enrich many articles in parallel (bounded concurrency), caching by `(set|card|name)` key.
+   *
+   * @param articles - Rows with `id`, `set_code`, `card_number`, `pokemon_name`.
+   * @param concurrency - Max parallel `lookup` calls (default `4`).
+   * @returns {Promise<Map<number, PricingLookup>>} Article id → pricing row (errors filled with a stub row).
+   */
   async function lookupMany(
     articles: Array<{
       id: number
@@ -34,14 +49,20 @@ export function usePricing() {
       card_number: string | null
       pokemon_name: string | null
     }>,
-    concurrency = 4
+    concurrency = 4,
   ): Promise<Map<number, PricingLookup>> {
     const out = new Map<number, PricingLookup>()
     const keyCache = new Map<string, PricingLookup>()
 
-    const tasks = articles.filter(a => a.set_code && a.card_number)
+    const tasks = articles.filter((a) => a.set_code && a.card_number)
 
-    async function runOne(a: (typeof tasks)[0]) {
+    /**
+     * Resolve pricing for one article and populate `out` / `keyCache`.
+     *
+     * @param a - Article row with non-null set + card number.
+     * @returns {Promise<void>} Nothing.
+     */
+    async function runOne(a: (typeof tasks)[0]): Promise<void> {
       const k = `${a.set_code}|${a.card_number}|${a.pokemon_name || ''}`
       if (keyCache.has(k)) {
         out.set(a.id, keyCache.get(k)!)
@@ -59,13 +80,18 @@ export function usePricing() {
           suggested_price_eur: null,
           margin_percent_used: 0,
           set_name: null,
-          error: 'Erreur réseau'
+          error: 'Erreur réseau',
         })
       }
     }
 
     const queue = [...tasks]
-    async function worker() {
+    /**
+     * Worker draining the shared queue until empty.
+     *
+     * @returns {Promise<void>} Nothing.
+     */
+    async function worker(): Promise<void> {
       while (queue.length) {
         const a = queue.shift()
         if (a) {

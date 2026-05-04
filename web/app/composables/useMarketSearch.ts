@@ -1,3 +1,4 @@
+import type { Ref } from 'vue'
 import type { AxiosInstance } from 'axios'
 
 export type GradedFilter = 'raw' | 'psa' | 'cgc' | 'bgs' | 'all'
@@ -69,18 +70,23 @@ export interface MarketSearchInput {
 }
 
 /**
- * eBay France market price lookup (Browse API, active listings).
+ * eBay France market price lookup (`GET /ebay/market/search`) via Browse API — OAuth is server-side.
  *
- * Authentication is handled server-side via OAuth Client Credentials: the user
- * doesn't need to connect their eBay account to use the search.
+ * @returns Reactive `loading` / `error` / `result`, plus `search` and `reset`.
  */
 export function useMarketSearch() {
   const { $api } = useNuxtApp() as unknown as { $api: AxiosInstance }
 
-  const loading = ref(false)
-  const error = ref<string | null>(null)
-  const result = ref<MarketSearchResponse | null>(null)
+  const loading: Ref<boolean> = ref(false)
+  const error: Ref<string | null> = ref(null)
+  const result: Ref<MarketSearchResponse | null> = ref(null)
 
+  /**
+   * Run a market search with filters; stores `result` or sets `error` on failure.
+   *
+   * @param input - Query text, window, filters, and result limit.
+   * @returns {Promise<MarketSearchResponse | null>} API payload on success, or `null` after error handling.
+   */
   async function search(input: MarketSearchInput): Promise<MarketSearchResponse | null> {
     loading.value = true
     error.value = null
@@ -92,7 +98,7 @@ export function useMarketSearch() {
         graded: input.graded,
         sort: input.sort,
         fr_only: input.frOnly,
-        limit: input.limit
+        limit: input.limit,
       }
       if (input.minPrice != null) {
         params.min_price = input.minPrice
@@ -113,7 +119,12 @@ export function useMarketSearch() {
     }
   }
 
-  function reset() {
+  /**
+   * Clear `result`, `error`, and `loading` — e.g. when leaving the page.
+   *
+   * @returns {void} Nothing.
+   */
+  function reset(): void {
     result.value = null
     error.value = null
     loading.value = false

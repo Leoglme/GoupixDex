@@ -42,7 +42,7 @@ def forward(path: str) -> Response:
     except RuntimeError as e:
         return Response(str(e), status=500, mimetype="text/plain")
 
-    # Chemin + query tels que reçus (ex. /v1/foo?bar=1)
+    # Path + query as received (e.g. /v1/foo?bar=1)
     url = TARGET + request.full_path
 
     try:

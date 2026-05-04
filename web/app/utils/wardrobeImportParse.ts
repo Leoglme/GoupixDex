@@ -1,9 +1,14 @@
 /**
- * Parse titre / description import Vinted → champs formulaire GoupixDex.
+ * Parse Vinted import title/description → GoupixDex form fields.
  */
 
 const FORM_SUFFIX_RE = /^(?:ex|v|vmax|vstar|gx|tag\s*team|tt|break|lv\.?\s*x|lvx|mega)(?:\s|$)/i
 
+/**
+ *
+ * @param longerCf
+ * @param shorterCf
+ */
 function longerIsShorterPlusForm(longerCf: string, shorterCf: string): boolean {
   if (!longerCf.startsWith(shorterCf)) {
     return false
@@ -15,7 +20,11 @@ function longerIsShorterPlusForm(longerCf: string, shorterCf: string): boolean {
   return FORM_SUFFIX_RE.test(rest)
 }
 
-/** Aligné sur ``api/services/scan_service._fr_en_same_for_title`` (titres / noms redondants). */
+/**
+ * Aligned with ``api/services/scan_service._fr_en_same_for_title`` (redundant titles / names).
+ * @param nameFr
+ * @param nameEn
+ */
 export function frEnSameForDisplay(nameFr: string, nameEn: string): boolean {
   const a = nameFr.trim()
   const b = nameEn.trim()
@@ -33,7 +42,10 @@ export function frEnSameForDisplay(nameFr: string, nameEn: string): boolean {
   return false
 }
 
-/** Retire `` ex`` / `` V`` en fin de libellé anglais pour le champ « nom Pokémon ». */
+/**
+ * Strip trailing `` ex`` / `` V`` etc. from English labels for the Pokémon name field.
+ * @param s
+ */
 export function stripTrailingTcgFormSuffix(s: string): string {
   const t = s.trim()
   const re = /\s+(?:ex|v|vmax|vstar|gx)(?:\s|$)/i
@@ -47,7 +59,8 @@ export function stripTrailingTcgFormSuffix(s: string): string {
 }
 
 /**
- * Champ nom : « Fr / En » → un seul libellé si redondant, sinon **partie française** (avant le slash).
+ * Name field: ``Fr / En`` → single label if redundant, else **French part** (before the slash).
+ * @param raw
  */
 export function normalizePokemonNameField(raw: string): string {
   const t = raw.trim()
@@ -66,13 +79,19 @@ export function normalizePokemonNameField(raw: string): string {
   return stripTrailingTcgFormSuffix(t)
 }
 
-/** ``160/086 SR Super Rare`` → ``160/086`` */
+/**
+ * ``160/086 SR Super Rare`` → ``160/086``
+ * @param raw
+ */
 export function parseFractionFromNumeroLine(raw: string): string {
   const m = raw.match(/(\d{1,4}\s*\/\s*\d{1,4})/)
   return m?.[1]?.replace(/\s*\/\s*/, '/') ?? raw.trim()
 }
 
-/** Codes type ``sv11w``, ``sv7``, ``m1l`` (contiennent un chiffre) — pas le nom d'extension « White Flare ». */
+/**
+ * Tokens like ``sv11w``, ``sv7``, ``m1l`` (contain a digit) — not an expansion name such as « White Flare ».
+ * @param s
+ */
 function looksLikeSetCodeToken(s: string): boolean {
   const t = s.trim()
   if (!t || /\s/.test(t) || t.includes('/')) {
@@ -89,7 +108,8 @@ export interface ParsedGoupixTitleHead {
 }
 
 /**
- * Premier segment titre GoupixDex : ``{noms} {code} {fraction} [variant] - …``.
+ * First segment of a GoupixDex-style title: ``{names} {code} {fraction} [variant] - …``.
+ * @param title
  */
 export function parseGoupixStyleTitleHead(title: string): ParsedGoupixTitleHead | null {
   const head = title.split(/\s*-\s*/)[0]?.trim() ?? ''
@@ -119,6 +139,10 @@ export function parseGoupixStyleTitleHead(title: string): ParsedGoupixTitleHead 
   return { namePart, setCode, cardNumber, variant }
 }
 
+/**
+ *
+ * @param serie
+ */
 function serieLooksLikeExpansionName(serie: string): boolean {
   const t = serie.trim()
   if (!t) {
@@ -134,10 +158,12 @@ function serieLooksLikeExpansionName(serie: string): boolean {
   return false
 }
 
-export function pickSetCodeForForm(
-  title: string,
-  serieLine: string
-): string {
+/**
+ *
+ * @param title
+ * @param serieLine
+ */
+export function pickSetCodeForForm(title: string, serieLine: string): string {
   const parsed = parseGoupixStyleTitleHead(title)
   if (parsed?.setCode) {
     return parsed.setCode
@@ -149,6 +175,11 @@ export function pickSetCodeForForm(
   return ''
 }
 
+/**
+ *
+ * @param title
+ * @param numeroLine
+ */
 export function pickCardNumberForForm(title: string, numeroLine: string): string {
   const parsed = parseGoupixStyleTitleHead(title)
   if (parsed?.cardNumber) {
@@ -157,6 +188,11 @@ export function pickCardNumberForForm(title: string, numeroLine: string): string
   return parseFractionFromNumeroLine(numeroLine)
 }
 
+/**
+ *
+ * @param title
+ * @param nomLine
+ */
 export function pickPokemonNameForForm(title: string, nomLine: string): string {
   const parsed = parseGoupixStyleTitleHead(title)
   const fromDesc = nomLine.trim()
@@ -164,13 +200,12 @@ export function pickPokemonNameForForm(title: string, nomLine: string): string {
   return normalizePokemonNameField(raw)
 }
 
-const BOILERPLATE_HINTS = [
-  'une communauté',
-  'milliers de marques',
-  'prêt à te lancer',
-  'découvre comment ça marche'
-]
+const BOILERPLATE_HINTS = ['une communauté', 'milliers de marques', 'prêt à te lancer', 'découvre comment ça marche']
 
+/**
+ *
+ * @param text
+ */
 export function isVintedMarketingDescription(text: string): boolean {
   const lower = text.toLowerCase()
   return BOILERPLATE_HINTS.some((h) => lower.includes(h))

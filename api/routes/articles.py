@@ -77,7 +77,7 @@ def _parse_sold_at_iso(value: str | None) -> dt.datetime | None:
 
 
 def _validate_create_title_or_raise(raw_title: str) -> str:
-    """Titre requis, longueur max alignée sur Vinted (espaces inclus après trim côté annonce)."""
+    """Title required; max length matches Vinted (spaces count after trim on the listing)."""
     t = raw_title.strip()
     if not t:
         raise HTTPException(

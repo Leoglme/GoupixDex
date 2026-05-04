@@ -1,26 +1,33 @@
 /**
- * Connexion au flux SSE ``GET /articles/:id/listing-progress`` après une mise en ligne
- * (Vinted et/ou eBay). La session d’événements vit sur l’API distante ; le worker local
- * n’est utilisé que pour la publication Vinted desktop (``sseBase: 'local'``).
+ * Subscribes to the SSE stream ``GET /articles/:id/listing-progress`` after a listing
+ * (Vinted and/or eBay). The event session lives on the remote API; the local worker
+ * is only used for desktop Vinted publish (``sseBase: 'local'``).
  */
+import type { Ref } from 'vue'
+
 export type ListingStreamContext = 'create' | 'list' | 'logs'
 
 export interface VintedLogEntry {
   text: string
-  /** Data URL image/jpeg (capture navigateur). */
+  /** Data URL image/jpeg (browser capture). */
   screenshot?: string
 }
 
 export type ListingProgressSseBase = 'api' | 'local'
 
+/**
+ * Single-listing publish progress via SSE — logs, toasts, and optional local-worker hub.
+ *
+ * @returns `logEntries`, `logEl`, `followStream`, and `closeStream`.
+ */
 export function useVintedPublishStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
   const { isDesktopApp } = useDesktopRuntime()
 
-  const logEntries = ref<VintedLogEntry[]>([])
-  const logEl = ref<HTMLElement | null>(null)
+  const logEntries: Ref<VintedLogEntry[]> = ref([])
+  const logEl: Ref<HTMLElement | null> = ref(null)
 
   let eventSource: EventSource | null = null
 
@@ -33,14 +40,25 @@ export function useVintedPublishStream() {
         el.scrollTop = el.scrollHeight
       }
     },
-    { deep: true }
+    { deep: true },
   )
 
-  function close() {
+  /**
+   * Close the open SSE connection.
+   *
+   * @returns {void} Nothing.
+   */
+  function close(): void {
     eventSource?.close()
     eventSource = null
   }
 
+  /**
+   * Push one log row when `type === 'log'`.
+   *
+   * @param data - Parsed SSE fragment (`message`, optional `form_step`, `detail`, `screenshot`).
+   * @returns {void} Nothing.
+   */
   function pushLog(data: {
     type?: string
     message?: string
@@ -48,7 +66,7 @@ export function useVintedPublishStream() {
     form_step?: string
     detail?: string
     screenshot?: string
-  }) {
+  }): void {
     if (data.type !== 'log' || typeof data.message !== 'string') {
       return
     }
@@ -56,37 +74,34 @@ export function useVintedPublishStream() {
     const extra = data.detail ? ` — ${data.detail}` : ''
     logEntries.value.push({
       text: `${tag}${data.message}${extra}`,
-      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined
+      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined,
     })
   }
 
   /**
-   * Ouvre le flux jusqu'à l'événement ``done`` ou ``error``.
-   * @param sseBase ``api`` (défaut) : hub sur l’API distante (eBay, Vinted serveur). ``local`` : worker desktop uniquement.
+   * Open the listing-progress stream until `done` or `error`.
+   *
+   * @param streamPath - Absolute path under the hub (`/articles/.../listing-progress`).
+   * @param context - Controls toast vs log-only UX (`logs` page stays silent on success toasts).
+   * @param options - Optional `{ sseBase?: 'local' | 'api' }` to route via desktop worker.
+   * @returns {Promise<void>} Resolves when the hub emits terminal events.
    */
   function followStream(
     streamPath: string,
     context: ListingStreamContext = 'list',
-    options?: { sseBase?: ListingProgressSseBase }
+    options?: { sseBase?: ListingProgressSseBase },
   ): Promise<void> {
     close()
     logEntries.value = []
-    const t
-      = token.value
-        ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
+    const t = token.value ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
     if (!t) {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(
-      /\/$/,
-      ''
-    )
+    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(/\/$/, '')
     const useLocal = options?.sseBase === 'local' && isDesktopApp.value
     const base = useLocal ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value && useLocal
-      ? `&remote_api=${encodeURIComponent(remoteBase)}`
-      : ''
+    const remoteParam = isDesktopApp.value && useLocal ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
     const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
 
     return new Promise((resolve, reject) => {
@@ -102,8 +117,8 @@ export function useVintedPublishStream() {
             form_step?: string
             detail?: string
             screenshot?: string
-            vinted?: { published?: boolean, detail?: string }
-            ebay?: { published?: boolean, detail?: string, listing_id?: string }
+            vinted?: { published?: boolean; detail?: string }
+            ebay?: { published?: boolean; detail?: string; listing_id?: string }
           }
           if (data.type === 'log') {
             pushLog(data)
@@ -116,8 +131,8 @@ export function useVintedPublishStream() {
               // Publish journal: surface failures as log entries (otherwise
               // the user only sees a silent `done`).
               if (v && v.published === false) {
-                const detail
-                  = v.detail === 'missing_vinted_credentials'
+                const detail =
+                  v.detail === 'missing_vinted_credentials'
                     ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
                     : String(v.detail ?? 'Publication non confirmée.')
                 logEntries.value.push({ text: `[Vinted · Erreur] ${detail}` })
@@ -131,11 +146,8 @@ export function useVintedPublishStream() {
               if (v) {
                 if (v.published) {
                   toast.add({
-                    title:
-                      context === 'create'
-                        ? 'Article créé et publié sur Vinted'
-                        : 'Publié sur Vinted',
-                    color: 'success'
+                    title: context === 'create' ? 'Article créé et publié sur Vinted' : 'Publié sur Vinted',
+                    color: 'success',
                   })
                 } else {
                   toast.add({
@@ -144,7 +156,7 @@ export function useVintedPublishStream() {
                       v?.detail === 'missing_vinted_credentials'
                         ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
                         : String(v?.detail ?? 'Publication non confirmée.'),
-                    color: 'warning'
+                    color: 'warning',
                   })
                 }
               }
@@ -152,13 +164,13 @@ export function useVintedPublishStream() {
                 if (eb.published) {
                   toast.add({
                     title: context === 'create' ? 'Article créé et publié sur eBay' : 'Publié sur eBay',
-                    color: 'success'
+                    color: 'success',
                   })
                 } else {
                   toast.add({
                     title: 'Publication eBay',
                     description: String(eb.detail ?? 'Échec ou annulation.'),
-                    color: 'warning'
+                    color: 'warning',
                   })
                 }
               }
@@ -174,7 +186,7 @@ export function useVintedPublishStream() {
               toast.add({
                 title: 'Flux publication',
                 description: String(data.message ?? 'Erreur'),
-                color: 'warning'
+                color: 'warning',
               })
             }
             resolve()

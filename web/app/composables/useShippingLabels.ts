@@ -36,27 +36,37 @@ export interface ShippingLabelInput {
   country_code: string | null
 }
 
+/**
+ * eBay unshipped orders + PDF label generation (`/shipping/*`).
+ *
+ * @returns `fetchEbayOrders` and `generateLabelsPdf`.
+ */
 export function useShippingLabels() {
   const { $api } = useNuxtApp()
 
+  /**
+   * GET `/shipping/ebay-orders` — orders awaiting shipment.
+   *
+   * @returns {Promise<EbayUnshippedOrder[]>} Normalized order rows (may be empty).
+   */
   async function fetchEbayOrders(): Promise<EbayUnshippedOrder[]> {
-    const { data } = await $api.get<{ orders: EbayUnshippedOrder[], count: number }>(
-      '/shipping/ebay-orders'
-    )
+    const { data } = await $api.get<{ orders: EbayUnshippedOrder[]; count: number }>('/shipping/ebay-orders')
     return data.orders ?? []
   }
 
+  /**
+   * POST `/shipping/labels.pdf` — render a multi-label PDF blob.
+   *
+   * @param addresses - One row per label (buyer address fields).
+   * @returns {Promise<Blob>} Raw PDF bytes (`responseType: 'blob'`).
+   */
   async function generateLabelsPdf(addresses: ShippingLabelInput[]): Promise<Blob> {
-    const { data } = await $api.post<Blob>(
-      '/shipping/labels.pdf',
-      { addresses },
-      { responseType: 'blob' }
-    )
+    const { data } = await $api.post<Blob>('/shipping/labels.pdf', { addresses }, { responseType: 'blob' })
     return data
   }
 
   return {
     fetchEbayOrders,
-    generateLabelsPdf
+    generateLabelsPdf,
   }
 }

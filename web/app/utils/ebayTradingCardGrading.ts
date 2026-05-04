@@ -1,6 +1,6 @@
-/** Libellés FR / IDs valeur eBay — alignés sur `api/services/ebay_trading_card_grading.py`. */
+/** French labels / eBay value ids — aligned with `api/services/ebay_trading_card_grading.py`. */
 
-export const EBAY_PROFESSIONAL_GRADER_OPTIONS: { label: string, value: string }[] = [
+export const EBAY_PROFESSIONAL_GRADER_OPTIONS: { label: string; value: string }[] = [
   { label: 'Professional Sports Authenticator (PSA)', value: '275010' },
   { label: 'Beckett Collectors Club Grading (BCCG)', value: '275011' },
   { label: 'Beckett Vintage Grading (BVG)', value: '275012' },
@@ -24,10 +24,10 @@ export const EBAY_PROFESSIONAL_GRADER_OPTIONS: { label: string, value: string }[
   { label: 'Card Grading Australia (CGA)', value: '2750120' },
   { label: 'Trading Card Grading (TCG)', value: '2750121' },
   { label: 'ARK Grading (ARK)', value: '2750122' },
-  { label: 'Autre', value: '2750123' }
+  { label: 'Autre', value: '2750123' },
 ]
 
-export const EBAY_GRADE_OPTIONS: { label: string, value: string }[] = [
+export const EBAY_GRADE_OPTIONS: { label: string; value: string }[] = [
   { label: '10', value: '275020' },
   { label: '9.5', value: '275021' },
   { label: '9', value: '275022' },
@@ -50,5 +50,5 @@ export const EBAY_GRADE_OPTIONS: { label: string, value: string }[] = [
   { label: 'Authentic', value: '2750219' },
   { label: 'Authentic Altered', value: '2750220' },
   { label: 'Authentic - Trimmed', value: '2750221' },
-  { label: 'Authentic - Coloured', value: '2750222' }
+  { label: 'Authentic - Coloured', value: '2750222' },
 ]

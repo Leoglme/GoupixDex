@@ -83,17 +83,34 @@ export interface FetchDashboardOptions {
   period?: DashboardPeriod
 }
 
+/**
+ * Serialize a `Date` as ISO string for dashboard query params.
+ *
+ * @param date - Range boundary from the date picker.
+ * @returns {string} ISO timestamp string accepted by the API.
+ */
 function toIsoDate(date: Date): string {
   // Use a plain ISO datetime so the API can parse it back deterministically.
   return date.toISOString()
 }
 
+/**
+ * Dashboard aggregates (`GET /stats/dashboard`).
+ *
+ * @returns `fetchDashboard` with optional range / period / Cardmarket enrichment flag.
+ */
 export function useStats() {
   const { $api } = useNuxtApp()
 
+  /**
+   * Load dashboard KPIs for the selected window.
+   *
+   * @param options - Optional custom range, aggregation period, and market-valuation toggle.
+   * @returns {Promise<DashboardStats>} Full dashboard payload from the API.
+   */
   async function fetchDashboard(options: FetchDashboardOptions = {}) {
     const params: Record<string, string | boolean> = {
-      include_market: options.includeMarket ?? false
+      include_market: options.includeMarket ?? false,
     }
     if (options.range) {
       params.start = toIsoDate(options.range.start)

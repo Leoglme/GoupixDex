@@ -1,6 +1,7 @@
 /**
- * SSE pour ``GET /articles/vinted-batch/{job_id}/stream`` : logs + événements ``progress``.
+ * SSE consumer for ``GET /articles/vinted-batch/{job_id}/stream``: logs + ``progress`` events.
  */
+import type { Ref } from 'vue'
 import type { VintedLogEntry } from '~/composables/useVintedPublishStream'
 
 export interface VintedBatchProgress {
@@ -10,17 +11,22 @@ export interface VintedBatchProgress {
   title?: string
 }
 
+/**
+ * Multi-article Vinted publish job stream (desktop worker or API relay) with scroll-sticky logs.
+ *
+ * @returns Log refs, progress, `followBatchStream`, and explicit close helpers.
+ */
 export function useVintedBatchStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
   const { isDesktopApp } = useDesktopRuntime()
 
-  const logEntries = ref<VintedLogEntry[]>([])
-  const logEl = ref<HTMLElement | null>(null)
-  const progress = ref<VintedBatchProgress | null>(null)
-  const finished = ref(false)
-  const lastSummary = ref<unknown>(null)
+  const logEntries: Ref<VintedLogEntry[]> = ref([])
+  const logEl: Ref<HTMLElement | null> = ref(null)
+  const progress: Ref<VintedBatchProgress | null> = ref(null)
+  const finished: Ref<boolean> = ref(false)
+  const lastSummary: Ref<unknown> = ref(null)
 
   let eventSource: EventSource | null = null
 
@@ -33,21 +39,32 @@ export function useVintedBatchStream() {
         el.scrollTop = el.scrollHeight
       }
     },
-    { deep: true }
+    { deep: true },
   )
 
-  function close() {
+  /**
+   * Tear down the active `EventSource`, if any.
+   *
+   * @returns {void} Nothing.
+   */
+  function close(): void {
     eventSource?.close()
     eventSource = null
   }
 
+  /**
+   * Append one structured log line coming from SSE JSON payloads.
+   *
+   * @param data - Parsed message body (`type`, `message`, optional `form_step`, `detail`, `screenshot`).
+   * @returns {void} Nothing.
+   */
   function pushLog(data: {
     type?: string
     message?: string
     form_step?: string
     detail?: string
     screenshot?: string
-  }) {
+  }): void {
     if (data.type !== 'log' || typeof data.message !== 'string') {
       return
     }
@@ -55,38 +72,32 @@ export function useVintedBatchStream() {
     const extra = data.detail ? ` — ${data.detail}` : ''
     logEntries.value.push({
       text: `${tag}${data.message}${extra}`,
-      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined
+      screenshot: typeof data.screenshot === 'string' ? data.screenshot : undefined,
     })
   }
 
   /**
-   * Ouvre le flux jusqu'à ``done`` ou ``error`` (premier message).
+   * Subscribe to the batch SSE URL until `done` / `error` / transport failure.
+   *
+   * @param streamPath - Path suffix including job id (from `startVintedBatch`).
+   * @param opts - Optional `{ quiet?: boolean }` to suppress completion toasts.
+   * @returns {Promise<void>} Resolves when the server closes the stream normally.
    */
-  function followBatchStream(
-    streamPath: string,
-    opts?: { quiet?: boolean }
-  ): Promise<void> {
+  function followBatchStream(streamPath: string, opts?: { quiet?: boolean }): Promise<void> {
     close()
     logEntries.value = []
     progress.value = null
     finished.value = false
     lastSummary.value = null
 
-    const t
-      = token.value
-        ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
+    const t = token.value ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
     if (!t) {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(
-      /\/$/,
-      ''
-    )
+    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(/\/$/, '')
     const base = isDesktopApp.value ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value
-      ? `&remote_api=${encodeURIComponent(remoteBase)}`
-      : ''
+    const remoteParam = isDesktopApp.value ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
     const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
 
     return new Promise((resolve, reject) => {
@@ -107,7 +118,7 @@ export function useVintedBatchStream() {
             article_id?: number
             title?: string
             summary?: unknown
-            vinted?: { published?: boolean, detail?: string }
+            vinted?: { published?: boolean; detail?: string }
           }
           if (data.type === 'progress') {
             const cur = data.current ?? 0
@@ -116,7 +127,7 @@ export function useVintedBatchStream() {
               current: cur,
               total: tot,
               articleId: data.article_id,
-              title: data.title
+              title: data.title,
             }
             return
           }
@@ -135,7 +146,7 @@ export function useVintedBatchStream() {
                 toast.add({
                   title: 'Lot Vinted terminé',
                   description: 'Toutes les annonces prévues ont été publiées.',
-                  color: 'success'
+                  color: 'success',
                 })
               } else {
                 toast.add({
@@ -144,7 +155,7 @@ export function useVintedBatchStream() {
                     v?.detail === 'missing_vinted_credentials'
                       ? "Identifiants Vinted manquants (profil ou variables d'environnement)."
                       : String(v?.detail ?? 'Publication partielle ou non confirmée.'),
-                  color: 'warning'
+                  color: 'warning',
                 })
               }
             }
@@ -159,7 +170,7 @@ export function useVintedBatchStream() {
               toast.add({
                 title: 'Flux publication groupée',
                 description: String(data.message ?? 'Erreur'),
-                color: 'warning'
+                color: 'warning',
               })
             }
             resolve()
@@ -191,6 +202,6 @@ export function useVintedBatchStream() {
     finished,
     lastSummary,
     followBatchStream,
-    closeBatchStream: close
+    closeBatchStream: close,
   }
 }

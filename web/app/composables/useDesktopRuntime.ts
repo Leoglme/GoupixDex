@@ -1,6 +1,7 @@
 /**
- * Détection runtime desktop (Tauri WebView) vs web navigateur.
- * Évite toute dépendance côté SSR.
+ * Detect GoupixDex desktop (Tauri WebView) vs plain browser — client-only, SSR-safe.
+ *
+ * @returns Desktop detection + contrôle optionnel des workers Python locaux (Tauri).
  */
 export function useDesktopRuntime() {
   const isDesktopApp = computed(() => {
@@ -14,5 +15,27 @@ export function useDesktopRuntime() {
     return Boolean(w.__TAURI__ || w.__TAURI_INTERNALS__)
   })
 
-  return { isDesktopApp }
+  /**
+   * Arrête puis relance les workers Vinted + Amazon (ports libérés). No-op hors desktop.
+   */
+  async function restartLocalWorkers(): Promise<void> {
+    if (!import.meta.client || !isDesktopApp.value) {
+      return
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('restart_local_workers')
+  }
+
+  /**
+   * Tue les workers sans les relancer (ex. avant mise à jour). No-op hors desktop.
+   */
+  async function stopLocalWorkers(): Promise<void> {
+    if (!import.meta.client || !isDesktopApp.value) {
+      return
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('stop_local_worker')
+  }
+
+  return { isDesktopApp, restartLocalWorkers, stopLocalWorkers }
 }

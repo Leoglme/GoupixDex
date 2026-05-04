@@ -102,16 +102,26 @@ export interface ArticleUpdateBody {
   graded_cert_number?: string | null
   purchase_price?: number
   sell_price?: number | null
-  /** Édition : remet le suivi Vinted à « non publié » dans GoupixDex. */
+  /** Edit: reset Vinted tracking to “unpublished” in GoupixDex. */
   clear_vinted_publication?: boolean
-  /** Édition : remet le suivi eBay à « non publié » dans GoupixDex. */
+  /** Edit: reset eBay tracking to “unpublished” in GoupixDex. */
   clear_ebay_publication?: boolean
 }
 
+/**
+ * Article REST CRUD, marketplace publish endpoints, and Vinted worker routing on desktop.
+ *
+ * @returns HTTP helpers; `vintedHttp()` picks `$vintedLocal` when running inside Tauri with publish intent.
+ */
 export function useArticles() {
   const { $api, $vintedLocal } = useNuxtApp()
   const { isDesktopApp } = useDesktopRuntime()
 
+  /**
+   * Axios instance for Vinted automation — local worker on desktop when available.
+   *
+   * @returns Axios-like client (`$vintedLocal` or `$api`).
+   */
   function vintedHttp() {
     if (import.meta.client && isDesktopApp.value && $vintedLocal) {
       return $vintedLocal
@@ -119,84 +129,141 @@ export function useArticles() {
     return $api
   }
 
+  /**
+   * GET `/articles` — current user’s inventory.
+   *
+   * @returns {Promise<Article[]>} Article rows with nested images.
+   */
   async function listArticles() {
     const { data } = await $api.get<Article[]>('/articles')
     return data
   }
 
+  /**
+   * GET `/articles/:id` — single article detail.
+   *
+   * @param id - Article primary key.
+   * @returns {Promise<Article>} Full article payload.
+   */
   async function getArticle(id: number) {
     const { data } = await $api.get<Article>(`/articles/${id}`)
     return data
   }
 
+  /**
+   * POST `/articles` — multipart create (+ optional Vinted/eBay publish flags in form).
+   *
+   * @param form - `FormData` including images and marketplace booleans.
+   * @returns {Promise<CreateArticleResponse>} Created article + publish stubs / stream paths.
+   */
   async function createArticle(form: FormData) {
     const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' }
-    if (
-      import.meta.client
-      && isDesktopApp.value
-      && form.get('publish_to_vinted') === 'true'
-    ) {
+    if (import.meta.client && isDesktopApp.value && form.get('publish_to_vinted') === 'true') {
       headers['X-Goupix-Vinted-Target'] = 'local'
     }
     const { data } = await $api.post<CreateArticleResponse>('/articles', form, { headers })
     return data
   }
 
+  /**
+   * PUT `/articles/:id` — JSON patch for editable fields.
+   *
+   * @param id - Article id.
+   * @param body - Partial article fields.
+   * @returns {Promise<Article>} Updated article row.
+   */
   async function updateArticle(id: number, body: ArticleUpdateBody) {
     const { data } = await $api.put<Article>(`/articles/${id}`, body)
     return data
   }
 
+  /**
+   * DELETE `/articles/:id`.
+   *
+   * @param id - Article id.
+   * @returns {Promise<void>} Resolves on 2xx.
+   */
   async function deleteArticle(id: number) {
     await $api.delete(`/articles/${id}`)
   }
 
+  /**
+   * POST `/articles/bulk-delete`.
+   *
+   * @param ids - Article ids to delete.
+   * @returns {Promise<{ deleted: number; requested: number }>} Count summary from the API.
+   */
   async function deleteArticlesBulk(ids: number[]) {
-    const { data } = await $api.post<{ deleted: number, requested: number }>(
-      '/articles/bulk-delete',
-      { ids }
-    )
+    const { data } = await $api.post<{ deleted: number; requested: number }>('/articles/bulk-delete', { ids })
     return data
   }
 
-  async function markSold(
-    id: number,
-    body: { sold_price: number, sale_source: 'vinted' | 'ebay' }
-  ) {
-    const { data } = await $api.patch<Article>(`/articles/${id}/sold`, body)
+  /**
+   * PATCH `/articles/:id/sold` — record sale price + channel.
+   *
+   * @param id - Article id.
+   * @param payload - `{ sold_price, sale_source }` for the PATCH body.
+   * @returns {Promise<Article>} Updated article marked sold.
+   */
+  async function markSold(id: number, payload: { sold_price: number; sale_source: 'vinted' | 'ebay' }) {
+    const { data } = await $api.patch<Article>(`/articles/${id}/sold`, payload)
     return data
   }
 
+  /**
+   * POST Vinted publish for one article (SSE stream path in response body).
+   *
+   * @param id - Article id.
+   * @returns {Promise<PublishVintedResponse>} Running job + `stream_path`.
+   */
   async function publishArticleToVinted(id: number) {
-    const { data } = await vintedHttp().post<PublishVintedResponse>(
-      `/articles/${id}/publish-vinted`
-    )
+    const { data } = await vintedHttp().post<PublishVintedResponse>(`/articles/${id}/publish-vinted`)
     return data
   }
 
+  /**
+   * POST `/articles/vinted-batch` — enqueue multiple articles for sequential desktop publish.
+   *
+   * @param articleIds - Ids to include in the batch job.
+   * @returns {Promise<VintedBatchStartResponse>} Job id + SSE path.
+   */
   async function startVintedBatch(articleIds: number[]) {
-    const { data } = await vintedHttp().post<VintedBatchStartResponse>(
-      '/articles/vinted-batch',
-      { article_ids: articleIds }
-    )
+    const { data } = await vintedHttp().post<VintedBatchStartResponse>('/articles/vinted-batch', {
+      article_ids: articleIds,
+    })
     return data
   }
 
+  /**
+   * GET `/articles/vinted-batch/active` — resume UI state after reload.
+   *
+   * @returns {Promise<VintedBatchActiveResponse>} Active job pointer or nulls when idle.
+   */
   async function getVintedBatchActive() {
-    const { data } = await vintedHttp().get<VintedBatchActiveResponse>(
-      '/articles/vinted-batch/active'
-    )
+    const { data } = await vintedHttp().get<VintedBatchActiveResponse>('/articles/vinted-batch/active')
     return data
   }
 
+  /**
+   * POST eBay publish for one article.
+   *
+   * @param id - Article id.
+   * @returns {Promise<PublishEbayResponse>} Running hub stream reference.
+   */
   async function publishArticleToEbay(id: number) {
     const { data } = await $api.post<PublishEbayResponse>(`/articles/${id}/publish-ebay`)
     return data
   }
 
+  /**
+   * POST `/articles/ebay-batch` — queue multiple eBay listings server-side.
+   *
+   * @param articleIds - Article ids.
+   * @returns {Promise<EbayBatchStartResponse>} Queue depth hint from the API.
+   */
   async function startEbayBatch(articleIds: number[]) {
     const { data } = await $api.post<EbayBatchStartResponse>('/articles/ebay-batch', {
-      article_ids: articleIds
+      article_ids: articleIds,
     })
     return data
   }
@@ -213,6 +280,6 @@ export function useArticles() {
     publishArticleToEbay,
     startVintedBatch,
     startEbayBatch,
-    getVintedBatchActive
+    getVintedBatchActive,
   }
 }

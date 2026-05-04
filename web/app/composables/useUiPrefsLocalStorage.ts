@@ -1,5 +1,5 @@
 /**
- * Préférences UI persistantes (localStorage), usage client uniquement.
+ * Persistent UI preferences (localStorage), client-only.
  */
 
 import type { DashboardPeriod, DashboardRange } from '~/composables/useStats'
@@ -8,19 +8,13 @@ const ARTICLES_LIST_KEY = 'goupix_articles_list_prefs'
 const DASHBOARD_KEY = 'goupix_dashboard_prefs'
 
 export type ArticleListFilterSold = 'all' | 'sold' | 'unsold'
-export type ArticleListSortKey =
-  | 'created_desc'
-  | 'sold_desc'
-  | 'purchase_asc'
-  | 'purchase_desc'
-  | 'cm_asc'
-  | 'cm_desc'
+export type ArticleListSortKey = 'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'
 
 export interface ArticleListPrefs {
   filterSold: ArticleListFilterSold
   sortKey: ArticleListSortKey
   searchQuery: string
-  /** Page Mon stock : afficher aussi les articles déjà en vente (défaut faux si absent). */
+  /** My stock page: also show articles already for sale (default false if missing). */
   stockIncludeListed?: boolean
 }
 
@@ -30,9 +24,14 @@ const SORT_KEYS: ArticleListSortKey[] = [
   'purchase_asc',
   'purchase_desc',
   'cm_asc',
-  'cm_desc'
+  'cm_desc',
 ]
 
+/**
+ * Load persisted article-list UI preferences from `localStorage` (SSR-safe).
+ *
+ * @returns {Partial<ArticleListPrefs> | null} Parsed prefs, or `null` when absent or invalid.
+ */
 export function loadArticleListPrefs(): Partial<ArticleListPrefs> | null {
   if (!import.meta.client) {
     return null
@@ -62,7 +61,13 @@ export function loadArticleListPrefs(): Partial<ArticleListPrefs> | null {
   }
 }
 
-export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>) {
+/**
+ * Merge and persist article-list UI preferences to `localStorage`.
+ *
+ * @param prefs - Partial prefs to merge onto the stored JSON object.
+ * @returns {void} Nothing.
+ */
+export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>): void {
   if (!import.meta.client) {
     return
   }
@@ -77,11 +82,16 @@ export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>) {
 }
 
 export interface DashboardPrefsPersisted {
-  range: { startIso: string, endIso: string }
+  range: { startIso: string; endIso: string }
   period: DashboardPeriod
   fetchMarketData: boolean
 }
 
+/**
+ * Load persisted dashboard date range / period / market-toggle prefs.
+ *
+ * @returns {Partial<DashboardPrefsPersisted> | null} Parsed prefs, or `null` when absent or invalid.
+ */
 export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
   if (!import.meta.client) {
     return null
@@ -94,15 +104,15 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
     const p = JSON.parse(raw) as Record<string, unknown>
     const out: Partial<DashboardPrefsPersisted> = {}
     if (
-      p.range
-      && typeof p.range === 'object'
-      && p.range !== null
-      && typeof (p.range as { startIso?: unknown }).startIso === 'string'
-      && typeof (p.range as { endIso?: unknown }).endIso === 'string'
+      p.range &&
+      typeof p.range === 'object' &&
+      p.range !== null &&
+      typeof (p.range as { startIso?: unknown }).startIso === 'string' &&
+      typeof (p.range as { endIso?: unknown }).endIso === 'string'
     ) {
       out.range = {
         startIso: (p.range as { startIso: string }).startIso,
-        endIso: (p.range as { endIso: string }).endIso
+        endIso: (p.range as { endIso: string }).endIso,
       }
     }
     if (p.period === 'daily' || p.period === 'weekly' || p.period === 'monthly') {
@@ -117,22 +127,28 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
   }
 }
 
-export function saveDashboardPrefs(data: {
+/**
+ * Persist dashboard UI preferences (range as ISO strings).
+ *
+ * @param prefs - Selected date range, stats period, and whether to include Cardmarket lookups.
+ * @returns {void} Nothing.
+ */
+export function saveDashboardPrefs(prefs: {
   range: DashboardRange
   period: DashboardPeriod
   fetchMarketData: boolean
-}) {
+}): void {
   if (!import.meta.client) {
     return
   }
   try {
     const payload: DashboardPrefsPersisted = {
       range: {
-        startIso: data.range.start.toISOString(),
-        endIso: data.range.end.toISOString()
+        startIso: prefs.range.start.toISOString(),
+        endIso: prefs.range.end.toISOString(),
       },
-      period: data.period,
-      fetchMarketData: data.fetchMarketData
+      period: prefs.period,
+      fetchMarketData: prefs.fetchMarketData,
     }
     localStorage.setItem(DASHBOARD_KEY, JSON.stringify(payload))
   } catch {
@@ -140,6 +156,12 @@ export function saveDashboardPrefs(data: {
   }
 }
 
+/**
+ * Convert persisted ISO range strings back to `Date` bounds for the stats API.
+ *
+ * @param p - Stored `{ startIso, endIso }` payload.
+ * @returns {DashboardRange | null} Valid inclusive range, or `null` if dates are invalid.
+ */
 export function dashboardPrefsToRange(p: DashboardPrefsPersisted['range']): DashboardRange | null {
   const start = new Date(p.startIso)
   const end = new Date(p.endIso)

@@ -1,6 +1,6 @@
 /**
- * Exécutable Tauri uniquement : pas de landing marketing sur `/`, pas de page téléchargements.
- * Symétrique à « Journal Vinted » (réservé au desktop), ici landing + /downloads restent pour le web.
+ * Tauri desktop build only: no marketing landing on `/`, no downloads page.
+ * Mirror of “listing logs” (desktop-only): here landing + /downloads stay on the web build.
  */
 export default defineNuxtRouteMiddleware((to) => {
   if (import.meta.server) {

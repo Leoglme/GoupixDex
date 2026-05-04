@@ -1601,7 +1601,7 @@ class VintedService:
 
     @classmethod
     async def _find_condition_trigger_via_js(cls) -> Any:
-        """Dernier recours : champ État Vinted (#condition / category-condition-single-list-input)."""
+        """Last resort: Vinted condition field (#condition / category-condition-single-list-input)."""
         tab = cls._require_tab()
         sel = await tab.evaluate(
             """

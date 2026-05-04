@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Crée un fichier vide `web/src-tauri/binaries/goupix-vinted-worker-<triple>(.exe)`
-// si le binaire PyInstaller n'a pas encore été produit (dev local, pas de CI).
+// Creates an empty `web/src-tauri/binaries/goupix-vinted-worker-<triple>(.exe)` file when the
+// PyInstaller binary has not been built yet (local dev, no CI artifact).
 //
-// En dev (`tauri dev`), `lib.rs` n'utilise pas le sidecar (branche `cfg(debug_assertions)`),
-// mais le build script de Tauri valide la présence des fichiers déclarés dans
-// `bundle.externalBin`. Ce stub satisfait cette validation sans impact runtime.
+// In dev (`tauri dev`), `lib.rs` does not use the sidecar (`cfg(debug_assertions)` branch),
+// but Tauri's build step still checks that files listed in `bundle.externalBin` exist.
+// This stub satisfies that check without affecting runtime behavior.
 
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
@@ -15,15 +15,18 @@ import process from 'node:process'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
+/**
+ *
+ */
 function rustHostTriple() {
   try {
     const out = execSync('rustc -vV', { encoding: 'utf8' })
     const m = out.match(/^host:\s*(\S+)/m)
     if (m) return m[1]
   } catch {
-    // fallback ci-dessous
+    // fall through to platform guesses below
   }
-  // Fallback grossier (juste pour le dev sans Rust en PATH).
+  // Coarse fallback when Rust is not on PATH (local dev).
   if (process.platform === 'win32') return 'x86_64-pc-windows-msvc'
   if (process.platform === 'darwin') {
     return process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
@@ -41,9 +44,9 @@ if (!existsSync(binDir)) {
 }
 
 if (!existsSync(target) || statSync(target).size === 0) {
-  // Sur Windows, un .exe de 0 octet est OK pour la validation Tauri.
+  // On Windows, a zero-byte .exe is enough for Tauri's presence check.
   writeFileSync(target, '')
-  console.log(`[ensure-vinted-worker-stub] stub créé : ${target}`)
+  console.log(`[ensure-vinted-worker-stub] stub written: ${target}`)
 } else {
-  console.log(`[ensure-vinted-worker-stub] binaire existant : ${target}`)
+  console.log(`[ensure-vinted-worker-stub] existing binary: ${target}`)
 }

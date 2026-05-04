@@ -1,13 +1,13 @@
 /**
- * Préremplissage création groupée à partir du document renvoyé par le worker
- * ``POST /vinted/wardrobe-sync/jobs`` (champ ``result``).
+ * Batch-create prefill from the document returned by the worker
+ * ``POST /vinted/wardrobe-sync/jobs`` (``result`` field).
  */
 
 import {
   isVintedMarketingDescription,
   pickCardNumberForForm,
   pickPokemonNameForForm,
-  pickSetCodeForForm
+  pickSetCodeForForm,
 } from '~/utils/wardrobeImportParse'
 
 export const WARDROBE_IMPORT_STORAGE_KEY = 'goupix_wardrobe_import'
@@ -24,11 +24,11 @@ export interface WardrobeSlotPrefill {
   photoUrls: string[]
   isSold: boolean
   soldAt: string | null
-  /** Annonce déjà présente sur Vinted (import garde-robe) — à refléter en base. */
+  /** Listing already on Vinted (wardrobe import) — mirror in DB. */
   wardrobeVintedListed: boolean
-  /** Date de mise en ligne côté Vinted (ISO), annonces actives. */
+  /** Vinted go-live date (ISO) for active listings. */
   vintedPublishedAtIso: string | null
-  /** Prix encaissé / alloué pour une vente importée (champ sold_price). */
+  /** Proceeds / allocated amount for an imported sale (sold_price field). */
   importSoldPrice: string | null
 }
 
@@ -37,18 +37,28 @@ const VINTED_STATUS_TO_CONDITION: Record<string, string> = {
   'Neuf sans étiquette': 'Near Mint',
   'Très bon état': 'Excellent',
   'Bon état': 'Good',
-  Satisfaisant: 'Played'
+  Satisfaisant: 'Played',
 }
 
+/**
+ * Read a single `Label: value` line from a free-text description block.
+ *
+ * @param desc - Full listing description text.
+ * @param label - Line prefix to match (case-sensitive French labels).
+ * @returns {string} Trimmed value after the colon, or empty string.
+ */
 function lineValue(desc: string, label: string): string {
-  const re = new RegExp(
-    `^\\s*${label}\\s*:\\s*(.+)\\s*$`,
-    'im'
-  )
+  const re = new RegExp(`^\\s*${label}\\s*:\\s*(.+)\\s*$`, 'im')
   const m = desc.match(re)
   return m?.[1]?.trim() ?? ''
 }
 
+/**
+ * Infer English TCG-style condition tokens from the `État:` line when present.
+ *
+ * @param desc - Listing description containing optional structured lines.
+ * @returns {string} Mapped condition (`Mint`, `Near Mint`, …) or empty string.
+ */
 function parseEtatFromDescription(desc: string): string {
   const raw = lineValue(desc, 'État')
   if (!raw) {
@@ -73,6 +83,13 @@ function parseEtatFromDescription(desc: string): string {
   return ''
 }
 
+/**
+ * Map Vinted wardrobe status + description text to our article `condition` field.
+ *
+ * @param status - Raw `status` string from the wardrobe API row.
+ * @param description - Full description for regex-based `État` fallback.
+ * @returns {string} Condition label stored on the article form.
+ */
 function mapVintedCondition(status: unknown, description: string): string {
   const fromDesc = parseEtatFromDescription(description)
   if (fromDesc) {
@@ -82,6 +99,12 @@ function mapVintedCondition(status: unknown, description: string): string {
   return VINTED_STATUS_TO_CONDITION[key] ?? 'Near Mint'
 }
 
+/**
+ * Normalize a sold timestamp string to ISO (fallback: now).
+ *
+ * @param raw - Worker-provided datetime string.
+ * @returns {string} ISO 8601 string.
+ */
 function normalizeSoldAt(raw: string): string {
   const d = new Date(raw)
   if (Number.isNaN(d.getTime())) {
@@ -90,6 +113,12 @@ function normalizeSoldAt(raw: string): string {
   return d.toISOString()
 }
 
+/**
+ * Listed asking price from `row.price.amount` (comma-normalized).
+ *
+ * @param row - Wardrobe item row from the worker JSON.
+ * @returns {string} Decimal string for form inputs, or empty when missing.
+ */
 function rowPriceAmount(row: Record<string, unknown>): string {
   const price = row.price as { amount?: unknown } | undefined
   if (price?.amount == null) {
@@ -98,7 +127,12 @@ function rowPriceAmount(row: Record<string, unknown>): string {
   return String(price.amount).replace(',', '.').trim()
 }
 
-/** Prix réalisé côté vendeur pour une ligne vendue (allocation transaction). */
+/**
+ * Seller-side realized price for a sold row (transaction allocation).
+ *
+ * @param row - Wardrobe item row (sold branch).
+ * @returns {string | null} Proceeds as decimal string, or display price fallback.
+ */
 function rowSoldProceedsAmount(row: Record<string, unknown>): string | null {
   const total = row.total_item_price as { amount?: unknown } | undefined
   if (total?.amount != null && String(total.amount).trim()) {
@@ -108,6 +142,12 @@ function rowSoldProceedsAmount(row: Record<string, unknown>): string | null {
   return p || null
 }
 
+/**
+ * Collect HTTP(S) photo URLs attached to the wardrobe row.
+ *
+ * @param row - Wardrobe item row.
+ * @returns {string[]} Absolute URLs suitable for download via the local worker.
+ */
 function rowPhotoUrls(row: Record<string, unknown>): string[] {
   const urls = row.photo_urls
   if (!Array.isArray(urls)) {
@@ -116,6 +156,12 @@ function rowPhotoUrls(row: Record<string, unknown>): string[] {
   return urls.filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
 }
 
+/**
+ * Convert one wardrobe JSON row into a batch-create slot prefill object.
+ *
+ * @param row - Raw object from `active_items` / `sold_items`.
+ * @returns {WardrobeSlotPrefill} Normalized slot for `ArticleForm` defaults.
+ */
 function rowToSlot(row: Record<string, unknown>): WardrobeSlotPrefill {
   let desc = String(row.description ?? '').trim()
   const title = String(row.title ?? '').trim()
@@ -130,10 +176,7 @@ function rowToSlot(row: Record<string, unknown>): WardrobeSlotPrefill {
   if (isSold && row.transaction_debit_processed_at) {
     soldAt = normalizeSoldAt(String(row.transaction_debit_processed_at))
   }
-  const listedUtc
-    = typeof row.listed_at_utc === 'string' && row.listed_at_utc.trim()
-      ? row.listed_at_utc.trim()
-      : null
+  const listedUtc = typeof row.listed_at_utc === 'string' && row.listed_at_utc.trim() ? row.listed_at_utc.trim() : null
   const importSold = isSold ? rowSoldProceedsAmount(row) : null
   return {
     title: title || 'Annonce Vinted',
@@ -149,16 +192,18 @@ function rowToSlot(row: Record<string, unknown>): WardrobeSlotPrefill {
     soldAt,
     wardrobeVintedListed: true,
     vintedPublishedAtIso: !isSold ? listedUtc : null,
-    importSoldPrice: importSold
+    importSoldPrice: importSold,
   }
 }
 
+/**
+ * Flatten `active_items` + `sold_items` from a wardrobe sync `result` payload into form slots.
+ *
+ * @param result - `result` object returned when the sync job completes.
+ * @returns {WardrobeSlotPrefill[]} Ordered slots for multi-row batch create UI.
+ */
 export function syncResultToPrefillSlots(result: Record<string, unknown>): WardrobeSlotPrefill[] {
-  const active = Array.isArray(result.active_items)
-    ? (result.active_items as Record<string, unknown>[])
-    : []
-  const sold = Array.isArray(result.sold_items)
-    ? (result.sold_items as Record<string, unknown>[])
-    : []
+  const active = Array.isArray(result.active_items) ? (result.active_items as Record<string, unknown>[]) : []
+  const sold = Array.isArray(result.sold_items) ? (result.sold_items as Record<string, unknown>[]) : []
   return [...active, ...sold].map(rowToSlot)
 }

@@ -3,15 +3,16 @@
 With ``--reload``, uvicorn may pick ``SelectorEventLoop``, which is incompatible with
 ``create_subprocess_exec`` (Chrome / nodriver).
 
-For a **custom** ``--loop``, uvicorn imports **one** object and passes it to
-``asyncio.Runner``: it must be the **loop class** (e.g. ``ProactorEventLoop``),
-instantiated with no arguments — **not** a factory like
-``lambda: ProactorEventLoop()`` (see ``uvicorn.config.Config.get_loop_factory``).
+Since **uvicorn ≥ 0.30**, ``loop=`` can no longer be an arbitrary import string
+(e.g. ``asyncio.windows_events:ProactorEventLoop``): it must be a known key
+(``auto``, ``asyncio``, …). On Windows, after
+``asyncio.set_event_loop_policy(WindowsProactorEventLoopPolicy())`` (see
+``core.win32_asyncio.ensure_proactor_event_loop``), ``loop="asyncio"`` uses the
+**Proactor** loop, which nodriver supports.
 
-Value to pass to ``uvicorn --loop`` on Windows:
+Pass this to ``uvicorn.run(..., loop=...)`` on Windows (after setting the policy):
 """
 
 from __future__ import annotations
 
-# Stdlib event-loop class (importable only on Windows).
-UVICORN_WINDOWS_NODRIVER_LOOP = "asyncio.windows_events:ProactorEventLoop"
+UVICORN_WINDOWS_NODRIVER_LOOP = "asyncio"

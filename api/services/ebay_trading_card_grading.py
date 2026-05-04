@@ -16,7 +16,7 @@ EBAY_DESCRIPTOR_CARD_CONDITION = "40001"
 # Item condition enum for graded slabs
 EBAY_CONDITION_GRADED = "LIKE_NEW"
 
-# (French UI label, value id) — aligné sur l’éditeur eBay.fr
+# (French UI label, value id) — aligned with eBay.fr listing editor
 EBAY_PROFESSIONAL_GRADER_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Professional Sports Authenticator (PSA)", "275010"),
     ("Beckett Collectors Club Grading (BCCG)", "275011"),
@@ -44,7 +44,7 @@ EBAY_PROFESSIONAL_GRADER_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Autre", "2750123"),
 )
 
-# (label, value id) — suite numérique officielle eBay
+# (label, value id) — official eBay numeric sequence
 EBAY_GRADE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("10", "275020"),
     ("9.5", "275021"),

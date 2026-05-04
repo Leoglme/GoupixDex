@@ -1,31 +1,47 @@
 /**
- * Vérifie la présence de Chrome / Edge sur la machine de l'utilisateur (app Tauri uniquement).
+ * Check for Chrome / Edge on the user's machine (Tauri app only).
  *
- * Le worker Vinted local pilote un Chrome installé via nodriver. S'il n'y en a pas :
- * - Edge est utilisé en fallback (renseigné automatiquement côté Rust dans
- *   `VINTED_CHROME_EXECUTABLE` au moment de spawn du sidecar) ;
- * - sinon il faut demander à l'utilisateur d'installer Chrome.
+ * The local Vinted worker drives Chrome via nodriver. If Chrome is missing:
+ * - Edge is used as fallback (set automatically in Rust in
+ *   `VINTED_CHROME_EXECUTABLE` when spawning the sidecar);
+ * - otherwise the user must install Chrome.
  *
- * Côté web (sans Tauri) on renvoie un état neutre : la modale ne s'affiche jamais.
+ * On the web (no Tauri) we return a neutral state: the modal never shows.
  */
-export interface BrowserAvailability {
-  chromeAvailable: boolean
-  edgeAvailable: boolean
-  chromePath: string | null
-  edgePath: string | null
-  chromeInstallUrl: string
-  /** Aucun navigateur compatible trouvé (ni Chrome ni Edge). */
-  noBrowser: boolean
-}
+import type { ComputedRef, Ref } from 'vue'
+import type {
+  GoupixDexBrowserAvailability,
+  GoupixDexBrowserAvailabilityTauriPayload,
+} from '~/types/GoupixDexBrowserAvailability'
 
-const STATE_KEY = 'goupix_browser_availability'
+const STATE_KEY: string = 'goupix_browser_availability'
 
-export function useBrowserAvailability() {
-  const { isDesktopApp } = useDesktopRuntime()
-  const state = useState<BrowserAvailability | null>(STATE_KEY, () => null)
-  const checked = useState<boolean>(`${STATE_KEY}_checked`, () => false)
+/**
+ * Shared browser availability state (`useState`) and Tauri helpers for Chrome/Edge detection.
+ *
+ * @returns Reactive `state` / `checked`, plus `check()` and `openExternal()`.
+ */
+export function useBrowserAvailability(): {
+  state: Ref<GoupixDexBrowserAvailability | null>
+  checked: Ref<boolean>
+  check: (force?: boolean) => Promise<GoupixDexBrowserAvailability>
+  openExternal: (url: string) => Promise<void>
+} {
+  const desktopRuntime: ReturnType<typeof useDesktopRuntime> = useDesktopRuntime()
+  const isDesktopApp: ComputedRef<boolean> = desktopRuntime.isDesktopApp
 
-  async function check(force = false): Promise<BrowserAvailability> {
+  const state: Ref<GoupixDexBrowserAvailability | null> = useState<GoupixDexBrowserAvailability | null>(
+    STATE_KEY,
+    () => null,
+  )
+  const checked: Ref<boolean> = useState<boolean>(`${STATE_KEY}_checked`, () => false)
+
+  /**
+   * Check browser availability (desktop only).
+   * @param {boolean} force - When true, bypass cached state.
+   * @returns {Promise<GoupixDexBrowserAvailability>} The computed availability.
+   */
+  async function check(force: boolean = false): Promise<GoupixDexBrowserAvailability> {
     if (!import.meta.client) {
       return makeNeutralState()
     }
@@ -33,47 +49,47 @@ export function useBrowserAvailability() {
       return state.value
     }
     if (!isDesktopApp.value) {
-      const neutral = makeNeutralState()
+      const neutral: GoupixDexBrowserAvailability = makeNeutralState()
       state.value = neutral
       checked.value = true
       return neutral
     }
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const raw = await invoke<{
-        chromeAvailable: boolean
-        edgeAvailable: boolean
-        chromePath: string | null
-        edgePath: string | null
-        chromeInstallUrl: string
-      }>('check_browser_availability')
-      const next: BrowserAvailability = {
+      const tauriCore: typeof import('@tauri-apps/api/core') = await import('@tauri-apps/api/core')
+      const raw: GoupixDexBrowserAvailabilityTauriPayload =
+        await tauriCore.invoke<GoupixDexBrowserAvailabilityTauriPayload>('check_browser_availability')
+      const next: GoupixDexBrowserAvailability = {
         chromeAvailable: Boolean(raw.chromeAvailable),
         edgeAvailable: Boolean(raw.edgeAvailable),
         chromePath: raw.chromePath ?? null,
         edgePath: raw.edgePath ?? null,
         chromeInstallUrl: raw.chromeInstallUrl || 'https://www.google.com/intl/fr_fr/chrome/',
-        noBrowser: !raw.chromeAvailable && !raw.edgeAvailable
+        noBrowser: !raw.chromeAvailable && !raw.edgeAvailable,
       }
       state.value = next
       checked.value = true
       return next
     } catch (e) {
       console.warn('[GoupixDex] check_browser_availability indisponible', e)
-      const fallback = makeNeutralState()
+      const fallback: GoupixDexBrowserAvailability = makeNeutralState()
       state.value = fallback
       checked.value = true
       return fallback
     }
   }
 
+  /**
+   * Open a URL externally (desktop: via Tauri shell; web: window.open fallback).
+   * @param {string} url - Target URL.
+   * @returns {Promise<void>} Resolves when the URL has been opened (best-effort).
+   */
   async function openExternal(url: string): Promise<void> {
     if (!isDesktopApp.value || !import.meta.client) {
       window.open(url, '_blank', 'noopener')
       return
     }
     try {
-      const shell = await import('@tauri-apps/plugin-shell')
+      const shell: typeof import('@tauri-apps/plugin-shell') = await import('@tauri-apps/plugin-shell')
       await shell.open(url)
     } catch {
       window.open(url, '_blank', 'noopener')
@@ -83,13 +99,17 @@ export function useBrowserAvailability() {
   return { state, checked, check, openExternal }
 }
 
-function makeNeutralState(): BrowserAvailability {
+/**
+ * Neutral “no-op” state for non-desktop runtimes.
+ * @returns {GoupixDexBrowserAvailability} A safe default availability object.
+ */
+function makeNeutralState(): GoupixDexBrowserAvailability {
   return {
     chromeAvailable: true,
     edgeAvailable: false,
     chromePath: null,
     edgePath: null,
     chromeInstallUrl: 'https://www.google.com/intl/fr_fr/chrome/',
-    noBrowser: false
+    noBrowser: false,
   }
 }

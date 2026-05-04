@@ -19,6 +19,8 @@ api/
   main.py                       # FastAPI app (routers + middleware)
   desktop_vinted_server.py      # Local HTTP worker (127.0.0.1:18766) for Tauri desktop:
                                 #   Vinted publish + wardrobe sync via nodriver/Chromium
+  desktop_amazon_server.py      # Local HTTP worker (127.0.0.1:18768) for Tauri desktop:
+                                #   Amazon invites (stub or nodriver depending on integration)
   config.py                     # AppSettings + legacy Vinted CLI defaults
   cli_vinted_listings.py        # Standalone nodriver CLI (legacy batch from items.json)
   app_types/                    # TypedDict (PokéWallet, Groq, Vinted, eBay payloads)
@@ -107,6 +109,14 @@ pip install -r requirements.txt
 
 Copy `.env.example` to `.env` and set at least `DATABASE_URL` and `JWT_SECRET`.
 
+**Troubleshooting —** `ModuleNotFoundError: No module named 'pydantic._internal._signature'`: your environment has an **outdated Pydantic 2** (e.g. 2.5) while `pydantic-settings` expects internal modules from newer releases. Upgrade the venv:
+
+```bash
+pip install -U -r requirements.txt
+```
+
+(`requirements.txt` now pins **pydantic ≥ 2.10**.)
+
 ### Database
 
 ```bash
@@ -163,11 +173,13 @@ On **Windows**, if you use **`--reload`** with **Vinted** publishing (nodriver /
 python run_dev.py
 ```
 
-or explicitly (Windows only — stdlib `ProactorEventLoop` class):
+or explicitly (Windows only — with **uvicorn ≥ 0.30**, use the `asyncio` loop key, not a stdlib import string):
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000 --loop asyncio.windows_events:ProactorEventLoop
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 --loop asyncio
 ```
+
+On Windows, `main.py` already calls `ensure_proactor_event_loop()`; the loop from `--loop asyncio` remains nodriver-compatible.
 
 - Swagger UI: http://127.0.0.1:8000/docs
 - Health: `GET /health`
@@ -225,7 +237,7 @@ It exposes job-style endpoints used by the Nuxt frontend (`useWardrobeLocalSync`
 | GET | `/ebay/oauth/authorize-url` | Build the consent URL (per-user OAuth state) |
 | POST | `/ebay/oauth/exchange` \| `/disconnect` | Store / clear encrypted tokens on the user row |
 | POST | `/ebay/onboarding/setup` | Create FR inventory location + business policies |
-| POST | `/ebay/policies/fulfillment/ensure` | Create/update « GoupixDex — Envoi » shipping policy |
+| POST | `/ebay/policies/fulfillment/ensure` | Create/update “GoupixDex — Shipping” fulfillment policy |
 | GET | `/ebay/status` \| `/ebay/seller-setup` | Connection state and metadata |
 | GET | `/stats/dashboard` | KPIs, revenue timeline, channel split |
 

@@ -1,7 +1,7 @@
-# Déploie l'API FastAPI (dossier api/) sur le VPS — venv + systemd + Nginx reload.
-# La base MariaDB peut être distante (ex. o2switch) : DATABASE_URL dans les secrets.
-# Sur le VPS : installe xvfb + xauth et lance Uvicorn sous xvfb-run (Chromium fenêtré si VINTED_BROWSER_HEADLESS=false).
-# Secret optionnel VINTED_BROWSER_HEADLESS : absent → true (historique) ; false → moins flaggé par Vinted sur Xvfb.
+# Deploy FastAPI (api/) to the VPS — venv + systemd + Nginx reload.
+# MariaDB may be remote (e.g. o2switch): DATABASE_URL in secrets.
+# On the VPS: install xvfb + xauth and run Uvicorn under xvfb-run (headed Chromium if VINTED_BROWSER_HEADLESS=false).
+# Optional secret VINTED_BROWSER_HEADLESS: missing → true (legacy); false → less likely flagged by Vinted on Xvfb.
 
 name: Deploy API (FastAPI)
 
@@ -162,9 +162,9 @@ jobs:
             python -m pip install --upgrade pip wheel
             pip install -r "$APP_ROOT/requirements.txt" --no-cache-dir
             deactivate
-            # Migrations SQL (fichiers non déjà enregistrés dans schema_migrations)
+            # SQL migrations (files not already recorded in schema_migrations)
             "$APP_ROOT/.venv/bin/python" "$APP_ROOT/migrations/run_migrations.py"
-            # Bootstrap DB si tables vides (user / marges ; articles seulement si SEED_DEV_ARTICLES=1 sur le VPS)
+            # Bootstrap DB if empty tables (user / margins; articles only if SEED_DEV_ARTICLES=1 on the VPS)
             "$APP_ROOT/.venv/bin/python" "$APP_ROOT/seeders/conditional_seed.py"
             sudo tee "/etc/systemd/system/${SVC}" > /dev/null <<EOF
             [Unit]
