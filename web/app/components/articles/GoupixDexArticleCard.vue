@@ -14,7 +14,7 @@
             {{ article.is_sold ? 'Vendu' : 'En stock' }}
           </UBadge>
           <UBadge :color="(article.published_on_vinted ?? false) ? 'success' : 'neutral'" variant="subtle">
-            Vinted {{ (article.published_on_vinted ?? false) ? 'oui' : 'non' }}
+            {{ (article.published_on_vinted ?? false) ? 'Vinted oui' : 'Vinted' }}
           </UBadge>
           <UBadge :color="(article.published_on_ebay ?? false) ? 'success' : 'neutral'" variant="subtle">
             eBay {{ (article.published_on_ebay ?? false) ? 'oui' : 'non' }}
@@ -23,9 +23,6 @@
           <span class="text-muted">
             Vente {{ article.sell_price != null ? eur.format(article.sell_price) : '—' }}
           </span>
-          <span v-if="pricing?.cardmarket_eur != null" class="text-muted"
-            >CM {{ eur.format(pricing.cardmarket_eur) }}</span
-          >
         </div>
       </div>
     </div>
@@ -34,11 +31,9 @@
 
 <script setup lang="ts">
 import type { Article } from '~/composables/useArticles'
-import type { PricingLookup } from '~/composables/usePricing'
 
 defineProps<{
   article: Article
-  pricing?: PricingLookup | null
 }>()
 
 const config = useRuntimeConfig()

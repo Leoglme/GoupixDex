@@ -428,6 +428,14 @@ async function submitAll() {
           })
           return
         }
+        if (e instanceof Error && e.message === 'ARTICLE_TITLE_VINTED_UPPERCASE') {
+          toast.add({
+            title: `Article ${i + 1} — titre Vinted`,
+            description: 'Plus de 3 majuscules consécutives. Ex. « Vstar » au lieu de « VSTAR ».',
+            color: 'error',
+          })
+          return
+        }
         throw e
       }
       const title = fd.get('title')?.toString()?.trim()

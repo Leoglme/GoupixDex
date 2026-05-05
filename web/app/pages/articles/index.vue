@@ -19,24 +19,6 @@
 
     <template #body>
       <div class="w-full space-y-4 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8">
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-3">
-              <USwitch v-model="fetchMarketData" />
-              <div class="space-y-0.5">
-                <p class="text-highlighted text-sm">Afficher les prix marché</p>
-                <p class="text-muted text-xs">
-                  Récupération des prix Cardmarket / PokéWallet pour chaque carte (plus lent mais plus précis).
-                </p>
-              </div>
-            </div>
-            <p class="text-muted max-w-sm text-xs">
-              Désactivez cette option si vous voulez simplement mettre à jour vos fiches sans attendre les prix
-              externes.
-            </p>
-          </div>
-        </UCard>
-
         <UCard
           v-if="!loading && !hasAnyArticles"
           class="ring-primary/25 border-primary/20 shadow-sm ring-1"
@@ -90,9 +72,8 @@
           <div class="p-3 sm:p-4">
             <GoupixDexArticleList
               :articles="displayedArticles"
-              :pricing-by-id="pricingById"
               :loading="loading"
-              :pricing-loading="pricingLoading"
+              :selection-reset-key="articleListSelectionReset"
               :show-ebay-column="ebayPublishAvailable"
               :ebay-publish-available="ebayPublishAvailable"
               :vinted-channel-enabled="vintedChannelEnabled"
@@ -104,7 +85,8 @@
                   deleteOpen = true
                 }
               "
-              @sold="openSold"
+              @sold="(a) => openSold([a])"
+              @bulk-sold="openSold"
               @publish-vinted="onPublishVinted"
               @publish-ebay="onPublishEbay"
               @bulk-delete="openBulkDelete"
@@ -120,7 +102,7 @@
 
   <GoupixDexArticleMarkSoldModal
     v-model:open="soldOpen"
-    :article="soldArticle"
+    :articles="soldArticles"
     :ebay-enabled="ebayPublishAvailable"
     :loading="soldSubmitting"
     @confirm="confirmSold"
@@ -162,16 +144,14 @@ const { isDesktopApp } = useDesktopRuntime()
 const {
   displayedArticles,
   hasAnyArticles,
-  pricingById,
   loading,
-  pricingLoading,
-  fetchMarketData,
   wardrobeSyncing,
   ebayPublishAvailable,
   vintedChannelEnabled,
   soldOpen,
-  soldArticle,
+  soldArticles,
   soldSubmitting,
+  articleListSelectionReset,
   deleteOpen,
   deleteId,
   bulkDeleteOpen,

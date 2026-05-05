@@ -122,6 +122,20 @@ async def search_market(
 
     kept, outliers = partition_outliers(raw_listings)
     stats = aggregate_prices(kept)
+    items_response = kept
+    outliers_response: list = outliers
+    if stats["count"] == 0 and raw_listings:
+        fb_stats = aggregate_prices(raw_listings)
+        if fb_stats["count"] > 0:
+            stats = fb_stats
+            items_response = raw_listings
+            outliers_response = []
+            warnings = list(warnings)
+            warnings.append(
+                "Les écarts de prix sont très importants : statistiques calculées sur toutes les annonces "
+                "retournées par eBay (filtre anti-prix aberrants désactivé pour cet aperçu)."
+            )
+
     return {
         "query": q.strip(),
         "effective_query": effective_q,
@@ -139,9 +153,9 @@ async def search_market(
             "exclude_outliers": True,
         },
         "stats": stats,
-        "items": kept,
-        "outliers": outliers,
-        "outliers_excluded": len(outliers),
+        "items": items_response,
+        "outliers": outliers_response,
+        "outliers_excluded": len(outliers_response),
         "total_matches": total,
         "warnings": warnings,
     }
