@@ -50,6 +50,7 @@
           </template>
 
           <GoupixDexMarketSearchForm
+            :seed="marketSeed"
             :loading="loading"
             :result-count="result?.items?.length ?? null"
             @submit="onSubmit"
@@ -168,6 +169,7 @@
 
 <script setup lang="ts">
 import type { MarketListing, MarketSearchInput } from '~/composables/useMarketSearch'
+import { parseMarketSearchFromQuery } from '~/utils/marketSearchQuery'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -176,16 +178,19 @@ useGoupixPageSeo(
   'Analysez en direct les prix des cartes Pokémon et produits scellés sur eBay France : prix minimum, moyen, médian et maximum des annonces actives.',
 )
 
+const route = useRoute()
 const { loading, error, result, search } = useMarketSearch()
 const toast = useToast()
 const lastQuery = ref<string | null>(null)
 
+const marketSeed = computed(() => parseMarketSearchFromQuery(route.query))
+
 /**
- * Run a market search and show a warning toast when the result set is empty.
- * @param input - Search form payload
- * @returns {Promise<void>} Resolves when the request finishes
+ * Exécute la recherche marché + toast si aucun résultat.
+ * @param input - Paramètres (formulaire ou query string)
+ * @returns {Promise<void>} Résultat API dans `result`
  */
-async function onSubmit(input: MarketSearchInput): Promise<void> {
+async function runMarketSearch(input: MarketSearchInput): Promise<void> {
   lastQuery.value = input.q
   const res = await search(input)
   if (res && res.items.length === 0) {
@@ -195,6 +200,35 @@ async function onSubmit(input: MarketSearchInput): Promise<void> {
       color: 'warning',
     })
   }
+}
+
+/**
+ * Soumission du formulaire.
+ * @param input - Search form payload
+ * @returns {Promise<void>} Résout quand la requête finit
+ */
+async function onSubmit(input: MarketSearchInput): Promise<void> {
+  await runMarketSearch(input)
+}
+
+if (import.meta.client) {
+  watch(
+    () => route.fullPath,
+    async () => {
+      if (route.name !== 'market') {
+        return
+      }
+      if (route.query.auto !== '1') {
+        return
+      }
+      const input = parseMarketSearchFromQuery(route.query)
+      if (!input) {
+        return
+      }
+      await runMarketSearch(input)
+    },
+    { immediate: true },
+  )
 }
 
 /**

@@ -52,17 +52,12 @@
               { label: 'Date vente ↓', value: 'sold_desc' },
               { label: 'Prix achat ↑', value: 'purchase_asc' },
               { label: 'Prix achat ↓', value: 'purchase_desc' },
-              { label: 'Cardmarket ↑', value: 'cm_asc' },
-              { label: 'Cardmarket ↓', value: 'cm_desc' },
             ]"
             value-key="value"
             label-key="label"
             class="min-w-0 flex-1 sm:w-52 sm:flex-none"
           />
         </div>
-        <p v-if="pricingLoading" class="text-muted text-sm sm:ml-auto md:ml-0 md:whitespace-nowrap">
-          Chargement des prix PokéWallet…
-        </p>
       </div>
     </div>
 
@@ -118,6 +113,17 @@
         </UButton>
         <UButton
           size="sm"
+          color="success"
+          variant="subtle"
+          icon="i-lucide-circle-check"
+          :disabled="!!bulkSoldDisabledReason || bulkPublishing"
+          :title="bulkSoldDisabledReason || undefined"
+          @click="emitBulkSold"
+        >
+          Marquer comme vendu
+        </UButton>
+        <UButton
+          size="sm"
           color="error"
           icon="i-lucide-trash-2"
           :disabled="bulkPublishing"
@@ -152,8 +158,6 @@
             <th class="border-default border-b px-3 py-2 font-medium">Prix réalisé</th>
             <th class="border-default border-b px-3 py-2 font-medium">Vinted</th>
             <th v-if="showEbayColumn" class="border-default border-b px-3 py-2 font-medium">eBay</th>
-            <th class="border-default border-b px-3 py-2 font-medium">Cardmarket</th>
-            <th class="border-default border-b px-3 py-2 font-medium">TCGPlayer</th>
             <th class="border-default border-b px-3 py-2 font-medium">Dates</th>
             <th class="border-default border-b px-3 py-2 text-end font-medium">Actions</th>
           </tr>
@@ -220,7 +224,7 @@
               </UBadge>
             </td>
             <td class="text-muted border-default border-b px-3 py-3 align-middle">
-              {{ pricingById.get(row.id)?.set_name || row.set_code || '—' }}
+              {{ row.set_code || '—' }}
             </td>
             <td class="border-default border-b px-3 py-3 align-middle">
               {{ row.card_number || '—' }}
@@ -238,26 +242,13 @@
               <span v-else class="text-muted">—</span>
             </td>
             <td class="border-default border-b px-3 py-3 align-middle">
-              <UBadge :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'" variant="subtle">
-                {{ (row.published_on_vinted ?? false) ? 'Oui' : 'Non' }}
-              </UBadge>
+              <UBadge v-if="row.published_on_vinted ?? false" color="success" variant="subtle">Oui</UBadge>
+              <span v-else class="text-muted text-sm">—</span>
             </td>
             <td v-if="showEbayColumn" class="border-default border-b px-3 py-3 align-middle">
               <UBadge :color="(row.published_on_ebay ?? false) ? 'success' : 'neutral'" variant="subtle">
                 {{ (row.published_on_ebay ?? false) ? 'Oui' : 'Non' }}
               </UBadge>
-            </td>
-            <td class="border-default border-b px-3 py-3 align-middle">
-              <span v-if="pricingById.get(row.id)?.cardmarket_eur != null">
-                {{ eur.format(pricingById.get(row.id)!.cardmarket_eur!) }}
-              </span>
-              <span v-else class="text-muted">—</span>
-            </td>
-            <td class="border-default border-b px-3 py-3 align-middle">
-              <span v-if="pricingById.get(row.id)?.tcgplayer_usd != null">
-                {{ usd.format(pricingById.get(row.id)!.tcgplayer_usd!) }}
-              </span>
-              <span v-else class="text-muted">—</span>
             </td>
             <td class="text-muted border-default border-b px-3 py-3 align-middle text-xs whitespace-nowrap">
               <div>Créé le {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}</div>
@@ -349,7 +340,7 @@
                       {{ soldStatusLabel(row) }}
                     </UBadge>
                     <UBadge :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'" variant="subtle">
-                      Vinted {{ (row.published_on_vinted ?? false) ? 'oui' : 'non' }}
+                      {{ (row.published_on_vinted ?? false) ? 'Vinted oui' : 'Vinted' }}
                     </UBadge>
                     <UBadge
                       v-if="showEbayColumn"
@@ -405,17 +396,16 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
-import type { PricingLookup } from '~/composables/usePricing'
 import type { ArticleListFilterSold, ArticleListSortKey } from '~/composables/useUiPrefsLocalStorage'
 import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
 
 const props = defineProps<{
   articles: Article[]
-  pricingById: Map<number, PricingLookup>
   loading?: boolean
-  pricingLoading?: boolean
+  /** Incrémenté par la page parent après une vente pour vider la sélection. */
+  selectionResetKey?: number
   /** Show the “listed on eBay” column (same gate as eBay publish actions). */
   showEbayColumn?: boolean
   /** eBay enabled + account connected + listing wizard complete (settings); hides eBay actions otherwise. */
@@ -436,6 +426,7 @@ const emit = defineEmits<{
   'bulk-publish-vinted': [ids: number[]]
   'bulk-publish-ebay': [ids: number[]]
   'bulk-publish-both': [ids: number[]]
+  'bulk-sold': [articles: Article[]]
 }>()
 
 const { isDesktopApp } = useDesktopRuntime()
@@ -572,8 +563,7 @@ function normalizeSearch(s: string): string {
  * @returns {string} Haystack text for filtering
  */
 function articleSearchText(row: Article): string {
-  const p = props.pricingById.get(row.id)
-  return [row.pokemon_name, row.set_code, row.card_number, row.title, p?.set_name]
+  return [row.pokemon_name, row.set_code, row.card_number, row.title]
     .filter((x): x is string => Boolean(x && String(x).trim()))
     .join(' ')
 }
@@ -583,13 +573,8 @@ const eur = new Intl.NumberFormat('fr-FR', {
   currency: 'EUR',
   maximumFractionDigits: 2,
 })
-const usd = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2,
-})
 
-const filtered = computed(() => {
+const filtered: ComputedRef<Article[]> = computed(() => {
   let rows = [...props.articles]
   if (filterSold.value === 'sold') {
     rows = rows.filter((r) => r.is_sold)
@@ -607,9 +592,6 @@ const filtered = computed(() => {
   }
 
   rows.sort((a, b) => {
-    const pa = props.pricingById.get(a.id)
-    const pb = props.pricingById.get(b.id)
-    const cm = (p: PricingLookup | undefined) => p?.cardmarket_eur ?? -1
     switch (sortKey.value) {
       case 'created_desc':
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -619,10 +601,6 @@ const filtered = computed(() => {
         return a.purchase_price - b.purchase_price
       case 'purchase_desc':
         return b.purchase_price - a.purchase_price
-      case 'cm_asc':
-        return cm(pa) - cm(pb)
-      case 'cm_desc':
-        return cm(pb) - cm(pa)
       default:
         return 0
     }
@@ -645,9 +623,11 @@ watch(
   },
 )
 
-const selectedRows = computed(() => props.articles.filter((a) => selectedIds.value.includes(a.id)))
+const selectedRows: ComputedRef<Article[]> = computed(() =>
+  props.articles.filter((a) => selectedIds.value.includes(a.id)),
+)
 
-const bulkVintedDisabledReason = computed(() => {
+const bulkVintedDisabledReason: ComputedRef<string> = computed(() => {
   if (!props.vintedChannelEnabled) {
     return 'Activez Vinted dans les paramètres marché.'
   }
@@ -660,7 +640,7 @@ const bulkVintedDisabledReason = computed(() => {
   return ''
 })
 
-const bulkEbayDisabledReason = computed(() => {
+const bulkEbayDisabledReason: ComputedRef<string> = computed(() => {
   if (!props.ebayPublishAvailable) {
     return 'eBay n’est pas prêt (connexion OAuth et configuration des annonces).'
   }
@@ -670,7 +650,7 @@ const bulkEbayDisabledReason = computed(() => {
   return ''
 })
 
-const bulkBothDisabledReason = computed(() => {
+const bulkBothDisabledReason: ComputedRef<string> = computed(() => {
   if (!props.vintedChannelEnabled || !props.ebayPublishAvailable) {
     return 'Activez Vinted et eBay dans les paramètres, et terminez la configuration eBay.'
   }
@@ -683,18 +663,32 @@ const bulkBothDisabledReason = computed(() => {
   return ''
 })
 
-const showBulkVinted = computed(() => props.vintedChannelEnabled === true)
-const showBulkEbay = computed(() => props.ebayPublishAvailable === true)
+const bulkSoldDisabledReason: ComputedRef<string> = computed(() => {
+  if (!selectedRows.value.length) {
+    return ''
+  }
+  if (selectedRows.value.some((a) => a.is_sold)) {
+    return 'Ne sélectionnez que des articles non vendus.'
+  }
+  return ''
+})
+
+const showBulkVinted: ComputedRef<boolean> = computed(() => props.vintedChannelEnabled === true)
+const showBulkEbay: ComputedRef<boolean> = computed(() => props.ebayPublishAvailable === true)
 /** Shown when both channels are ready (disabled on web: see bulkBothDisabledReason). */
-const showBulkBoth = computed(() => props.vintedChannelEnabled === true && props.ebayPublishAvailable === true)
+const showBulkBoth: ComputedRef<boolean> = computed(
+  () => props.vintedChannelEnabled === true && props.ebayPublishAvailable === true,
+)
 
-const selectedCount = computed(() => selectedIds.value.length)
+const selectedCount: ComputedRef<number> = computed(() => selectedIds.value.length)
 
-const allFilteredSelected = computed(
+const allFilteredSelected: ComputedRef<boolean> = computed(
   () => filtered.value.length > 0 && filtered.value.every((r) => selectedIds.value.includes(r.id)),
 )
 
-const someFilteredSelected = computed(() => filtered.value.some((r) => selectedIds.value.includes(r.id)))
+const someFilteredSelected: ComputedRef<boolean> = computed(() =>
+  filtered.value.some((r) => selectedIds.value.includes(r.id)),
+)
 
 /**
  * Whether the article id is part of the current multi-selection.
@@ -746,6 +740,38 @@ function toggleSelectAll(checked: boolean | 'indeterminate'): void {
 
 function clearSelection() {
   selectedIds.value = []
+}
+
+watch(
+  () => props.selectionResetKey,
+  (_, prev) => {
+    if (prev === undefined) {
+      return
+    }
+    clearSelection()
+  },
+)
+
+/**
+ * Ouvre la vente groupée : uniquement les lignes non vendues, dans l’ordre de sélection.
+ */
+function emitBulkSold() {
+  const rows: Article[] = []
+  const seen = new Set<number>()
+  for (const id of selectedIds.value) {
+    if (seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+    const a = props.articles.find((x) => x.id === id)
+    if (a && !a.is_sold) {
+      rows.push(a)
+    }
+  }
+  if (!rows.length) {
+    return
+  }
+  emit('bulk-sold', rows)
 }
 
 const UAvatar = resolveComponent('UAvatar')

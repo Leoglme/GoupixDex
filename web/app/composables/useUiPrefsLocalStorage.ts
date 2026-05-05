@@ -8,7 +8,7 @@ const ARTICLES_LIST_KEY = 'goupix_articles_list_prefs'
 const DASHBOARD_KEY = 'goupix_dashboard_prefs'
 
 export type ArticleListFilterSold = 'all' | 'sold' | 'unsold'
-export type ArticleListSortKey = 'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc' | 'cm_asc' | 'cm_desc'
+export type ArticleListSortKey = 'created_desc' | 'sold_desc' | 'purchase_asc' | 'purchase_desc'
 
 export interface ArticleListPrefs {
   filterSold: ArticleListFilterSold
@@ -18,14 +18,7 @@ export interface ArticleListPrefs {
   stockIncludeListed?: boolean
 }
 
-const SORT_KEYS: ArticleListSortKey[] = [
-  'created_desc',
-  'sold_desc',
-  'purchase_asc',
-  'purchase_desc',
-  'cm_asc',
-  'cm_desc',
-]
+const SORT_KEYS: ArticleListSortKey[] = ['created_desc', 'sold_desc', 'purchase_asc', 'purchase_desc']
 
 /**
  * Load persisted article-list UI preferences from `localStorage` (SSR-safe).

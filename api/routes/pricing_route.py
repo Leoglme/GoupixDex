@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from config import get_settings
 from core.database import get_db
 from core.deps import get_current_user
 from models.margin_settings import MarginSettings
@@ -57,9 +58,16 @@ def lookup_prices(
             raw = info.get("set_name")
             set_name = str(raw).strip() if raw else None
 
+    usd = pricing.get("tcgplayer_usd")
+    app = get_settings()
+    tcg_eur: float | None = None
+    if usd is not None and float(usd) > 0:
+        tcg_eur = _round_eur(float(usd) * app.usd_to_eur)
+
     return {
         "cardmarket_eur": _round_eur(pricing.get("cardmarket_eur")),
         "tcgplayer_usd": _round_eur(pricing.get("tcgplayer_usd")),
+        "tcgplayer_eur": tcg_eur,
         "average_price_eur": avg,
         "suggested_price_eur": suggested,
         "margin_percent_used": margin,

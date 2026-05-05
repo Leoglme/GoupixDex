@@ -8,6 +8,9 @@
         <p class="text-muted text-xs leading-snug">
           {{ titleFieldDescription }}
         </p>
+        <p v-if="vintedTitleUppercaseRunInvalid" class="text-xs leading-snug text-red-600 dark:text-red-400">
+          Vinted : pas plus de 3 majuscules d’affilée dans le titre. Ex. « Vstar » plutôt que « VSTAR ».
+        </p>
       </div>
       <UFormField v-if="!isGraded" label="État" class="min-w-0">
         <USelect v-model="condition" :items="conditionOptions" value-key="value" label-key="label" class="w-full" />
@@ -302,6 +305,8 @@ const emit = defineEmits<{
 }>()
 
 const VINTED_TITLE_MAX_CHARS: number = 100
+/** Vinted rejects 4+ consecutive uppercase letters in the listing title (e.g. "VSTAR"); runs of at most 3 are OK. */
+const VINTED_TITLE_UPPERCASE_RUN_RE = /\p{Lu}{4,}/u
 
 const title: Ref<string> = ref('')
 const description: Ref<string> = ref('')
@@ -538,6 +543,18 @@ const titleLenVinted = computed(() => title.value.trim().length)
 function titleWithinVintedLimit(): boolean {
   return titleLenVinted.value <= VINTED_TITLE_MAX_CHARS
 }
+
+/**
+ * Whether the title avoids 4+ consecutive uppercase Latin letters (Vinted rule).
+ * @returns {boolean} True when compliant
+ */
+function titleWithinVintedUppercaseRunRule(): boolean {
+  return !VINTED_TITLE_UPPERCASE_RUN_RE.test(title.value.trim())
+}
+
+const vintedTitleUppercaseRunInvalid = computed(
+  () => title.value.trim().length > 0 && !titleWithinVintedUppercaseRunRule(),
+)
 
 /**
  * Assign title from an external source (market search / clipboard), clamped to Vinted max length.
@@ -849,6 +866,9 @@ function buildCreateFormData(): FormData {
   if (!titleWithinVintedLimit()) {
     throw new Error('ARTICLE_TITLE_TOO_LONG')
   }
+  if (!titleWithinVintedUppercaseRunRule()) {
+    throw new Error('ARTICLE_TITLE_VINTED_UPPERCASE')
+  }
   const fd = new FormData()
   fd.append('title', title.value.trim())
   fd.append('description', description.value)
@@ -932,6 +952,15 @@ function submit() {
     toast.add({
       title: 'Titre trop long',
       description: `Vinted : maximum ${VINTED_TITLE_MAX_CHARS} caractères (espaces inclus). Actuellement : ${title.value.trim().length}.`,
+      color: 'error',
+    })
+    return
+  }
+  if (!titleWithinVintedUppercaseRunRule()) {
+    toast.add({
+      title: 'Titre Vinted',
+      description:
+        'Vinted refuse plus de 3 lettres majuscules consécutives dans le titre. Ajoutez un espace, un chiffre ou des minuscules pour couper la suite.',
       color: 'error',
     })
     return

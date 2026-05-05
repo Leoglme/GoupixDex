@@ -70,6 +70,8 @@ const props = defineProps<{
   loading?: boolean
   /** Number of matches returned by the last search (for display in submit button). */
   resultCount?: number | null
+  /** Prefill champs (ex. query string `/market?...`) — ne lance pas la recherche. */
+  seed?: MarketSearchInput | null
 }>()
 
 const emit = defineEmits<{
@@ -85,6 +87,25 @@ const frOnly: Ref<boolean> = ref(false)
 const minPrice: Ref<string> = ref('')
 const maxPrice: Ref<string> = ref('')
 const limit: Ref<number> = ref(50)
+
+watch(
+  () => props.seed,
+  (s) => {
+    if (!s) {
+      return
+    }
+    q.value = s.q
+    periodDays.value = s.periodDays
+    condition.value = s.condition
+    graded.value = s.graded
+    sort.value = s.sort
+    frOnly.value = s.frOnly
+    limit.value = s.limit
+    minPrice.value = s.minPrice != null ? String(s.minPrice) : ''
+    maxPrice.value = s.maxPrice != null ? String(s.maxPrice) : ''
+  },
+  { deep: true, immediate: true },
+)
 
 const periodOptions = [
   { label: '7 derniers jours', value: 7 },

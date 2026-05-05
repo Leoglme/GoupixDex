@@ -4,15 +4,15 @@
       <div>
         <p class="text-highlighted text-sm font-medium">Aperçu du marché</p>
         <p class="text-muted text-xs">
-          Basé sur <span class="text-highlighted font-medium">{{ stats.count }}</span> annonce<span
-            v-if="stats.count > 1"
+          <span class="text-highlighted font-medium">eBay (France)</span> · basé sur
+          <span class="text-highlighted font-medium">{{ stats.count }}</span> annonce<span v-if="stats.count > 1"
             >s</span
           >
           analysée<span v-if="stats.count > 1">s</span>
           <span v-if="totalMatches > stats.count">
             (sur {{ totalMatches.toLocaleString('fr-FR') }} résultat<span v-if="totalMatches > 1">s</span>)
           </span>
-          — annonces publiées sur les {{ periodDays }} dernier<span v-if="periodDays > 1">s</span> jour<span
+          — annonces eBay publiées au cours des {{ periodDays }} dernier<span v-if="periodDays > 1">s</span> jour<span
             v-if="periodDays > 1"
             >s</span
           >.

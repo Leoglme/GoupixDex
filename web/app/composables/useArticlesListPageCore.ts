@@ -1,6 +1,5 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
-import type { PricingLookup } from '~/composables/usePricing'
 import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
 
 export type ArticlesListPageVariant = 'listed' | 'stock'
@@ -33,7 +32,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     startEbayBatch,
   } = useArticles()
   const { getSettings } = useSettings()
-  const { lookupMany } = usePricing()
   const toast = useToast()
   const { isDesktopApp } = useDesktopRuntime()
   const { startJob } = useWardrobeLocalSync()
@@ -43,17 +41,17 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const vintedChannelEnabled: Ref<boolean> = ref(false)
 
   const allArticles: Ref<Article[]> = ref([])
-  const pricingById: Ref<Map<number, PricingLookup>> = ref(new Map())
   const loading: Ref<boolean> = ref(true)
-  const pricingLoading: Ref<boolean> = ref(false)
-  const fetchMarketData: Ref<boolean> = ref(false)
 
   /** My stock: include listings already online (persisted; default off). */
   const stockIncludeListed: Ref<boolean> = ref(false)
 
   const soldOpen: Ref<boolean> = ref(false)
-  const soldArticle: Ref<Article | null> = ref(null)
+  /** Fiches en cours de vente (1 = unitaire, plusieurs = lot). */
+  const soldArticles: Ref<Article[] | null> = ref(null)
   const soldSubmitting: Ref<boolean> = ref(false)
+  /** Incrémenté après une vente enregistrée pour vider la sélection dans la liste. */
+  const articleListSelectionReset: Ref<number> = ref(0)
 
   const deleteOpen: Ref<boolean> = ref(false)
   const deleteId: Ref<number | null> = ref(null)
@@ -144,17 +142,10 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     loading.value = true
     try {
       allArticles.value = await listArticles()
-      if (fetchMarketData.value) {
-        pricingLoading.value = true
-        pricingById.value = await lookupMany(allArticles.value, 4)
-      } else {
-        pricingById.value = new Map()
-      }
     } catch (e) {
       toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
     } finally {
       loading.value = false
-      pricingLoading.value = false
     }
   }
 
@@ -192,37 +183,65 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     })
   }
 
-  watch(fetchMarketData, () => {
-    refresh()
-  })
-
   /**
+   * Ouvre la modale « vendu » pour un ou plusieurs articles (lot : parts égales).
    *
-   * @param a
+   * @param articles - Liste non vide ; les lignes déjà vendues devraient être exclues par l’appelant.
    */
-  function openSold(a: Article) {
-    soldArticle.value = a
+  function openSold(articles: Article[]) {
+    if (!articles.length) {
+      return
+    }
+    soldArticles.value = articles
     soldOpen.value = true
   }
 
   /**
-   *
-   * @param payload
-   * @param payload.soldPrice
-   * @param payload.saleSource
+   * @param payload - Vente unitaire ou lot avec répartition calculée côté modale.
    */
-  async function confirmSold(payload: { soldPrice: number; saleSource: 'vinted' | 'ebay' }) {
-    if (!soldArticle.value) {
+  async function confirmSold(
+    payload:
+      | { mode: 'single'; soldPrice: number; saleSource: 'vinted' | 'ebay' }
+      | {
+          mode: 'bundle'
+          saleSource: 'vinted' | 'ebay'
+          allocations: { id: number; soldPrice: number }[]
+        },
+  ) {
+    const rows = soldArticles.value
+    if (!rows?.length) {
       return
     }
     soldSubmitting.value = true
     try {
-      await markSold(soldArticle.value.id, {
-        sold_price: payload.soldPrice,
-        sale_source: payload.saleSource,
-      })
-      toast.add({ title: 'Article marqué comme vendu', color: 'success' })
+      if (payload.mode === 'single') {
+        const id = rows[0]?.id
+        if (id == null) {
+          return
+        }
+        await markSold(id, {
+          sold_price: payload.soldPrice,
+          sale_source: payload.saleSource,
+        })
+        toast.add({ title: 'Article marqué comme vendu', color: 'success' })
+      } else {
+        for (const a of payload.allocations) {
+          await markSold(a.id, {
+            sold_price: a.soldPrice,
+            sale_source: payload.saleSource,
+          })
+        }
+        toast.add({
+          title:
+            payload.allocations.length > 1
+              ? `${payload.allocations.length} articles marqués comme vendus`
+              : 'Article marqué comme vendu',
+          color: 'success',
+        })
+      }
       soldOpen.value = false
+      soldArticles.value = null
+      articleListSelectionReset.value += 1
       await refresh()
     } catch (e) {
       toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
@@ -578,16 +597,14 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     displayedArticles,
     hasAnyArticles,
     stockAllListed,
-    pricingById,
     loading,
-    pricingLoading,
-    fetchMarketData,
     wardrobeSyncing,
     ebayPublishAvailable,
     vintedChannelEnabled,
     soldOpen,
-    soldArticle,
+    soldArticles,
     soldSubmitting,
+    articleListSelectionReset,
     deleteOpen,
     deleteId,
     bulkDeleteOpen,
