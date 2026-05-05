@@ -6,6 +6,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from app_types.ebay_browse import (
     ConditionFilter,
@@ -22,6 +23,7 @@ from services.ebay_price_aggregator_service import aggregate_prices, partition_o
 from services.ebay_sold_scrape_rate_limit import acquire_sold_scrape_slot
 from services.ebay_sold_scrape_service import ebay_fr_sold_search_url, scrape_sold_listings
 from services.ebay_sold_top_service import aggregate_top_sold
+from services.ebay_sold_top_worker import get_job, peek_items_sample, submit_job
 
 logger = logging.getLogger(__name__)
 
@@ -179,14 +181,33 @@ async def sold_scrape_html(
     Window goes up to ``720`` hours (30 days).
     """
     app = get_settings()
+
+    # If the worker has a fresh cached top result for the same (q, window),
+    # reuse its items_sample — saves an eBay roundtrip *and* the rate-limit
+    # slot, which matters when the user just searched in Top mode and
+    # switches to List mode.
+    cached_sample = peek_items_sample(q=q.strip(), window_hours=window_hours)
+    if cached_sample is not None:
+        return {
+            "query": q.strip(),
+            "window_hours": window_hours,
+            "items": cached_sample[:limit],
+            "error": None,
+            "ebay_sold_search_url": ebay_fr_sold_search_url(
+                q=q.strip(), page_size=min(60, max(limit, 10)),
+            ),
+            "source": "ebay_html_scrape_cached_from_top",
+            "cached": True,
+        }
+
     retry_after = await acquire_sold_scrape_slot(user.id, app.ebay_sold_scrape_min_interval_seconds)
     if retry_after > 0:
         iv = app.ebay_sold_scrape_min_interval_seconds
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
-                f"Limite : une recherche « vendus eBay » toutes les {iv:g} s "
-                f"(réessayez dans {retry_after} s)."
+                f"Rate limit: at most one eBay sold-search every {iv:g} s "
+                f"(retry in {retry_after} s)."
             ),
             headers={"Retry-After": str(retry_after)},
         )
@@ -198,64 +219,94 @@ async def sold_scrape_html(
         "error": err,
         "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=min(60, max(limit, 10))),
         "source": "ebay_html_scrape",
+        "cached": False,
     }
 
 
-@router.get("/sold-top", response_model=None)
-async def sold_top(
+class SoldTopSubmitBody(BaseModel):
+    """Body for ``POST /ebay/market/sold-top`` — schedules a background scrape."""
+
+    q: str = Field(min_length=2, max_length=256)
+    window_hours: float = Field(default=168, ge=1, le=720)
+    pages: int = Field(default=10, ge=1, le=20)
+    scrape_limit: int = Field(default=600, ge=10, le=1000)
+    top_limit: int = Field(default=20, ge=1, le=100)
+    min_count: int = Field(default=1, ge=1, le=20)
+
+
+@router.post("/sold-top", response_model=None, status_code=status.HTTP_202_ACCEPTED)
+async def sold_top_submit(
     user: Annotated[User, Depends(get_current_user)],
-    q: Annotated[str, Query(min_length=2, max_length=256)],
-    window_hours: Annotated[float, Query(ge=1, le=720)] = 168,
-    pages: Annotated[int, Query(ge=1, le=5)] = 2,
-    scrape_limit: Annotated[int, Query(ge=10, le=300)] = 180,
-    top_limit: Annotated[int, Query(ge=1, le=100)] = 30,
-    min_count: Annotated[int, Query(ge=1, le=20)] = 1,
+    body: SoldTopSubmitBody,
 ) -> dict[str, Any]:
     """
-    Top des cartes les plus vendues dans la fenêtre, agrégées depuis le
-    scrape HTML public eBay.fr.
+    Submit a background top-sold scrape job and return its ``job_id``
+    (consumed via ``GET /ebay/market/sold-top/{job_id}``).
 
-    Le résultat est trié par ``count`` (puis valeur cumulée). Fenêtre par
-    défaut : 7 jours (168 h) ; valeurs autorisées de 1 h à 720 h (30 j).
-    ``pages`` (1-5) déclenche autant de requêtes paginées vers eBay (60
-    annonces / page), avec déduplication par ``item_id``. Même rate-limit
-    utilisateur que ``/sold-scrape`` — un appel utilisateur peut donc
-    générer plusieurs requêtes vers eBay.
+    When a fresh cached result (TTL 15 min) exists for the same parameters,
+    the job comes back already in ``status="completed"`` with its
+    ``result`` populated — no eBay scrape triggered. The per-user rate-limit
+    only fires when an actual scrape is launched.
     """
     app = get_settings()
-    retry_after = await acquire_sold_scrape_slot(user.id, app.ebay_sold_scrape_min_interval_seconds)
-    if retry_after > 0:
-        iv = app.ebay_sold_scrape_min_interval_seconds
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Limite : une recherche « vendus eBay » toutes les {iv:g} s "
-                f"(réessayez dans {retry_after} s)."
-            ),
-            headers={"Retry-After": str(retry_after)},
-        )
-    items, err = await scrape_sold_listings(
-        q=q.strip(),
-        window_hours=window_hours,
-        limit=scrape_limit,
-        pages=pages,
+    job = submit_job(
+        user_id=user.id,
+        q=body.q.strip(),
+        window_hours=body.window_hours,
+        pages=body.pages,
+        scrape_limit=body.scrape_limit,
+        top_limit=body.top_limit,
+        min_count=body.min_count,
         app=app,
     )
-    grouped = aggregate_top_sold(items, min_count=min_count, limit_per_category=top_limit)
+
+    cache_hit = job.status == "completed" and job.result is not None
+    if not cache_hit:
+        retry_after = await acquire_sold_scrape_slot(
+            user.id, app.ebay_sold_scrape_min_interval_seconds,
+        )
+        if retry_after > 0:
+            iv = app.ebay_sold_scrape_min_interval_seconds
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Rate limit: at most one eBay sold-search every {iv:g} s "
+                    f"(retry in {retry_after} s)."
+                ),
+                headers={"Retry-After": str(retry_after)},
+            )
+
     return {
-        "query": q.strip(),
-        "window_hours": window_hours,
-        "pages_requested": pages,
-        "total_observed": len(items),
-        "cards": grouped["cards"],
-        "graded": grouped["graded"],
-        "sealed": grouped["sealed"],
-        "groups_count": {
-            "cards": len(grouped["cards"]),
-            "graded": len(grouped["graded"]),
-            "sealed": len(grouped["sealed"]),
-        },
-        "error": err,
-        "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=60),
-        "source": "ebay_html_scrape_aggregated",
+        **job.to_public(),
+        "ebay_sold_search_url": ebay_fr_sold_search_url(q=body.q.strip(), page_size=60),
+        "cached": cache_hit,
+    }
+
+
+@router.get("/sold-top/{job_id}", response_model=None)
+async def sold_top_status(
+    user: Annotated[User, Depends(get_current_user)],
+    job_id: str,
+) -> dict[str, Any]:
+    """
+    Return the current state of a ``sold-top`` job.
+
+    The client polls this endpoint while ``status`` is ``pending`` or
+    ``running``. Once ``completed`` (or ``failed``), ``result`` is populated
+    and polling can stop. A job may only be read by its creator.
+    """
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown or expired job.",
+        )
+    if job.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This job does not belong to you.",
+        )
+    return {
+        **job.to_public(),
+        "ebay_sold_search_url": ebay_fr_sold_search_url(q=job.q, page_size=60),
     }

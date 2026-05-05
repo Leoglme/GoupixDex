@@ -117,11 +117,38 @@
           :description="displayError"
         />
 
-        <!-- Résultats : liste -->
-        <template v-else-if="viewMode === 'list'">
+        <!-- Barre de progression globale (un seul scrape alimente liste + tops) -->
+        <div
+          v-if="loading"
+          class="border-default bg-elevated/30 flex flex-col gap-2 rounded-xl border p-4"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-highlighted inline-flex items-center gap-2 text-sm font-medium">
+              <UIcon name="i-lucide-loader-circle" class="text-primary size-4 animate-spin" />
+              {{ progressLabel }}
+            </span>
+            <span class="text-muted text-xs tabular-nums">{{ progressPercent }}%</span>
+          </div>
+          <UProgress
+            :model-value="progressPercent"
+            :max="100"
+            size="sm"
+            color="primary"
+          />
+          <p class="text-muted text-xs">
+            {{ topScrape.totalObservedSoFar.value }} ventes uniques scannées —
+            regroupement à la fin du scrape.
+          </p>
+        </div>
+
+        <!-- List results -->
+        <template v-if="!displayError && viewMode === 'list'">
           <template v-if="hasSearched && listRows.length">
             <p class="text-muted text-sm">
               {{ listRows.length }} vente(s) dans la fenêtre. Tri d'origine eBay : terminées récemment.
+              <span v-if="topScrape.cached.value" class="text-primary inline-flex items-center gap-1 font-medium">
+                · <UIcon name="i-lucide-zap" class="size-3.5" /> servi depuis le cache
+              </span>
             </p>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <GoupixDexEbaySoldCard
@@ -133,7 +160,7 @@
           </template>
 
           <UAlert
-            v-else-if="hasSearched && listResult && !listRows.length && !loading"
+            v-else-if="hasSearched && topResult && !listRows.length && !loading"
             color="info"
             variant="subtle"
             icon="i-lucide-search-x"
@@ -141,9 +168,7 @@
             description="Essayez d'élargir à 7 jours ou reformulez la recherche."
           />
 
-          <div v-else-if="loading" class="flex justify-center py-16">
-            <UIcon name="i-lucide-loader-circle" class="text-primary size-10 animate-spin" />
-          </div>
+          <GoupixDexEbaySoldCardSkeleton v-else-if="loading" :count="8" />
 
           <div
             v-else-if="!hasSearched"
@@ -159,13 +184,17 @@
           </div>
         </template>
 
-        <!-- Résultats : tops (cards / graded / sealed) -->
-        <template v-else>
+        <!-- Top results (cards / graded / sealed) -->
+        <template v-else-if="!displayError">
+
           <template v-if="hasSearched && currentTopRows.length">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-muted text-sm">
                 Top {{ currentTopRows.length }} {{ currentTopLabel }} — agrégés sur
-                {{ topResult?.total_observed ?? 0 }} ventes scrapées.
+                {{ topResult?.total_observed ?? 0 }} ventes scrapées
+                <span v-if="topScrape.cached.value" class="text-primary inline-flex items-center gap-1 font-medium">
+                  · <UIcon name="i-lucide-zap" class="size-3.5" /> servi depuis le cache
+                </span>
               </p>
               <div class="text-muted flex flex-wrap items-center gap-3 text-xs">
                 <span class="inline-flex items-center gap-1">
@@ -192,7 +221,7 @@
           </template>
 
           <UAlert
-            v-else-if="hasSearched && topResult && !currentTopRows.length && !loading"
+            v-else-if="hasSearched && topResult && !currentTopRows.length && !topLoading"
             color="info"
             variant="subtle"
             icon="i-lucide-search-x"
@@ -200,22 +229,27 @@
             :description="emptyDescription"
           />
 
-          <div v-else-if="loading" class="flex justify-center py-16">
-            <UIcon name="i-lucide-loader-circle" class="text-primary size-10 animate-spin" />
-          </div>
+          <GoupixDexEbaySoldTopSkeleton v-else-if="topLoading" :count="6" />
 
           <div
-            v-else-if="!hasSearched"
+            v-else-if="!topResult"
             class="border-default/60 bg-elevated/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center"
           >
             <UIcon :name="emptyIcon" class="text-primary size-8" />
-            <p class="text-highlighted text-sm font-medium">Lancez une recherche pour générer le top</p>
+            <p class="text-highlighted text-sm font-medium">{{ topEmptyHeadline }}</p>
             <p class="text-muted max-w-md text-xs">
-              Le top fonctionne mieux avec des requêtes larges :
-              <span class="font-medium">« carte pokemon »</span>,
-              <span class="font-medium">« pokemon TCG »</span>,
-              <span class="font-medium">« Charizard »</span>.
+              {{ topEmptyHint }}
             </p>
+            <UButton
+              v-if="hasSearched"
+              color="primary"
+              variant="soft"
+              icon="i-lucide-trophy"
+              :disabled="q.trim().length < 2"
+              @click.prevent="runLoad"
+            >
+              Calculer le top pour cette recherche
+            </UButton>
           </div>
         </template>
       </div>
@@ -226,8 +260,11 @@
 <script setup lang="ts">
 import type { TabsItem } from '@nuxt/ui'
 
-import type { EbaySoldScrapeRow } from '~/composables/useEbaySoldScrape'
-import type { EbaySoldTopRow } from '~/composables/useEbaySoldTop'
+import type {
+  EbaySoldTopItem,
+  EbaySoldTopResultBody,
+  EbaySoldTopRow
+} from '~/composables/useEbaySoldTop'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -266,13 +303,24 @@ const hasSearched = ref(false)
 
 const windowHoursNum = computed(() => WINDOW_HOURS[windowKey.value])
 
-const listScrape = useEbaySoldScrape()
 const topScrape = useEbaySoldTop()
-
-const listResult = listScrape.result
 const topResult = topScrape.result
 
-const listRows = computed<EbaySoldScrapeRow[]>(() => listResult.value?.items ?? [])
+/** Client-side cache keyed by (q, window) for tops — skips a POST when the user
+ * returns to a search they just ran (the 15-minute server cache covers full page
+ * reloads; this covers the current session). */
+interface ClientTopCacheEntry {
+  result: EbaySoldTopResultBody
+  ebaySearchUrl: string | null
+  fetchedAt: number
+}
+const topClientCache = new Map<string, ClientTopCacheEntry>()
+
+function topCacheKey(qVal: string, win: WindowKey): string {
+  return `${qVal.trim().toLowerCase()}|${win}`
+}
+
+const listRows = computed<EbaySoldTopItem[]>(() => topResult.value?.items ?? [])
 
 const currentTopRows = computed<EbaySoldTopRow[]>(() => {
   const r = topResult.value
@@ -341,18 +389,50 @@ const emptyIcon = computed(() => {
   return 'i-lucide-trophy'
 })
 
-const loading = computed(() => listScrape.loading.value || topScrape.loading.value)
-
-const displayError = computed(() => {
-  if (viewMode.value === 'list') {
-    return listScrape.error.value ?? listResult.value?.error ?? ''
+const topEmptyHeadline = computed(() => {
+  if (hasSearched.value) {
+    return 'Le top n\'est pas encore calculé pour cette recherche'
   }
-  return topScrape.error.value ?? topResult.value?.error ?? ''
+  return 'Lancez une recherche pour générer le top'
 })
+
+const topEmptyHint = computed(() => {
+  if (hasSearched.value) {
+    return 'Le top demande un scrape plus profond (jusqu\'à 20 pages eBay) que la liste rapide. '
+      + 'Le résultat sera mis en cache 15 minutes côté serveur — utilisable instantanément ensuite.'
+  }
+  return 'Le top fonctionne mieux avec des requêtes larges : « carte pokemon », « pokemon TCG », « Charizard ».'
+})
+
+const topLoading = computed(() => topScrape.loading.value)
+const loading = topLoading
+
+const progressPercent = computed(() => {
+  const total = topScrape.pagesTotal.value
+  const done = topScrape.pagesDone.value
+  if (total <= 0) {
+    return 0
+  }
+  return Math.min(100, Math.round((done / total) * 100))
+})
+
+const progressLabel = computed(() => {
+  const total = topScrape.pagesTotal.value
+  const done = topScrape.pagesDone.value
+  if (topScrape.status.value === 'pending') {
+    return 'Préparation du scrape eBay…'
+  }
+  if (total <= 0) {
+    return 'Scrape eBay en cours…'
+  }
+  return `Scrape eBay — page ${done}/${total}`
+})
+
+const displayError = computed(() => topScrape.error.value ?? '')
 
 /** eBay « vendus » search URL — usable even if the API is unreachable. */
 const manualUrl = computed(() => {
-  const fromApi = (viewMode.value === 'list' ? listResult.value : topResult.value)?.ebay_sold_search_url?.trim()
+  const fromApi = topScrape.ebaySearchUrl.value?.trim()
   if (fromApi) {
     return fromApi
   }
@@ -372,9 +452,8 @@ function onSearchEnter(): void {
 }
 
 /**
- * Submit a sold-listings request matching the current view mode.
- * The 3 « top » modes share the same payload — switching between them
- * does not retrigger a fetch.
+ * Runs a single scrape that feeds both the list and the three top tabs.
+ * Switching tabs never refetches — it only filters ``topResult`` on the client.
  *
  * @returns {Promise<void>} Resolves once the request finishes (success or error).
  */
@@ -383,33 +462,41 @@ async function runLoad(): Promise<void> {
     return
   }
   hasSearched.value = true
-  if (viewMode.value === 'list') {
-    await listScrape.load({
-      q: q.value,
-      windowHours: windowHoursNum.value,
-      limit: 50
-    })
+
+  // Client cache: if we already have a result for (q, window), reuse it as-is
+  // without calling the API.
+  const key = topCacheKey(q.value, windowKey.value)
+  const cached = topClientCache.get(key)
+  if (cached) {
+    topScrape.cancel()
+    topScrape.result.value = cached.result
+    topScrape.ebaySearchUrl.value = cached.ebaySearchUrl
+    topScrape.cached.value = true
+    topScrape.status.value = 'completed'
+    topScrape.pagesDone.value = cached.result.pages_requested
+    topScrape.pagesTotal.value = cached.result.pages_requested
+    topScrape.totalObservedSoFar.value = cached.result.total_observed
     return
   }
-  await topScrape.load({
+
+  const fresh = await topScrape.load({
     q: q.value,
     windowHours: windowHoursNum.value,
-    scrapeLimit: 180,
-    topLimit: 50,
+    pages: 20,
+    scrapeLimit: 1000,
+    topLimit: 20,
     minCount: 1
   })
+  if (fresh) {
+    topClientCache.set(key, {
+      result: fresh,
+      ebaySearchUrl: topScrape.ebaySearchUrl.value,
+      fetchedAt: Date.now()
+    })
+  }
 }
 
-watch(viewMode, (next, prev) => {
-  if (!hasSearched.value || q.value.trim().length < 2) {
-    return
-  }
-  const wasList = prev === 'list'
-  const isList = next === 'list'
-  // Switching between the 3 « top » sub-tabs reuses the same payload — no refetch.
-  if (wasList === isList) {
-    return
-  }
-  void runLoad()
+onBeforeUnmount(() => {
+  topScrape.cancel()
 })
 </script>

@@ -4,10 +4,12 @@
   >
     <div class="bg-muted/30 relative aspect-square overflow-hidden">
       <img
-        v-if="row.image_url"
-        :src="row.image_url"
+        v-if="imgSrc"
+        :src="imgSrc"
+        :srcset="imgSrcset"
         :alt="row.title"
         loading="lazy"
+        decoding="async"
         class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
       />
       <div v-else class="text-muted flex size-full items-center justify-center">
@@ -31,10 +33,10 @@
         </div>
       </div>
 
-      <div v-if="row.sold_caption" class="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span class="inline-flex items-center gap-1">
+      <div v-if="soldLabel" class="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span class="inline-flex items-center gap-1" :title="row.sold_caption ?? undefined">
           <UIcon name="i-lucide-calendar-check" class="size-3" />
-          {{ row.sold_caption }}
+          {{ soldLabel }}
         </span>
       </div>
 
@@ -76,4 +78,20 @@ const priceFormatted = computed(() => {
   }
   return eur.format(v)
 })
+
+/** Prefer the parsed relative time (« il y a 2 h ») over the raw eBay
+ * caption when available — gives a uniform format across listings, even
+ * when eBay returned an absolute date (« 15 mars »). */
+const soldLabel = computed(() => {
+  const rel = formatRelativeHours(props.row.approx_hours_ago)
+  if (rel) {
+    return rel
+  }
+  return props.row.sold_caption ?? ''
+})
+
+/** Bump the eBay thumbnail (s-l140 by default) to a larger variant so the
+ * card image stays sharp at desktop widths and on retina displays. */
+const imgSrc = computed(() => upgradeEbayImage(props.row.image_url, 500))
+const imgSrcset = computed(() => ebayImageSrcset(props.row.image_url, 500))
 </script>

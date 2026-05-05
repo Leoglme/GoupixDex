@@ -8,10 +8,12 @@
 
     <div class="bg-muted/30 relative size-16 shrink-0 overflow-hidden rounded-lg sm:size-20">
       <img
-        v-if="row.image_url"
-        :src="row.image_url"
+        v-if="imgSrc"
+        :src="imgSrc"
+        :srcset="imgSrcset"
         :alt="row.display_title"
         loading="lazy"
+        decoding="async"
         class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
       />
       <div v-else class="text-muted flex size-full items-center justify-center">
@@ -87,18 +89,9 @@ const totalFormatted = computed(() => {
   return v == null || !Number.isFinite(v) || v <= 0 ? '' : eur.format(v)
 })
 
-const approxRecentLabel = computed(() => {
-  const h = props.row.approx_hours_min
-  if (h == null) {
-    return ''
-  }
-  if (h < 1) {
-    return 'il y a moins d\'1 h'
-  }
-  if (h < 24) {
-    return `il y a ${Math.round(h)} h`
-  }
-  const days = Math.round(h / 24)
-  return `il y a ${days} j`
-})
+const approxRecentLabel = computed(() => formatRelativeHours(props.row.approx_hours_min))
+
+/** Vignettes ~80 px sur grand écran : 225 nominal, 500 pour la 2x retina. */
+const imgSrc = computed(() => upgradeEbayImage(props.row.image_url, 225))
+const imgSrcset = computed(() => ebayImageSrcset(props.row.image_url, 225))
 </script>

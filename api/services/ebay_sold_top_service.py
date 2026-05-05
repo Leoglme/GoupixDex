@@ -54,9 +54,7 @@ _GRADE_RX = re.compile(
 
 #: Strong sealed-product signals (matched on the diacritic-stripped lowercased
 #: title). Order does not matter — first hit classifies the listing.
-_SEALED_SIGNALS: tuple[str, ...] = (
-    "scelle",
-    "sealed",
+_SEALED_STRONG_SIGNALS: tuple[str, ...] = (
     "etb",
     "elite trainer",
     "trainer box",
@@ -81,6 +79,20 @@ _SEALED_SIGNALS: tuple[str, ...] = (
     "build battle",
     "ultra premium",
     "pokebox",
+)
+
+#: Weak sealed hints often used for single cards in blister/sleeve.
+#: We only use these when no card-level hint is detected.
+_SEALED_WEAK_SIGNALS: tuple[str, ...] = (
+    "scelle",
+    "sealed",
+)
+
+#: Single-card set/promo codes commonly seen in French listings
+#: (e.g. "SWSH291", "SVP 052", "MEP031", "TG07").
+_CARD_CODE_RX = re.compile(
+    r"\b(?:svp|swsh|tg|gg|mep|sm|xy|bw|dp|hgss|sw|svp)\s*-?\s*\d{1,3}\b",
+    re.IGNORECASE,
 )
 
 _STOPWORDS: frozenset[str] = frozenset(
@@ -175,7 +187,13 @@ def _significant_tokens(title_norm: str) -> list[str]:
     return out
 
 
-def _classify(title_norm: str, *, has_grade: bool, has_card_number: bool) -> Category:
+def _classify(
+    title_norm: str,
+    *,
+    has_grade: bool,
+    has_card_number: bool,
+    has_card_code: bool,
+) -> Category:
     """
     Decide if the listing is a graded card, a sealed product, or a raw card.
 
@@ -183,20 +201,29 @@ def _classify(title_norm: str, *, has_grade: bool, has_card_number: bool) -> Cat
 
     1. ``has_grade`` — graded items always win, even if they happen to mention
        a sealed-product keyword (graded sealed boosters are ultra-rare).
-    2. ``has_card_number`` — a ``\\d+/\\d+`` pattern in the title denotes a
-       single card. Listings using the word « scellé(e) » in this case mean
-       *the card is sealed in plastic*, not « unopened booster product » — so
-       we never classify them as sealed.
-    3. Sealed-product keyword (ETB, display, blister, …) — sealed.
-    4. Default — raw card.
+    2. ``has_card_number`` or ``has_card_code`` — single-card hints (``12/102``,
+       ``SWSH291``, ``SVP052``, ``TG07``, …). Listings using « scellé(e) » in
+       this case mean *the card is sealed in plastic*, not unopened sealed
+       product — we keep them as cards.
+    3. Strong sealed-product keywords (ETB, display, booster box, coffret…) — sealed.
+    4. Weak sealed hints ("scellé"/"sealed"):
+       - if single-card hints are present (promo/code set), keep as card;
+       - otherwise sealed.
+    5. Default — raw card.
     """
     if has_grade:
         return "graded"
-    if has_card_number:
+    if has_card_number or has_card_code:
         return "cards"
-    for sig in _SEALED_SIGNALS:
+    for sig in _SEALED_STRONG_SIGNALS:
         if sig in title_norm:
             return "sealed"
+    has_weak_sealed = any(sig in title_norm for sig in _SEALED_WEAK_SIGNALS)
+    if has_weak_sealed:
+        has_card_hint = "promo" in title_norm or bool(_CARD_CODE_RX.search(title_norm))
+        if has_card_hint:
+            return "cards"
+        return "sealed"
     return "cards"
 
 
@@ -213,10 +240,12 @@ def _build_fingerprint(title: str) -> tuple[str, str | None, Category]:
         norm = _GRADE_RX.sub(" ", norm)
 
     card_match = _CARD_NUMBER_RX.search(norm)
+    has_card_code = _CARD_CODE_RX.search(norm) is not None
     category = _classify(
         norm,
         has_grade=grade is not None,
         has_card_number=card_match is not None,
+        has_card_code=has_card_code,
     )
     tokens = _significant_tokens(norm)
 

@@ -19,7 +19,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
@@ -477,6 +477,7 @@ async def scrape_sold_listings(
     limit: int = 50,
     pages: int = 1,
     app: AppSettings | None = None,
+    on_page_done: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """
     Return ``(items_as_dicts, error_message_or_none)``.
@@ -487,9 +488,13 @@ async def scrape_sold_listings(
     along with the matching error message. A small politeness pause sits
     between pages.
 
+    ``on_page_done`` is awaited after each successfully parsed page with
+    ``(page_num, total_unique_observed_so_far)`` — useful for surfacing
+    progress to a long-running job consumer.
+
     On success ``error_message_or_none`` is ``None``.
     """
-    pages_total = max(1, min(int(pages), 5))
+    pages_total = max(1, min(int(pages), 20))
     page_size = min(60, max(limit, 10))
 
     raw_rows: list[Any] = []
@@ -536,6 +541,12 @@ async def scrape_sold_listings(
                 seen_item_ids.add(r.item_id)
             raw_rows.append(r)
             new_in_page += 1
+
+        if on_page_done is not None:
+            try:
+                await on_page_done(page_num, len(raw_rows))
+            except Exception:
+                logger.exception("on_page_done callback raised — ignoring")
 
         # eBay quietly stops returning new listings past the available pages —
         # break early once a page yields nothing new.
