@@ -1,12 +1,17 @@
 <template>
-  <UDashboardPanel :id="`article-${id}`">
+  <UDashboardPanel :id="`article-edit-${id}`">
     <template #header>
       <UDashboardNavbar title="Modifier l'article">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mon stock </UButton>
+          <div class="flex flex-wrap items-center gap-2">
+            <UButton :to="`/articles/${id}`" color="neutral" variant="ghost" icon="i-lucide-eye">
+              Fiche article
+            </UButton>
+            <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mon stock </UButton>
+          </div>
         </template>
       </UDashboardNavbar>
     </template>

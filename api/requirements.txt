@@ -30,3 +30,6 @@ vinted-scraper>=3.0.0
 
 # Shipping label PDF generation (Avery L7173 — 8 labels per A4)
 reportlab>=4.0.0
+
+# Cardmarket order PDF text extraction
+pypdf>=5.0.0

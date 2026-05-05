@@ -24,6 +24,8 @@ class ArticleUpdate(BaseModel):
     clear_vinted_publication: bool | None = None
     #: Same for eBay: clears local tracking and stored listing id.
     clear_ebay_publication: bool | None = None
+    #: Optional link to a Cardmarket purchase line (FIFO stock tracking).
+    order_line_id: int | None = None
 
     @field_validator("title")
     @classmethod

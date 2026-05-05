@@ -29,7 +29,7 @@ function clampMaxPages(n: number): number {
 }
 
 /**
- * Map Axios / network failures to short French copy for the invites UI.
+ * Map Axios / network failures to short user-visible copy for the invites UI.
  *
  * @param e - Thrown rejection from `fetch*` calls.
  * @param fallback - Generic message when status-specific text does not apply.
@@ -85,15 +85,15 @@ export function useAmazonInvitesPage() {
   /** Latest worker message for the progress subtitle. */
   const refreshPhaseHint: Ref<string> = ref('')
   /**
-   * Fiches reçues via WebSocket pendant ``refresh()`` (recherche + vérification), pour affichage
-   * avant la fin du POST ``/amazon/invites/refresh``.
+   * Invites received over WebSocket during ``refresh()`` (search + verification), shown before
+   * ``POST /amazon/invites/refresh`` completes.
    */
   const streamingInvites: Ref<AmazonInvite[]> = ref([])
   /** ASIN whose invite request is in flight (worker ``POST /amazon/invites/request``). */
   const requestInviteLoadingAsin: Ref<string | null> = ref(null)
 
   /**
-   *
+   * Upsert one invite into ``streamingInvites`` keyed by ASIN or id.
    */
   function mergeStreamInvite(inv: AmazonInvite): void {
     const key = ((inv.asin ?? inv.id) || '').trim().toUpperCase()
@@ -111,7 +111,7 @@ export function useAmazonInvitesPage() {
   }
 
   /**
-   *
+   * Merge ``invite_preview`` from a WebSocket progress payload into ``streamingInvites``.
    */
   function mergeInvitePreviewFromWs(payload: AmazonWorkerProgressPayload): void {
     const raw = payload.invite_preview
@@ -264,10 +264,10 @@ export function useAmazonInvitesPage() {
   })
 
   /**
-   * Applique filtres statut / « masquer expirées » / recherche locale (comme ``displayItems``).
+   * Applies status / “hide expired” / local search filters (same as ``displayItems``).
    *
-   * @param list - Liste à filtrer (cache principal ou flux temps réel).
-   * @returns Liste filtrée.
+   * @param list - List to filter (main cache or real-time stream).
+   * @returns Filtered list.
    */
   function filterInvitesClientSide(list: AmazonInvite[]): AmazonInvite[] {
     let out = list
@@ -290,13 +290,13 @@ export function useAmazonInvitesPage() {
 
   const displayItems: ComputedRef<AmazonInvite[]> = computed(() => filterInvitesClientSide(items.value))
 
-  /** Même filtres que ``displayItems``, appliqués au flux temps réel pendant ``refresh()``. */
+  /** Same filters as ``displayItems``, applied to the real-time stream during ``refresh()``. */
   const streamingDisplayItems: ComputedRef<AmazonInvite[]> = computed(() =>
     filterInvitesClientSide(streamingInvites.value),
   )
 
   /**
-   * Envoie la demande d’invitation via le worker (POST Amazon), puis met à jour la ligne locale.
+   * Sends the invite request via the worker (POST Amazon), then updates the local row.
    */
   async function requestProductInvite(invite: AmazonInvite): Promise<void> {
     const asin = invite.asin?.trim()

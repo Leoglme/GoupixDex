@@ -64,6 +64,12 @@ class Article(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    order_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cardmarket_order_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="articles")
     images: Mapped[list["Image"]] = relationship(back_populates="article", cascade="all, delete-orphan")
+    order_line: Mapped["CardmarketOrderLine | None"] = relationship("CardmarketOrderLine", back_populates="articles")

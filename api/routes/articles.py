@@ -27,6 +27,7 @@ from schemas.articles import (
     VintedBatchStartBody,
 )
 from services import article_service
+from services.cardmarket_order_service import assign_article_order_line
 from services.combined_marketplace_service import CombinedMarketplaceService
 from services.ebay_background_service import EbayBackgroundService
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
@@ -51,6 +52,43 @@ def _parse_decimal(value: str | None) -> Decimal | None:
 
 def _parse_decimal_required(value: str) -> Decimal:
     return Decimal(str(value).strip())
+
+
+def _parse_optional_order_line_id(raw: str | None) -> int | None:
+    """Parse optional multipart ``order_line_id`` field."""
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return int(str(raw).strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid order_line_id (expected integer).",
+        ) from exc
+
+
+def _apply_order_line_assignment(
+    db: Session,
+    user: User,
+    article: Article,
+    order_line_id: int | None,
+) -> None:
+    """Attach purchase line or translate validation errors."""
+    try:
+        assign_article_order_line(db, user.id, article, order_line_id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "purchase_line_not_found":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ligne d'achat introuvable ou non autorisée.",
+            ) from exc
+        if code == "purchase_line_full":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Plus de quantité disponible sur cette ligne d'achat.",
+            ) from exc
+        raise
 
 
 def _form_bool(value: str | None) -> bool:
@@ -466,6 +504,7 @@ async def create_article(
     graded_grader_value_id: str | None = Form(None),
     graded_grade_value_id: str | None = Form(None),
     graded_cert_number: str | None = Form(None),
+    order_line_id: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -519,6 +558,7 @@ async def create_article(
         sold_at=sold_at_dt if sold_flag else None,
     )
     _validate_graded_article_or_raise(article)
+    _apply_order_line_assignment(db, user, article, _parse_optional_order_line_id(order_line_id))
 
     if _form_bool(wardrobe_vinted_listed):
         article.published_on_vinted = True
@@ -644,6 +684,9 @@ def update_article(
         raise HTTPException(status_code=404, detail="Article not found")
     article_service.update_article_from_body(article, body)
     _validate_graded_article_or_raise(article)
+    unset = body.model_dump(exclude_unset=True)
+    if "order_line_id" in unset:
+        _apply_order_line_assignment(db, user, article, body.order_line_id)
     db.commit()
     db.refresh(article)
     return article_service.article_to_dict(article)

@@ -1,7 +1,7 @@
 export default defineAppConfig({
   /**
-   * Rendu SVG natif : le mode `css` (masques / fonts) peut produire des glyphes tronqués
-   * dans WebView2 (app Tauri), notamment sur les icônes « refresh » à arcs multiples.
+   * Native SVG rendering: `css` mode (masks / fonts) can clip glyphs in WebView2 (Tauri app),
+   * especially on multi-arc “refresh” icons.
    */
   icon: {
     mode: 'svg',

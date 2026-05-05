@@ -97,7 +97,7 @@
               :ebay-publish-available="ebayPublishAvailable"
               :vinted-channel-enabled="vintedChannelEnabled"
               :bulk-publishing="bulkPublishBusy"
-              @edit="(id: number) => navigateTo(`/articles/${id}`)"
+              @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
               @delete="
                 (id: number) => {
                   deleteId = id

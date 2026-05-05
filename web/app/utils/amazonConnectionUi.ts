@@ -8,7 +8,7 @@ export interface AmazonConnectionBadge {
 }
 
 /**
- * Libellé + couleur de badge pour l’état de session Amazon (worker local).
+ * Badge label + color for Amazon session state (local worker).
  */
 export function amazonSessionBadge(session: AmazonSessionResponse | null): AmazonConnectionBadge {
   if (!session) {

@@ -5,6 +5,6 @@ export interface GoupixDexAlertProps {
   title: string
   description?: string
   icon?: string
-  /** Classes CSS pour l’icône (ex. animate-spin pour un loader). */
+  /** CSS classes for the icon (e.g. `animate-spin` for a loader). */
   iconClass?: string
 }

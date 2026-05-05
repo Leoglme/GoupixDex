@@ -11,6 +11,6 @@ export interface AmazonWorkerProgressPayload {
   items_found?: number
   item_title?: string
   asin?: string
-  /** Fiche normalisée (recherche ou vérification `/dp`) pour affichage incrémental pendant l’actualisation. */
+  /** Normalized invite (search or `/dp` check) for incremental UI while refreshing. */
   invite_preview?: AmazonInvite
 }

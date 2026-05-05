@@ -183,9 +183,12 @@
             </td>
             <td class="text-highlighted border-default border-b px-3 py-3 align-middle font-medium">
               <div class="flex flex-col gap-0.5">
-                <span class="truncate">
+                <NuxtLink
+                  :to="`/articles/${row.id}`"
+                  class="text-primary hover:text-primary/80 truncate font-medium underline-offset-2 hover:underline"
+                >
                   {{ row.pokemon_name || row.title || '—' }}
-                </span>
+                </NuxtLink>
                 <span class="text-muted truncate text-xs">
                   {{ row.title }}
                 </span>
@@ -324,9 +327,12 @@
                   <img :src="row.images[0]!.image_url" :alt="row.title" class="h-20 w-full object-cover" />
                 </div>
                 <div class="min-w-0 flex-1 space-y-1">
-                  <p class="text-highlighted truncate font-medium">
+                  <NuxtLink
+                    :to="`/articles/${row.id}`"
+                    class="text-primary block truncate font-medium underline-offset-2 hover:underline"
+                  >
                     {{ row.pokemon_name || row.title }}
-                  </p>
+                  </NuxtLink>
                   <p class="text-muted truncate text-xs">{{ row.set_code || '—' }} · {{ row.card_number || '—' }}</p>
                   <div class="flex flex-wrap gap-1.5 text-[11px]">
                     <UBadge v-if="!row.is_sold" color="error" variant="subtle">

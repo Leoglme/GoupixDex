@@ -95,10 +95,10 @@ export function useAmazonWorker() {
   }
 
   /**
-   * POST `/amazon/invites/request` — envoie la demande d’invitation côté Amazon (cookies du worker).
+   * POST `/amazon/invites/request` — submit invite request on Amazon (worker session cookies).
    *
-   * @param asin - ASIN produit (10 caractères).
-   * @returns {Promise<AmazonRequestInviteResponse>} Réponse worker (succès / message / fiche mise à jour).
+   * @param asin - Product ASIN (10 characters).
+   * @returns {Promise<AmazonRequestInviteResponse>} Worker response (success, message, updated row).
    */
   async function requestInvite(asin: string): Promise<AmazonRequestInviteResponse> {
     const { data } = await client.value.post<AmazonRequestInviteResponse>('/amazon/invites/request', {
@@ -108,10 +108,10 @@ export function useAmazonWorker() {
   }
 
   /**
-   * POST `/amazon/open-login` - lance Chromium (profil Amazon) sur la page de connexion.
-   * Alias serveur: `/amazon/browser/open-login`.
+   * POST `/amazon/open-login` — opens Chromium (Amazon profile) on the sign-in page.
+   * Server alias: `/amazon/browser/open-login`.
    *
-   * @returns Réponse worker `{ opened, url }`.
+   * @returns Worker response `{ opened, url }`.
    */
   async function openLoginBrowser(): Promise<{ opened: boolean; url: string }> {
     const { data } = await client.value.post<{ opened: boolean; url: string }>('/amazon/open-login')

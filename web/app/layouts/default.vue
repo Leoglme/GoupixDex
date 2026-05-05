@@ -113,6 +113,14 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       },
     },
     {
+      label: 'Commandes',
+      icon: 'i-lucide-file-text',
+      to: '/orders',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
       label: 'Journal des publications',
       icon: 'i-lucide-scroll-text',
       to: '/articles/listing-logs',

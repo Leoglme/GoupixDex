@@ -32,6 +32,16 @@ export interface Article {
   ebay_published_at?: string | null
   created_at: string
   sold_at: string | null
+  order_line_id?: number | null
+  order_context?: {
+    order_line_id: number
+    order_id: number
+    external_order_id: string
+    paid_at: string | null
+    unit_price_eur: number
+    seller_username: string | null
+    seller_country_code: string | null
+  } | null
   images: ArticleImage[]
 }
 
@@ -106,6 +116,7 @@ export interface ArticleUpdateBody {
   clear_vinted_publication?: boolean
   /** Edit: reset eBay tracking to “unpublished” in GoupixDex. */
   clear_ebay_publication?: boolean
+  order_line_id?: number | null
 }
 
 /**

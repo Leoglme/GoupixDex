@@ -67,6 +67,40 @@
         <UInput v-model="cardNumber" class="w-full" />
       </UFormField>
     </div>
+
+    <UCard
+      v-if="mode === 'create' && (orderMatchLoading || orderMatchCandidates.length > 0)"
+      class="ring-default/60 border-primary/15 from-primary/5 bg-elevated/40 shadow-sm ring-1"
+      :ui="{ body: 'p-4 sm:p-5 space-y-3' }"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-highlighted text-sm font-medium">Achats Cardmarket</p>
+        <UIcon v-if="orderMatchLoading" name="i-lucide-loader-2" class="text-primary size-5 shrink-0 animate-spin" />
+      </div>
+      <p v-if="!orderMatchLoading && orderMatchCandidates.length" class="text-muted text-xs leading-relaxed">
+        Lignes trouvées pour cette carte. Par défaut, la commande la plus ancienne avec stock (FIFO) est liée ; le prix
+        d’achat affiché correspond à votre achat le plus récent parmi les lignes encore disponibles.
+      </p>
+      <UFormField v-if="orderMatchCandidates.length" label="Lier à une ligne d’achat">
+        <USelect
+          v-model="selectedOrderLineIdStr"
+          :items="orderLineSelectItems"
+          value-key="value"
+          label-key="label"
+          class="w-full"
+          placeholder="Choisir une ligne…"
+        />
+      </UFormField>
+      <div v-if="orderMatchCandidates.length" class="space-y-1.5">
+        <p class="text-muted text-xs font-medium uppercase">Historique (date · prix)</p>
+        <ul class="text-muted max-h-40 space-y-1 overflow-y-auto text-xs">
+          <li v-for="c in orderMatchCandidates" :key="c.order_line_id" class="flex justify-between gap-2 tabular-nums">
+            <span>{{ formatOrderMatchRow(c) }}</span>
+          </li>
+        </ul>
+      </div>
+    </UCard>
+
     <div class="grid gap-4 sm:grid-cols-2">
       <UFormField label="Prix d'achat (€)" required>
         <UInput v-model="purchasePrice" type="text" inputmode="decimal" class="w-full" />
@@ -237,10 +271,11 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 import type { AppSettings } from '~/composables/useSettings'
 import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
+import type { OrderMatchResponse } from '~/types/Orders'
 import { EBAY_GRADE_OPTIONS, EBAY_PROFESSIONAL_GRADER_OPTIONS } from '~/utils/ebayTradingCardGrading'
 
 const props = withDefaults(
@@ -271,6 +306,10 @@ const VINTED_TITLE_MAX_CHARS: number = 100
 const title: Ref<string> = ref('')
 const description: Ref<string> = ref('')
 const pokemonName: Ref<string> = ref('')
+/** OCR variants for Cardmarket match (FR invoice vs EN printed name). */
+const ocrPokemonFrench: Ref<string> = ref('')
+const ocrPokemonEnglish: Ref<string> = ref('')
+const ocrPokemonPrinted: Ref<string> = ref('')
 const setCode: Ref<string> = ref('')
 const cardNumber: Ref<string> = ref('')
 const conditionOptions: { label: string; value: string }[] = [
@@ -291,6 +330,175 @@ const clearEbayPublication: Ref<boolean> = ref(false)
 const purchasePrice: Ref<string> = ref('')
 const sellPrice: Ref<string> = ref('')
 const toast = useToast()
+const { matchOrderLines } = useOrders()
+const orderMatchLoading: Ref<boolean> = ref(false)
+const orderMatchCandidates: Ref<OrderMatchResponse['candidates']> = ref([])
+const selectedOrderLineId: Ref<number | null> = ref(null)
+const ocrLanguageCode: Ref<string> = ref('')
+let orderMatchDebounce: ReturnType<typeof setTimeout> | null = null
+
+const selectedOrderLineIdStr: ComputedRef<string> = computed({
+  get(): string {
+    return selectedOrderLineId.value != null ? String(selectedOrderLineId.value) : ''
+  },
+  set(v: string): void {
+    selectedOrderLineId.value = v ? Number(v) : null
+    applyPricesFromSelectedLine()
+  },
+})
+
+const orderLineSelectItems: ComputedRef<{ label: string; value: string }[]> = computed(() =>
+  orderMatchCandidates.value.map((c) => ({
+    value: String(c.order_line_id),
+    label: `${formatShortDate(c.paid_at)} · ${eurFmt.format(c.unit_price_eur)} · reste ${c.remaining_units} · #${
+      c.external_order_id
+    }`,
+  })),
+)
+
+const eurFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+})
+
+/**
+ * Format a Cardmarket match row for the compact history list.
+ * @param c - Candidate row from the API.
+ * @returns Single-line summary (locale date + price + order id).
+ */
+function formatOrderMatchRow(c: OrderMatchResponse['candidates'][number]): string {
+  const d = formatShortDate(c.paid_at)
+  return `${d} · ${eurFmt.format(c.unit_price_eur)} · commande #${c.external_order_id}`
+}
+
+/**
+ * Parse ISO-ish date strings for short locale display.
+ * @param iso - Nullable API datetime.
+ * @returns Human-readable date or em dash.
+ */
+function formatShortDate(iso: string | null): string {
+  if (!iso) {
+    return '—'
+  }
+  try {
+    return new Date(iso).toLocaleDateString('fr-FR')
+  } catch {
+    return '—'
+  }
+}
+
+/**
+ * Recompute purchase and sell price from the selected purchase line and margin settings.
+ * @returns {Promise<void>} Nothing.
+ */
+async function applyPricesFromSelectedLine(): Promise<void> {
+  const id = selectedOrderLineId.value
+  if (id == null) {
+    return
+  }
+  const row = orderMatchCandidates.value.find((x) => x.order_line_id === id)
+  if (!row) {
+    return
+  }
+  let margin = 20
+  try {
+    const s = await getSettings()
+    margin = s.margin_percent
+  } catch {
+    /* keep default */
+  }
+  const purchase = row.unit_price_eur
+  const sell = purchase * (1 + margin / 100)
+  purchasePrice.value = formatMoneyInput(purchase)
+  sellPrice.value = formatMoneyInput(sell)
+}
+
+/**
+ * Format a number for price fields (dot decimal — server ``Decimal`` parsing).
+ * @param n - Amount in euros.
+ * @returns Two-decimal string suitable for ``purchasePrice`` / ``sellPrice``.
+ */
+function formatMoneyInput(n: number): string {
+  return (Math.round(n * 100) / 100).toFixed(2)
+}
+
+/**
+ * Build pipe-separated Pokémon names for GET /orders/match (FR / EN / printed vs invoice).
+ * @returns Combined string for API.
+ */
+function buildPokemonMatchNameParam(): string {
+  const parts = [ocrPokemonFrench.value, ocrPokemonEnglish.value, ocrPokemonPrinted.value, pokemonName.value]
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return [...new Set(parts)].join('|')
+}
+
+/**
+ * Map OCR language tokens to Cardmarket line codes (JA → JP).
+ * @param raw - Raw OCR language code.
+ * @returns Normalized code or undefined.
+ */
+function normalizeLangForOrderMatch(raw: string): string | undefined {
+  const u = raw.trim().toUpperCase()
+  if (!u) {
+    return undefined
+  }
+  if (u === 'JA' || u === 'JPN') {
+    return 'JP'
+  }
+  return u
+}
+
+/**
+ * Fetch matching Cardmarket lines and prefill purchase / FIFO link when creating an article.
+ * @returns {Promise<void>} Nothing.
+ */
+async function refreshOrderMatch(): Promise<void> {
+  if (props.mode !== 'create') {
+    return
+  }
+  const pk = buildPokemonMatchNameParam()
+  const sc = setCode.value.trim()
+  const cn = cardNumber.value.trim()
+  if (!pk || !sc || !cn) {
+    orderMatchCandidates.value = []
+    selectedOrderLineId.value = null
+    return
+  }
+  orderMatchLoading.value = true
+  try {
+    const langRaw = ocrLanguageCode.value.trim()
+    const lang = langRaw ? (normalizeLangForOrderMatch(langRaw) ?? langRaw) : undefined
+    const res = await matchOrderLines({
+      pokemon_name: pk,
+      set_code: sc,
+      card_number: cn,
+      condition: condition.value.trim(),
+      language_code: lang,
+    })
+    orderMatchCandidates.value = res.candidates
+    const fifo = res.fifo_order_line_id
+    selectedOrderLineId.value = fifo
+    if (res.suggested_purchase_price != null) {
+      let margin = 20
+      try {
+        const s = await getSettings()
+        margin = s.margin_percent
+      } catch {
+        /* ignore */
+      }
+      const purchase = res.suggested_purchase_price
+      const sell = purchase * (1 + margin / 100)
+      purchasePrice.value = formatMoneyInput(purchase)
+      sellPrice.value = formatMoneyInput(sell)
+    }
+  } catch {
+    orderMatchCandidates.value = []
+    selectedOrderLineId.value = null
+  } finally {
+    orderMatchLoading.value = false
+  }
+}
 
 const imageFiles: Ref<File[]> = ref([])
 const previews: Ref<string[]> = ref([])
@@ -353,6 +561,18 @@ onMounted(async () => {
   } catch {
     svcSettings.value = null
   }
+})
+
+watch([pokemonName, setCode, cardNumber, condition, ocrLanguageCode], (): void => {
+  if (props.mode !== 'create') {
+    return
+  }
+  if (orderMatchDebounce) {
+    clearTimeout(orderMatchDebounce)
+  }
+  orderMatchDebounce = setTimeout((): void => {
+    void refreshOrderMatch()
+  }, 450)
 })
 
 /**
@@ -459,7 +679,7 @@ function addImageFiles(files: File[]) {
  * @param scan.pricing.cardmarket_eur
  * @param scan.pricing.tcgplayer_usd
  */
-function applyScanPrefill(scan: {
+async function applyScanPrefill(scan: {
   listing_preview: { title: string; description: string; suggested_price: number | null }
   ocr: Record<string, unknown>
   pricing: { cardmarket_eur: number | null; tcgplayer_usd: number | null }
@@ -467,11 +687,17 @@ function applyScanPrefill(scan: {
   assignTitleFromExternal(scan.listing_preview.title)
   description.value = scan.listing_preview.description
   const o = scan.ocr
-  const en = typeof o.pokemon_name_english === 'string' ? o.pokemon_name_english : ''
-  const fr = typeof o.pokemon_name === 'string' ? o.pokemon_name : ''
-  pokemonName.value = en || fr
+  const nameFr = typeof o.pokemon_name_french === 'string' ? o.pokemon_name_french.trim() : ''
+  const nameEn = typeof o.pokemon_name_english === 'string' ? o.pokemon_name_english.trim() : ''
+  const printed = typeof o.pokemon_name === 'string' ? o.pokemon_name.trim() : ''
+  ocrPokemonFrench.value = nameFr
+  ocrPokemonEnglish.value = nameEn
+  ocrPokemonPrinted.value = printed
+  pokemonName.value = nameEn || nameFr || printed
   setCode.value = typeof o.set_code === 'string' ? o.set_code : ''
   cardNumber.value = typeof o.card_number === 'string' ? o.card_number : ''
+  const langRaw = o.language_code ?? o.lang ?? o.language
+  ocrLanguageCode.value = typeof langRaw === 'string' ? langRaw : typeof langRaw === 'number' ? String(langRaw) : ''
   if (scan.listing_preview.suggested_price != null) {
     purchasePrice.value = String(scan.listing_preview.suggested_price)
   }
@@ -484,6 +710,7 @@ function applyScanPrefill(scan: {
   wardrobeVintedListed.value = false
   wardrobeVintedPublishedAtIso.value = null
   wardrobeImportSoldPrice.value = null
+  await refreshOrderMatch()
 }
 
 /**
@@ -512,6 +739,9 @@ async function applyEbayPrefill(p: {
   sellPrice?: string
   imageUrl?: string | null
 }) {
+  ocrPokemonFrench.value = ''
+  ocrPokemonEnglish.value = ''
+  ocrPokemonPrinted.value = ''
   if (p.title) {
     assignTitleFromExternal(p.title)
   }
@@ -536,6 +766,7 @@ async function applyEbayPrefill(p: {
   if (p.sellPrice) {
     sellPrice.value = p.sellPrice
   }
+  await refreshOrderMatch()
   if (p.imageUrl) {
     try {
       const blob = await blobFromVintedPhotoUrl(p.imageUrl)
@@ -569,6 +800,9 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   description.value = p.description
   purchasePrice.value = p.purchasePrice || '0'
   sellPrice.value = p.sellPrice
+  ocrPokemonFrench.value = ''
+  ocrPokemonEnglish.value = ''
+  ocrPokemonPrinted.value = ''
   pokemonName.value = p.pokemonName
   setCode.value = p.setCode
   cardNumber.value = p.cardNumber
@@ -596,6 +830,7 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
       /* optional image */
     }
   }
+  await refreshOrderMatch()
 }
 
 defineExpose({
@@ -642,6 +877,9 @@ function buildCreateFormData(): FormData {
   }
   if (sellPrice.value.trim()) {
     fd.append('sell_price', sellPrice.value.trim())
+  }
+  if (selectedOrderLineId.value != null) {
+    fd.append('order_line_id', String(selectedOrderLineId.value))
   }
   for (const f of imageFiles.value) {
     fd.append('images', f)

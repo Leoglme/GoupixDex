@@ -27,6 +27,7 @@ from routes import scan as scan_routes
 from routes import settings_route
 from routes import shipping_route
 from routes import stats_route
+from routes import orders as orders_routes
 from routes import users as users_routes
 
 from core.win32_asyncio import ensure_proactor_event_loop
@@ -100,6 +101,7 @@ app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(users_routes.router)
 app.include_router(access_requests_routes.router)
 app.include_router(articles_routes.router)
+app.include_router(orders_routes.router)
 app.include_router(settings_route.router)
 app.include_router(ebay_route.router)
 app.include_router(ebay_market_route.router)

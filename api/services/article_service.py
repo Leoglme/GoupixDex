@@ -10,13 +10,17 @@ from sqlalchemy.orm import Session, joinedload
 
 from core.database import SessionLocal
 from models.article import Article
+from models.cardmarket_order_line import CardmarketOrderLine
 from schemas.articles import ArticleUpdate
 
 
 def list_articles_for_user(db: Session, user_id: int) -> list[Article]:
     return (
         db.query(Article)
-        .options(joinedload(Article.images))
+        .options(
+            joinedload(Article.images),
+            joinedload(Article.order_line).joinedload(CardmarketOrderLine.order),
+        )
         .filter(Article.user_id == user_id)
         .order_by(Article.created_at.desc())
         .all()
@@ -24,7 +28,14 @@ def list_articles_for_user(db: Session, user_id: int) -> list[Article]:
 
 
 def get_article(db: Session, article_id: int, user_id: int | None = None) -> Article | None:
-    q = db.query(Article).options(joinedload(Article.images)).filter(Article.id == article_id)
+    q = (
+        db.query(Article)
+        .options(
+            joinedload(Article.images),
+            joinedload(Article.order_line).joinedload(CardmarketOrderLine.order),
+        )
+        .filter(Article.id == article_id)
+    )
     if user_id is not None:
         q = q.filter(Article.user_id == user_id)
     return q.first()
@@ -32,6 +43,20 @@ def get_article(db: Session, article_id: int, user_id: int | None = None) -> Art
 
 def article_to_dict(article: Article) -> dict[str, Any]:
     """Serialize article and nested images for JSON responses."""
+    order_ctx: dict[str, Any] | None = None
+    if article.order_line_id and article.order_line is not None:
+        ln = article.order_line
+        ord_row = ln.order
+        if ord_row is not None:
+            order_ctx = {
+                "order_line_id": ln.id,
+                "order_id": ord_row.id,
+                "external_order_id": ord_row.external_order_id,
+                "paid_at": ord_row.paid_at.isoformat() if ord_row.paid_at else None,
+                "unit_price_eur": float(ln.unit_price_eur),
+                "seller_username": ord_row.seller_username,
+                "seller_country_code": ord_row.seller_country_code,
+            }
     return {
         "id": article.id,
         "user_id": article.user_id,
@@ -61,6 +86,8 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         else None,
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
+        "order_line_id": article.order_line_id,
+        "order_context": order_ctx,
         "images": [{"id": img.id, "image_url": img.image_url, "created_at": img.created_at.isoformat()} for img in article.images],
     }
 
@@ -113,6 +140,7 @@ def delete_articles_by_ids(db: Session, user_id: int, ids: list[int]) -> int:
 def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
     """Apply a partial update from ``ArticleUpdate`` (only set fields are changed)."""
     data = body.model_dump(exclude_unset=True)
+    data.pop("order_line_id", None)
     if "is_graded" in data:
         article.is_graded = bool(data["is_graded"])
         if not article.is_graded:

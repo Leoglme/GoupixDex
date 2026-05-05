@@ -6,7 +6,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import get_settings
-from models import Article, Base, Image, MarginSettings, User  # noqa: F401
+from models import (  # noqa: F401
+    Article,
+    Base,
+    CardmarketOrder,
+    CardmarketOrderLine,
+    Image,
+    MarginSettings,
+    User,
+)
 
 _settings = get_settings()
 engine = create_engine(

@@ -98,7 +98,7 @@ const toast = useToast()
 const { isDesktopApp } = useDesktopRuntime()
 
 const formRef: Ref<{
-  applyScanPrefill: (s: ScanCardResponse) => void
+  applyScanPrefill: (s: ScanCardResponse) => Promise<void>
   addImageFiles: (files: File[]) => void
   applyEbayPrefill: (p: {
     title?: string
@@ -112,7 +112,7 @@ const formRef: Ref<{
     imageUrl?: string | null
   }) => Promise<void>
 } | null> = ref<{
-  applyScanPrefill: (s: ScanCardResponse) => void
+  applyScanPrefill: (s: ScanCardResponse) => Promise<void>
   addImageFiles: (files: File[]) => void
   applyEbayPrefill: (p: {
     title?: string
@@ -159,7 +159,7 @@ async function runScan(addImage: boolean): Promise<void> {
       /* ignore */
     }
     const res = await scan(file, margin, scanOcrHint.value)
-    formRef.value?.applyScanPrefill(res)
+    await formRef.value?.applyScanPrefill(res)
     if (addImage) {
       formRef.value?.addImageFiles([file])
     }

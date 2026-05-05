@@ -178,7 +178,7 @@ useGoupixPageSeo(
 
 type ArticleFormExpose = {
   buildCreateFormData: () => FormData
-  applyScanPrefill: (s: ScanCardResponse) => void
+  applyScanPrefill: (s: ScanCardResponse) => Promise<void>
   addImageFiles: (files: File[]) => void
   applyWardrobeSlot: (p: import('~/composables/useWardrobeImportPrefill').WardrobeSlotPrefill) => Promise<void>
 }
@@ -256,7 +256,7 @@ async function runScanIntoForm(targetIndex: number, addImage: boolean): Promise<
   scanning.value = true
   try {
     const result = await scan(file, 20, slotHints.value[targetIndex] ?? '')
-    comp.applyScanPrefill(result)
+    await comp.applyScanPrefill(result)
     if (addImage) {
       comp.addImageFiles([file])
     }
@@ -314,7 +314,7 @@ async function onBulkScanFiles(e: Event): Promise<void> {
       }
       const first = chunk[0]!
       const result = await scan(first, 20, slotHints.value[idx] ?? '')
-      comp.applyScanPrefill(result)
+      await comp.applyScanPrefill(result)
       comp.addImageFiles(chunk)
       slotScanFiles.value[idx] = first
       const prev = slotScanPreviews.value[idx]
