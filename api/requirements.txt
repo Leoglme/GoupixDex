@@ -19,6 +19,9 @@ python-jose[cryptography]>=3.3.0
 nodriver>=0.48.0
 python-dotenv>=1.0.0
 httpx>=0.27.0
+# curl_cffi: HTTP client with TLS/JA3 fingerprint impersonation (Chrome/Firefox).
+# Used by ebay_sold_scrape_service to bypass datacenter-IP 403s on ebay.fr.
+curl_cffi>=0.7.0
 beautifulsoup4>=4.12.0
 Pillow>=10.0.0
 supabase>=2.0.0

@@ -79,6 +79,10 @@ class AppSettings(BaseSettings):
     ebay_redirect_uri: str | None = None
     #: Use sandbox API hosts (``auth.sandbox.ebay.com``, ``api.sandbox.ebay.com``).
     ebay_use_sandbox: bool = True
+    #: Optional HTTP(S) proxy for fetching eBay « vendus » HTML (datacenter IPs are often blocked).
+    ebay_sold_scrape_proxy: str | None = None
+    #: Min seconds between two « sold-scrape » calls **per user** (limits burst traffic to eBay).
+    ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
 
 
 @lru_cache

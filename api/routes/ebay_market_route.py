@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -19,6 +19,8 @@ from models.user import User
 from services.ebay_app_oauth_service import ebay_app_oauth_configured
 from services.ebay_browse_service import DEFAULT_LIMIT, MAX_LIMIT, browse_search
 from services.ebay_price_aggregator_service import aggregate_prices, partition_outliers
+from services.ebay_sold_scrape_rate_limit import acquire_sold_scrape_slot
+from services.ebay_sold_scrape_service import ebay_fr_sold_search_url, scrape_sold_listings
 
 logger = logging.getLogger(__name__)
 
@@ -144,4 +146,40 @@ async def search_market(
         "outliers_excluded": len(outliers),
         "total_matches": total,
         "warnings": warnings,
+    }
+
+
+@router.get("/sold-scrape", response_model=None)
+async def sold_scrape_html(
+    user: Annotated[User, Depends(get_current_user)],
+    q: Annotated[str, Query(min_length=2, max_length=256)],
+    window_hours: Annotated[float, Query(ge=1, le=168)] = 24,
+    limit: Annotated[int, Query(ge=1, le=60)] = 50,
+) -> dict[str, Any]:
+    """
+    **Completed listings** (sold) via **public eBay HTML search** — no Marketplace Insights OAuth.
+
+    May fail with bot protection (403); optional ``EBAY_SOLD_SCRAPE_PROXY`` in server env.
+    Rate-limited per user (default: one call every ``EBAY_SOLD_SCRAPE_MIN_INTERVAL_SECONDS``).
+    """
+    app = get_settings()
+    retry_after = await acquire_sold_scrape_slot(user.id, app.ebay_sold_scrape_min_interval_seconds)
+    if retry_after > 0:
+        iv = app.ebay_sold_scrape_min_interval_seconds
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Limite : une recherche « vendus eBay » toutes les {iv:g} s "
+                f"(réessayez dans {retry_after} s)."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+    items, err = await scrape_sold_listings(q=q.strip(), window_hours=window_hours, limit=limit, app=app)
+    return {
+        "query": q.strip(),
+        "window_hours": window_hours,
+        "items": items,
+        "error": err,
+        "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=min(60, max(limit, 10))),
+        "source": "ebay_html_scrape",
     }
