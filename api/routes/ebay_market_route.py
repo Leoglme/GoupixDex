@@ -21,6 +21,7 @@ from services.ebay_browse_service import DEFAULT_LIMIT, MAX_LIMIT, browse_search
 from services.ebay_price_aggregator_service import aggregate_prices, partition_outliers
 from services.ebay_sold_scrape_rate_limit import acquire_sold_scrape_slot
 from services.ebay_sold_scrape_service import ebay_fr_sold_search_url, scrape_sold_listings
+from services.ebay_sold_top_service import aggregate_top_sold
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ async def search_market(
 async def sold_scrape_html(
     user: Annotated[User, Depends(get_current_user)],
     q: Annotated[str, Query(min_length=2, max_length=256)],
-    window_hours: Annotated[float, Query(ge=1, le=168)] = 24,
+    window_hours: Annotated[float, Query(ge=1, le=720)] = 168,
     limit: Annotated[int, Query(ge=1, le=60)] = 50,
 ) -> dict[str, Any]:
     """
@@ -175,6 +176,7 @@ async def sold_scrape_html(
 
     May fail with bot protection (403); optional ``EBAY_SOLD_SCRAPE_PROXY`` in server env.
     Rate-limited per user (default: one call every ``EBAY_SOLD_SCRAPE_MIN_INTERVAL_SECONDS``).
+    Window goes up to ``720`` hours (30 days).
     """
     app = get_settings()
     retry_after = await acquire_sold_scrape_slot(user.id, app.ebay_sold_scrape_min_interval_seconds)
@@ -196,4 +198,64 @@ async def sold_scrape_html(
         "error": err,
         "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=min(60, max(limit, 10))),
         "source": "ebay_html_scrape",
+    }
+
+
+@router.get("/sold-top", response_model=None)
+async def sold_top(
+    user: Annotated[User, Depends(get_current_user)],
+    q: Annotated[str, Query(min_length=2, max_length=256)],
+    window_hours: Annotated[float, Query(ge=1, le=720)] = 168,
+    pages: Annotated[int, Query(ge=1, le=5)] = 2,
+    scrape_limit: Annotated[int, Query(ge=10, le=300)] = 180,
+    top_limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    min_count: Annotated[int, Query(ge=1, le=20)] = 1,
+) -> dict[str, Any]:
+    """
+    Top des cartes les plus vendues dans la fenêtre, agrégées depuis le
+    scrape HTML public eBay.fr.
+
+    Le résultat est trié par ``count`` (puis valeur cumulée). Fenêtre par
+    défaut : 7 jours (168 h) ; valeurs autorisées de 1 h à 720 h (30 j).
+    ``pages`` (1-5) déclenche autant de requêtes paginées vers eBay (60
+    annonces / page), avec déduplication par ``item_id``. Même rate-limit
+    utilisateur que ``/sold-scrape`` — un appel utilisateur peut donc
+    générer plusieurs requêtes vers eBay.
+    """
+    app = get_settings()
+    retry_after = await acquire_sold_scrape_slot(user.id, app.ebay_sold_scrape_min_interval_seconds)
+    if retry_after > 0:
+        iv = app.ebay_sold_scrape_min_interval_seconds
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Limite : une recherche « vendus eBay » toutes les {iv:g} s "
+                f"(réessayez dans {retry_after} s)."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+    items, err = await scrape_sold_listings(
+        q=q.strip(),
+        window_hours=window_hours,
+        limit=scrape_limit,
+        pages=pages,
+        app=app,
+    )
+    grouped = aggregate_top_sold(items, min_count=min_count, limit_per_category=top_limit)
+    return {
+        "query": q.strip(),
+        "window_hours": window_hours,
+        "pages_requested": pages,
+        "total_observed": len(items),
+        "cards": grouped["cards"],
+        "graded": grouped["graded"],
+        "sealed": grouped["sealed"],
+        "groups_count": {
+            "cards": len(grouped["cards"]),
+            "graded": len(grouped["graded"]),
+            "sealed": len(grouped["sealed"]),
+        },
+        "error": err,
+        "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=60),
+        "source": "ebay_html_scrape_aggregated",
     }

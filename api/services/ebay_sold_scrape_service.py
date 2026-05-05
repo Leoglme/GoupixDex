@@ -75,9 +75,9 @@ class ScrapedSoldRow:
     approx_hours_ago: float | None
 
 
-def ebay_fr_sold_search_url(*, q: str, page_size: int = 50) -> str:
+def ebay_fr_sold_search_url(*, q: str, page_size: int = 50, page: int = 1) -> str:
     """Human-readable same search as the scraper (for opening in a browser)."""
-    params = {
+    params: dict[str, str] = {
         "_nkw": q.strip(),
         "LH_Sold": "1",
         "LH_Complete": "1",
@@ -85,6 +85,8 @@ def ebay_fr_sold_search_url(*, q: str, page_size: int = 50) -> str:
         "_ipg": str(min(max(page_size, 10), 60)),
         "rt": "nc",
     }
+    if page > 1:
+        params["_pgn"] = str(page)
     return f"{EBAY_FR_SOLD_BASE}?{urlencode(params)}"
 
 
@@ -414,7 +416,13 @@ async def _fetch_with_profile(
     return resp.text
 
 
-async def fetch_sold_listings_html(*, q: str, page_size: int = 50, app: AppSettings | None = None) -> str:
+async def fetch_sold_listings_html(
+    *,
+    q: str,
+    page_size: int = 50,
+    page: int = 1,
+    app: AppSettings | None = None,
+) -> str:
     """
     Fetch the sold-listings HTML, trying each impersonation profile in turn.
 
@@ -423,7 +431,7 @@ async def fetch_sold_listings_html(*, q: str, page_size: int = 50, app: AppSetti
     the caller detects the challenge to surface a clean error to the user.
     """
     s = app or get_settings()
-    url = ebay_fr_sold_search_url(q=q, page_size=page_size)
+    url = ebay_fr_sold_search_url(q=q, page_size=page_size, page=page)
     proxy = (s.ebay_sold_scrape_proxy or "").strip() or None
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
@@ -467,42 +475,79 @@ async def scrape_sold_listings(
     q: str,
     window_hours: float,
     limit: int = 50,
+    pages: int = 1,
     app: AppSettings | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """
     Return ``(items_as_dicts, error_message_or_none)``.
 
+    With ``pages > 1``, the scraper paginates the eBay results and merges
+    them, deduplicating by ``item_id``. A bot challenge or transport error
+    on any page short-circuits and returns whatever was collected so far
+    along with the matching error message. A small politeness pause sits
+    between pages.
+
     On success ``error_message_or_none`` is ``None``.
     """
-    try:
-        html = await fetch_sold_listings_html(q=q, page_size=min(60, max(limit, 10)), app=app)
-    except EbayScrapeError as exc:
-        if exc.status_code is None:
-            logger.warning("eBay sold scrape transport error: %s", exc)
-            return [], f"Erreur réseau lors du téléchargement de la page eBay : {exc}"
-        return (
-            [],
-            f"eBay a refusé la page HTML (HTTP {exc.status_code}). "
-            f"Réessayez plus tard ou ouvrez la recherche « vendus » dans le navigateur.",
-        )
+    pages_total = max(1, min(int(pages), 5))
+    page_size = min(60, max(limit, 10))
 
-    if _looks_like_bot_challenge(html):
-        logger.warning("eBay served bot-challenge page (len=%d)", len(html))
-        return (
-            [],
-            "eBay a affiché une page de vérification anti-bot. "
-            "Ouvrez ebay.fr dans Safari ou Chrome sur cette machine, laissez la page se charger "
-            "(le challenge se résout tout seul), puis réessayez : l'API réutilisera vos cookies "
-            "de navigateur. À défaut, attendez 30–60 min et utilisez le lien manuel ci-dessous.",
-        )
+    raw_rows: list[Any] = []
+    seen_item_ids: set[str] = set()
+    err_msg: str | None = None
 
-    all_rows = _parse_sold_rows(html)
-    in_window = _filter_window(all_rows, window_hours=window_hours)
+    for page_num in range(1, pages_total + 1):
+        if page_num > 1:
+            await asyncio.sleep(0.8)
+        try:
+            html = await fetch_sold_listings_html(
+                q=q,
+                page_size=page_size,
+                page=page_num,
+                app=app,
+            )
+        except EbayScrapeError as exc:
+            if exc.status_code is None:
+                logger.warning("eBay sold scrape transport error (page %d): %s", page_num, exc)
+                err_msg = f"Erreur réseau lors du téléchargement de la page eBay : {exc}"
+            else:
+                err_msg = (
+                    f"eBay a refusé la page HTML (HTTP {exc.status_code}). "
+                    f"Réessayez plus tard ou ouvrez la recherche « vendus » dans le navigateur."
+                )
+            break
+
+        if _looks_like_bot_challenge(html):
+            logger.warning("eBay served bot-challenge page %d (len=%d)", page_num, len(html))
+            err_msg = (
+                "eBay a affiché une page de vérification anti-bot. "
+                "Ouvrez ebay.fr dans Safari ou Chrome sur cette machine, laissez la page se charger "
+                "(le challenge se résout tout seul), puis réessayez : l'API réutilisera vos cookies "
+                "de navigateur. À défaut, attendez 30–60 min et utilisez le lien manuel ci-dessous."
+            )
+            break
+
+        page_rows = _parse_sold_rows(html)
+        new_in_page = 0
+        for r in page_rows:
+            if r.item_id and r.item_id in seen_item_ids:
+                continue
+            if r.item_id:
+                seen_item_ids.add(r.item_id)
+            raw_rows.append(r)
+            new_in_page += 1
+
+        # eBay quietly stops returning new listings past the available pages —
+        # break early once a page yields nothing new.
+        if new_in_page == 0 and page_num > 1:
+            break
+
+    in_window = _filter_window(raw_rows, window_hours=window_hours)
     rows = in_window[:limit]
     if not rows:
         logger.info(
-            "eBay sold scrape empty: q=%r window=%sh parsed=%d in_window=%d html_len=%d",
-            q, window_hours, len(all_rows), len(in_window), len(html),
+            "eBay sold scrape empty: q=%r window=%sh pages=%d parsed=%d in_window=%d",
+            q, window_hours, pages_total, len(raw_rows), len(in_window),
         )
 
     items: list[dict[str, Any]] = []
@@ -518,4 +563,4 @@ async def scrape_sold_listings(
                 "approx_hours_ago": r.approx_hours_ago,
             },
         )
-    return items, None
+    return items, err_msg
