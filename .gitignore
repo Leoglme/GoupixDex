@@ -8,3 +8,6 @@ web/.env
 web/goupixdex.key
 web/goupixdex.key.pub
 integrations
+
+# Local Cursor / agent guidelines — not versioned
+CLAUDE.md
