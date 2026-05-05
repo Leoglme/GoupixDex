@@ -3,9 +3,12 @@
     <UCard>
       <template #header>
         <p class="text-highlighted text-sm font-medium">Cartes les plus rentables</p>
-        <p class="text-muted text-xs">Marge par article (toutes périodes)</p>
+        <p class="text-muted text-xs">Toutes vos ventes classées par marge décroissante</p>
       </template>
-      <ul v-if="stats?.top_profitable?.length" class="divide-default divide-y">
+      <ul
+        v-if="stats?.top_profitable?.length"
+        class="divide-default max-h-80 divide-y overflow-y-auto overscroll-contain"
+      >
         <li v-for="r in stats.top_profitable" :key="r.article_id" class="flex justify-between gap-2 py-2.5 text-sm">
           <span class="text-highlighted truncate">{{ r.title }}</span>
           <span class="text-primary shrink-0 font-semibold">{{ eur.format(r.profit_eur) }}</span>
@@ -17,9 +20,12 @@
     <UCard>
       <template #header>
         <p class="text-highlighted text-sm font-medium">Ventes les plus rapides</p>
-        <p class="text-muted text-xs">Délai entre mise en ligne et vente</p>
+        <p class="text-muted text-xs">Toutes vos ventes avec délai le plus court en premier</p>
       </template>
-      <ul v-if="stats?.fastest_sold?.length" class="divide-default divide-y">
+      <ul
+        v-if="stats?.fastest_sold?.length"
+        class="divide-default max-h-80 divide-y overflow-y-auto overscroll-contain"
+      >
         <li v-for="r in stats.fastest_sold" :key="r.article_id" class="flex justify-between gap-2 py-2.5 text-sm">
           <span class="truncate">{{ r.title }}</span>
           <span class="text-muted shrink-0 tabular-nums">{{ formatTimeToSell(r.hours_to_sell) }}</span>

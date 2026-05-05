@@ -2,7 +2,7 @@
  * Persistent UI preferences (localStorage), client-only.
  */
 
-import type { DashboardPeriod, DashboardRange } from '~/composables/useStats'
+import type { DashboardRange } from '~/composables/useStats'
 
 const ARTICLES_LIST_KEY = 'goupix_articles_list_prefs'
 const DASHBOARD_KEY = 'goupix_dashboard_prefs'
@@ -76,8 +76,6 @@ export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>): void {
 
 export interface DashboardPrefsPersisted {
   range: { startIso: string; endIso: string }
-  period: DashboardPeriod
-  fetchMarketData: boolean
 }
 
 /**
@@ -108,12 +106,6 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
         endIso: (p.range as { endIso: string }).endIso,
       }
     }
-    if (p.period === 'daily' || p.period === 'weekly' || p.period === 'monthly') {
-      out.period = p.period
-    }
-    if (typeof p.fetchMarketData === 'boolean') {
-      out.fetchMarketData = p.fetchMarketData
-    }
     return Object.keys(out).length ? out : null
   } catch {
     return null
@@ -123,14 +115,10 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
 /**
  * Persist dashboard UI preferences (range as ISO strings).
  *
- * @param prefs - Selected date range, stats period, and whether to include Cardmarket lookups.
+ * @param prefs - Selected date range for dashboard KPIs.
  * @returns {void} Nothing.
  */
-export function saveDashboardPrefs(prefs: {
-  range: DashboardRange
-  period: DashboardPeriod
-  fetchMarketData: boolean
-}): void {
+export function saveDashboardPrefs(prefs: { range: DashboardRange }): void {
   if (!import.meta.client) {
     return
   }
@@ -140,8 +128,6 @@ export function saveDashboardPrefs(prefs: {
         startIso: prefs.range.start.toISOString(),
         endIso: prefs.range.end.toISOString(),
       },
-      period: prefs.period,
-      fetchMarketData: prefs.fetchMarketData,
     }
     localStorage.setItem(DASHBOARD_KEY, JSON.stringify(payload))
   } catch {

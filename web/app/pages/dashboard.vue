@@ -12,14 +12,8 @@
 
       <UDashboardToolbar>
         <template #left>
+          <GoupixDexDashboardRangePresetSelect v-model="range" />
           <GoupixDexDashboardDateRangePicker v-model="range" class="-ms-1" />
-          <GoupixDexDashboardPeriodSelect v-model="period" :range="range" />
-        </template>
-        <template #right>
-          <div class="flex items-center gap-2">
-            <USwitch v-model="fetchMarketData" />
-            <span class="text-muted text-xs"> Données Cardmarket (plus lent) </span>
-          </div>
         </template>
       </UDashboardToolbar>
     </template>
@@ -90,27 +84,14 @@
                     {{ eur2.format(stats.inventory_estimated_profit_eur) }}
                   </dd>
                 </div>
-                <div class="sm:col-span-2">
-                  <dt class="text-muted text-xs tracking-wide uppercase">Prix Cardmarket</dt>
-                  <dd class="text-xl font-semibold tabular-nums">
-                    {{
-                      stats.estimated_cardmarket_unsold_eur != null
-                        ? eur2.format(stats.estimated_cardmarket_unsold_eur)
-                        : '—'
-                    }}
-                  </dd>
-                </div>
               </dl>
-              <p v-if="stats.market_lookup_errors && fetchMarketData" class="text-warning mt-4 text-xs">
-                {{ stats.market_lookup_errors }} carte(s) sans prix PokéWallet (réf. incomplète).
-              </p>
             </UCard>
 
             <!-- Vinted vs eBay sales pie -->
             <UCard>
               <template #header>
                 <p class="text-highlighted text-sm font-medium">Ventes Vinted vs eBay</p>
-                <p class="text-muted text-xs">Répartition du chiffre d'affaires par canal (toutes périodes)</p>
+                <p class="text-muted text-xs">Répartition du chiffre d'affaires sur la période sélectionnée</p>
               </template>
               <div class="flex flex-col items-center gap-6 sm:flex-row">
                 <div class="ring-default size-40 shrink-0 rounded-full shadow-sm ring-2" :style="pieStyle" />
@@ -131,7 +112,7 @@
                     </span>
                   </li>
                   <li v-if="!channelSegments.length" class="text-muted text-sm">
-                    Aucune vente enregistrée sur Vinted ou eBay.
+                    Aucune vente enregistrée sur Vinted ou eBay pour cette période.
                   </li>
                 </ul>
               </div>
@@ -139,7 +120,7 @@
           </div>
 
           <!-- Revenue chart driven by period + range -->
-          <GoupixDexDashboardRevenueChart :stats="stats" :period="period" />
+          <GoupixDexDashboardRevenueChart :stats="stats" :period="chartPeriod" />
 
           <!-- Recent sales -->
           <GoupixDexDashboardSalesTable :sales="stats.recent_sales" />
@@ -154,9 +135,9 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref, ShallowRef } from 'vue'
-import { sub } from 'date-fns'
 import type { DashboardPeriod, DashboardRange, DashboardStats } from '~/composables/useStats'
 import { dashboardPrefsToRange, loadDashboardPrefs, saveDashboardPrefs } from '~/composables/useUiPrefsLocalStorage'
+import { chartPeriodForDashboardRange, dashboardRangeForPreset } from '~/utils/dashboardRange'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -170,13 +151,10 @@ const toast = useToast()
 
 const stats: Ref<DashboardStats | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
-const fetchMarketData: Ref<boolean> = ref(false)
-const range: ShallowRef<DashboardRange> = shallowRef<DashboardRange>({
-  start: sub(new Date(), { days: 30 }),
-  end: new Date(),
-})
-const period: Ref<DashboardPeriod> = ref('daily')
+const range: ShallowRef<DashboardRange> = shallowRef<DashboardRange>(dashboardRangeForPreset('days30'))
 const suppressDashboardPrefsWatch: Ref<boolean> = ref(false)
+
+const chartPeriod: ComputedRef<DashboardPeriod> = computed(() => chartPeriodForDashboardRange(range.value))
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -201,7 +179,7 @@ const CHANNEL_COLORS = {
 type PieSegment = { value: number; label: string; color: string; count: number }
 
 const channelSegments: ComputedRef<PieSegment[]> = computed(() => {
-  const split = stats.value?.channel_split_total
+  const split = stats.value?.channel_split_period
   if (!split) {
     return []
   }
@@ -235,9 +213,9 @@ const pieStyle: ComputedRef<{ background: string }> = computed(() => {
   }
   let acc = 0
   const parts = segs.map((s) => {
-    const pct = (s.value / total) * 100
+    const pctVal = (s.value / total) * 100
     const start = acc
-    acc += pct
+    acc += pctVal
     return `${s.color} ${start}% ${acc}%`
   })
   return { background: `conic-gradient(${parts.join(', ')})` }
@@ -247,9 +225,8 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     stats.value = await fetchDashboard({
-      includeMarket: fetchMarketData.value,
       range: range.value,
-      period: period.value,
+      period: chartPeriod.value,
     })
   } catch {
     toast.add({ title: 'Impossible de charger les statistiques', color: 'error' })
@@ -265,14 +242,12 @@ function pct(value: number): string {
   return `${Math.round((value / channelTotal.value) * 100)}%`
 }
 
-watch([fetchMarketData, range, period], (): void => {
+watch(range, (): void => {
   if (suppressDashboardPrefsWatch.value) {
     return
   }
   saveDashboardPrefs({
     range: range.value,
-    period: period.value,
-    fetchMarketData: fetchMarketData.value,
   })
   void load()
 })
@@ -289,12 +264,6 @@ onMounted((): void => {
       if (r) {
         range.value = r
       }
-    }
-    if (saved?.period) {
-      period.value = saved.period
-    }
-    if (typeof saved?.fetchMarketData === 'boolean') {
-      fetchMarketData.value = saved.fetchMarketData
     }
   } finally {
     suppressDashboardPrefsWatch.value = false

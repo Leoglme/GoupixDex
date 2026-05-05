@@ -33,10 +33,6 @@ def _parse_iso(value: str | None) -> dt.datetime | None:
 def dashboard(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
-    include_market: bool = Query(
-        False,
-        description="If true, sums Cardmarket EUR per article via PokéWallet (slower).",
-    ),
     start: str | None = Query(None, description="Range start (ISO date or datetime)."),
     end: str | None = Query(None, description="Range end (ISO date or datetime)."),
     period: Literal["daily", "weekly", "monthly"] = Query(
@@ -47,7 +43,6 @@ def dashboard(
     return compute_dashboard_stats(
         db,
         user.id,
-        include_market=include_market,
         range_start=_parse_iso(start),
         range_end=_parse_iso(end),
         period=period,

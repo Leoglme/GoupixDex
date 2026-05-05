@@ -78,7 +78,6 @@ export interface DashboardStats {
 }
 
 export interface FetchDashboardOptions {
-  includeMarket?: boolean
   range?: DashboardRange
   period?: DashboardPeriod
 }
@@ -97,7 +96,7 @@ function toIsoDate(date: Date): string {
 /**
  * Dashboard aggregates (`GET /stats/dashboard`).
  *
- * @returns `fetchDashboard` with optional range / period / Cardmarket enrichment flag.
+ * @returns `fetchDashboard` with optional range and timeline bucket size.
  */
 export function useStats() {
   const { $api } = useNuxtApp()
@@ -105,13 +104,11 @@ export function useStats() {
   /**
    * Load dashboard KPIs for the selected window.
    *
-   * @param options - Optional custom range, aggregation period, and market-valuation toggle.
+   * @param options - Optional custom range and aggregation period for the revenue timeline.
    * @returns {Promise<DashboardStats>} Full dashboard payload from the API.
    */
   async function fetchDashboard(options: FetchDashboardOptions = {}) {
-    const params: Record<string, string | boolean> = {
-      include_market: options.includeMarket ?? false,
-    }
+    const params: Record<string, string> = {}
     if (options.range) {
       params.start = toIsoDate(options.range.start)
       params.end = toIsoDate(options.range.end)

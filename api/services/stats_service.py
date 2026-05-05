@@ -9,8 +9,6 @@ from sqlalchemy.orm import Session
 
 from models.article import Article
 from services import article_service
-from services.pricing_service import fetch_card_prices
-
 Period = Literal["daily", "weekly", "monthly"]
 
 
@@ -88,7 +86,6 @@ def compute_dashboard_stats(
     db: Session,
     user_id: int,
     *,
-    include_market: bool = False,
     range_start: dt.datetime | None = None,
     range_end: dt.datetime | None = None,
     period: Period = "daily",
@@ -168,10 +165,10 @@ def compute_dashboard_stats(
         if p is not None
     )
 
-    top_profitable = sorted(sold, key=_profit_eur, reverse=True)[:5]
+    top_profitable = sorted(sold, key=_profit_eur, reverse=True)
     with_duration = [(a, _hours_to_sell(a)) for a in sold]
     with_duration = [(a, h) for a, h in with_duration if h is not None]
-    fastest = sorted(with_duration, key=lambda x: x[1])[:5]
+    fastest = sorted(with_duration, key=lambda x: x[1])
 
     unsold = [a for a in rows if not a.is_sold]
     inventory_count = len(unsold)
@@ -227,25 +224,6 @@ def compute_dashboard_stats(
             }
         )
 
-    market_sum: float | None = None
-    market_sum_unsold: float | None = None
-    market_errors = 0
-    if include_market:
-        market_sum = 0.0
-        market_sum_unsold = 0.0
-        for a in rows:
-            if not a.set_code or not a.card_number:
-                continue
-            p = fetch_card_prices(a.set_code, a.card_number, a.pokemon_name)
-            if p.get("error"):
-                market_errors += 1
-            cm = p.get("cardmarket_eur")
-            if cm is not None:
-                v = float(cm)
-                market_sum += v
-                if not a.is_sold:
-                    market_sum_unsold += v
-
     return {
         "range": {
             "start": range_start.isoformat(),
@@ -273,11 +251,9 @@ def compute_dashboard_stats(
         "inventory_purchase_total_eur": round(inventory_purchase_total_eur, 2),
         "inventory_sell_total_eur": round(inventory_sell_total_eur, 2),
         "inventory_estimated_profit_eur": round(inventory_estimated_profit_eur, 2),
-        "estimated_cardmarket_inventory_eur": round(market_sum, 2) if market_sum is not None else None,
-        "estimated_cardmarket_unsold_eur": round(market_sum_unsold, 2)
-        if market_sum_unsold is not None
-        else None,
-        "market_lookup_errors": market_errors,
+        "estimated_cardmarket_inventory_eur": None,
+        "estimated_cardmarket_unsold_eur": None,
+        "market_lookup_errors": 0,
         "revenue_timeline": revenue_timeline,
         "recent_sales": recent_sales_payload,
         "top_profitable": [

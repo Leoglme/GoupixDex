@@ -121,14 +121,6 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       },
     },
     {
-      label: 'Journal des publications',
-      icon: 'i-lucide-scroll-text',
-      to: '/articles/listing-logs',
-      onSelect: () => {
-        open.value = false
-      },
-    },
-    {
       label: 'Prix du marché',
       icon: 'i-lucide-trending-up',
       to: '/market',
