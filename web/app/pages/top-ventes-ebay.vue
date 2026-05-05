@@ -1,7 +1,7 @@
 <template>
   <UDashboardPanel id="vendus-ebay">
     <template #header>
-      <UDashboardNavbar title="Vendus eBay">
+      <UDashboardNavbar title="Ventes terminées eBay">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
@@ -26,14 +26,14 @@
                 Cartes et lots récemment vendus sur eBay France
               </h1>
               <p class="text-muted text-sm leading-relaxed sm:text-base">
-                GoupixDex parse la page publique « vendus » d'eBay pour remonter les annonces clôturées, avec leur prix
-                de transaction et la date de vente. Aucun scope développeur eBay requis.
+                Explorez les ventes récentes correspondant à votre recherche : dernier prix affiché et période au choix
+                (24 h à 30 jours), puis comparez aussi les tops les plus fréquents.
               </p>
             </div>
             <div
-              class="bg-primary/15 text-primary hidden size-24 shrink-0 items-center justify-center rounded-2xl lg:flex"
+              class="bg-primary/15 hidden size-24 shrink-0 items-center justify-center rounded-2xl text-[#E53238] lg:flex"
             >
-              <UIcon name="i-lucide-circle-check" class="size-12" />
+              <UIcon name="i-simple-icons-ebay" class="size-12" />
             </div>
           </div>
         </div>
@@ -43,8 +43,8 @@
           <template #header>
             <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <p class="text-highlighted font-medium">Paramètres de recherche</p>
-              <p class="text-muted max-w-xs text-xs">
-                La recherche est lancée à chaque soumission (aucun historique, aucun cache).
+              <p class="text-muted max-w-sm text-xs sm:text-end">
+                Même recherche et même fenêtre : résultat immédiat si disponible (voir indicateur sous les résultats).
               </p>
             </div>
           </template>
@@ -117,7 +117,7 @@
           :description="displayError"
         />
 
-        <!-- Barre de progression globale (un seul scrape alimente liste + tops) -->
+        <!-- Global progress bar (one eBay analysis feeds list + tops) -->
         <div
           v-if="loading"
           class="border-default bg-elevated/30 flex flex-col gap-2 rounded-xl border p-4"
@@ -136,8 +136,8 @@
             color="primary"
           />
           <p class="text-muted text-xs">
-            {{ topScrape.totalObservedSoFar.value }} ventes uniques scannées —
-            regroupement à la fin du scrape.
+            {{ topScrape.totalObservedSoFar.value }} ventes uniques analysées —
+            regroupement à la fin de l'analyse.
           </p>
         </div>
 
@@ -191,7 +191,7 @@
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-muted text-sm">
                 Top {{ currentTopRows.length }} {{ currentTopLabel }} — agrégés sur
-                {{ topResult?.total_observed ?? 0 }} ventes scrapées
+                {{ topResult?.total_observed ?? 0 }} ventes analysées
                 <span v-if="topScrape.cached.value" class="text-primary inline-flex items-center gap-1 font-medium">
                   · <UIcon name="i-lucide-zap" class="size-3.5" /> servi depuis le cache
                 </span>
@@ -269,7 +269,7 @@ import type {
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Vendus eBay',
+  'Ventes terminées eBay',
   'Ventes terminées Pokémon TCG sur eBay France (page publique, sans scope Marketplace Insights).',
 )
 
@@ -398,7 +398,7 @@ const topEmptyHeadline = computed(() => {
 
 const topEmptyHint = computed(() => {
   if (hasSearched.value) {
-    return 'Le top demande un scrape plus profond (jusqu\'à 20 pages eBay) que la liste rapide. '
+    return 'Le top demande une analyse plus profonde (jusqu\'à 20 pages eBay) que la liste rapide. '
       + 'Le résultat sera mis en cache 15 minutes côté serveur — utilisable instantanément ensuite.'
   }
   return 'Le top fonctionne mieux avec des requêtes larges : « carte pokemon », « pokemon TCG », « Charizard ».'
@@ -420,12 +420,12 @@ const progressLabel = computed(() => {
   const total = topScrape.pagesTotal.value
   const done = topScrape.pagesDone.value
   if (topScrape.status.value === 'pending') {
-    return 'Préparation du scrape eBay…'
+    return 'Préparation de l’analyse eBay…'
   }
   if (total <= 0) {
-    return 'Scrape eBay en cours…'
+    return 'Analyse eBay en cours…'
   }
-  return `Scrape eBay — page ${done}/${total}`
+  return `Analyse eBay — page ${done}/${total}`
 })
 
 const displayError = computed(() => topScrape.error.value ?? '')
@@ -452,7 +452,7 @@ function onSearchEnter(): void {
 }
 
 /**
- * Runs a single scrape that feeds both the list and the three top tabs.
+ * Runs a single eBay analysis that feeds both the list and the three top tabs.
  * Switching tabs never refetches — it only filters ``topResult`` on the client.
  *
  * @returns {Promise<void>} Resolves once the request finishes (success or error).
