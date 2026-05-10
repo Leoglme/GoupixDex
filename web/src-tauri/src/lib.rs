@@ -8,7 +8,10 @@ use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-/// Local Python workers (`desktop_vinted_server.py`, `desktop_amazon_server.py`).
+#[cfg(debug_assertions)]
+mod db_sync;
+
+/// Local Python workers (Vinted, Amazon, Cardmarket sidecars / dev scripts).
 ///
 /// In `release`: embedded binaries via `bundle.externalBin` (PyInstaller).
 /// In `debug`  : `python` from PATH (or `GOUPIX_PYTHON`) running scripts in `api/`.
@@ -17,6 +20,7 @@ struct DesktopWorkers(Mutex<DesktopWorkersInner>);
 struct DesktopWorkersInner {
     vinted: Option<CommandChild>,
     amazon: Option<CommandChild>,
+    cardmarket: Option<CommandChild>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -163,6 +167,13 @@ fn amazon_local_port() -> u16 {
         .unwrap_or(18768)
 }
 
+fn cardmarket_local_port() -> u16 {
+    std::env::var("GOUPIX_CARDMARKET_LOCAL_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(18770)
+}
+
 /// Tue tout processus qui **écoute** déjà sur ces ports (instance Python orpheline, ancien worker).
 /// Sans ça, `restart_local_workers` ne fait que tuer les `CommandChild` suivis — insuffisant si le
 /// port est tenu par un autre PID (ex. script lancé à la main).
@@ -201,22 +212,24 @@ fn kill_processes_listening_on_ports(ports: &[u16]) {
 #[cfg(not(target_os = "windows"))]
 fn kill_processes_listening_on_ports(_ports: &[u16]) {}
 
-/// Attend que les deux workers acceptent une connexion TCP (bind réussi).
-fn verify_local_workers_accept_tcp(vinted_port: u16, amazon_port: u16) -> Result<(), String> {
+/// Attend que les workers locaux acceptent une connexion TCP (bind réussi).
+fn verify_local_workers_accept_tcp(ports: &[u16]) -> Result<(), String> {
     let attempts: u32 = 14;
     let pause = Duration::from_millis(200);
     let timeout = Duration::from_millis(900);
-    let addr_v: SocketAddr = format!("127.0.0.1:{vinted_port}")
-        .parse()
-        .map_err(|_| "adresse Vinted invalide".to_string())?;
-    let addr_a: SocketAddr = format!("127.0.0.1:{amazon_port}")
-        .parse()
-        .map_err(|_| "adresse Amazon invalide".to_string())?;
+    let mut addrs: Vec<SocketAddr> = Vec::new();
+    for &p in ports {
+        let addr: SocketAddr = format!("127.0.0.1:{p}")
+            .parse()
+            .map_err(|_| format!("adresse invalide pour le port {p}"))?;
+        addrs.push(addr);
+    }
 
     for i in 0..attempts {
-        let v_ok = std::net::TcpStream::connect_timeout(&addr_v, timeout).is_ok();
-        let a_ok = std::net::TcpStream::connect_timeout(&addr_a, timeout).is_ok();
-        if v_ok && a_ok {
+        let all_ok = addrs
+            .iter()
+            .all(|addr| std::net::TcpStream::connect_timeout(addr, timeout).is_ok());
+        if all_ok {
             return Ok(());
         }
         if i + 1 < attempts {
@@ -224,11 +237,11 @@ fn verify_local_workers_accept_tcp(vinted_port: u16, amazon_port: u16) -> Result
         }
     }
     Err(format!(
-        "Les ports {vinted_port} et {amazon_port} ne répondent pas après redémarrage (voir la console : souvent « port déjà utilisé » ou erreur Python)."
+        "Les ports {ports:?} ne répondent pas après redémarrage (voir la console : souvent « port déjà utilisé » ou erreur Python)."
     ))
 }
 
-/// Stop local workers (Vinted + Amazon) before a Tauri app update.
+/// Stop local workers (Vinted + Amazon + Cardmarket) before a Tauri app update.
 #[tauri::command]
 fn stop_local_worker(state: tauri::State<'_, DesktopWorkers>) -> Result<(), String> {
     let mut inner = match state.0.lock() {
@@ -241,10 +254,13 @@ fn stop_local_worker(state: tauri::State<'_, DesktopWorkers>) -> Result<(), Stri
     if let Some(child) = inner.amazon.take() {
         kill_worker_tree(child);
     }
+    if let Some(child) = inner.cardmarket.take() {
+        kill_worker_tree(child);
+    }
     Ok(())
 }
 
-/// Arrête puis relance les deux workers (utile en `tauri dev` après changement de code Python ou port bloqué).
+/// Arrête puis relance les workers locaux (Vinted + Amazon + Cardmarket).
 #[tauri::command]
 fn restart_local_workers(
     app: tauri::AppHandle,
@@ -252,6 +268,7 @@ fn restart_local_workers(
 ) -> Result<(), String> {
     let vinted_port = vinted_local_port();
     let amazon_port = amazon_local_port();
+    let cardmarket_port = cardmarket_local_port();
 
     {
         let mut inner = state
@@ -264,9 +281,12 @@ fn restart_local_workers(
         if let Some(child) = inner.amazon.take() {
             kill_worker_tree(child);
         }
+        if let Some(child) = inner.cardmarket.take() {
+            kill_worker_tree(child);
+        }
     }
 
-    kill_processes_listening_on_ports(&[vinted_port, amazon_port]);
+    kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port]);
     std::thread::sleep(Duration::from_millis(500));
 
     let mut errs: Vec<String> = Vec::new();
@@ -291,6 +311,16 @@ fn restart_local_workers(
         }
         Err(e) => errs.push(format!("Amazon: {e}")),
     }
+    match spawn_cardmarket_worker(&app) {
+        Ok(child) => {
+            app.state::<DesktopWorkers>()
+                .0
+                .lock()
+                .expect("desktop workers mutex")
+                .cardmarket = Some(child);
+        }
+        Err(e) => errs.push(format!("Cardmarket: {e}")),
+    }
 
     if !errs.is_empty() {
         let mut inner = state
@@ -303,12 +333,15 @@ fn restart_local_workers(
         if let Some(child) = inner.amazon.take() {
             kill_worker_tree(child);
         }
+        if let Some(child) = inner.cardmarket.take() {
+            kill_worker_tree(child);
+        }
         return Err(errs.join(" ; "));
     }
 
-    match verify_local_workers_accept_tcp(vinted_port, amazon_port) {
+    match verify_local_workers_accept_tcp(&[vinted_port, amazon_port, cardmarket_port]) {
         Ok(()) => {
-            eprintln!("[GoupixDex] Workers locaux redémarrés (Vinted + Amazon).");
+            eprintln!("[GoupixDex] Workers locaux redémarrés (Vinted + Amazon + Cardmarket).");
             Ok(())
         }
         Err(msg) => {
@@ -320,6 +353,9 @@ fn restart_local_workers(
                 kill_worker_tree(child);
             }
             if let Some(child) = inner.amazon.take() {
+                kill_worker_tree(child);
+            }
+            if let Some(child) = inner.cardmarket.take() {
                 kill_worker_tree(child);
             }
             Err(msg)
@@ -547,6 +583,98 @@ fn spawn_amazon_worker(app: &tauri::AppHandle) -> Result<CommandChild, String> {
     Ok(child)
 }
 
+fn build_cardmarket_worker_command(
+    app: &tauri::AppHandle,
+) -> Result<tauri_plugin_shell::process::Command, String> {
+    let info = detect_browsers();
+    let chrome_path = info.chrome_path.clone().or(info.edge_path.clone());
+
+    #[cfg(debug_assertions)]
+    {
+        if let Some(api_dir) = dev_repo_api_dir_with("desktop_cardmarket_server.py") {
+            let bin = std::env::var("GOUPIX_PYTHON").unwrap_or_else(|_| "python".to_string());
+            eprintln!(
+                "[GoupixDex] Worker Cardmarket : `{} desktop_cardmarket_server.py` (cwd={})",
+                bin,
+                api_dir.display()
+            );
+            let mut cmd = app
+                .shell()
+                .command(bin)
+                .args(["desktop_cardmarket_server.py"])
+                .current_dir(api_dir);
+            if std::env::var("GOUPIX_CARDMARKET_LOCAL_PORT").is_err() {
+                cmd = cmd.env("GOUPIX_CARDMARKET_LOCAL_PORT", "18770");
+            }
+            if let Some(p) = chrome_path {
+                cmd = cmd.env("VINTED_CHROME_EXECUTABLE", p);
+            }
+            return Ok(cmd);
+        }
+        eprintln!(
+            "[GoupixDex] Worker Cardmarket : script `api/desktop_cardmarket_server.py` introuvable — sidecar.\n\
+             Astuce : `GOUPIX_API_DIR` ou `npm run cardmarket-worker:sync-dist`."
+        );
+    }
+
+    let mut sidecar = app
+        .shell()
+        .sidecar("goupix-cardmarket-worker")
+        .map_err(|e| format!("sidecar `goupix-cardmarket-worker` introuvable: {e}"))?;
+    if let Some(p) = chrome_path {
+        sidecar = sidecar.env("VINTED_CHROME_EXECUTABLE", p);
+    }
+    Ok(sidecar)
+}
+
+fn spawn_cardmarket_worker(app: &tauri::AppHandle) -> Result<CommandChild, String> {
+    let cmd = build_cardmarket_worker_command(app)?;
+    let (mut rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("Impossible de lancer le worker Cardmarket local: {e}"))?;
+
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    eprintln!(
+                        "[goupix-cardmarket-worker:out] {}",
+                        String::from_utf8_lossy(&line).trim_end()
+                    );
+                }
+                CommandEvent::Stderr(line) => {
+                    eprintln!(
+                        "[goupix-cardmarket-worker:err] {}",
+                        String::from_utf8_lossy(&line).trim_end()
+                    );
+                }
+                CommandEvent::Terminated(payload) => {
+                    eprintln!(
+                        "[goupix-cardmarket-worker] terminé (code={:?}, signal={:?})",
+                        payload.code, payload.signal
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(child)
+}
+
+#[tauri::command]
+fn sync_dev_database_from_prod() -> Result<String, String> {
+    #[cfg(debug_assertions)]
+    {
+        db_sync::sync_dev_database_from_prod_impl()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Err("Prod → dev DB sync is only available in debug builds (`tauri dev`).".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -556,11 +684,13 @@ pub fn run() {
         .manage(DesktopWorkers(Mutex::new(DesktopWorkersInner {
             vinted: None,
             amazon: None,
+            cardmarket: None,
         })))
         .invoke_handler(tauri::generate_handler![
             check_browser_availability,
             stop_local_worker,
-            restart_local_workers
+            restart_local_workers,
+            sync_dev_database_from_prod
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -603,6 +733,23 @@ pub fn run() {
                 }
             }
 
+            match spawn_cardmarket_worker(&handle) {
+                Ok(child) => {
+                    app.state::<DesktopWorkers>()
+                        .0
+                        .lock()
+                        .expect("desktop workers mutex")
+                        .cardmarket = Some(child);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[GoupixDex] Worker Cardmarket local indisponible : {e}\n\
+                         → En dev : `python desktop_cardmarket_server.py` depuis « api », ou `GOUPIX_PYTHON`.\n\
+                         → En prod : sidecar `goupix-cardmarket-worker` (PyInstaller, CI desktop)."
+                    );
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -614,6 +761,9 @@ pub fn run() {
                         kill_worker_tree(child);
                     }
                     if let Some(child) = guard.amazon.take() {
+                        kill_worker_tree(child);
+                    }
+                    if let Some(child) = guard.cardmarket.take() {
                         kill_worker_tree(child);
                     }
                 }

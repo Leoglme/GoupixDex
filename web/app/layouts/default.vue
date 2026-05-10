@@ -41,12 +41,24 @@
 
     <div
       v-if="showDevWorkerControls"
-      class="border-default bg-elevated/95 fixed right-3 bottom-3 z-[100] flex items-center gap-2 rounded-lg border px-2 py-1.5 shadow-lg"
+      class="border-default bg-elevated/95 fixed right-3 bottom-3 z-[100] flex max-w-[min(100vw-1.5rem,22rem)] flex-col gap-2 rounded-lg border px-2 py-1.5 shadow-lg sm:max-w-none sm:flex-row sm:items-center"
     >
       <span class="text-muted hidden text-xs sm:inline">Dev · workers</span>
-      <UButton size="xs" color="neutral" variant="soft" :loading="workersRestarting" @click="onRestartWorkers">
-        Redémarrer workers
-      </UButton>
+      <div class="flex flex-wrap items-center gap-2">
+        <UButton size="xs" color="neutral" variant="soft" :loading="workersRestarting" @click="onRestartWorkers">
+          Redémarrer workers
+        </UButton>
+        <UButton
+          size="xs"
+          color="warning"
+          variant="soft"
+          :loading="dbSyncLoading"
+          title="Requires web/.env.sync. Without local SQL clients, Docker Desktop is enough (mariadb:11) — see .env.sync.example"
+          @click="onSyncDevDb"
+        >
+          Sync DB prod → dev
+        </UButton>
+      </div>
     </div>
   </UDashboardGroup>
 </template>
@@ -58,9 +70,10 @@ import type { ComputedRef, Ref } from 'vue'
 useDashboard()
 
 const open: Ref<boolean> = ref(false)
-const { isDesktopApp, restartLocalWorkers } = useDesktopRuntime()
+const { isDesktopApp, restartLocalWorkers, syncDevDatabaseFromProd } = useDesktopRuntime()
 const toast = useToast()
 const workersRestarting: Ref<boolean> = ref(false)
+const dbSyncLoading: Ref<boolean> = ref(false)
 
 const showDevWorkerControls = computed(() => import.meta.dev && Boolean(isDesktopApp.value))
 
@@ -77,6 +90,30 @@ async function onRestartWorkers(): Promise<void> {
     })
   } finally {
     workersRestarting.value = false
+  }
+}
+
+async function onSyncDevDb(): Promise<void> {
+  const ok = window.confirm(
+    'Replace all data in the local Docker database with a prod dump?\n' +
+      'Stop the api container (`docker compose stop api`) if import fails (connections).\n' +
+      'Configure web/.env.sync — see web/.env.sync.example.',
+  )
+  if (!ok) {
+    return
+  }
+  dbSyncLoading.value = true
+  try {
+    const msg = await syncDevDatabaseFromProd()
+    toast.add({ title: 'Local database updated', description: msg, color: 'success' })
+  } catch (e: unknown) {
+    toast.add({
+      title: 'Sync DB prod → dev',
+      description: e instanceof Error ? e.message : String(e),
+      color: 'error',
+    })
+  } finally {
+    dbSyncLoading.value = false
   }
 }
 
@@ -116,6 +153,14 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       label: 'Commandes',
       icon: 'i-lucide-file-text',
       to: '/orders',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Panier Cardmarket',
+      icon: 'i-lucide-shopping-basket',
+      to: '/panier-cardmarket',
       onSelect: () => {
         open.value = false
       },

@@ -9,6 +9,8 @@ on:
       - 'api/desktop_vinted_server.spec'
       - 'api/desktop_amazon_server.py'
       - 'api/desktop_amazon_server.spec'
+      - 'api/desktop_cardmarket_server.py'
+      - 'api/desktop_cardmarket_server.spec'
       - 'api/worker_bundled.env'
       - 'api/worker_env_bootstrap.py'
       - '.github/workflows/desktop-release.yml'
@@ -155,6 +157,25 @@ jobs:
                "../web/src-tauri/binaries/goupix-amazon-worker-${MATRIX_TRIPLE}"
             chmod +x "../web/src-tauri/binaries/goupix-amazon-worker-${MATRIX_TRIPLE}"
             file "../web/src-tauri/binaries/goupix-amazon-worker-${MATRIX_TRIPLE}" || true
+          fi
+          ls -la "../web/src-tauri/binaries/"
+
+      - name: Build Cardmarket local worker (PyInstaller)
+        shell: bash
+        working-directory: api
+        env:
+          MATRIX_TRIPLE: ${{ matrix.rust_triple }}
+        run: |
+          set -e
+          pyinstaller desktop_cardmarket_server.spec --noconfirm --clean
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            mv "dist/goupix-cardmarket-worker.exe" \
+               "../web/src-tauri/binaries/goupix-cardmarket-worker-${MATRIX_TRIPLE}.exe"
+          else
+            mv "dist/goupix-cardmarket-worker" \
+               "../web/src-tauri/binaries/goupix-cardmarket-worker-${MATRIX_TRIPLE}"
+            chmod +x "../web/src-tauri/binaries/goupix-cardmarket-worker-${MATRIX_TRIPLE}"
+            file "../web/src-tauri/binaries/goupix-cardmarket-worker-${MATRIX_TRIPLE}" || true
           fi
           ls -la "../web/src-tauri/binaries/"
 

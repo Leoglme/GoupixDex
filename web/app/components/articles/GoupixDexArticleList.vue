@@ -62,6 +62,40 @@
     </div>
 
     <div
+      v-if="!loading && filtered.length > 0"
+      class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div class="flex items-center gap-2">
+        <p class="text-muted text-xs">Par page</p>
+        <USelect v-model="pageSize" :items="PAGE_SIZE_ITEMS" value-key="value" label-key="label" class="w-32" />
+      </div>
+
+      <div class="flex items-center justify-between gap-2 sm:justify-end">
+        <p class="text-muted text-xs tabular-nums">Page {{ page }} / {{ totalPages }}</p>
+        <div class="flex items-center gap-2">
+          <UButton
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-arrow-left"
+            :disabled="page <= 1"
+            @click="page = Math.max(1, page - 1)"
+          >
+            Précédent
+          </UButton>
+          <UButton
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-arrow-right"
+            :disabled="page >= totalPages"
+            @click="page = Math.min(totalPages, page + 1)"
+          >
+            Suivant
+          </UButton>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="selectedCount > 0"
       class="border-default bg-elevated/95 supports-[backdrop-filter]:bg-elevated/85 sticky top-0 z-30 flex flex-col gap-2 rounded-lg border px-3 py-2.5 shadow-md shadow-black/5 backdrop-blur sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
     >
@@ -163,7 +197,12 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filtered" :key="row.id" class="group border-default hover:bg-elevated/40 border-t">
+          <tr
+            v-for="row in cachedRows"
+            v-show="idToPage.get(row.id) === page"
+            :key="row.id"
+            class="group border-default hover:bg-elevated/40 border-t"
+          >
             <td
               class="border-default bg-default group-hover:bg-elevated/40 sticky left-0 z-10 border-r border-b px-3 py-3 align-middle transition-colors"
             >
@@ -177,7 +216,7 @@
               <UAvatar
                 v-if="row.images?.length"
                 size="lg"
-                :src="row.images[0]?.image_url"
+                :src="imageSrc(row.images[0]?.image_url)"
                 :alt="row.title"
                 class="ring-default/80 ring-1"
               />
@@ -299,7 +338,7 @@
     </div>
 
     <div class="space-y-3 lg:hidden">
-      <div v-for="row in filtered" :key="row.id" class="w-full">
+      <div v-for="row in cachedRows" v-show="idToPage.get(row.id) === page" :key="row.id" class="w-full">
         <UCard class="border-default/80 bg-elevated/70 w-full border" :ui="{ body: 'p-3 space-y-3' }">
           <div class="flex items-start gap-3">
             <div class="shrink-0 pt-1">
@@ -315,7 +354,16 @@
                   v-if="row.images?.length"
                   class="bg-elevated ring-default w-20 shrink-0 overflow-hidden rounded-lg ring"
                 >
-                  <img :src="row.images[0]!.image_url" :alt="row.title" class="h-20 w-full object-cover" />
+                  <img
+                    :src="row.images[0]!.image_url"
+                    :alt="row.title"
+                    width="80"
+                    height="80"
+                    loading="lazy"
+                    decoding="async"
+                    fetchpriority="low"
+                    class="h-20 w-full object-cover"
+                  />
                 </div>
                 <div class="min-w-0 flex-1 space-y-1">
                   <NuxtLink
@@ -396,6 +444,7 @@
 </template>
 
 <script setup lang="ts">
+import { reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { ArticleListFilterSold, ArticleListSortKey } from '~/composables/useUiPrefsLocalStorage'
@@ -527,6 +576,18 @@ const sortKey: Ref<ArticleListSortKey> = ref('created_desc')
 /** Text filter: name, set code, set name, card #, title. */
 const searchQuery: Ref<string> = ref('')
 
+const PAGE_SIZE_ITEMS = [
+  { label: '5', value: 5 },
+  { label: '10', value: 10 },
+  { label: '15', value: 15 },
+  { label: '30', value: 30 },
+  { label: '50', value: 50 },
+  { label: '100', value: 100 },
+]
+
+const page: Ref<number> = ref(1)
+const pageSize: Ref<number> = ref(10)
+
 onMounted(() => {
   const s = loadArticleListPrefs()
   if (s?.filterSold) {
@@ -538,13 +599,17 @@ onMounted(() => {
   if (s?.searchQuery != null) {
     searchQuery.value = s.searchQuery
   }
+  if (typeof s?.pageSize === 'number') {
+    pageSize.value = s.pageSize
+  }
 })
 
-watch([filterSold, sortKey, searchQuery], () => {
+watch([filterSold, sortKey, searchQuery, pageSize], () => {
   saveArticleListPrefs({
     filterSold: filterSold.value,
     sortKey: sortKey.value,
     searchQuery: searchQuery.value,
+    pageSize: pageSize.value,
   })
 })
 
@@ -606,6 +671,187 @@ const filtered: ComputedRef<Article[]> = computed(() => {
     }
   })
   return rows
+})
+
+watch([filterSold, sortKey, searchQuery, pageSize], () => {
+  page.value = 1
+})
+
+const totalPages: ComputedRef<number> = computed(() => {
+  const total = filtered.value.length
+  const size = Math.max(1, pageSize.value)
+  return Math.max(1, Math.ceil(total / size))
+})
+
+watch(
+  [totalPages, page],
+  ([tp, p]) => {
+    if (p > tp) {
+      page.value = tp
+    } else if (p < 1) {
+      page.value = 1
+    }
+  },
+  { immediate: true },
+)
+
+const paged: ComputedRef<Article[]> = computed(() => {
+  const p = Math.max(1, page.value)
+  const size = Math.max(1, pageSize.value)
+  const start = (p - 1) * size
+  return filtered.value.slice(start, start + size)
+})
+
+/**
+ * In-memory thumbnail cache (URL -> objectURL).
+ * This avoids re-downloading small images when navigating back & forth,
+ * even if the remote server sends no-cache / no-store headers.
+ */
+const IMAGE_CACHE_MAX = 250
+const imageObjectUrlBySrc = reactive(new Map<string, string>())
+const imageFetchInflight = reactive(new Set<string>())
+
+function imageSrc(src?: string | null): string | undefined {
+  if (!src) {
+    return undefined
+  }
+  return imageObjectUrlBySrc.get(src) ?? src
+}
+
+/**
+ * Keep a small LRU of rendered pages so <img> nodes don't get destroyed/recreated
+ * when you navigate Next/Prev. This prevents refetch even when HTTP caching is disabled.
+ */
+const PAGE_DOM_CACHE_MAX = 3
+const cachedPages: Ref<number[]> = ref([1])
+
+const idToPage: ComputedRef<Map<number, number>> = computed(() => {
+  const m = new Map<number, number>()
+  const size = Math.max(1, pageSize.value)
+  for (let i = 0; i < filtered.value.length; i += 1) {
+    const row = filtered.value[i]
+    if (!row) continue
+    m.set(row.id, Math.floor(i / size) + 1)
+  }
+  return m
+})
+
+const cachedRows: ComputedRef<Article[]> = computed(() => {
+  const wanted = new Set(cachedPages.value)
+  return filtered.value.filter((row) => wanted.has(idToPage.value.get(row.id) ?? -1))
+})
+
+function touchCachedPage(p: number) {
+  const next = cachedPages.value.filter((x) => x !== p)
+  next.push(p)
+  while (next.length > PAGE_DOM_CACHE_MAX) {
+    next.shift()
+  }
+  cachedPages.value = next
+}
+
+watch(
+  page,
+  (p) => {
+    touchCachedPage(p)
+  },
+  { immediate: true },
+)
+
+watch([filterSold, sortKey, searchQuery, pageSize], () => {
+  cachedPages.value = [1]
+})
+
+function evictOldestImageCacheEntries() {
+  while (imageObjectUrlBySrc.size > IMAGE_CACHE_MAX) {
+    const oldestKey = imageObjectUrlBySrc.keys().next().value as string | undefined
+    if (!oldestKey) {
+      return
+    }
+    const objUrl = imageObjectUrlBySrc.get(oldestKey)
+    imageObjectUrlBySrc.delete(oldestKey)
+    if (objUrl) {
+      URL.revokeObjectURL(objUrl)
+    }
+  }
+}
+
+async function cacheImageAsObjectUrl(src: string) {
+  if (!src || imageObjectUrlBySrc.has(src) || imageFetchInflight.has(src)) {
+    return
+  }
+  imageFetchInflight.add(src)
+  try {
+    const res = await fetch(src, { cache: 'force-cache' })
+    if (!res.ok) {
+      return
+    }
+    const blob = await res.blob()
+    // Skip huge blobs just in case the URL points to a full-size image.
+    if (blob.size > 2_500_000) {
+      return
+    }
+    const objUrl = URL.createObjectURL(blob)
+    imageObjectUrlBySrc.set(src, objUrl)
+    evictOldestImageCacheEntries()
+  } catch {
+    // If CORS blocks fetch, the <img> / UAvatar can still load via direct URL.
+  } finally {
+    imageFetchInflight.delete(src)
+  }
+}
+
+function prefetchPageImages(targetPage: number) {
+  const size = Math.max(1, pageSize.value)
+  const tp = totalPages.value
+  if (targetPage < 1 || targetPage > tp) {
+    return
+  }
+  const start = (targetPage - 1) * size
+  const rows = filtered.value.slice(start, start + size)
+  for (const row of rows) {
+    const url = row.images?.[0]?.image_url
+    if (typeof url === 'string' && url) {
+      void cacheImageAsObjectUrl(url)
+    }
+  }
+}
+
+function schedulePrefetchAdjacentPages() {
+  const next = page.value + 1
+  const prev = page.value - 1
+  const run = () => {
+    prefetchPageImages(next)
+    prefetchPageImages(prev)
+  }
+  if (import.meta.client && 'requestIdleCallback' in window) {
+    ;(
+      window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout?: number }) => void }
+    ).requestIdleCallback(run, { timeout: 1500 })
+  } else {
+    setTimeout(run, 50)
+  }
+}
+
+watch(
+  [page, pageSize, filtered],
+  () => {
+    if (!import.meta.client) {
+      return
+    }
+    schedulePrefetchAdjacentPages()
+    // Always cache the current page eagerly (prefetch does adjacent pages in idle time).
+    prefetchPageImages(page.value)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  for (const objUrl of imageObjectUrlBySrc.values()) {
+    URL.revokeObjectURL(objUrl)
+  }
+  imageObjectUrlBySrc.clear()
+  imageFetchInflight.clear()
 })
 
 /** Multi-row selection (ids visible in the current list) */
@@ -683,11 +929,11 @@ const showBulkBoth: ComputedRef<boolean> = computed(
 const selectedCount: ComputedRef<number> = computed(() => selectedIds.value.length)
 
 const allFilteredSelected: ComputedRef<boolean> = computed(
-  () => filtered.value.length > 0 && filtered.value.every((r) => selectedIds.value.includes(r.id)),
+  () => paged.value.length > 0 && paged.value.every((r) => selectedIds.value.includes(r.id)),
 )
 
 const someFilteredSelected: ComputedRef<boolean> = computed(() =>
-  filtered.value.some((r) => selectedIds.value.includes(r.id)),
+  paged.value.some((r) => selectedIds.value.includes(r.id)),
 )
 
 /**
@@ -727,7 +973,7 @@ function toggleSelectAll(checked: boolean | 'indeterminate'): void {
   if (checked === 'indeterminate') {
     return
   }
-  const fids = filtered.value.map((r) => r.id)
+  const fids = paged.value.map((r) => r.id)
   if (checked) {
     const s = new Set(selectedIds.value)
     fids.forEach((id) => s.add(id))
@@ -773,6 +1019,4 @@ function emitBulkSold() {
   }
   emit('bulk-sold', rows)
 }
-
-const UAvatar = resolveComponent('UAvatar')
 </script>

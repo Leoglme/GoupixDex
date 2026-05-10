@@ -37,5 +37,18 @@ export function useDesktopRuntime() {
     await invoke('stop_local_worker')
   }
 
-  return { isDesktopApp, restartLocalWorkers, stopLocalWorkers }
+  /**
+   * Dump read-only prod MariaDB → import into local DB. Requires debug Tauri build + `.env.sync`.
+   *
+   * @returns Human-readable summary of the sync (e.g. tables imported / row counts) returned by Tauri.
+   */
+  async function syncDevDatabaseFromProd(): Promise<string> {
+    if (!import.meta.dev || !import.meta.client || !isDesktopApp.value) {
+      throw new Error('DB sync is only available in desktop dev mode.')
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string>('sync_dev_database_from_prod')
+  }
+
+  return { isDesktopApp, restartLocalWorkers, stopLocalWorkers, syncDevDatabaseFromProd }
 }

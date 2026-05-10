@@ -30,7 +30,8 @@
     "targets": "all",
     "externalBin": [
       "binaries/goupix-vinted-worker",
-      "binaries/goupix-amazon-worker"
+      "binaries/goupix-amazon-worker",
+      "binaries/goupix-cardmarket-worker"
     ],
     "icon": [
       "../public/favicon.ico",

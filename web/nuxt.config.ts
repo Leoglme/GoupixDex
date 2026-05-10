@@ -47,6 +47,8 @@ export default defineNuxtConfig({
       vintedLocalBase: process.env.NUXT_PUBLIC_VINTED_LOCAL_BASE || 'http://127.0.0.1:18766',
       /** Local Python worker (Amazon invites / nodriver) — mainly desktop app */
       amazonLocalBase: process.env.NUXT_PUBLIC_AMAZON_LOCAL_BASE || 'http://127.0.0.1:18768',
+      /** Local Python worker (Cardmarket panier / nodriver) — desktop app */
+      cardmarketLocalBase: process.env.NUXT_PUBLIC_CARDMARKET_LOCAL_BASE || 'http://127.0.0.1:18770',
       siteUrl: process.env.NUXT_PUBLIC_SITE_URL || 'https://goupixdex.dibodev.fr',
       githubRepo: process.env.NUXT_PUBLIC_GITHUB_REPO || 'leogu/GoupixDex',
       desktopReleaseChannel: process.env.NUXT_PUBLIC_DESKTOP_RELEASE_CHANNEL || 'latest',

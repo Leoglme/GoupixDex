@@ -14,11 +14,14 @@ export interface ArticleListPrefs {
   filterSold: ArticleListFilterSold
   sortKey: ArticleListSortKey
   searchQuery: string
+  /** Pagination size for article lists (default 10 if missing). */
+  pageSize?: number
   /** My stock page: also show articles already for sale (default false if missing). */
   stockIncludeListed?: boolean
 }
 
 const SORT_KEYS: ArticleListSortKey[] = ['created_desc', 'sold_desc', 'purchase_asc', 'purchase_desc']
+const PAGE_SIZES: number[] = [5, 10, 15, 30, 50, 100]
 
 /**
  * Load persisted article-list UI preferences from `localStorage` (SSR-safe).
@@ -44,6 +47,9 @@ export function loadArticleListPrefs(): Partial<ArticleListPrefs> | null {
     }
     if (typeof p.searchQuery === 'string') {
       out.searchQuery = p.searchQuery
+    }
+    if (typeof p.pageSize === 'number' && PAGE_SIZES.includes(p.pageSize)) {
+      out.pageSize = p.pageSize
     }
     if (typeof p.stockIncludeListed === 'boolean') {
       out.stockIncludeListed = p.stockIncludeListed

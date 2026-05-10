@@ -7,8 +7,8 @@
       <div>
         <h1 class="text-highlighted text-lg font-semibold">Marketplace</h1>
         <p class="text-muted text-sm">
-          Activez ou désactivez Vinted et eBay, et suivez la connexion Amazon (invitations produits) depuis
-          l’application bureau.
+          Activez ou désactivez Vinted et eBay, et suivez les connexions Amazon (invitations produits) et Cardmarket
+          (panier) depuis l’application bureau.
         </p>
       </div>
     </div>
@@ -43,6 +43,10 @@
 
       <div id="amazon-connection" class="scroll-mt-24">
         <GoupixDexAmazonAccountCard />
+      </div>
+
+      <div id="cardmarket-connection" class="scroll-mt-24">
+        <GoupixDexCardmarketAccountCard />
       </div>
 
       <UCard v-if="s.ebay_enabled && s.ebay_oauth_configured">
@@ -290,6 +294,10 @@ onMounted((): void => {
     if (import.meta.client && route.hash === '#amazon-connection') {
       await nextTick()
       document.getElementById('amazon-connection')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    if (import.meta.client && route.hash === '#cardmarket-connection') {
+      await nextTick()
+      document.getElementById('cardmarket-connection')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   })()
 })

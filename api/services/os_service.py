@@ -68,7 +68,32 @@ class OsService:
             return Path.home() / "Library" / "Application Support" / "GoupixDex" / "amazon-nodriver-profile"
         return Path.home() / ".local" / "share" / "GoupixDex" / "amazon-nodriver-profile"
 
+    @staticmethod
+    def resolve_cardmarket_nodriver_user_data_dir(explicit: str | None) -> Path:
+        """
+        Chromium profile for Cardmarket product scraping (nodriver).
+
+        Override: ``GOUPIX_CARDMARKET_USER_DATA_DIR``.
+        """
+        if explicit is not None and str(explicit).strip():
+            return Path(str(explicit).strip()).expanduser().resolve()
+        if sys.platform == "win32":
+            local = os.environ.get("LOCALAPPDATA")
+            if local:
+                return Path(local) / "GoupixDex" / "cardmarket-nodriver-profile"
+            return Path.home() / "GoupixDex" / "cardmarket-nodriver-profile"
+        if sys.platform == "darwin":
+            return (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "GoupixDex"
+                / "cardmarket-nodriver-profile"
+            )
+        return Path.home() / ".local" / "share" / "GoupixDex" / "cardmarket-nodriver-profile"
+
 
 get_project_root = OsService.get_project_root
 resolve_vinted_nodriver_user_data_dir = OsService.resolve_vinted_nodriver_user_data_dir
 resolve_amazon_nodriver_user_data_dir = OsService.resolve_amazon_nodriver_user_data_dir
+resolve_cardmarket_nodriver_user_data_dir = OsService.resolve_cardmarket_nodriver_user_data_dir
