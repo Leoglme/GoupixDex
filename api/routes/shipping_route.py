@@ -17,9 +17,13 @@ from services.ebay_oauth_service import EbayOAuthError
 from services.ebay_orders_service import list_unshipped_orders
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.shipping_label_service import LabelAddress, render_labels_pdf
-from services.user_settings_service import get_or_create_user_settings
+from services.stamp_overlay_service import decode_stamp_pdf_base64, overlay_stamps_on_labels_pdf
+from services.user_settings_service import get_or_create_user_settings, sender_address_complete
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
+
+
+_STAMP_B64_MAX_LEN = 6_000_000
 
 
 class ShippingLabelInput(BaseModel):
@@ -32,6 +36,11 @@ class ShippingLabelInput(BaseModel):
     city: str = Field(..., min_length=1, max_length=80)
     state: str | None = Field(default=None, max_length=80)
     country_code: str | None = Field(default="FR", max_length=3)
+    stamp_pdf_base64: str | None = Field(
+        default=None,
+        max_length=_STAMP_B64_MAX_LEN,
+        description="Optional La Poste stamp PDF (single-page), base64 or data URL.",
+    )
 
 
 class ShippingLabelsBody(BaseModel):
@@ -84,27 +93,71 @@ async def shipping_ebay_orders(
 @router.post("/labels.pdf")
 async def shipping_labels_pdf(
     body: ShippingLabelsBody,
+    db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],  # noqa: ARG001 (auth gate)
 ) -> Response:
     """
     Render the supplied recipient blocks as an A4 PDF (Avery L7173 — 99×57 mm, 8 per page).
 
-    Same endpoint serves both the in-app preview (iframe) and the final download — guarantees
-    the on-screen rendering matches the printed output byte-for-byte.
+    Each parcel uses **two** L7173 vignettes stacked vertically on the sheet (sender immediately below recipient).
+    The sender vignette uses a crop rectangle nearly full sticker width; address stays on **one line** under the name when
+    possible (font scales down, then ellipsis). Padding inside the crop marks is the same on top, bottom, left, and right.
+
+    Optional ``stamp_pdf_base64`` per row (PDF from laposte.fr): artwork on page 1 is overlaid at **native scale**
+    (no shrinking). Placement: **below** that parcel's sender vignette when the PDF grid leaves white space there (same
+    column); otherwise **flush-right** on the page, centred vertically on that parcel's recipient+sender pair; if neither
+    fits, an extra A4 page is appended for that stamp.
     """
-    addresses = [
-        LabelAddress(
-            full_name=row.full_name.strip(),
-            line1=row.line1.strip(),
-            line2=row.line2.strip() if row.line2 else None,
-            postal_code=row.postal_code.strip(),
-            city=row.city.strip(),
-            state=row.state.strip() if row.state else None,
-            country_code=(row.country_code or "FR").strip().upper() or "FR",
+    ms = get_or_create_user_settings(db, user.id)
+    if not sender_address_complete(ms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "sender_address_incomplete",
+                "message": (
+                    "Configurez votre adresse expéditeur dans Paramètres → Configuration "
+                    "avant de générer les étiquettes."
+                ),
+            },
         )
-        for row in body.addresses
-    ]
-    pdf = render_labels_pdf(addresses)
+
+    stamps_by_parcel: list[bytes | None] = []
+    addresses: list[LabelAddress] = []
+    for idx, row in enumerate(body.addresses):
+        try:
+            stamp_bytes = decode_stamp_pdf_base64(row.stamp_pdf_base64)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "invalid_stamp_pdf",
+                    "parcel_index": idx,
+                    "message": str(exc),
+                },
+            ) from exc
+        stamps_by_parcel.append(stamp_bytes)
+        addresses.append(
+            LabelAddress(
+                full_name=row.full_name.strip(),
+                line1=row.line1.strip(),
+                line2=row.line2.strip() if row.line2 else None,
+                postal_code=row.postal_code.strip(),
+                city=row.city.strip(),
+                state=row.state.strip() if row.state else None,
+                country_code=(row.country_code or "FR").strip().upper() or "FR",
+            )
+        )
+    sender = LabelAddress(
+        full_name=(ms.sender_full_name or "").strip(),
+        line1=(ms.sender_line1 or "").strip(),
+        line2=(ms.sender_line2 or "").strip() or None,
+        postal_code=(ms.sender_postal_code or "").strip(),
+        city=(ms.sender_city or "").strip(),
+        state=None,
+        country_code="FR",
+    )
+    pdf = render_labels_pdf(addresses, sender=sender)
+    pdf = overlay_stamps_on_labels_pdf(pdf, stamps_by_parcel)
     return Response(
         content=pdf,
         media_type="application/pdf",

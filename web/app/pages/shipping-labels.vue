@@ -24,16 +24,36 @@
         <UCard :ui="{ body: 'p-4 sm:p-5' }">
           <template #header>
             <div class="flex flex-col gap-1">
-              <p class="text-highlighted text-sm font-medium">
-                Format Avery L7173 — 99 × 57 mm, 8 étiquettes par feuille A4
-              </p>
+              <p class="text-highlighted text-sm font-medium">Destinataires : Avery L7173 — 99 × 57 mm (8 par page)</p>
               <p class="text-muted text-xs">
-                Sélectionnez vos commandes eBay « à expédier » et/ou ajoutez des destinataires à la main, puis générez
-                l'aperçu PDF strictement identique à l'impression.
+                Chaque colis : <strong>deux vignettes L7173 distinctes</strong>, l’étiquette expéditeur est placée
+                <strong>juste sous</strong> le destinataire (même colonne sur la feuille). Destinataire : vignette
+                pleine. Expéditeur : cadre de découpe resserré en hauteur, presque toute la largeur de la vignette ; une
+                ligne pour le nom et <strong>une seule ligne</strong> pour l’adresse complète (rue, complément, CP et
+                ville). Marges haut et bas égales dans le cadre pour faciliter la découpe. Ordre sur une page : colis A
+                destinataire puis expéditeur, colis B dest. puis exp., etc. Une page A4 = jusqu’à 4 colis (8 vignettes).
+                Vous pouvez joindre un <strong>PDF timbre</strong> laposte.fr par colis : placé
+                <strong>juste sous</strong> la vignette expéditeur lorsque l’emplacement est libre sous cette colonne
+                (centré), sinon à <strong>droite</strong> de la feuille, aligné avec la paire destinataire / expéditeur
+                du colis — taille PDF identique au fichier La Poste. À l’impression, utilisez
+                <strong>taille réelle / 100 %</strong> (pas « ajuster à la page ») pour éviter une réduction visuelle.
+                Sinon une page suivante (facultatif). Configurez l’expéditeur dans Paramètres → Configuration.
               </p>
             </div>
           </template>
         </UCard>
+
+        <GoupixDexAlert
+          v-if="!senderLoading && !senderAddressComplete"
+          variant="warning"
+          icon="i-lucide-map-pin"
+          title="Adresse expéditeur manquante"
+          description="Renseignez votre adresse expéditeur dans Paramètres → Configuration avant de générer le PDF."
+        >
+          <template #actions>
+            <UButton to="/settings" size="xs" color="neutral" variant="subtle"> Ouvrir la configuration </UButton>
+          </template>
+        </GoupixDexAlert>
 
         <!-- eBay orders -->
         <UCard :ui="{ body: 'p-0' }">
@@ -182,16 +202,15 @@
         </UCard>
 
         <!-- Selected labels -->
-        <UCard :ui="{ body: 'p-0' }">
+        <UCard :ui="{ body: 'p-0 overflow-visible' }">
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p class="text-highlighted text-sm font-medium">Étiquettes à imprimer</p>
                 <p class="text-muted text-xs">
-                  {{ labels.length }} étiquette{{ labels.length > 1 ? 's' : '' }} · {{ pageCount }} page{{
-                    pageCount > 1 ? 's' : ''
-                  }}
-                  A4 (8 par feuille). Modifications éphémères : la commande eBay d'origine n'est pas modifiée.
+                  {{ labels.length }} colis · {{ labelSlotCount }} vignettes
+                  <span v-if="pageCountDetail"> — {{ pageCountDetail }}</span
+                  >. Modifications éphémères : la commande eBay d’origine n’est pas modifiée.
                 </p>
               </div>
               <div class="flex items-center gap-2">
@@ -213,27 +232,75 @@
             Aucune étiquette sélectionnée pour le moment.
           </div>
 
-          <div v-else class="divide-default divide-y">
+          <div v-else class="divide-default divide-y overflow-visible">
             <div
               v-for="label in labels"
               :key="label.uid"
-              class="grid items-start gap-3 p-4 sm:p-5 lg:grid-cols-[auto_1fr_auto]"
+              class="flex flex-col gap-4 overflow-visible p-4 sm:p-5 lg:flex-row lg:items-start lg:gap-4"
             >
               <UBadge :color="label.source === 'ebay' ? 'warning' : 'neutral'" variant="subtle" class="shrink-0">
                 {{ label.source === 'ebay' ? `eBay #${label.ebayOrderId?.slice(-6)}` : 'Manuel' }}
               </UBadge>
-              <div class="grid gap-2 sm:grid-cols-2">
-                <UInput v-model="label.full_name" placeholder="Nom complet" />
-                <UInput v-model="label.line1" placeholder="Adresse" />
-                <UInput v-model="label.line2" placeholder="Complément" />
-                <div class="grid grid-cols-[1fr_2fr] gap-2">
-                  <UInput v-model="label.postal_code" placeholder="CP" />
-                  <UInput v-model="label.city" placeholder="Ville" />
+              <div class="flex min-w-0 flex-1 flex-col gap-3 overflow-visible">
+                <div class="grid min-w-0 gap-2 sm:grid-cols-2">
+                  <UInput v-model="label.full_name" placeholder="Nom complet" />
+                  <UInput v-model="label.line1" placeholder="Adresse" />
+                  <UInput v-model="label.line2" placeholder="Complément" />
+                  <div class="grid grid-cols-[1fr_2fr] gap-2">
+                    <UInput v-model="label.postal_code" placeholder="CP" />
+                    <UInput v-model="label.city" placeholder="Ville" />
+                  </div>
+                  <UInput v-model="label.state" placeholder="État (US/CA)" />
+                  <USelect v-model="label.country_code" :items="COUNTRY_OPTIONS" value-key="value" />
                 </div>
-                <UInput v-model="label.state" placeholder="État (US/CA)" />
-                <USelect v-model="label.country_code" :items="COUNTRY_OPTIONS" value-key="value" />
+                <!-- Bloc timbre : présence repérable dans le DOM via data-goupixdex-stamp (vérifiez après rebuild / reload de l’app). -->
+                <div
+                  data-goupixdex-stamp="pdf-picker"
+                  class="border-default bg-elevated/30 min-h-[4.5rem] min-w-0 overflow-visible rounded-lg border border-dashed p-3"
+                >
+                  <p class="text-highlighted text-sm font-medium">Timbre La Poste (PDF, optionnel)</p>
+                  <p class="text-muted mb-3 text-xs leading-snug">
+                    PDF depuis laposte.fr ; ajouté sur la planche à taille réelle (page suivante si besoin).
+                  </p>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <input
+                      :id="stampPdfInputId(label.uid)"
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      class="sr-only"
+                      @change="onStampPdfChange(label.uid, $event)"
+                    />
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="outline"
+                      icon="i-lucide-file-up"
+                      class="shrink-0"
+                      @click="openStampPdfPicker(label.uid)"
+                    >
+                      Choisir un PDF timbre
+                    </UButton>
+                    <UBadge v-if="label.stamp_pdf_base64" color="success" variant="subtle">PDF sélectionné</UBadge>
+                    <UButton
+                      v-if="label.stamp_pdf_base64"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      label="Retirer"
+                      class="shrink-0"
+                      @click="clearStampPdf(label.uid)"
+                    />
+                  </div>
+                </div>
               </div>
-              <UButton color="neutral" variant="ghost" icon="i-lucide-x" size="sm" @click="removeLabel(label.uid)" />
+              <UButton
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-x"
+                size="sm"
+                class="shrink-0 self-start"
+                @click="removeLabel(label.uid)"
+              />
             </div>
           </div>
 
@@ -248,7 +315,7 @@
                 <UButton
                   icon="i-lucide-eye"
                   :loading="previewLoading"
-                  :disabled="labels.length === 0"
+                  :disabled="labels.length === 0 || pdfBusy"
                   @click="refreshPreview"
                 >
                   Générer l'aperçu
@@ -256,7 +323,8 @@
                 <UButton
                   icon="i-lucide-download"
                   color="primary"
-                  :disabled="!previewBlob || previewStale"
+                  :loading="downloadLoading"
+                  :disabled="!canDownloadPdf"
                   @click="downloadPdf"
                 >
                   Télécharger le PDF
@@ -280,6 +348,7 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import { nextTick } from 'vue'
 import type { EbayUnshippedOrder, ShippingLabelInput } from '~/composables/useShippingLabels'
 import { apiErrorMessage } from '~/composables/useApiError'
 
@@ -297,16 +366,20 @@ interface LabelRow extends ShippingLabelInput {
 }
 
 const { fetchEbayOrders, generateLabelsPdf } = useShippingLabels()
+const { getSettings } = useSettings()
 const toast = useToast()
 
 const orders: Ref<EbayUnshippedOrder[]> = ref([])
 const loadingOrders: Ref<boolean> = ref(false)
 const ebayUnavailable: Ref<boolean> = ref(false)
 const ebayScopeMismatch: Ref<boolean> = ref(false)
+const senderAddressComplete: Ref<boolean> = ref(false)
+const senderLoading: Ref<boolean> = ref(true)
 const labels: Ref<LabelRow[]> = ref([])
 const previewUrl: Ref<string | null> = ref(null)
 const previewBlob: Ref<Blob | null> = ref(null)
 const previewLoading: Ref<boolean> = ref(false)
+const downloadLoading: Ref<boolean> = ref(false)
 const lastPreviewSignature: Ref<string> = ref('')
 
 const manual = reactive<ShippingLabelInput>({
@@ -408,6 +481,7 @@ function toggleOrder(order: EbayUnshippedOrder): void {
     city: order.address.city || '',
     state: order.address.state || '',
     country_code: order.address.country_code || 'FR',
+    stamp_pdf_base64: null,
   })
 }
 
@@ -432,6 +506,7 @@ function addManual(): void {
     city: manual.city.trim(),
     state: manual.state?.trim() || '',
     country_code: (manual.country_code || 'FR').toUpperCase(),
+    stamp_pdf_base64: null,
   })
   manual.full_name = ''
   manual.line1 = ''
@@ -449,6 +524,77 @@ function removeLabel(uid: string): void {
   }
 }
 
+function stampFingerprint(b64: string | null | undefined): string {
+  if (!b64) return ''
+  let h = 2166136261
+  const cap = Math.min(b64.length, 12000)
+  for (let i = 0; i < cap; i++) {
+    h ^= b64.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return `${b64.length}:${h >>> 0}`
+}
+
+/** Stable id for the hidden file input (DOM id cannot contain ':' etc.). */
+function stampPdfInputId(uid: string): string {
+  return `stamp-pdf-${uid.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function openStampPdfPicker(uid: string): void {
+  void nextTick(() => {
+    document.getElementById(stampPdfInputId(uid))?.click()
+  })
+}
+
+function onStampPdfChange(uid: string, ev: Event): void {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const okMime = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  if (!okMime) {
+    toast.add({
+      title: 'PDF requis',
+      description: 'Choisissez le fichier PDF du timbre (laposte.fr).',
+      color: 'warning',
+    })
+    input.value = ''
+    return
+  }
+  const maxBytes = 3 * 1024 * 1024
+  if (file.size > maxBytes) {
+    toast.add({
+      title: 'Fichier trop volumineux',
+      description: 'PDF timbre limité à 3 Mo.',
+      color: 'warning',
+    })
+    input.value = ''
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = (): void => {
+    const dataUrl = reader.result as string
+    const comma = dataUrl.indexOf(',')
+    const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
+    const row = labels.value.find((l) => l.uid === uid)
+    if (row) {
+      row.stamp_pdf_base64 = b64
+    }
+  }
+  reader.readAsDataURL(file)
+  input.value = ''
+}
+
+function clearStampPdf(uid: string): void {
+  const row = labels.value.find((l) => l.uid === uid)
+  if (row) {
+    row.stamp_pdf_base64 = null
+  }
+  const input = document.getElementById(stampPdfInputId(uid)) as HTMLInputElement | null
+  if (input) {
+    input.value = ''
+  }
+}
+
 function clearAll(): void {
   labels.value.splice(0, labels.value.length)
 }
@@ -462,14 +608,33 @@ const labelsPayload: ComputedRef<ShippingLabelInput[]> = computed(() =>
     city: l.city,
     state: l.state || null,
     country_code: l.country_code || 'FR',
+    stamp_pdf_base64: l.stamp_pdf_base64 ?? null,
   })),
 )
 
-const labelsSignature: ComputedRef<string> = computed(() => JSON.stringify(labelsPayload.value))
+const labelsSignature: ComputedRef<string> = computed(() =>
+  JSON.stringify({
+    rows: labels.value.map((l) => ({
+      full_name: l.full_name,
+      line1: l.line1,
+      line2: l.line2 || null,
+      postal_code: l.postal_code,
+      city: l.city,
+      state: l.state || null,
+      country_code: l.country_code || 'FR',
+      stamp: stampFingerprint(l.stamp_pdf_base64 ?? null),
+    })),
+  }),
+)
 
 const previewStale: ComputedRef<boolean> = computed(
   () => Boolean(previewUrl.value) && labelsSignature.value !== lastPreviewSignature.value,
 )
+
+const pdfBusy: ComputedRef<boolean> = computed(() => previewLoading.value || downloadLoading.value)
+
+/** Download button enabled whenever there is at least one label row (preview not required). */
+const canDownloadPdf: ComputedRef<boolean> = computed(() => labels.value.length > 0 && !downloadLoading.value)
 
 function revokePreview(): void {
   if (previewUrl.value) {
@@ -507,25 +672,81 @@ async function refreshPreview(): Promise<void> {
   }
 }
 
-function downloadPdf(): void {
-  if (!previewBlob.value) {
+async function downloadPdf(): Promise<void> {
+  if (labels.value.length === 0) {
+    toast.add({
+      title: 'Aucune étiquette',
+      description: 'Sélectionnez une commande ou ajoutez une étiquette manuelle.',
+      color: 'warning',
+    })
     return
   }
-  const url = URL.createObjectURL(previewBlob.value)
-  const a = document.createElement('a')
-  a.href = url
-  const stamp = new Date().toISOString().slice(0, 10)
-  a.download = `goupixdex-etiquettes-${stamp}.pdf`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  downloadLoading.value = true
+  try {
+    const blob = await generateLabelsPdf(labelsPayload.value)
+    const stamp = new Date().toISOString().slice(0, 10)
+    const dlUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = dlUrl
+    a.download = `goupixdex-etiquettes-${stamp}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(dlUrl)
+
+    revokePreview()
+    previewBlob.value = blob
+    previewUrl.value = URL.createObjectURL(blob)
+    lastPreviewSignature.value = labelsSignature.value
+  } catch (e) {
+    toast.add({
+      title: 'Téléchargement impossible',
+      description: apiErrorMessage(e),
+      color: 'error',
+    })
+  } finally {
+    downloadLoading.value = false
+  }
 }
 
-const pageCount: ComputedRef<number> = computed(() => Math.max(1, Math.ceil(labels.value.length / 8)))
+const LABELS_PER_PAGE = 8
+
+/** With sender configured: 2 L7173 stickers per parcel (recipient then sender on separate physical labels). */
+const labelSlotCount: ComputedRef<number> = computed(() => {
+  const n = labels.value.length
+  if (n === 0) return 0
+  return senderAddressComplete.value ? n * 2 : n
+})
+
+const pageCountDetail: ComputedRef<string> = computed(() => {
+  const n = labels.value.length
+  if (n === 0) {
+    return ''
+  }
+  const slots = senderAddressComplete.value ? n * 2 : n
+  const pages = Math.ceil(slots / LABELS_PER_PAGE)
+  const pagesWord = pages > 1 ? 'pages' : 'page'
+  if (!senderAddressComplete.value) {
+    return `${pages} ${pagesWord} A4 (aperçu destinataires seuls ; PDF complet après config. expéditeur)`
+  }
+  return `${pages} ${pagesWord} A4 (${slots} vignettes : ${n} destinataire${n > 1 ? 's' : ''} + ${n} expéditeur${n > 1 ? 's' : ''})`
+})
+
+async function loadSenderSettings(): Promise<void> {
+  senderLoading.value = true
+  try {
+    const s = await getSettings()
+    senderAddressComplete.value = s.sender_address_complete === true
+  } catch {
+    senderAddressComplete.value = false
+  } finally {
+    senderLoading.value = false
+  }
+}
 
 onMounted((): void => {
   void loadOrders()
+  void loadSenderSettings()
 })
 
 onBeforeUnmount((): void => {

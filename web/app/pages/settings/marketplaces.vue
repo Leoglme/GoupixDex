@@ -242,14 +242,57 @@ async function startEbayOAuth(): Promise<void> {
     sessionStorage.setItem('ebay_oauth_state', state)
   }
   try {
-    const { data } = await $api.get<{ authorization_url: string }>('/ebay/oauth/authorize-url', {
+    const { data } = await $api.get<{
+      authorization_url: string
+      redirect_uri?: string
+    }>('/ebay/oauth/authorize-url', {
       params: { state, force_login: true },
     })
     if (import.meta.client) {
+      const expected = normalizeOAuthCallbackUrl(`${window.location.origin}/settings/marketplaces`)
+      const configured = normalizeOAuthCallbackUrl(data.redirect_uri || '')
+      if (configured && configured !== expected) {
+        const ok = window.confirm(
+          [
+            "L'URL de retour eBay configurée sur le serveur ne correspond pas à cette fenêtre.",
+            '',
+            `Serveur (EBAY_REDIRECT_URI) :\n${data.redirect_uri}`,
+            '',
+            `Cette app :\n${window.location.origin}/settings/marketplaces`,
+            '',
+            'Après validation chez eBay, vous serez renvoyé vers la première URL — souvent la production : autre interface, pas d’outils de développement (workers / sync DB).',
+            '',
+            'Pour le dev local : alignez EBAY_REDIRECT_URI et l’« URL acceptée » eBay sur la même origine que cette page (voir api/EBAY.md).',
+            '',
+            'Continuer quand même ?',
+          ].join('\n'),
+        )
+        if (!ok) {
+          return
+        }
+      }
       window.location.href = data.authorization_url
     }
   } catch (e) {
     toast.add({ title: 'OAuth indisponible', description: apiErrorMessage(e), color: 'error' })
+  }
+}
+
+/** Same origin + path for comparing server redirect_uri with this app. */
+function normalizeOAuthCallbackUrl(raw: string): string {
+  const t = raw.trim()
+  if (!t) {
+    return ''
+  }
+  try {
+    const u = new URL(t)
+    let path = u.pathname
+    while (path.length > 1 && path.endsWith('/')) {
+      path = path.slice(0, -1)
+    }
+    return `${u.origin}${path === '' ? '/' : path}`.toLowerCase()
+  } catch {
+    return t.replace(/\/+$/, '').toLowerCase()
   }
 }
 

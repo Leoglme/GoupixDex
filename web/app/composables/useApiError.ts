@@ -10,6 +10,12 @@ export function apiErrorMessage(e: unknown): string {
   }
   const data = (e as { response?: { data?: { detail?: unknown } } }).response?.data
   const d = data?.detail
+  if (d && typeof d === 'object' && 'code' in d && (d as { code: string }).code === 'invalid_stamp_pdf') {
+    const det = d as { message?: string; parcel_index?: number }
+    const idx = typeof det.parcel_index === 'number' ? det.parcel_index + 1 : null
+    const base = typeof det.message === 'string' ? det.message : 'PDF timbre invalide.'
+    return idx != null ? `${base} (parcel ${idx})` : base
+  }
   if (typeof d === 'string') {
     return d
   }

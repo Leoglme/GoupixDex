@@ -17,6 +17,12 @@ class SettingsResponse(BaseModel):
     ebay_listing_config_complete: bool
     ebay_oauth_configured: bool
     ebay_environment: str
+    sender_full_name: str | None
+    sender_line1: str | None
+    sender_line2: str | None
+    sender_postal_code: str | None
+    sender_city: str | None
+    sender_address_complete: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -29,3 +35,8 @@ class SettingsUpdate(BaseModel):
     ebay_fulfillment_policy_id: str | None = Field(default=None, max_length=32)
     ebay_payment_policy_id: str | None = Field(default=None, max_length=32)
     ebay_return_policy_id: str | None = Field(default=None, max_length=32)
+    sender_full_name: str | None = Field(default=None, max_length=120)
+    sender_line1: str | None = Field(default=None, max_length=180)
+    sender_line2: str | None = Field(default=None, max_length=180)
+    sender_postal_code: str | None = Field(default=None, max_length=20)
+    sender_city: str | None = Field(default=None, max_length=80)

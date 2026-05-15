@@ -83,8 +83,9 @@ def ebay_authorize_url(
     force_login: Annotated[bool, Query()] = False,
 ) -> dict[str, str]:
     """Build the browser URL for eBay consent (User must open it)."""
+    app = get_settings()
     try:
-        url = build_authorization_url(state=state, force_login=force_login)
+        url = build_authorization_url(state=state, force_login=force_login, app=app)
     except RuntimeError as exc:
         if str(exc) == "ebay_oauth_not_configured":
             raise HTTPException(
@@ -92,7 +93,8 @@ def ebay_authorize_url(
                 detail="eBay OAuth is not configured on the server (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI).",
             ) from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"authorization_url": url, "state": state}
+    redirect = (app.ebay_redirect_uri or "").strip()
+    return {"authorization_url": url, "state": state, "redirect_uri": redirect}
 
 
 @router.post("/oauth/exchange", status_code=status.HTTP_200_OK)

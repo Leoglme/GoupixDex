@@ -20,6 +20,14 @@ In the developer portal, configure OAuth:
 
 **Important:** no mismatch in trailing slash, `http` vs `https`, or host (`localhost` vs `127.0.0.1`) between the eBay portal, `EBAY_REDIRECT_URI`, and the URL actually opened in the browser.
 
+### Local dev / desktop (Tauri) — “j’ai l’impression de passer sur une vieille version”
+
+After you approve eBay, **the browser always lands on `EBAY_REDIRECT_URI`**, not on whatever tab you started from.
+
+If `EBAY_REDIRECT_URI` points to **production** (e.g. `https://goupixdex.example/settings/marketplaces`) but you started OAuth from **`http://localhost:3000`** or a **Tauri dev** window, you will be redirected to **that production URL**. You then load the **deployed** front-end: no Nuxt devtools, no floating “Redémarrer workers / Sync DB” (those only exist when `import.meta.dev` is true), and the UI may lag behind your local branch.
+
+**Fix:** for local work, register and set `EBAY_REDIRECT_URI` to the **same origin** as the app you are running (e.g. `http://localhost:3000/settings/marketplaces` or your Tauri dev URL if eBay allows it). Use a separate eBay keyset/sandbox RuName if needed.
+
 ## 3. Scopes used by GoupixDex
 
 The API requests these scopes (already set in the backend):
@@ -65,6 +73,7 @@ Fulfillment shipping options (multiple domestic rates, international, handling t
 
 ## 8. Quick troubleshooting
 
+- **Après « Se connecter à eBay », l’app ressemble à une vieille version / plus d’outils dev** : eBay vous renvoie toujours vers `EBAY_REDIRECT_URI`. Si cette URL est la **production** alors que vous étiez en **localhost** ou Tauri dev, vous chargez le site déployé (build sans mode dev). Alignez `EBAY_REDIRECT_URI` + RuName eBay sur l’origine où vous travaillez — voir §2 ci-dessus.
 - **Token exchange error**: `redirect_uri` does not match what is registered at eBay, or `code` already used / expired (codes are single-use and short-lived).
 - **“User is not eligible for Business Policy”** (logs: error 20403 on `fulfillment_policy`): the account must be enrolled in **business policies**. The API calls [`optInToProgram`](https://developer.ebay.com/api-docs/sell/account/resources/program/methods/optInToProgram) with `SELLING_POLICY_MANAGEMENT` before loading policies; eBay can take **up to ~24 h** to activate — retry later or check with `getOptedInPrograms`.
 - **Publishing error**: wrong category, policies incompatible with the marketplace, or **condition descriptors** required for some card categories — see API logs (`ebay_body`).

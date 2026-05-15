@@ -14,7 +14,11 @@ from core.security import decrypt_ebay_token
 from models.user import User
 from schemas.settings import SettingsResponse, SettingsUpdate
 from services.ebay_oauth_service import ebay_oauth_configured
-from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
+from services.user_settings_service import (
+    ebay_listing_config_complete,
+    get_or_create_user_settings,
+    sender_address_complete,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -37,6 +41,12 @@ def _to_response(db: Session, user: User) -> SettingsResponse:
         ebay_listing_config_complete=ebay_listing_config_complete(s),
         ebay_oauth_configured=ebay_oauth_configured(app),
         ebay_environment="sandbox" if app.ebay_use_sandbox else "production",
+        sender_full_name=(s.sender_full_name or "").strip() or None,
+        sender_line1=(s.sender_line1 or "").strip() or None,
+        sender_line2=(s.sender_line2 or "").strip() or None,
+        sender_postal_code=(s.sender_postal_code or "").strip() or None,
+        sender_city=(s.sender_city or "").strip() or None,
+        sender_address_complete=sender_address_complete(s),
     )
 
 
@@ -75,6 +85,19 @@ def put_margin_settings(
         "ebay_fulfillment_policy_id",
         "ebay_payment_policy_id",
         "ebay_return_policy_id",
+    ):
+        if key in data:
+            val = data[key]
+            if val is None or (isinstance(val, str) and not val.strip()):
+                setattr(s, key, None)
+            else:
+                setattr(s, key, str(val).strip())
+    for key in (
+        "sender_full_name",
+        "sender_line1",
+        "sender_line2",
+        "sender_postal_code",
+        "sender_city",
     ):
         if key in data:
             val = data[key]

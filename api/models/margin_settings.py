@@ -24,5 +24,11 @@ class MarginSettings(Base):
     ebay_fulfillment_policy_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ebay_payment_policy_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ebay_return_policy_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: Envelope flap (return) address — used when printing shipping label sheets.
+    sender_full_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sender_line1: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    sender_line2: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    sender_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sender_city: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="margin_settings")

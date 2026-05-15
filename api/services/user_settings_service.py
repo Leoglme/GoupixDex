@@ -26,6 +26,16 @@ def effective_ebay_category_id(ms: MarginSettings) -> str:
     return EBAY_FR_DEFAULT_LEAF_CATEGORY_ID.strip()
 
 
+def sender_address_complete(ms: MarginSettings) -> bool:
+    """True when the envelope flap (return) address is filled in for label printing."""
+    return bool(
+        (ms.sender_full_name or "").strip()
+        and (ms.sender_line1 or "").strip()
+        and (ms.sender_postal_code or "").strip()
+        and (ms.sender_city or "").strip()
+    )
+
+
 def ebay_listing_config_complete(ms: MarginSettings) -> bool:
     return bool(
         effective_ebay_category_id(ms)

@@ -14,6 +14,12 @@ export interface AppSettings {
   ebay_listing_config_complete: boolean
   ebay_oauth_configured: boolean
   ebay_environment: string
+  sender_full_name: string | null
+  sender_line1: string | null
+  sender_line2: string | null
+  sender_postal_code: string | null
+  sender_city: string | null
+  sender_address_complete: boolean
 }
 
 export type AppSettingsPatch = Partial<{
@@ -26,6 +32,11 @@ export type AppSettingsPatch = Partial<{
   ebay_fulfillment_policy_id: string | null
   ebay_payment_policy_id: string | null
   ebay_return_policy_id: string | null
+  sender_full_name: string | null
+  sender_line1: string | null
+  sender_line2: string | null
+  sender_postal_code: string | null
+  sender_city: string | null
 }>
 
 /**

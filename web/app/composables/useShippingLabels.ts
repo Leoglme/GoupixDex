@@ -34,6 +34,8 @@ export interface ShippingLabelInput {
   city: string
   state: string | null
   country_code: string | null
+  /** Optional La Poste stamp PDF (laposte.fr); raw base64 without data-URL prefix is fine in JSON. */
+  stamp_pdf_base64?: string | null
 }
 
 /**
