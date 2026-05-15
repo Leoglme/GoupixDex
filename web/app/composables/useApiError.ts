@@ -13,6 +13,9 @@ export function apiErrorMessage(e: unknown): string {
   if (typeof d === 'string') {
     return d
   }
+  if (d && typeof d === 'object' && 'message' in d && typeof (d as { message: unknown }).message === 'string') {
+    return (d as { message: string }).message
+  }
   if (Array.isArray(d)) {
     return d
       .map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg: string }).msg) : JSON.stringify(x)))

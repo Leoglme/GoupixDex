@@ -19,6 +19,9 @@ from services.ebay_oauth_service import (
     build_authorization_url,
     ebay_oauth_configured,
     exchange_authorization_code,
+    refresh_user_access_token,
+    token_has_fulfillment_scope,
+    token_scope_string,
 )
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.ebay_seller_metadata_service import (
@@ -76,11 +79,12 @@ def _settings_public_row(db: Session, user: User) -> dict[str, Any]:
 @router.get("/oauth/authorize-url")
 def ebay_authorize_url(
     state: Annotated[str, Query(min_length=4, max_length=256)],
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],  # noqa: ARG001
+    force_login: Annotated[bool, Query()] = False,
 ) -> dict[str, str]:
     """Build the browser URL for eBay consent (User must open it)."""
     try:
-        url = build_authorization_url(state=state)
+        url = build_authorization_url(state=state, force_login=force_login)
     except RuntimeError as exc:
         if str(exc) == "ebay_oauth_not_configured":
             raise HTTPException(
@@ -129,7 +133,40 @@ async def ebay_oauth_exchange(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"ok": True, "ebay_connected": bool(decrypt_ebay_token(user.ebay_refresh_token))}
+    scope = token_scope_string(data)
+    return {
+        "ok": True,
+        "ebay_connected": bool(decrypt_ebay_token(user.ebay_refresh_token)),
+        "oauth_scope": scope,
+        "has_fulfillment_scope": token_has_fulfillment_scope(data),
+    }
+
+
+@router.get("/oauth/token-scopes")
+async def ebay_oauth_token_scopes(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Diagnostic: scopes on the current refresh token (after a refresh with all EBAY_SCOPES)."""
+    rt = decrypt_ebay_token(user.ebay_refresh_token)
+    if not rt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect eBay first (OAuth).",
+        )
+    try:
+        data = await refresh_user_access_token(rt, request_all_scopes=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"eBay token refresh failed: {exc}",
+        ) from exc
+    scope = token_scope_string(data)
+    return {
+        "oauth_scope": scope,
+        "has_fulfillment_scope": token_has_fulfillment_scope(data),
+        "scopes": [s for s in scope.split() if s],
+    }
 
 
 @router.post("/oauth/disconnect", status_code=status.HTTP_200_OK)

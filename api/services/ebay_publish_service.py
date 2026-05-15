@@ -18,7 +18,12 @@ from core.security import decrypt_ebay_token, store_ebay_token
 from models.article import Article
 from models.margin_settings import MarginSettings
 from models.user import User
-from services.ebay_oauth_service import _api_base_url, refresh_user_access_token
+from services.ebay_oauth_service import (
+    EbayOAuthError,
+    _api_base_url,
+    refresh_user_access_token,
+    token_has_fulfillment_scope,
+)
 from services.ebay_trading_card_grading import (
     EBAY_CONDITION_GRADED,
     graded_condition_descriptor_payloads,
@@ -220,7 +225,13 @@ def _sku_for_listing(article_id: int) -> str:
     return "".join(c for c in raw if c.isalnum())[:50]
 
 
-async def ensure_ebay_access_token(db: Session, user: User, *, app: AppSettings | None = None) -> str:
+async def ensure_ebay_access_token(
+    db: Session,
+    user: User,
+    *,
+    app: AppSettings | None = None,
+    require_fulfillment_scope: bool = False,
+) -> str:
     """Return a valid user access token, refreshing (and persisting) when needed."""
     import datetime as dt
 
@@ -228,7 +239,7 @@ async def ensure_ebay_access_token(db: Session, user: User, *, app: AppSettings 
     now = dt.datetime.now(dt.UTC)
     plain_access = decrypt_ebay_token(user.ebay_access_token)
     exp = user.ebay_access_expires_at
-    if plain_access and exp is not None:
+    if plain_access and exp is not None and not require_fulfillment_scope:
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=dt.UTC)
         if exp > now + dt.timedelta(minutes=5):
@@ -238,7 +249,25 @@ async def ensure_ebay_access_token(db: Session, user: User, *, app: AppSettings 
     if not rt:
         raise RuntimeError("ebay_not_connected")
 
-    data = await refresh_user_access_token(rt, app=s)
+    try:
+        data = await refresh_user_access_token(
+            rt,
+            app=s,
+            request_all_scopes=require_fulfillment_scope,
+        )
+    except EbayOAuthError as exc:
+        if require_fulfillment_scope and exc.code in {"invalid_scope", "ebay_scope_mismatch"}:
+            raise RuntimeError(
+                "ebay_fulfillment_scope_missing: reconnect eBay after enabling sell.fulfillment "
+                "on your production app keyset (developer.ebay.com)."
+            ) from exc
+        raise
+    if require_fulfillment_scope and not token_has_fulfillment_scope(data):
+        raise RuntimeError(
+            "ebay_fulfillment_scope_missing: le token OAuth ne contient pas sell.fulfillment. "
+            "Activez ce scope sur developer.ebay.com (clés production), révoquez l'app sur eBay.fr, "
+            "puis reconnectez."
+        )
     access = data.get("access_token")
     if not access or not isinstance(access, str):
         raise RuntimeError("ebay_token_response_invalid")

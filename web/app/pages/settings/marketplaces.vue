@@ -206,8 +206,20 @@ async function saveChannels(): Promise<void> {
 
 async function exchangeOAuthCode(code: string): Promise<void> {
   try {
-    await $api.post('/ebay/oauth/exchange', { code })
-    toast.add({ title: 'Compte eBay connecté', color: 'success' })
+    const { data } = await $api.post<{
+      ok: boolean
+      has_fulfillment_scope?: boolean
+    }>('/ebay/oauth/exchange', { code })
+    if (data.has_fulfillment_scope === false) {
+      toast.add({
+        title: 'eBay connecté — scope commandes manquant',
+        description:
+          'Le token ne contient pas sell.fulfillment. Sur developer.ebay.com, activez ce scope sur vos clés production, révoquez GoupixDex dans eBay (applications tierces), puis reconnectez.',
+        color: 'warning',
+      })
+    } else {
+      toast.add({ title: 'Compte eBay connecté', color: 'success' })
+    }
     await load()
   } catch (e) {
     toast.add({ title: 'Échange OAuth échoué', description: apiErrorMessage(e), color: 'error' })
@@ -231,7 +243,7 @@ async function startEbayOAuth(): Promise<void> {
   }
   try {
     const { data } = await $api.get<{ authorization_url: string }>('/ebay/oauth/authorize-url', {
-      params: { state },
+      params: { state, force_login: true },
     })
     if (import.meta.client) {
       window.location.href = data.authorization_url

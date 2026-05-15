@@ -173,6 +173,8 @@
               </UCard>
             </div>
 
+            <GoupixDexCardmarketBasketAdvisor v-if="resultCards.length" :cards="resultCards" />
+
             <UCard v-if="missingCards.length" class="ring-default/60 shadow-sm ring-1">
               <template #header>
                 <p class="text-highlighted font-medium">Sans offre (filtres)</p>
@@ -190,7 +192,11 @@
 
 <script setup lang="ts">
 import type { Ref } from 'vue'
-import type { CardmarketSearchDetail, CardmarketSearchProgressPayload } from '~/types/CardmarketSearch'
+import type {
+  CardmarketCardRaw,
+  CardmarketSearchDetail,
+  CardmarketSearchProgressPayload,
+} from '~/types/CardmarketSearch'
 import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
 
 definePageMeta({ middleware: 'auth' })
@@ -269,19 +275,22 @@ const valueRows = computed(() => {
   return (r.seller_summary_value as Record<string, unknown>[]).slice(0, 25)
 })
 
-const missingCards = computed(() => {
+const resultCards = computed<CardmarketCardRaw[]>(() => {
   const r = lastResult.value
   if (!r || !Array.isArray(r.cards)) {
     return []
   }
+  return r.cards as CardmarketCardRaw[]
+})
+
+const missingCards = computed<string[]>(() => {
   const out: string[] = []
-  for (const c of r.cards as Record<string, unknown>[]) {
-    const offers = c.offers as unknown[] | undefined
-    const code = String(c.code || '')
+  for (const c of resultCards.value) {
+    const code = String(c?.code || '')
     if (!code) {
       continue
     }
-    if (!offers || offers.length === 0) {
+    if (!Array.isArray(c.offers) || c.offers.length === 0) {
       out.push(code)
     }
   }

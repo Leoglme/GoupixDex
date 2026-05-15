@@ -51,16 +51,20 @@
             </div>
           </template>
 
-          <div v-if="ebayUnavailable" class="p-5">
+          <div v-if="ebayUnavailable || ebayScopeMismatch" class="p-5">
             <GoupixDexAlert
               variant="warning"
-              icon="i-lucide-link-2-off"
-              title="eBay non connecté"
-              description="Connectez votre compte eBay dans les Paramètres pour récupérer vos commandes à expédier. Pensez à reconnecter votre compte si vous voyez une erreur de scope (sell.fulfillment a été ajouté)."
+              :icon="ebayScopeMismatch ? 'i-lucide-shield-alert' : 'i-lucide-link-2-off'"
+              :title="ebayScopeMismatch ? 'Autorisation eBay à mettre à jour' : 'eBay non connecté'"
+              :description="
+                ebayScopeMismatch
+                  ? 'Reconnectez votre compte eBay dans les Paramètres pour accorder le scope « sell.fulfillment » (liste des commandes à expédier).'
+                  : 'Connectez votre compte eBay dans les Paramètres pour récupérer vos commandes à expédier.'
+              "
             >
               <template #actions>
                 <UButton to="/settings/marketplaces" size="xs" color="neutral" variant="subtle">
-                  Ouvrir les paramètres
+                  {{ ebayScopeMismatch ? 'Reconnecter eBay' : 'Ouvrir les paramètres' }}
                 </UButton>
               </template>
             </GoupixDexAlert>
@@ -298,6 +302,7 @@ const toast = useToast()
 const orders: Ref<EbayUnshippedOrder[]> = ref([])
 const loadingOrders: Ref<boolean> = ref(false)
 const ebayUnavailable: Ref<boolean> = ref(false)
+const ebayScopeMismatch: Ref<boolean> = ref(false)
 const labels: Ref<LabelRow[]> = ref([])
 const previewUrl: Ref<string | null> = ref(null)
 const previewBlob: Ref<Blob | null> = ref(null)
@@ -338,14 +343,29 @@ const COUNTRY_OPTIONS = [
 
 let manualCounter: number = 0
 
+function isEbayScopeMismatchError(e: unknown): boolean {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (detail && typeof detail === 'object' && 'code' in detail) {
+    const code = (detail as { code?: string }).code
+    return code === 'ebay_scope_mismatch' || code === 'ebay_fulfillment_denied'
+  }
+  if (typeof detail === 'string') {
+    return detail.includes('sell.fulfillment') || detail.includes('ebay_scope_mismatch')
+  }
+  return false
+}
+
 async function loadOrders(): Promise<void> {
   loadingOrders.value = true
   ebayUnavailable.value = false
+  ebayScopeMismatch.value = false
   try {
     orders.value = await fetchEbayOrders()
   } catch (e: unknown) {
     const status = (e as { response?: { status?: number } })?.response?.status
-    if (status === 400) {
+    if (status === 400 && isEbayScopeMismatchError(e)) {
+      ebayScopeMismatch.value = true
+    } else if (status === 400) {
       ebayUnavailable.value = true
     } else {
       toast.add({

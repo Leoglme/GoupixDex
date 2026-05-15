@@ -20,6 +20,20 @@ EBAY_SCOPES = [
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
 ]
 
+FULFILLMENT_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.fulfillment"
+FULFILLMENT_SCOPE_READONLY = "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly"
+
+
+def token_scope_string(data: dict[str, Any]) -> str:
+    """Space-separated scopes from an eBay token response (exchange or refresh)."""
+    raw = data.get("scope")
+    return raw.strip() if isinstance(raw, str) else ""
+
+
+def token_has_fulfillment_scope(data: dict[str, Any]) -> bool:
+    scopes = token_scope_string(data)
+    return FULFILLMENT_SCOPE in scopes or FULFILLMENT_SCOPE_READONLY in scopes
+
 
 class EbayOAuthError(RuntimeError):
     """User-facing eBay OAuth error (stable code + human-readable message)."""
@@ -90,20 +104,26 @@ def ebay_oauth_configured(app: AppSettings | None = None) -> bool:
     )
 
 
-def build_authorization_url(*, state: str, app: AppSettings | None = None) -> str:
+def build_authorization_url(
+    *,
+    state: str,
+    app: AppSettings | None = None,
+    force_login: bool = False,
+) -> str:
     """Consent page URL (GET in browser)."""
     s = app or get_settings()
     if not ebay_oauth_configured(s):
         raise RuntimeError("ebay_oauth_not_configured")
-    q = urlencode(
-        {
-            "client_id": s.ebay_client_id.strip(),
-            "redirect_uri": s.ebay_redirect_uri.strip(),
-            "response_type": "code",
-            "scope": " ".join(EBAY_SCOPES),
-            "state": state,
-        },
-    )
+    params: dict[str, str] = {
+        "client_id": s.ebay_client_id.strip(),
+        "redirect_uri": s.ebay_redirect_uri.strip(),
+        "response_type": "code",
+        "scope": " ".join(EBAY_SCOPES),
+        "state": state,
+    }
+    if force_login:
+        params["prompt"] = "login"
+    q = urlencode(params)
     return f"{_auth_base_url(s)}/oauth2/authorize?{q}"
 
 
@@ -135,24 +155,28 @@ async def exchange_authorization_code(code: str, *, app: AppSettings | None = No
     return resp.json()
 
 
-async def refresh_user_access_token(refresh_token: str, *, app: AppSettings | None = None) -> dict[str, Any]:
+async def refresh_user_access_token(
+    refresh_token: str,
+    *,
+    app: AppSettings | None = None,
+    request_all_scopes: bool = False,
+) -> dict[str, Any]:
     """Refresh the user access token.
 
-    We intentionally do **not** send the ``scope`` parameter: eBay then returns
-    a token with the scopes as originally consented. This is required when
-    ``EBAY_SCOPES`` evolves (e.g. when ``sell.fulfillment`` was added): users
-    already connected before the change keep publishing (inventory + account)
-    without re-consenting; features that need the new scope detect its absence
-    and prompt the user to reconnect.
+    When ``request_all_scopes`` is True, sends ``scope`` with all ``EBAY_SCOPES`` (subset of
+    consented scopes). Required for ``getOrders``: without ``scope`` on refresh, some access
+    tokens lose ``sell.fulfillment`` even though the refresh token includes it.
     """
     s = app or get_settings()
     if not ebay_oauth_configured(s):
         raise RuntimeError("ebay_oauth_not_configured")
     url = f"{_api_base_url(s)}/identity/v1/oauth2/token"
-    data = {
+    data: dict[str, str] = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token.strip(),
     }
+    if request_all_scopes:
+        data["scope"] = " ".join(EBAY_SCOPES)
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {_basic_auth_header(s)}",

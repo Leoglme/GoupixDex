@@ -13,9 +13,11 @@ from core.database import get_db
 from core.deps import get_current_user
 from core.security import decrypt_ebay_token
 from models.user import User
+from services.ebay_oauth_service import EbayOAuthError
 from services.ebay_orders_service import list_unshipped_orders
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.shipping_label_service import LabelAddress, render_labels_pdf
+from services.user_settings_service import get_or_create_user_settings
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
 
@@ -48,12 +50,29 @@ async def shipping_ebay_orders(
             detail="Connect eBay first (OAuth).",
         )
     try:
-        token = await ensure_ebay_access_token(db, user)
+        token = await ensure_ebay_access_token(db, user, require_fulfillment_scope=True)
     except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        msg = str(exc)
+        if msg.startswith("ebay_fulfillment_scope_missing"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "ebay_fulfillment_denied",
+                    "message": msg.split(": ", 1)[-1],
+                },
+            ) from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+
+    ms = get_or_create_user_settings(db, user.id)
+    mp = (ms.ebay_marketplace_id or "EBAY_FR").strip() or "EBAY_FR"
 
     try:
-        orders = await list_unshipped_orders(token)
+        orders = await list_unshipped_orders(token, marketplace_id=mp)
+    except EbayOAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

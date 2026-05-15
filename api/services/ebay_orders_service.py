@@ -3,19 +3,67 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
 from config import AppSettings, get_settings
-from services.ebay_oauth_service import _api_base_url
+from services.ebay_oauth_service import EbayOAuthError, _api_base_url
 
 logger = logging.getLogger(__name__)
+
+_PENDING_FULFILLMENT = frozenset({"NOT_STARTED", "IN_PROGRESS"})
 
 
 def _orders_url(app: AppSettings) -> str:
     return f"{_api_base_url(app)}/sell/fulfillment/v1/order"
+
+
+def _fulfillment_headers(access_token: str, marketplace_id: str) -> dict[str, str]:
+    mp = (marketplace_id or "EBAY_FR").strip() or "EBAY_FR"
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Content-Language": "fr-FR",
+        "X-EBAY-C-MARKETPLACE-ID": mp,
+    }
+
+
+def _parse_ebay_error_body(text: str) -> str:
+    try:
+        payload = json.loads(text) if text else {}
+    except ValueError:
+        return text[:400] if text else ""
+    if not isinstance(payload, dict):
+        return text[:400] if text else ""
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors:
+        parts: list[str] = []
+        for err in errors:
+            if not isinstance(err, dict):
+                continue
+            msg = str(err.get("longMessage") or err.get("message") or "").strip()
+            eid = err.get("errorId")
+            if msg:
+                parts.append(f"[{eid}] {msg}" if eid is not None else msg)
+        if parts:
+            return " · ".join(parts)
+    return str(payload.get("message") or payload)[:400]
+
+
+def _fulfillment_access_denied_message(ebay_detail: str) -> str:
+    base = (
+        "Accès refusé à l'API Fulfillment eBay (commandes acheteur). "
+        "Vérifiez que votre application **production** sur developer.ebay.com inclut le scope "
+        "« sell.fulfillment » (OAuth Scopes), puis révoquez GoupixDex dans vos paramètres eBay "
+        "(Confidentialité → Applications tierces) et reconnectez-vous."
+    )
+    if ebay_detail:
+        return f"{base} Détail eBay : {ebay_detail}"
+    return base
 
 
 def _safe_str(value: Any) -> str:
@@ -101,10 +149,48 @@ def _normalize_order(order: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _parse_creation_date(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.UTC)
+        return parsed
+    except ValueError:
+        return None
+
+
+def _order_matches_pending_filters(
+    order: dict[str, Any],
+    *,
+    since: dt.datetime,
+) -> bool:
+    status = _safe_str(order.get("orderFulfillmentStatus")).upper()
+    if status not in _PENDING_FULFILLMENT:
+        return False
+    created = _parse_creation_date(_safe_str(order.get("creationDate")) or None)
+    if created is not None and created < since:
+        return False
+    return True
+
+
+def _raise_for_fulfillment_error(resp: httpx.Response) -> None:
+    ebay_detail = _parse_ebay_error_body(resp.text)
+    if resp.status_code == 403:
+        raise EbayOAuthError(
+            "ebay_fulfillment_denied",
+            _fulfillment_access_denied_message(ebay_detail),
+            status=403,
+        )
+    resp.raise_for_status()
+
+
 async def list_unshipped_orders(
     access_token: str,
     *,
     app: AppSettings | None = None,
+    marketplace_id: str = "EBAY_FR",
     days_back: int = 90,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
@@ -112,21 +198,15 @@ async def list_unshipped_orders(
     Return orders whose fulfillment status is ``NOT_STARTED`` or ``IN_PROGRESS`` (i.e. not yet
     fully shipped) created within the last ``days_back`` days.
 
-    Uses the ``filter`` query syntax of the Fulfillment API:
-    ``orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS},creationdate:[<from>..]``.
+    Uses ``getOrders`` without server-side ``filter`` (filtered client-side). Some tokens /
+    app configs return 403 when combining ``orderfulfillmentstatus`` + ``creationdate`` filters
+    despite valid ``sell.fulfillment`` scope; the default endpoint returns the last 90 days.
     """
     s = app or get_settings()
     url = _orders_url(s)
+    headers = _fulfillment_headers(access_token, marketplace_id)
 
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=max(1, int(days_back)))
-    since_iso = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    fulfillment_filter = "orderfulfillmentstatus:%7BNOT_STARTED%7CIN_PROGRESS%7D"
-    creation_filter = f"creationdate:%5B{since_iso}..%5D"
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json",
-    }
 
     out: list[dict[str, Any]] = []
     offset = 0
@@ -134,23 +214,21 @@ async def list_unshipped_orders(
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         while len(out) < limit:
-            params_qs = (
-                f"filter={fulfillment_filter},{creation_filter}"
-                f"&limit={page_size}&offset={offset}"
-            )
-            full_url = f"{url}?{params_qs}"
-            resp = await client.get(full_url, headers=headers)
+            qs = urlencode({"limit": page_size, "offset": offset})
+            resp = await client.get(f"{url}?{qs}", headers=headers)
             if resp.status_code == 204:
                 break
             if resp.status_code >= 400:
-                logger.warning("eBay getOrders failed: %s %s", resp.status_code, resp.text[:500])
-                resp.raise_for_status()
+                logger.warning("eBay getOrders failed: %s %s", resp.status_code, resp.text[:800])
+                _raise_for_fulfillment_error(resp)
             data = resp.json() if resp.content else {}
             orders = data.get("orders") or []
             if not isinstance(orders, list) or not orders:
                 break
             for raw in orders:
                 if not isinstance(raw, dict):
+                    continue
+                if not _order_matches_pending_filters(raw, since=since):
                     continue
                 normalized = _normalize_order(raw)
                 if normalized:
