@@ -2,7 +2,9 @@
   <article
     class="group border-default bg-elevated/30 hover:border-primary/40 hover:bg-elevated/60 flex items-center gap-3 rounded-xl border p-3 transition-colors sm:gap-4 sm:p-4"
   >
-    <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-base font-semibold tabular-nums sm:size-12 sm:text-lg">
+    <div
+      class="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-full text-base font-semibold tabular-nums sm:size-12 sm:text-lg"
+    >
       {{ row.rank }}
     </div>
 
@@ -26,7 +28,10 @@
         {{ row.display_title }}
       </h3>
       <div class="text-muted mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span v-if="row.grade" class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600 dark:text-amber-400">
+        <span
+          v-if="row.grade"
+          class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600 dark:text-amber-400"
+        >
           <UIcon name="i-lucide-shield-check" class="size-3" />
           {{ row.grade }}
         </span>
@@ -45,9 +50,7 @@
       <span class="text-primary text-base font-semibold tabular-nums sm:text-lg">
         {{ row.count }} {{ row.count > 1 ? 'ventes' : 'vente' }}
       </span>
-      <span v-if="totalFormatted" class="text-muted text-xs tabular-nums">
-        {{ totalFormatted }} cumulés
-      </span>
+      <span v-if="totalFormatted" class="text-muted text-xs tabular-nums"> {{ totalFormatted }} cumulés </span>
       <UButton
         v-if="row.sample_listing_url"
         :to="row.sample_listing_url"
@@ -76,7 +79,7 @@ const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
   currency: 'EUR',
   minimumFractionDigits: 2,
-  maximumFractionDigits: 2
+  maximumFractionDigits: 2,
 })
 
 const medianFormatted = computed(() => {

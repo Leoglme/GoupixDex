@@ -79,9 +79,11 @@ const priceFormatted = computed(() => {
   return eur.format(v)
 })
 
-/** Prefer the parsed relative time (« il y a 2 h ») over the raw eBay
+/**
+ * Prefer the parsed relative time (« il y a 2 h ») over the raw eBay
  * caption when available — gives a uniform format across listings, even
- * when eBay returned an absolute date (« 15 mars »). */
+ * when eBay returned an absolute date (« 15 mars »).
+ */
 const soldLabel = computed(() => {
   const rel = formatRelativeHours(props.row.approx_hours_ago)
   if (rel) {
@@ -90,8 +92,10 @@ const soldLabel = computed(() => {
   return props.row.sold_caption ?? ''
 })
 
-/** Bump the eBay thumbnail (s-l140 by default) to a larger variant so the
- * card image stays sharp at desktop widths and on retina displays. */
+/**
+ * Bump the eBay thumbnail (s-l140 by default) to a larger variant so the
+ * card image stays sharp at desktop widths and on retina displays.
+ */
 const imgSrc = computed(() => upgradeEbayImage(props.row.image_url, 500))
 const imgSrcset = computed(() => ebayImageSrcset(props.row.image_url, 500))
 </script>

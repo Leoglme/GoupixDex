@@ -4,7 +4,6 @@
  *
  * Returns an empty string when the input is null / undefined / non-finite,
  * so templates can safely render the result with a ``v-if`` on truthiness.
- *
  * @param hours - Number of hours since the event (>= 0).
  * @returns A non-empty French label, or `''` if the input is unusable.
  */
@@ -13,7 +12,7 @@ export function formatRelativeHours(hours: number | null | undefined): string {
     return ''
   }
   if (hours < 1 / 60) {
-    return 'à l\'instant'
+    return "à l'instant"
   }
   if (hours < 1) {
     const mins = Math.max(1, Math.round(hours * 60))

@@ -35,6 +35,9 @@ const EXCLUDED_TOKENS = new Set([
   'TEAM',
 ])
 
+/**
+ *
+ */
 export function mapMarketCondition(ebayCondition: string, isGraded: boolean): string {
   if (isGraded) {
     return 'Mint'
@@ -58,6 +61,9 @@ export function mapMarketCondition(ebayCondition: string, isGraded: boolean): st
   return 'Near Mint'
 }
 
+/**
+ *
+ */
 export function buildMarketListingDescription(listing: MarketListing): string {
   const lines: string[] = [listing.title]
   if (listing.condition) {
@@ -69,6 +75,9 @@ export function buildMarketListingDescription(listing: MarketListing): string {
   return lines.join('\n').trim()
 }
 
+/**
+ *
+ */
 export function parseCardInfoFromTitle(title: string): {
   pokemonName: string
   setCode: string
@@ -106,6 +115,9 @@ export function parseCardInfoFromTitle(title: string): {
   return result
 }
 
+/**
+ *
+ */
 export function buildArticlePrefillFromListing(listing: MarketListing): Record<string, string> {
   const payload: Record<string, string> = {
     title: listing.title,

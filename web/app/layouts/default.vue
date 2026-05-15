@@ -146,6 +146,14 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       },
     },
     {
+      label: 'Catalogue',
+      icon: 'i-lucide-library',
+      to: '/articles/catalog',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
       label: 'Articles',
       icon: 'i-lucide-store',
       to: '/articles',

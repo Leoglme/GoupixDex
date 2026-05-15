@@ -11,6 +11,9 @@
             <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
               Création groupée
             </UButton>
+            <UButton to="/articles/catalog" color="neutral" variant="subtle" icon="i-lucide-library">
+              Catalogue
+            </UButton>
             <UButton to="/articles/create" icon="i-lucide-plus"> Nouvel article </UButton>
           </div>
         </template>

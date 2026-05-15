@@ -41,7 +41,7 @@ export interface EbaySoldTopResultBody {
   cards: EbaySoldTopRow[]
   graded: EbaySoldTopRow[]
   sealed: EbaySoldTopRow[]
-  groups_count: { cards: number, graded: number, sealed: number }
+  groups_count: { cards: number; graded: number; sealed: number }
   source: string
 }
 
@@ -103,6 +103,9 @@ export function useEbaySoldTop() {
   const activeJobId: Ref<string | null> = ref(null)
   let pollTimer: ReturnType<typeof setTimeout> | null = null
 
+  /**
+   *
+   */
   function clearPollTimer(): void {
     if (pollTimer !== null) {
       clearTimeout(pollTimer)
@@ -110,6 +113,9 @@ export function useEbaySoldTop() {
     }
   }
 
+  /**
+   *
+   */
   function applyEnvelope(env: JobEnvelope): void {
     pagesDone.value = env.pages_done
     pagesTotal.value = env.pages_requested
@@ -152,9 +158,9 @@ export function useEbaySoldTop() {
           pages: input.pages ?? 10,
           scrape_limit: input.scrapeLimit ?? 600,
           top_limit: input.topLimit ?? 20,
-          min_count: input.minCount ?? 1
+          min_count: input.minCount ?? 1,
         },
-        { timeout: 30_000 }
+        { timeout: 30_000 },
       )
       env = data
     } catch (err: unknown) {
@@ -184,7 +190,7 @@ export function useEbaySoldTop() {
         }
         try {
           const { data } = await $api.get<JobEnvelope>(`/ebay/market/sold-top/${jobId}`, {
-            timeout: 15_000
+            timeout: 15_000,
           })
           if (jobId !== activeJobId.value) {
             resolve(null)
@@ -269,6 +275,6 @@ export function useEbaySoldTop() {
     cached,
     load,
     cancel,
-    reset
+    reset,
   }
 }

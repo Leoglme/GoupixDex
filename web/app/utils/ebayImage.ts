@@ -22,15 +22,11 @@ const _SIZE_RX = /\/s-l\d+(\.[a-zA-Z]{2,5})(\?.*)?$/
  * Rewrite an eBay image URL to target a specific pixel width. Non-eBay
  * URLs (or unparseable ones) come back unchanged so this is safe to apply
  * blindly.
- *
  * @param url - The original eBay image URL (or null / undefined).
  * @param targetWidth - Desired pixel width on the long edge.
  * @returns The upgraded URL, or `null` when the input was falsy.
  */
-export function upgradeEbayImage(
-  url: string | null | undefined,
-  targetWidth = 500
-): string | null {
+export function upgradeEbayImage(url: string | null | undefined, targetWidth = 500): string | null {
   if (!url) {
     return null
   }
@@ -46,15 +42,11 @@ export function upgradeEbayImage(
 /**
  * Build a ``srcset`` string with 1x and 2x variants so the browser picks
  * the right size on retina displays.
- *
  * @param url - The original eBay image URL.
  * @param baseWidth - The 1x target width (the 2x variant is twice as large, clamped).
  * @returns A `srcset` value usable on `<img>`, or `''` if the input was falsy.
  */
-export function ebayImageSrcset(
-  url: string | null | undefined,
-  baseWidth = 500
-): string {
+export function ebayImageSrcset(url: string | null | undefined, baseWidth = 500): string {
   if (!url) {
     return ''
   }

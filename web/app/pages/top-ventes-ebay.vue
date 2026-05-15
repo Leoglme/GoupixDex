@@ -61,7 +61,13 @@
                 />
               </UFormField>
               <UFormField label="Fenêtre (vente)" class="w-full md:w-72">
-                <USelect v-model="windowKey" :items="windowOptions" value-key="value" label-key="label" class="w-full" />
+                <USelect
+                  v-model="windowKey"
+                  :items="windowOptions"
+                  value-key="value"
+                  label-key="label"
+                  class="w-full"
+                />
               </UFormField>
               <UButton
                 type="button"
@@ -118,10 +124,7 @@
         />
 
         <!-- Global progress bar (one eBay analysis feeds list + tops) -->
-        <div
-          v-if="loading"
-          class="border-default bg-elevated/30 flex flex-col gap-2 rounded-xl border p-4"
-        >
+        <div v-if="loading" class="border-default bg-elevated/30 flex flex-col gap-2 rounded-xl border p-4">
           <div class="flex items-center justify-between gap-3">
             <span class="text-highlighted inline-flex items-center gap-2 text-sm font-medium">
               <UIcon name="i-lucide-loader-circle" class="text-primary size-4 animate-spin" />
@@ -129,15 +132,9 @@
             </span>
             <span class="text-muted text-xs tabular-nums">{{ progressPercent }}%</span>
           </div>
-          <UProgress
-            :model-value="progressPercent"
-            :max="100"
-            size="sm"
-            color="primary"
-          />
+          <UProgress :model-value="progressPercent" :max="100" size="sm" color="primary" />
           <p class="text-muted text-xs">
-            {{ topScrape.totalObservedSoFar.value }} ventes uniques analysées —
-            regroupement à la fin de l'analyse.
+            {{ topScrape.totalObservedSoFar.value }} ventes uniques analysées — regroupement à la fin de l'analyse.
           </p>
         </div>
 
@@ -186,7 +183,6 @@
 
         <!-- Top results (cards / graded / sealed) -->
         <template v-else-if="!displayError">
-
           <template v-if="hasSearched && currentTopRows.length">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-muted text-sm">
@@ -260,11 +256,7 @@
 <script setup lang="ts">
 import type { TabsItem } from '@nuxt/ui'
 
-import type {
-  EbaySoldTopItem,
-  EbaySoldTopResultBody,
-  EbaySoldTopRow
-} from '~/composables/useEbaySoldTop'
+import type { EbaySoldTopItem, EbaySoldTopResultBody, EbaySoldTopRow } from '~/composables/useEbaySoldTop'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -279,20 +271,20 @@ type WindowKey = '24h' | '7d' | '30d'
 const windowOptions = [
   { label: 'Dernières 24 heures', value: '24h' as const },
   { label: '7 derniers jours', value: '7d' as const },
-  { label: '30 derniers jours', value: '30d' as const }
+  { label: '30 derniers jours', value: '30d' as const },
 ]
 
 const WINDOW_HOURS: Record<WindowKey, number> = {
   '24h': 24,
   '7d': 168,
-  '30d': 720
+  '30d': 720,
 }
 
 const viewModeTabs: TabsItem[] = [
   { label: 'Liste des ventes', value: 'list', icon: 'i-lucide-list' },
   { label: 'Top cartes', value: 'top-cards', icon: 'i-lucide-layers' },
   { label: 'Top gradées', value: 'top-graded', icon: 'i-lucide-shield-check' },
-  { label: 'Top scellés', value: 'top-sealed', icon: 'i-lucide-package' }
+  { label: 'Top scellés', value: 'top-sealed', icon: 'i-lucide-package' },
 ]
 
 const q = ref('carte pokemon')
@@ -306,9 +298,11 @@ const windowHoursNum = computed(() => WINDOW_HOURS[windowKey.value])
 const topScrape = useEbaySoldTop()
 const topResult = topScrape.result
 
-/** Client-side cache keyed by (q, window) for tops — skips a POST when the user
+/**
+ * Client-side cache keyed by (q, window) for tops — skips a POST when the user
  * returns to a search they just ran (the 15-minute server cache covers full page
- * reloads; this covers the current session). */
+ * reloads; this covers the current session).
+ */
 interface ClientTopCacheEntry {
   result: EbaySoldTopResultBody
   ebaySearchUrl: string | null
@@ -371,7 +365,7 @@ const emptyTitle = computed(() => {
 
 const emptyDescription = computed(() => {
   if (viewMode.value === 'top-graded') {
-    return 'Essayez d\'ajouter « PSA », « BGS » ou « CGC » à votre recherche, ou élargissez la fenêtre à 7 jours.'
+    return "Essayez d'ajouter « PSA », « BGS » ou « CGC » à votre recherche, ou élargissez la fenêtre à 7 jours."
   }
   if (viewMode.value === 'top-sealed') {
     return 'Essayez « ETB », « display », « scellé » dans la recherche, ou élargissez la fenêtre à 7 jours.'
@@ -391,15 +385,17 @@ const emptyIcon = computed(() => {
 
 const topEmptyHeadline = computed(() => {
   if (hasSearched.value) {
-    return 'Le top n\'est pas encore calculé pour cette recherche'
+    return "Le top n'est pas encore calculé pour cette recherche"
   }
   return 'Lancez une recherche pour générer le top'
 })
 
 const topEmptyHint = computed(() => {
   if (hasSearched.value) {
-    return 'Le top demande une analyse plus profonde (jusqu\'à 20 pages eBay) que la liste rapide. '
-      + 'Le résultat sera mis en cache 15 minutes côté serveur — utilisable instantanément ensuite.'
+    return (
+      "Le top demande une analyse plus profonde (jusqu'à 20 pages eBay) que la liste rapide. " +
+      'Le résultat sera mis en cache 15 minutes côté serveur — utilisable instantanément ensuite.'
+    )
   }
   return 'Le top fonctionne mieux avec des requêtes larges : « carte pokemon », « pokemon TCG », « Charizard ».'
 })
@@ -442,7 +438,6 @@ const manualUrl = computed(() => {
 
 /**
  * Trigger a search when pressing Enter in the keyword input.
- *
  * @returns {void} Nothing.
  */
 function onSearchEnter(): void {
@@ -454,7 +449,6 @@ function onSearchEnter(): void {
 /**
  * Runs a single eBay analysis that feeds both the list and the three top tabs.
  * Switching tabs never refetches — it only filters ``topResult`` on the client.
- *
  * @returns {Promise<void>} Resolves once the request finishes (success or error).
  */
 async function runLoad(): Promise<void> {
@@ -485,13 +479,13 @@ async function runLoad(): Promise<void> {
     pages: 20,
     scrapeLimit: 1000,
     topLimit: 20,
-    minCount: 1
+    minCount: 1,
   })
   if (fresh) {
     topClientCache.set(key, {
       result: fresh,
       ebaySearchUrl: topScrape.ebaySearchUrl.value,
-      fetchedAt: Date.now()
+      fetchedAt: Date.now(),
     })
   }
 }
