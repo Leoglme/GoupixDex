@@ -55,11 +55,12 @@ async def _request_app_token(app: AppSettings) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(_token_url(app), data=data, headers=headers)
     if resp.status_code >= 400:
-        logger.warning(
-            "eBay app token request failed: %s %s",
-            resp.status_code,
-            resp.text[:500],
-        )
+        if resp.status_code >= 500:
+            logger.warning(
+                "eBay app token request failed: %s %s",
+                resp.status_code,
+                resp.text[:500],
+            )
         resp.raise_for_status()
     return resp.json()
 

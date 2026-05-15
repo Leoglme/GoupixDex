@@ -178,6 +178,14 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       },
     },
     {
+      label: 'Ventes terminées eBay',
+      icon: 'i-simple-icons-ebay',
+      to: '/top-ventes-ebay',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
       label: 'Invitations Amazon',
       icon: 'i-simple-icons-amazon',
       to: '/amazon-invites',
