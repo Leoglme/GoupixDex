@@ -39,11 +39,13 @@ from core.nodriver_uvicorn_loop import UVICORN_WINDOWS_NODRIVER_LOOP
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.cardmarket_session_service import (
     clear_session_info,
-    parse_account_info_from_html,
+    persist_session_from_probe,
+    probe_tab_and_persist_session,
+    read_session_from_tab,
     read_session_info,
-    write_session_info,
 )
 from services.cardmarket_scraper_service import HOME_POKEMON_URL, _prepare_clean_main_tab
+from services.desktop_cardmarket_orders_sync_service import run_cardmarket_orders_sync_job
 from services.desktop_cardmarket_runner_service import run_cardmarket_search_job
 from services.os_service import OsService
 
@@ -53,42 +55,6 @@ logger = logging.getLogger("goupixdex.cardmarket_local")
 
 CARDMARKET_LOGIN_POLL_INTERVAL_SEC = 2.5
 CARDMARKET_LOGIN_POLL_MAX_SEC = 600.0
-
-# Live DOM (same pattern as ``vinted_service._parse_eval_dict_result``): ``get_content()`` can lag
-# behind what the user sees; ``evaluate`` reads the hydrated page.
-_CM_LOGIN_PROBE_JS = """
-(() => {
-  const out = { logged_in: false, username: null, credit_eur: null };
-  const dd = document.querySelector('#account-dropdown');
-  if (!dd) return JSON.stringify(out);
-  const line = dd.querySelector('.line-height115');
-  if (line) {
-    for (const s of line.querySelectorAll('span')) {
-      const t = (s.textContent || '').trim();
-      if (t && !t.includes('€') && !t.startsWith('(') && t.toLowerCase() !== 'particulier' && t.length < 60) {
-        out.username = t;
-        out.logged_in = true;
-        break;
-      }
-    }
-  }
-  if (!out.username) {
-    const mheader = document.querySelector('a#account-dropdown + ul.dropdown-menu h6.dropdown-header');
-    if (mheader) {
-      for (const s of mheader.querySelectorAll('span')) {
-        const t = (s.textContent || '').trim();
-        if (t && !t.includes('€') && !t.startsWith('(') && t.length < 60) { out.username = t; out.logged_in = true; break; }
-      }
-    }
-  }
-  const credit = document.querySelector('#totalCreditMainNav');
-  if (credit) {
-    const m = (credit.textContent || '').match(/(-?\\d+(?:[.,]\\d+)?)\\s*€/);
-    if (m) out.credit_eur = parseFloat(m[1].replace(',', '.'));
-  }
-  return JSON.stringify(out);
-})()
-"""
 
 _INTROSPECT_CACHE_TTL_SEC = 120.0
 _introspect_cache: dict[str, tuple[float, int]] = {}
@@ -158,6 +124,11 @@ async def get_user_id_introspected(
 _ws_clients: dict[int, set[WebSocket]] = {}
 _ws_lock = asyncio.Lock()
 _active_tasks: dict[int, asyncio.Task] = {}
+
+_orders_sync_ws_clients: dict[int, set[WebSocket]] = {}
+_orders_sync_ws_lock = asyncio.Lock()
+_orders_sync_tasks: dict[int, asyncio.Task] = {}
+_orders_sync_last_event: dict[int, dict[str, Any]] = {}
 
 
 async def _broadcast_search(search_id: int, payload: dict[str, Any]) -> None:
@@ -277,6 +248,130 @@ async def cancel_run(
     return {"status": "cancelled"}
 
 
+async def _broadcast_orders_sync(user_id: int, payload: dict[str, Any]) -> None:
+    """Broadcast a sync event to every active WS client for ``user_id``."""
+    async with _orders_sync_ws_lock:
+        clients = list(_orders_sync_ws_clients.get(user_id, set()))
+    dead: list[WebSocket] = []
+    for ws in clients:
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            dead.append(ws)
+    if not dead:
+        return
+    async with _orders_sync_ws_lock:
+        for ws in dead:
+            _orders_sync_ws_clients.get(user_id, set()).discard(ws)
+
+
+@app.get("/cardmarket/orders/sync/active")
+async def cardmarket_orders_sync_active(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, Any]:
+    """Whether a sync is currently running for the caller (for the UI to resume)."""
+    t = _orders_sync_tasks.get(user_id)
+    active = t is not None and not t.done()
+    last = _orders_sync_last_event.get(user_id)
+    return {"active": active, "last_event": last}
+
+
+@app.post("/cardmarket/orders/sync", status_code=status.HTTP_202_ACCEPTED)
+async def cardmarket_orders_sync_start(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, str]:
+    """
+    Start the Cardmarket purchases-sync job (scrape ``Orders/Purchases/Sent``, dedup, import).
+
+    Returns immediately with ``status=started``; subscribe to the WebSocket to follow progress.
+    """
+    existing = _orders_sync_tasks.get(user_id)
+    if existing is not None and not existing.done():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Une synchronisation Cardmarket est déjà en cours pour ce compte.",
+        )
+
+    await _ensure_cm_login_browser_closed()
+
+    async def emit(ev: dict[str, Any]) -> None:
+        _orders_sync_last_event[user_id] = ev
+        await _broadcast_orders_sync(user_id, ev)
+
+    async def _job() -> None:
+        await run_cardmarket_orders_sync_job(user_id, raw_token, remote, emit)
+
+    task = asyncio.create_task(_job())
+    _orders_sync_tasks[user_id] = task
+
+    def _cleanup(_: asyncio.Task) -> None:
+        cur = _orders_sync_tasks.get(user_id)
+        if cur is task:
+            _orders_sync_tasks.pop(user_id, None)
+
+    task.add_done_callback(_cleanup)
+    return {"status": "started"}
+
+
+@app.post("/cardmarket/orders/sync/cancel")
+async def cardmarket_orders_sync_cancel(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, str]:
+    """Cancel the running sync (closes the browser; partially-imported orders are kept)."""
+    task = _orders_sync_tasks.get(user_id)
+    if task is None or task.done():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aucune synchronisation active.")
+    task.cancel()
+    try:
+        await asyncio.wait_for(task, timeout=20.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("orders sync cancel wait: %s", exc)
+    await _broadcast_orders_sync(
+        user_id,
+        {"type": "cancelled", "message": "Synchronisation arrêtée par l’utilisateur."},
+    )
+    return {"status": "cancelled"}
+
+
+@app.websocket("/ws/cardmarket/orders/sync/progress")
+async def cardmarket_orders_sync_progress_ws(websocket: WebSocket) -> None:
+    """Live progress stream for the orders-sync job (one socket per user)."""
+    raw_token = websocket.query_params.get("token")
+    remote_raw = websocket.query_params.get("remote_api") or os.environ.get("GOUPIX_REMOTE_API", "")
+    remote = str(remote_raw).strip().rstrip("/") if remote_raw else ""
+    if not raw_token or not remote:
+        await websocket.close(code=1008)
+        return
+    try:
+        user_id = await introspect_user_id(raw_token.strip(), remote)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    last = _orders_sync_last_event.get(user_id)
+    if last is not None:
+        try:
+            await websocket.send_json(last)
+        except Exception:
+            pass
+
+    async with _orders_sync_ws_lock:
+        _orders_sync_ws_clients.setdefault(user_id, set()).add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        async with _orders_sync_ws_lock:
+            _orders_sync_ws_clients.get(user_id, set()).discard(websocket)
+
+
 @app.websocket("/ws/cardmarket-searches/{search_id}/progress")
 async def cardmarket_progress_websocket(websocket: WebSocket, search_id: int) -> None:
     raw_token = websocket.query_params.get("token")
@@ -335,6 +430,15 @@ async def _safe_close_cm_browser() -> None:
     tab = _cm_tab
     if browser is None:
         return
+
+    if tab is not None:
+        try:
+            profile = _cardmarket_profile_dir()
+            info = await read_session_from_tab(tab)
+            if info.get("logged_in") or info.get("username"):
+                persist_session_from_probe(profile, info, clear_when_absent=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cm session probe before close: %s", exc)
 
     if tab is not None:
         try:
@@ -422,55 +526,6 @@ def _pick_cardmarket_tab(browser: Any, preferred: Any | None) -> Any:
     return tabs[0] if tabs else preferred
 
 
-def _merge_probe_html(js_info: dict[str, Any], html_info: dict[str, Any]) -> dict[str, Any]:
-    """Combine JS (live) and HTML (static) probes: prefer JS username when present."""
-    u_js = js_info.get("username") if isinstance(js_info.get("username"), str) else None
-    u_html = html_info.get("username") if isinstance(html_info.get("username"), str) else None
-    username = (u_js or "").strip() or (u_html or "").strip() or None
-    credit = js_info.get("credit_eur")
-    if credit is None:
-        credit = html_info.get("credit_eur")
-    logged_in = bool(username) or bool(html_info.get("logged_in")) or bool(js_info.get("logged_in"))
-    return {"logged_in": logged_in, "username": username, "credit_eur": credit}
-
-
-async def _read_session_from_tab(tab: Any) -> dict[str, Any]:
-    """Read login state via live JS (hydrated DOM) and static HTML fallback."""
-    from nodriver.cdp import runtime as cdp_runtime
-
-    js_info: dict[str, Any] = {"logged_in": False, "username": None, "credit_eur": None}
-    try:
-        raw = await asyncio.wait_for(
-            tab.evaluate(_CM_LOGIN_PROBE_JS, return_by_value=True),
-            timeout=12.0,
-        )
-        if isinstance(raw, cdp_runtime.ExceptionDetails):
-            logger.debug("cm login probe JS: %s", raw)
-        elif isinstance(raw, str):
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                js_info = parsed
-        elif isinstance(raw, dict):
-            js_info = raw
-    except (asyncio.TimeoutError, json.JSONDecodeError, TypeError, Exception) as exc:  # noqa: BLE001
-        logger.debug("cm login probe JS failed: %s", exc)
-
-    if js_info.get("credit_eur") is not None:
-        try:
-            js_info["credit_eur"] = float(js_info["credit_eur"])
-        except (TypeError, ValueError):
-            js_info["credit_eur"] = None
-
-    html_info: dict[str, Any] = {"logged_in": False, "username": None, "credit_eur": None}
-    try:
-        html = await asyncio.wait_for(tab.get_content(), timeout=10.0)
-        html_info = parse_account_info_from_html(html)
-    except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001
-        logger.debug("cm get_content: %s", exc)
-
-    return _merge_probe_html(js_info, html_info)
-
-
 async def _read_session_from_browser(browser: Any, preferred_tab: Any | None) -> dict[str, Any]:
     try:
         await browser.wait(0.12)
@@ -479,7 +534,7 @@ async def _read_session_from_browser(browser: Any, preferred_tab: Any | None) ->
     tab = _pick_cardmarket_tab(browser, preferred_tab)
     if tab is None:
         return {"logged_in": False, "username": None, "credit_eur": None}
-    return await _read_session_from_tab(tab)
+    return await read_session_from_tab(tab)
 
 
 async def _open_login_browser_inner() -> dict[str, Any]:
@@ -594,11 +649,12 @@ async def _login_polling_loop() -> None:
         if not (isinstance(username, str) and username.strip()):
             continue
         username = username.strip()
-        write_session_info(
+        persist_session_from_probe(
             profile,
             {
                 "username": username,
                 "credit_eur": info.get("credit_eur"),
+                "logged_in": True,
             },
         )
         logger.info("Cardmarket session detected for %s — closing helper browser to flush cookies", username)
@@ -617,37 +673,33 @@ async def cardmarket_session(
     - If the helper browser is open: live-reads the DOM (and refreshes the JSON cache).
     - Otherwise: returns the persisted JSON written by the login polling loop.
     """
+    global _cm_tab
     profile = _cardmarket_profile_dir()
     live: dict[str, Any] | None = None
     if _cm_browser is not None:
         try:
+            tab = _pick_cardmarket_tab(_cm_browser, _cm_tab)
+            if tab is not None:
+                await tab.get(HOME_POKEMON_URL)
+                await tab
+                try:
+                    await tab.wait(0.7)
+                except Exception:  # noqa: BLE001
+                    await asyncio.sleep(0.7)
+                _cm_tab = tab
             live = await _read_session_from_browser(_cm_browser, _cm_tab)
+            if live.get("logged_in") or live.get("username"):
+                persist_session_from_probe(profile, live, clear_when_absent=False)
         except Exception as exc:  # noqa: BLE001
             logger.debug("session live read: %s", exc)
             live = None
 
-    if live and (live.get("logged_in") or live.get("username")):
-        write_session_info(
-            profile,
-            {
-                "username": live.get("username"),
-                "credit_eur": live.get("credit_eur"),
-            },
-        )
-
     persisted = read_session_info(profile)
-    live_user: str | None = None
-    if isinstance(live, dict):
-        u = live.get("username")
-        if isinstance(u, str) and u.strip():
-            live_user = u.strip()
-    username = live_user or (persisted.get("username") if persisted else None)
+    username: str | None = None
+    if persisted and isinstance(persisted.get("username"), str):
+        username = persisted["username"].strip() or None
 
-    credit_eur = None
-    if live_user and isinstance(live, dict):
-        credit_eur = live.get("credit_eur")
-    if credit_eur is None and persisted:
-        credit_eur = persisted.get("credit_eur")
+    credit_eur = persisted.get("credit_eur") if persisted else None
     last_seen = persisted.get("last_seen") if persisted else None
 
     if username:

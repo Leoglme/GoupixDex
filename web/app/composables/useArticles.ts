@@ -241,15 +241,38 @@ export function useArticles() {
   }
 
   /**
-   * POST worker local — retire l’annonce Vinted après vente eBay (nodriver).
+   * POST worker local uniquement — retire l’annonce Vinted après vente eBay (nodriver).
+   * Ne passe jamais par l’API distante (endpoint absent côté serveur).
    *
    * @param id - Article id.
    * @returns {Promise<{ ok: boolean; status?: string }>} Accusé de réception du worker (202).
    */
   async function vintedUnlistAfterEbaySale(id: number) {
-    const { data } = await vintedHttp().post<{ ok: boolean; status?: string }>(
+    if (!import.meta.client || !isDesktopApp.value || !$vintedLocal) {
+      throw new Error('VINTED_LOCAL_WORKER_REQUIRED')
+    }
+    const { data } = await $vintedLocal.post<{ ok: boolean; status?: string }>(
       `/articles/${id}/vinted-unlist-after-ebay-sale`,
     )
+    return data
+  }
+
+  /**
+   * POST worker local — retire l’annonce Vinted (fiche article).
+   */
+  async function removeVintedListing(id: number) {
+    if (!import.meta.client || !isDesktopApp.value || !$vintedLocal) {
+      throw new Error('VINTED_LOCAL_WORKER_REQUIRED')
+    }
+    const { data } = await $vintedLocal.post<{ ok: boolean; status?: string }>(`/articles/${id}/remove-vinted-listing`)
+    return data
+  }
+
+  /**
+   * POST `/articles/:id/remove-ebay-listing` — retire l’annonce eBay (API).
+   */
+  async function removeEbayListing(id: number) {
+    const { data } = await $api.post<Article>(`/articles/${id}/remove-ebay-listing`)
     return data
   }
 
@@ -321,6 +344,8 @@ export function useArticles() {
     markSold,
     retryCrossEbayRemoval,
     vintedUnlistAfterEbaySale,
+    removeVintedListing,
+    removeEbayListing,
     publishArticleToVinted,
     publishArticleToEbay,
     startVintedBatch,

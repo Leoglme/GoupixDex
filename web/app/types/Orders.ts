@@ -72,6 +72,33 @@ export interface OrderDetail {
 }
 
 /**
+ * Live event broadcast by the desktop worker during a Cardmarket orders sync.
+ *
+ * One of: high-level lifecycle events (`log`, `done`, `error`, `cancelled`),
+ * pagination markers (`page`), Cloudflare prompts, and per-order events
+ * (`order_start`, `order_imported`, `order_failed`, `skip`).
+ */
+export interface OrdersSyncEvent {
+  type: string
+  message?: string
+  logged_in?: boolean
+  /** Cardmarket external order id (for per-order events). */
+  external_order_id?: string
+  page?: number
+  total_pages?: number | null
+  rows_on_page?: number
+  seller?: string | null
+  date_text?: string | null
+  total_text?: string | null
+  /** Imported order detail returned by `/orders/import`. */
+  order?: OrderDetail
+  /** Cumulative counts across the run. */
+  totals?: { discovered?: number; imported?: number; skipped?: number; failed?: number }
+  /** Final summary on `done`. */
+  summary?: { discovered: number; imported: number; skipped: number; failed: number }
+}
+
+/**
  * GET /orders/match response for article create prefill.
  */
 export interface OrderMatchResponse {

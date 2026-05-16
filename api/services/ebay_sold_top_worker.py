@@ -47,9 +47,14 @@ class EbaySoldTopJob:
     scrape_limit: int
     top_limit: int
     min_count: int
+    #: eBay aspect-filter language code (``fr`` | ``ja`` | ``None``). Persisted on
+    #: the job + cache key so the same query in two languages is two cache entries.
+    language: str | None = None
     status: JobStatus = "pending"
     pages_done: int = 0
     total_observed: int = 0
+    #: Last snapshot of in-window items collected so far (rendered progressively).
+    partial_items: list[dict[str, Any]] = field(default_factory=list)
     result: dict[str, Any] | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
@@ -64,9 +69,11 @@ class EbaySoldTopJob:
             "status": self.status,
             "query": self.q,
             "window_hours": self.window_hours,
+            "language": self.language,
             "pages_requested": self.pages,
             "pages_done": self.pages_done,
             "total_observed": self.total_observed,
+            "partial_items": self.partial_items,
             "result": self.result,
             "error": self.error,
             "created_at": self.created_at,
@@ -83,7 +90,7 @@ _JOB_TTL_SECONDS = 600.0
 _RESULT_CACHE_TTL_SECONDS = 15 * 60.0
 
 _JOBS: dict[str, EbaySoldTopJob] = {}
-_RESULT_CACHE: dict[tuple[str, float, int, int, int], tuple[float, dict[str, Any]]] = {}
+_RESULT_CACHE: dict[tuple[str, float, int, int, int, str], tuple[float, dict[str, Any]]] = {}
 
 
 def _gc_jobs(now: float | None = None) -> None:
@@ -103,19 +110,38 @@ def _gc_cache(now: float | None = None) -> None:
 
 
 def _cache_key(
-    *, q: str, window_hours: float, pages: int, top_limit: int, min_count: int,
-) -> tuple[str, float, int, int, int]:
-    return (q.strip().lower(), float(window_hours), int(pages), int(top_limit), int(min_count))
+    *,
+    q: str,
+    window_hours: float,
+    pages: int,
+    top_limit: int,
+    min_count: int,
+    language: str | None,
+) -> tuple[str, float, int, int, int, str]:
+    return (
+        q.strip().lower(),
+        float(window_hours),
+        int(pages),
+        int(top_limit),
+        int(min_count),
+        (language or "").strip().lower(),
+    )
 
 
 def _peek_cached_result(
-    *, q: str, window_hours: float, pages: int, top_limit: int, min_count: int,
+    *,
+    q: str,
+    window_hours: float,
+    pages: int,
+    top_limit: int,
+    min_count: int,
+    language: str | None,
 ) -> dict[str, Any] | None:
     """Return a cached top-sold result body if still fresh, else ``None``."""
     _gc_cache()
     key = _cache_key(
         q=q, window_hours=window_hours, pages=pages,
-        top_limit=top_limit, min_count=min_count,
+        top_limit=top_limit, min_count=min_count, language=language,
     )
     entry = _RESULT_CACHE.get(key)
     if entry is None:
@@ -134,11 +160,12 @@ def _store_cached_result(
     pages: int,
     top_limit: int,
     min_count: int,
+    language: str | None,
     body: dict[str, Any],
 ) -> None:
     key = _cache_key(
         q=q, window_hours=window_hours, pages=pages,
-        top_limit=top_limit, min_count=min_count,
+        top_limit=top_limit, min_count=min_count, language=language,
     )
     _RESULT_CACHE[key] = (time.time(), body)
 
@@ -149,9 +176,12 @@ async def _run_job(job: EbaySoldTopJob, app: AppSettings) -> None:
     job.started_at = time.time()
     job.updated_at = job.started_at
 
-    async def _on_page_done(page_num: int, total_observed: int) -> None:
+    async def _on_page_done(
+        page_num: int, total_observed: int, partial_items: list[dict[str, Any]],
+    ) -> None:
         job.pages_done = page_num
         job.total_observed = total_observed
+        job.partial_items = partial_items
         job.updated_at = time.time()
 
     try:
@@ -160,6 +190,7 @@ async def _run_job(job: EbaySoldTopJob, app: AppSettings) -> None:
             window_hours=job.window_hours,
             limit=job.scrape_limit,
             pages=job.pages,
+            language=job.language,
             app=app,
             on_page_done=_on_page_done,
         )
@@ -209,6 +240,7 @@ async def _run_job(job: EbaySoldTopJob, app: AppSettings) -> None:
                 pages=job.pages,
                 top_limit=job.top_limit,
                 min_count=job.min_count,
+                language=job.language,
                 body=body,
             )
     job.completed_at = time.time()
@@ -224,6 +256,7 @@ def submit_job(
     scrape_limit: int,
     top_limit: int,
     min_count: int,
+    language: str | None,
     app: AppSettings,
 ) -> EbaySoldTopJob:
     """
@@ -235,6 +268,7 @@ def submit_job(
     """
     _gc_jobs()
 
+    lang = (language or "").strip().lower() or None
     job = EbaySoldTopJob(
         job_id=secrets.token_urlsafe(12),
         user_id=user_id,
@@ -244,11 +278,12 @@ def submit_job(
         scrape_limit=scrape_limit,
         top_limit=top_limit,
         min_count=min_count,
+        language=lang,
     )
 
     cached = _peek_cached_result(
         q=q, window_hours=window_hours, pages=pages,
-        top_limit=top_limit, min_count=min_count,
+        top_limit=top_limit, min_count=min_count, language=lang,
     )
     if cached is not None:
         now = time.time()
@@ -256,6 +291,9 @@ def submit_job(
         job.result = cached
         job.pages_done = pages
         job.total_observed = int(cached.get("total_observed") or 0)
+        cached_items = cached.get("items")
+        if isinstance(cached_items, list):
+            job.partial_items = cached_items
         job.started_at = now
         job.completed_at = now
         job.updated_at = now
@@ -273,10 +311,12 @@ def get_job(job_id: str) -> EbaySoldTopJob | None:
     return _JOBS.get(job_id)
 
 
-def peek_items_sample(*, q: str, window_hours: float) -> list[dict[str, Any]] | None:
+def peek_items_sample(
+    *, q: str, window_hours: float, language: str | None = None,
+) -> list[dict[str, Any]] | None:
     """
-    Look up any fresh cached top result matching ``(q, window_hours)`` and
-    return its ``items`` payload, regardless of which ``pages`` /
+    Look up any fresh cached top result matching ``(q, window_hours, language)``
+    and return its ``items`` payload, regardless of which ``pages`` /
     ``top_limit`` / ``min_count`` was used.
 
     Kept for the legacy ``/sold-scrape`` route, which is no longer driven by
@@ -286,10 +326,11 @@ def peek_items_sample(*, q: str, window_hours: float) -> list[dict[str, Any]] | 
     _gc_cache()
     target_q = q.strip().lower()
     target_window = float(window_hours)
+    target_lang = (language or "").strip().lower()
     best_ts = 0.0
     best_sample: list[dict[str, Any]] | None = None
-    for (cq, cw, _pages, _top, _min), (ts, body) in _RESULT_CACHE.items():
-        if cq != target_q or cw != target_window:
+    for (cq, cw, _pages, _top, _min, clang), (ts, body) in _RESULT_CACHE.items():
+        if cq != target_q or cw != target_window or clang != target_lang:
             continue
         if ts <= best_ts:
             continue

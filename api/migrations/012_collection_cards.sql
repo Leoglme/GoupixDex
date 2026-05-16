@@ -1,0 +1,27 @@
+-- Personal Pokémon card collection (no price / no condition — those live on `articles`).
+CREATE TABLE IF NOT EXISTS collection_cards (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  tcgdex_card_id VARCHAR(120) NOT NULL,
+  tcgdex_set_id VARCHAR(64) NOT NULL,
+  set_code VARCHAR(64) NULL,
+  set_name VARCHAR(255) NULL,
+  card_number VARCHAR(64) NOT NULL,
+  card_name_en VARCHAR(255) NULL,
+  card_name_fr VARCHAR(255) NULL,
+  card_name_ja VARCHAR(255) NULL,
+  display_name VARCHAR(255) NOT NULL,
+  rarity VARCHAR(64) NULL,
+  language VARCHAR(8) NOT NULL DEFAULT 'fr',
+  image_url VARCHAR(512) NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  notes TEXT NULL,
+  article_id BIGINT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_collection_cards_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_collection_cards_article FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE SET NULL,
+  INDEX idx_collection_cards_user (user_id),
+  INDEX idx_collection_cards_card (user_id, tcgdex_card_id, language),
+  INDEX idx_collection_cards_article (article_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -172,6 +172,7 @@ async def sold_scrape_html(
     q: Annotated[str, Query(min_length=2, max_length=256)],
     window_hours: Annotated[float, Query(ge=1, le=720)] = 168,
     limit: Annotated[int, Query(ge=1, le=60)] = 50,
+    language: Annotated[str | None, Query(max_length=32)] = None,
 ) -> dict[str, Any]:
     """
     **Completed listings** (sold) via **public eBay HTML search** — no Marketplace Insights OAuth.
@@ -182,19 +183,20 @@ async def sold_scrape_html(
     """
     app = get_settings()
 
-    # If the worker has a fresh cached top result for the same (q, window),
+    # If the worker has a fresh cached top result for the same (q, window, language),
     # reuse its items_sample — saves an eBay roundtrip *and* the rate-limit
     # slot, which matters when the user just searched in Top mode and
     # switches to List mode.
-    cached_sample = peek_items_sample(q=q.strip(), window_hours=window_hours)
+    cached_sample = peek_items_sample(q=q.strip(), window_hours=window_hours, language=language)
     if cached_sample is not None:
         return {
             "query": q.strip(),
             "window_hours": window_hours,
+            "language": language,
             "items": cached_sample[:limit],
             "error": None,
             "ebay_sold_search_url": ebay_fr_sold_search_url(
-                q=q.strip(), page_size=min(60, max(limit, 10)),
+                q=q.strip(), page_size=min(60, max(limit, 10)), language=language,
             ),
             "source": "ebay_html_scrape_cached_from_top",
             "cached": True,
@@ -211,13 +213,18 @@ async def sold_scrape_html(
             ),
             headers={"Retry-After": str(retry_after)},
         )
-    items, err = await scrape_sold_listings(q=q.strip(), window_hours=window_hours, limit=limit, app=app)
+    items, err = await scrape_sold_listings(
+        q=q.strip(), window_hours=window_hours, limit=limit, language=language, app=app,
+    )
     return {
         "query": q.strip(),
         "window_hours": window_hours,
+        "language": language,
         "items": items,
         "error": err,
-        "ebay_sold_search_url": ebay_fr_sold_search_url(q=q.strip(), page_size=min(60, max(limit, 10))),
+        "ebay_sold_search_url": ebay_fr_sold_search_url(
+            q=q.strip(), page_size=min(60, max(limit, 10)), language=language,
+        ),
         "source": "ebay_html_scrape",
         "cached": False,
     }
@@ -232,6 +239,9 @@ class SoldTopSubmitBody(BaseModel):
     scrape_limit: int = Field(default=600, ge=10, le=1000)
     top_limit: int = Field(default=20, ge=1, le=100)
     min_count: int = Field(default=1, ge=1, le=20)
+    #: Optional eBay aspect-filter for the « Langue » facet (``fr``, ``ja`` …
+    #: or the literal label such as ``Français``). ``None`` lists all languages.
+    language: str | None = Field(default=None, max_length=32)
 
 
 @router.post("/sold-top", response_model=None, status_code=status.HTTP_202_ACCEPTED)
@@ -257,6 +267,7 @@ async def sold_top_submit(
         scrape_limit=body.scrape_limit,
         top_limit=body.top_limit,
         min_count=body.min_count,
+        language=body.language,
         app=app,
     )
 
@@ -278,7 +289,9 @@ async def sold_top_submit(
 
     return {
         **job.to_public(),
-        "ebay_sold_search_url": ebay_fr_sold_search_url(q=body.q.strip(), page_size=60),
+        "ebay_sold_search_url": ebay_fr_sold_search_url(
+            q=body.q.strip(), page_size=60, language=body.language,
+        ),
         "cached": cache_hit,
     }
 
@@ -308,5 +321,7 @@ async def sold_top_status(
         )
     return {
         **job.to_public(),
-        "ebay_sold_search_url": ebay_fr_sold_search_url(q=job.q, page_size=60),
+        "ebay_sold_search_url": ebay_fr_sold_search_url(
+            q=job.q, page_size=60, language=job.language,
+        ),
     }

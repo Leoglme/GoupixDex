@@ -218,6 +218,20 @@ async def vinted_unlist_after_ebay_sale(
     return {"ok": True, "status": "started"}
 
 
+@router.post("/{article_id}/remove-vinted-listing", status_code=status.HTTP_202_ACCEPTED)
+async def remove_vinted_listing(
+    article_id: int,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Retire l’annonce Vinted depuis la fiche article (Chrome / nodriver)."""
+    asyncio.create_task(
+        DesktopVintedRunnerService.run_remove_vinted_listing(article_id, user_id, raw_token, remote)
+    )
+    return {"ok": True, "status": "started"}
+
+
 @router.get("/{article_id}/listing-progress")
 @router.get("/{article_id}/vinted-progress", include_in_schema=False)
 async def article_listing_progress_stream(

@@ -56,6 +56,32 @@ def _strip_set_code_prefix_from_expansion_name(set_name: str, set_code: str | No
     return stripped if stripped else trimmed_name
 
 
+#: Hiragana, Katakana (full + half-width) and CJK ideographs. A printed name
+#: containing any of these is unambiguously a Japanese print.
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]")
+
+
+def detect_physical_language_from_ocr(ocr: dict[str, Any]) -> str:
+    """
+    Infer the card's physical language (``fr`` | ``en`` | ``ja``) from OCR.
+
+    No explicit language code comes back from the vision model, but the printed
+    name is decisive: a CJK script means a Japanese print; otherwise we match
+    the printed name against the resolved FR / EN dex names. Defaults to ``fr``
+    (the dominant case here, and FR's locale fallback chain covers EN anyway).
+    """
+    printed = (ocr.get("pokemon_name") or "").strip()
+    if printed and _CJK_RE.search(printed):
+        return "ja"
+    fr = (ocr.get("pokemon_name_french") or "").strip()
+    en = (ocr.get("pokemon_name_english") or "").strip()
+    if printed and en and printed.casefold() == en.casefold() and (
+        not fr or fr.casefold() != en.casefold()
+    ):
+        return "en"
+    return "fr"
+
+
 def _listing_language_label(ocr: GroqVisionCardCollectorResult) -> str:
     """Return ``Français`` when the printed name matches the French dex name, else ``Japonais``."""
     fr = (ocr.get("pokemon_name_french") or "").strip()

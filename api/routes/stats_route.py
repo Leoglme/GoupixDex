@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.deps import get_current_user
 from models.user import User
-from services.stats_service import compute_dashboard_stats
+from services.stats_service import compute_dashboard_stats, list_sold_sales
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -47,3 +47,16 @@ def dashboard(
         range_end=_parse_iso(end),
         period=period,
     )
+
+
+@router.get("/sold-sales")
+def sold_sales(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    sale_source: Literal["vinted", "ebay"] | None = Query(
+        None,
+        description="Filter by channel; omit for all sold articles.",
+    ),
+) -> dict[str, Any]:
+    """All sold articles (Vinted and/or eBay), same row shape as dashboard ``recent_sales``."""
+    return list_sold_sales(db, user.id, sale_source=sale_source)

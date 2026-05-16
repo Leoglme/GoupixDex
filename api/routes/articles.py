@@ -475,6 +475,37 @@ def fail_vinted_cross_removal(
     return {"ok": True}
 
 
+@router.post("/{article_id}/remove-ebay-listing")
+async def remove_ebay_listing(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Retire et supprime l’annonce eBay (Inventory API) pour cet article."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not article.published_on_ebay:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucune annonce eBay active pour cet article.",
+        )
+    ok, err = await delete_ebay_listing_for_article(db, article, user)
+    if ok:
+        clear_ebay_publication_fields(article)
+        article.cross_ebay_removal_failed = False
+        article.cross_ebay_removal_error = None
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=err or "Impossible de retirer l’annonce eBay.",
+        )
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    return article_service.article_to_dict(article)
+
+
 @router.post("/{article_id}/retry-cross-ebay-removal")
 async def retry_cross_ebay_removal(
     article_id: int,

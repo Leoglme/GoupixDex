@@ -47,6 +47,58 @@ def _hours_to_sell(article: Article) -> float | None:
     return max(0.0, delta.total_seconds() / 3600.0)
 
 
+def article_sale_row_dict(article: Article) -> dict[str, Any]:
+    """One sold article row for dashboard / sold-sales listings."""
+    proceeds = _sale_proceeds_eur(article)
+    return {
+        "article_id": article.id,
+        "title": article.title,
+        "pokemon_name": article.pokemon_name,
+        "sold_at": article.sold_at.isoformat() if article.sold_at else None,
+        "listing_price_eur": float(article.sell_price) if article.sell_price is not None else None,
+        "sold_price_eur": float(article.sold_price) if article.sold_price is not None else None,
+        "realized_price_eur": round(proceeds, 2) if proceeds is not None else None,
+        "sale_source": article.sale_source,
+        "purchase_price_eur": float(article.purchase_price),
+        "profit_eur": round(_profit_eur(article), 2),
+    }
+
+
+def list_sold_sales(
+    db: Session,
+    user_id: int,
+    *,
+    sale_source: str | None = None,
+) -> dict[str, Any]:
+    """
+    All sold articles for the user, newest first.
+
+    ``sale_source`` may be ``vinted``, ``ebay``, or omitted for both channels.
+    """
+    rows = article_service.list_articles_for_user(db, user_id)
+    sold = [a for a in rows if a.is_sold]
+    src = (sale_source or "").strip().lower()
+    if src in {"vinted", "ebay"}:
+        sold = [a for a in sold if (a.sale_source or "").lower() == src]
+
+    sold.sort(key=lambda a: _as_utc(a.sold_at) or dt.datetime.min.replace(tzinfo=dt.UTC), reverse=True)
+    sales = [article_sale_row_dict(a) for a in sold]
+
+    revenue_eur = sum(p for a in sold for p in [_sale_proceeds_eur(a)] if p is not None)
+    profit_eur = sum(_profit_eur(a) for a in sold)
+    vinted_count = sum(1 for a in sold if (a.sale_source or "").lower() == "vinted")
+    ebay_count = sum(1 for a in sold if (a.sale_source or "").lower() == "ebay")
+
+    return {
+        "sales": sales,
+        "count": len(sales),
+        "revenue_eur": round(revenue_eur, 2),
+        "profit_eur": round(profit_eur, 2),
+        "vinted_count": vinted_count,
+        "ebay_count": ebay_count,
+    }
+
+
 def _bucket_key(value: dt.datetime, period: Period) -> dt.datetime:
     """Truncate a UTC datetime to the start of its daily/weekly/monthly bucket."""
     if period == "monthly":
@@ -206,23 +258,7 @@ def compute_dashboard_stats(
         key=lambda a: _as_utc(a.sold_at) or now,
         reverse=True,
     )[:30]
-    recent_sales_payload = []
-    for a in recent_sales:
-        proceeds = _sale_proceeds_eur(a)
-        recent_sales_payload.append(
-            {
-                "article_id": a.id,
-                "title": a.title,
-                "pokemon_name": a.pokemon_name,
-                "sold_at": a.sold_at.isoformat() if a.sold_at else None,
-                "listing_price_eur": float(a.sell_price) if a.sell_price is not None else None,
-                "sold_price_eur": float(a.sold_price) if a.sold_price is not None else None,
-                "realized_price_eur": round(proceeds, 2) if proceeds is not None else None,
-                "sale_source": a.sale_source,
-                "purchase_price_eur": float(a.purchase_price),
-                "profit_eur": round(_profit_eur(a), 2),
-            }
-        )
+    recent_sales_payload = [article_sale_row_dict(a) for a in recent_sales]
 
     return {
         "range": {

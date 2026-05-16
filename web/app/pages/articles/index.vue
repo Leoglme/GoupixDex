@@ -8,6 +8,9 @@
         <template #right>
           <div class="flex flex-wrap items-center gap-2">
             <UButton to="/articles/stock" color="neutral" variant="subtle" icon="i-lucide-package"> Mon stock </UButton>
+            <UButton to="/articles/sold" color="neutral" variant="subtle" icon="i-lucide-badge-check">
+              Articles vendus
+            </UButton>
             <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
               Création groupée
             </UButton>

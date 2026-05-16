@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import logging
@@ -12,6 +13,41 @@ from typing import Any, Literal
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+# Live DOM probe (``evaluate`` reads the hydrated page; ``get_content()`` can lag).
+CM_LOGIN_PROBE_JS = """
+(() => {
+  const out = { logged_in: false, username: null, credit_eur: null };
+  const dd = document.querySelector('#account-dropdown');
+  if (!dd) return JSON.stringify(out);
+  const line = dd.querySelector('.line-height115');
+  if (line) {
+    for (const s of line.querySelectorAll('span')) {
+      const t = (s.textContent || '').trim();
+      if (t && !t.includes('€') && !t.startsWith('(') && t.toLowerCase() !== 'particulier' && t.length < 60) {
+        out.username = t;
+        out.logged_in = true;
+        break;
+      }
+    }
+  }
+  if (!out.username) {
+    const mheader = document.querySelector('a#account-dropdown + ul.dropdown-menu h6.dropdown-header');
+    if (mheader) {
+      for (const s of mheader.querySelectorAll('span')) {
+        const t = (s.textContent || '').trim();
+        if (t && !t.includes('€') && !t.startsWith('(') && t.length < 60) { out.username = t; out.logged_in = true; break; }
+      }
+    }
+  }
+  const credit = document.querySelector('#totalCreditMainNav');
+  if (credit) {
+    const m = (credit.textContent || '').match(/(-?\\d+(?:[.,]\\d+)?)\\s*€/);
+    if (m) out.credit_eur = parseFloat(m[1].replace(',', '.'));
+  }
+  return JSON.stringify(out);
+})()
+"""
 
 CardmarketSessionState = Literal["ready", "needs_login", "busy", "error"]
 
@@ -148,3 +184,111 @@ def parse_account_info_from_html(html: str | None) -> dict[str, Any]:
 
 def is_logged_in_html(html: str | None) -> bool:
     return bool(parse_account_info_from_html(html)["logged_in"])
+
+
+def merge_login_probe(js_info: dict[str, Any], html_info: dict[str, Any]) -> dict[str, Any]:
+    """Combine JS (live) and HTML (static) probes; prefer JS username when present."""
+    u_js = js_info.get("username") if isinstance(js_info.get("username"), str) else None
+    u_html = html_info.get("username") if isinstance(html_info.get("username"), str) else None
+    username = (u_js or "").strip() or (u_html or "").strip() or None
+    credit = js_info.get("credit_eur")
+    if credit is None:
+        credit = html_info.get("credit_eur")
+    logged_in = bool(username) or bool(html_info.get("logged_in")) or bool(js_info.get("logged_in"))
+    return {"logged_in": logged_in, "username": username, "credit_eur": credit}
+
+
+async def read_session_from_tab(tab: Any) -> dict[str, Any]:
+    """
+    Read login state via live JS (hydrated DOM) and static HTML fallback.
+
+    @returns ``{logged_in, username, credit_eur}``.
+    """
+    from nodriver.cdp import runtime as cdp_runtime
+
+    js_info: dict[str, Any] = {"logged_in": False, "username": None, "credit_eur": None}
+    try:
+        raw = await asyncio.wait_for(
+            tab.evaluate(CM_LOGIN_PROBE_JS, return_by_value=True),
+            timeout=12.0,
+        )
+        if isinstance(raw, cdp_runtime.ExceptionDetails):
+            logger.debug("cm login probe JS: %s", raw)
+        elif isinstance(raw, str):
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                js_info = parsed
+        elif isinstance(raw, dict):
+            js_info = raw
+    except (asyncio.TimeoutError, json.JSONDecodeError, TypeError, Exception) as exc:  # noqa: BLE001
+        logger.debug("cm login probe JS failed: %s", exc)
+
+    if js_info.get("credit_eur") is not None:
+        try:
+            js_info["credit_eur"] = float(js_info["credit_eur"])
+        except (TypeError, ValueError):
+            js_info["credit_eur"] = None
+
+    html_info: dict[str, Any] = {"logged_in": False, "username": None, "credit_eur": None}
+    try:
+        html = await asyncio.wait_for(tab.get_content(), timeout=10.0)
+        html_info = parse_account_info_from_html(html)
+    except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001
+        logger.debug("cm get_content: %s", exc)
+
+    return merge_login_probe(js_info, html_info)
+
+
+def persist_session_from_probe(
+    profile_dir: Path,
+    info: dict[str, Any],
+    *,
+    clear_when_absent: bool = True,
+) -> bool:
+    """
+    Update on-disk session JSON from a live DOM probe.
+
+    When ``clear_when_absent`` is True (scrape / sync warm-up), a probe without a
+    username clears the cache. When False (refresh API, closing the login helper),
+    an inconclusive probe leaves the existing cache intact.
+
+    @returns True when a username was persisted (signed in).
+    """
+    username = info.get("username")
+    if isinstance(username, str):
+        username = username.strip() or None
+    else:
+        username = None
+    logged_in = bool(info.get("logged_in")) or bool(username)
+    if logged_in and username:
+        write_session_info(
+            profile_dir,
+            {"username": username, "credit_eur": info.get("credit_eur")},
+        )
+        logger.info("Cardmarket session persisted for %s", username)
+        return True
+    if clear_when_absent:
+        clear_session_info(profile_dir)
+        logger.info("Cardmarket session cleared (not signed in on live page)")
+    return False
+
+
+async def probe_tab_and_persist_session(
+    tab: Any,
+    profile_dir: Path,
+    *,
+    clear_when_absent: bool = True,
+) -> dict[str, Any]:
+    """
+    Probe ``tab`` and sync the result to ``goupix-session.json``.
+
+    Call before closing Chrome after a scrape / sync so GoupixDex reflects logout.
+    """
+    empty: dict[str, Any] = {"logged_in": False, "username": None, "credit_eur": None}
+    try:
+        info = await read_session_from_tab(tab)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("probe_tab_and_persist_session: %s", exc)
+        return empty
+    persist_session_from_probe(profile_dir, info, clear_when_absent=clear_when_absent)
+    return info

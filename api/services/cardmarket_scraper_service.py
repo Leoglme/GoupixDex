@@ -367,10 +367,12 @@ async def warm_up_cardmarket_session(
             )
         await asyncio.sleep(random.uniform(0.8, 1.8))
     try:
-        from services.cardmarket_session_service import parse_account_info_from_html
+        from services.cardmarket_session_service import persist_session_from_probe, read_session_from_tab
 
-        info = parse_account_info_from_html(html)
-        if info.get("logged_in"):
+        profile_dir = default_user_data_dir()
+        info = await read_session_from_tab(tab)
+        logged_in = persist_session_from_probe(profile_dir, info)
+        if logged_in:
             logger.info("Cardmarket warmup: signed in as %s", info.get("username"))
             if emit:
                 await emit(
@@ -382,8 +384,8 @@ async def warm_up_cardmarket_session(
                 )
         else:
             logger.warning(
-                "Cardmarket warmup: not signed in — open Settings → Marketplace and click "
-                "« Ouvrir Chrome — connexion Cardmarket » to reduce Cloudflare blocks."
+                "Cardmarket warmup: not signed in — session cache cleared; connect via "
+                "Settings → Marketplace."
             )
             if emit:
                 await emit(
@@ -391,8 +393,8 @@ async def warm_up_cardmarket_session(
                         "type": "session_status",
                         "logged_in": False,
                         "message": (
-                            "Compte Cardmarket non détecté pour ce scrape. Connectez-vous via les "
-                            "paramètres marketplace pour limiter les blocages Cloudflare."
+                            "Compte Cardmarket non détecté — connectez-vous via les paramètres "
+                            "marketplace (la session enregistrée a été effacée)."
                         ),
                     }
                 )
@@ -874,6 +876,13 @@ async def scrape_urls_to_card_results(
                 jitter = random.uniform(jitter_min, jitter_max) if jitter_max > jitter_min else 0.0
                 await asyncio.sleep(sleep_between_cards + jitter)
     finally:
+        if browser is not None and tab is not None:
+            try:
+                from services.cardmarket_session_service import probe_tab_and_persist_session
+
+                await probe_tab_and_persist_session(tab, profile_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("session probe before browser close: %s", exc)
         _safe_close_browser(browser)
 
     return card_results

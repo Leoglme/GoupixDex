@@ -15,6 +15,27 @@
               class="hidden"
               @change="onPdfSelected"
             />
+            <UButton
+              v-if="isDesktopApp"
+              color="primary"
+              variant="soft"
+              icon="i-lucide-cloud-download"
+              :loading="syncRunning"
+              :disabled="syncRunning"
+              @click="onSync"
+            >
+              Synchroniser Cardmarket
+            </UButton>
+            <UButton
+              v-if="isDesktopApp && syncRunning"
+              color="error"
+              variant="soft"
+              icon="i-lucide-square"
+              :loading="syncCancelling"
+              @click="onCancelSync"
+            >
+              Arrêter
+            </UButton>
             <UButton color="primary" icon="i-lucide-file-up" :loading="importing" @click="openPdfPicker">
               Importer des PDF
             </UButton>
@@ -26,6 +47,47 @@
 
     <template #body>
       <div class="space-y-4 p-4 sm:p-6">
+        <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
+
+        <UAlert
+          v-if="cloudflareWaiting"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-shield-alert"
+          title="Vérification Cloudflare requise"
+          :description="cloudflareMessage"
+        />
+
+        <UCard v-if="syncRunning || syncLogLines.length" class="ring-default/60 shadow-sm ring-1">
+          <template #header>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-center gap-2">
+                <p class="text-highlighted font-medium">Synchronisation Cardmarket</p>
+                <UBadge v-if="cloudflareWaiting" color="warning" variant="subtle" size="sm">
+                  En attente Cloudflare
+                </UBadge>
+                <UBadge v-else-if="syncRunning" color="primary" variant="subtle" size="sm">En cours…</UBadge>
+                <UBadge v-else color="neutral" variant="subtle" size="sm">Terminé</UBadge>
+              </div>
+              <div class="text-muted text-xs tabular-nums">
+                <span v-if="syncTotals.imported || syncTotals.skipped || syncTotals.failed">
+                  {{ syncTotals.imported }} importée(s) · {{ syncTotals.skipped }} ignorée(s) ·
+                  {{ syncTotals.failed }} échec(s)
+                </span>
+                <span v-else>Préparation…</span>
+              </div>
+            </div>
+          </template>
+          <div class="space-y-3 p-4 sm:p-6">
+            <UProgress v-if="syncRunning && syncTotalDiscovered > 0" :model-value="syncProgressPercent" size="sm" />
+            <pre
+              ref="syncLogEl"
+              class="border-default bg-elevated/40 max-h-64 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap"
+              >{{ syncLogLines.join('\n') }}</pre
+            >
+          </div>
+        </UCard>
+
         <UInput
           v-model="search"
           class="w-full max-w-xl"
@@ -71,7 +133,8 @@ import type { Ref } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/table-core'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { OrderListRow } from '~/types/Orders'
+import type { OrderListRow, OrdersSyncEvent } from '~/types/Orders'
+import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
@@ -86,8 +149,11 @@ const UButton = resolveComponent('UButton')
 const toast = useToast()
 const tableRef = useTemplateRef('tableRef')
 const pdfInputRef = useTemplateRef<HTMLInputElement>('pdfInputRef')
+const syncLogEl = useTemplateRef<HTMLElement>('syncLogEl')
 
 const { listOrders, importOrderPdf } = useOrders()
+const { isDesktopApp, getActiveSync, cancelSync, openProgressSocket, runWithProgress } = useCardmarketOrdersSync()
+const { fetchSession: fetchCmSession } = useCardmarketWorker()
 
 const orders: Ref<OrderListRow[]> = ref([])
 const loading: Ref<boolean> = ref(true)
@@ -96,6 +162,31 @@ const search: Ref<string> = ref('')
 const pagination: Ref<{ pageIndex: number; pageSize: number }> = ref({
   pageIndex: 0,
   pageSize: 10,
+})
+
+const cmSession: Ref<CardmarketSessionResponse | null> = ref(null)
+const cmSessionLoading: Ref<boolean> = ref(false)
+
+const syncRunning: Ref<boolean> = ref(false)
+const syncCancelling: Ref<boolean> = ref(false)
+const syncLogLines: Ref<string[]> = ref([])
+const syncTotals: Ref<{ discovered: number; imported: number; skipped: number; failed: number }> = ref({
+  discovered: 0,
+  imported: 0,
+  skipped: 0,
+  failed: 0,
+})
+const syncTotalDiscovered: Ref<number> = ref(0)
+const cloudflareWaiting: Ref<boolean> = ref(false)
+const cloudflareMessage: Ref<string> = ref('')
+let syncWsCleanup: (() => void) | null = null
+
+const syncProgressPercent = computed(() => {
+  if (!syncTotalDiscovered.value) {
+    return 0
+  }
+  const handled = syncTotals.value.imported + syncTotals.value.skipped + syncTotals.value.failed
+  return Math.min(100, Math.round((handled / syncTotalDiscovered.value) * 100))
 })
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -343,7 +434,244 @@ watch(search, () => {
   }, 320)
 })
 
+/**
+ * Append one line to the in-page sync log and auto-scroll the panel to the bottom.
+ * @param line - Text to append.
+ */
+function appendSyncLog(line: string): void {
+  syncLogLines.value = [...syncLogLines.value, line]
+  void nextTick((): void => {
+    const el = syncLogEl.value
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
+}
+
+/**
+ * Reset Cloudflare banner / log state and free the WebSocket cleanup function.
+ * Called on terminal sync events (`done`, `error`, `cancelled`).
+ */
+function finalizeSync(): void {
+  syncRunning.value = false
+  syncCancelling.value = false
+  cloudflareWaiting.value = false
+  cloudflareMessage.value = ''
+  syncWsCleanup?.()
+  syncWsCleanup = null
+  void loadCardmarketSession()
+}
+
+/**
+ * Apply one streamed sync event to the local UI state.
+ * @param ev - Event broadcast by the desktop worker.
+ */
+function applySyncEvent(ev: OrdersSyncEvent): void {
+  if (ev.totals) {
+    syncTotals.value = {
+      discovered: Number(ev.totals.discovered ?? syncTotals.value.discovered) || syncTotals.value.discovered,
+      imported: Number(ev.totals.imported ?? syncTotals.value.imported) || syncTotals.value.imported,
+      skipped: Number(ev.totals.skipped ?? syncTotals.value.skipped) || syncTotals.value.skipped,
+      failed: Number(ev.totals.failed ?? syncTotals.value.failed) || syncTotals.value.failed,
+    }
+  }
+
+  if (ev.type === 'session_status') {
+    void loadCardmarketSession()
+    if (ev.logged_in === false && ev.message) {
+      appendSyncLog(`⚠ ${ev.message}`)
+    }
+    return
+  }
+  if (ev.type === 'log' && ev.message) {
+    appendSyncLog(ev.message)
+    return
+  }
+  if (ev.type === 'page') {
+    if (typeof ev.rows_on_page === 'number') {
+      syncTotalDiscovered.value += ev.rows_on_page
+    }
+    appendSyncLog(
+      `Page ${ev.page ?? '?'}${ev.total_pages ? ` / ${ev.total_pages}` : ''} — ${ev.rows_on_page ?? 0} commande(s).`,
+    )
+    return
+  }
+  if (ev.type === 'order_start') {
+    appendSyncLog(`→ Commande #${ev.external_order_id ?? ''} (${ev.seller ?? ''}) ${ev.total_text ?? ''}`)
+    return
+  }
+  if (ev.type === 'order_imported') {
+    appendSyncLog(`✓ Importée #${ev.external_order_id ?? ''}`)
+    return
+  }
+  if (ev.type === 'skip') {
+    appendSyncLog(`• Ignorée #${ev.external_order_id ?? ''}${ev.message ? ` — ${ev.message}` : ''}`)
+    return
+  }
+  if (ev.type === 'order_failed') {
+    appendSyncLog(`✗ Échec #${ev.external_order_id ?? ''} — ${ev.message ?? 'erreur inconnue'}`)
+    return
+  }
+  if (ev.type === 'cloudflare_wait') {
+    cloudflareWaiting.value = true
+    cloudflareMessage.value =
+      ev.message ?? 'Cloudflare demande une vérification — cochez la case dans la fenêtre Chrome ouverte par GoupixDex.'
+    appendSyncLog('⚠ Cloudflare — vérification manuelle requise')
+    return
+  }
+  if (ev.type === 'cloudflare_resolved') {
+    cloudflareWaiting.value = false
+    cloudflareMessage.value = ''
+    appendSyncLog('✓ Cloudflare résolu, reprise…')
+    return
+  }
+  if (ev.type === 'cloudflare_timeout') {
+    cloudflareWaiting.value = false
+    appendSyncLog('✗ Cloudflare non résolu dans les temps.')
+    return
+  }
+  if (ev.type === 'error') {
+    appendSyncLog(`ERREUR : ${ev.message ?? ''}`)
+    finalizeSync()
+    toast.add({ title: 'Synchronisation interrompue', description: ev.message ?? '', color: 'error' })
+    void load()
+    return
+  }
+  if (ev.type === 'cancelled') {
+    appendSyncLog('■ Synchronisation arrêtée.')
+    finalizeSync()
+    toast.add({ title: 'Synchronisation arrêtée', color: 'warning' })
+    void load()
+    return
+  }
+  if (ev.type === 'done') {
+    const s = ev.summary ?? syncTotals.value
+    appendSyncLog(`Terminé. ${s.imported ?? 0} importée(s), ${s.skipped ?? 0} ignorée(s), ${s.failed ?? 0} échec(s).`)
+    finalizeSync()
+    toast.add({
+      title: 'Synchronisation terminée',
+      description: `${s.imported ?? 0} nouvelle(s) commande(s) importée(s).`,
+      color: 'success',
+    })
+    void load()
+  }
+}
+
+/**
+ * Reset progress state before starting (or attaching to) a sync run.
+ */
+function resetSyncState(): void {
+  syncLogLines.value = []
+  syncTotals.value = { discovered: 0, imported: 0, skipped: 0, failed: 0 }
+  syncTotalDiscovered.value = 0
+  cloudflareWaiting.value = false
+  cloudflareMessage.value = ''
+}
+
+/**
+ * Trigger the desktop worker sync and stream progress live.
+ */
+async function onSync(): Promise<void> {
+  if (!isDesktopApp.value || syncRunning.value) {
+    return
+  }
+  resetSyncState()
+  syncRunning.value = true
+  try {
+    const { close } = await runWithProgress(applySyncEvent)
+    syncWsCleanup = close
+  } catch (e) {
+    syncRunning.value = false
+    toast.add({ title: 'Lancement impossible', description: apiErrorMessage(e), color: 'error' })
+  }
+}
+
+/**
+ * Send the cancel request; the worker emits `cancelled` to clean up the UI.
+ */
+async function onCancelSync(): Promise<void> {
+  if (!syncRunning.value || syncCancelling.value) {
+    return
+  }
+  syncCancelling.value = true
+  try {
+    await cancelSync()
+    appendSyncLog('Demande d’arrêt envoyée…')
+  } catch (e) {
+    syncCancelling.value = false
+    toast.add({ title: 'Arrêt impossible', description: apiErrorMessage(e), color: 'error' })
+  }
+}
+
+/**
+ * Refresh the Cardmarket session banner (logged-in / needs_login state).
+ */
+async function loadCardmarketSession(): Promise<void> {
+  if (!isDesktopApp.value) {
+    cmSession.value = null
+    return
+  }
+  cmSessionLoading.value = true
+  try {
+    cmSession.value = await fetchCmSession()
+  } catch {
+    cmSession.value = null
+  } finally {
+    cmSessionLoading.value = false
+  }
+}
+
+/**
+ * On mount, reattach to a sync that might already be running on the worker.
+ */
+async function reattachActiveSync(): Promise<void> {
+  if (!isDesktopApp.value) {
+    return
+  }
+  try {
+    const { active, last_event } = await getActiveSync()
+    if (!active) {
+      return
+    }
+    resetSyncState()
+    syncRunning.value = true
+    if (last_event) {
+      applySyncEvent(last_event)
+    }
+    const ws = await openProgressSocket(applySyncEvent)
+    if (ws) {
+      syncWsCleanup = (): void => {
+        try {
+          ws.close()
+        } catch {
+          /* ignore */
+        }
+      }
+    } else {
+      syncRunning.value = false
+    }
+  } catch {
+    /* worker offline — ignore */
+  }
+}
+
 onMounted((): void => {
   void load()
+  void loadCardmarketSession()
+  void reattachActiveSync()
+})
+
+watch(isDesktopApp, (desktop) => {
+  if (desktop) {
+    void loadCardmarketSession()
+    void reattachActiveSync()
+  } else {
+    cmSession.value = null
+  }
+})
+
+onBeforeUnmount((): void => {
+  syncWsCleanup?.()
+  syncWsCleanup = null
 })
 </script>

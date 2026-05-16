@@ -22,10 +22,12 @@ from routes import articles as articles_routes
 from routes import auth as auth_routes
 from routes import cardmarket_searches as cardmarket_searches_routes
 from routes import catalog_route
+from routes import collection_route
 from routes import ebay_market_route
 from routes import ebay_route
 from routes import pricing_route
 from routes import scan as scan_routes
+from routes import scan_stream_route
 from routes import settings_route
 from routes import shipping_route
 from routes import stats_route
@@ -110,6 +112,8 @@ app.include_router(ebay_route.router)
 app.include_router(ebay_market_route.router)
 app.include_router(pricing_route.router)
 app.include_router(catalog_route.router)
+app.include_router(collection_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
+app.include_router(scan_stream_route.router)
 app.include_router(shipping_route.router)

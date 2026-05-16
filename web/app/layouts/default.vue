@@ -142,9 +142,9 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       },
     },
     {
-      label: 'Catalogue',
-      icon: 'i-lucide-library',
-      to: '/articles/catalog',
+      label: 'Ma collection',
+      icon: 'i-lucide-album',
+      to: '/collection',
       onSelect: () => {
         open.value = false
       },
@@ -153,6 +153,14 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
       label: 'Articles',
       icon: 'i-lucide-store',
       to: '/articles',
+      onSelect: () => {
+        open.value = false
+      },
+    },
+    {
+      label: 'Articles vendus',
+      icon: 'i-lucide-badge-check',
+      to: '/articles/sold',
       onSelect: () => {
         open.value = false
       },
@@ -227,16 +235,17 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
         open.value = false
       },
     })
+    // Scanner = flux téléphone → web ; la version desktop n'a pas de caméra
+    // pertinente, donc on n'affiche le raccourci que dans le navigateur.
+    items.push({
+      label: 'Scanner mes cartes',
+      icon: 'i-lucide-scan-line',
+      to: '/collection/scan',
+      onSelect: () => {
+        open.value = false
+      },
+    })
   }
-
-  items.push({
-    label: 'Paramètres',
-    icon: 'i-lucide-settings',
-    to: '/settings',
-    onSelect: () => {
-      open.value = false
-    },
-  })
 
   return [items]
 })

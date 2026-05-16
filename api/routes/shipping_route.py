@@ -99,9 +99,8 @@ async def shipping_labels_pdf(
     """
     Render the supplied recipient blocks as an A4 PDF (Avery L7173 — 99×57 mm, 8 per page).
 
-    Each parcel uses **two** L7173 vignettes stacked vertically on the sheet (sender immediately below recipient).
-    The sender vignette uses a crop rectangle nearly full sticker width; address stays on **one line** under the name when
-    possible (font scales down, then ellipsis). Padding inside the crop marks is the same on top, bottom, left, and right.
+    When the sender address is configured (Paramètres → Configuration), each parcel uses **two** L7173 vignettes
+    (recipient + sender below). Otherwise only **recipient** labels are printed (8 per A4 page).
 
     Optional ``stamp_pdf_base64`` per row (PDF from laposte.fr): artwork on page 1 is overlaid at **native scale**
     (no shrinking). Placement: **below** that parcel's sender vignette when the PDF grid leaves white space there (same
@@ -109,17 +108,7 @@ async def shipping_labels_pdf(
     fits, an extra A4 page is appended for that stamp.
     """
     ms = get_or_create_user_settings(db, user.id)
-    if not sender_address_complete(ms):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "sender_address_incomplete",
-                "message": (
-                    "Configurez votre adresse expéditeur dans Paramètres → Configuration "
-                    "avant de générer les étiquettes."
-                ),
-            },
-        )
+    include_sender = sender_address_complete(ms)
 
     stamps_by_parcel: list[bytes | None] = []
     addresses: list[LabelAddress] = []
@@ -147,17 +136,19 @@ async def shipping_labels_pdf(
                 country_code=(row.country_code or "FR").strip().upper() or "FR",
             )
         )
-    sender = LabelAddress(
-        full_name=(ms.sender_full_name or "").strip(),
-        line1=(ms.sender_line1 or "").strip(),
-        line2=(ms.sender_line2 or "").strip() or None,
-        postal_code=(ms.sender_postal_code or "").strip(),
-        city=(ms.sender_city or "").strip(),
-        state=None,
-        country_code="FR",
-    )
+    sender: LabelAddress | None = None
+    if include_sender:
+        sender = LabelAddress(
+            full_name=(ms.sender_full_name or "").strip(),
+            line1=(ms.sender_line1 or "").strip(),
+            line2=(ms.sender_line2 or "").strip() or None,
+            postal_code=(ms.sender_postal_code or "").strip(),
+            city=(ms.sender_city or "").strip(),
+            state=None,
+            country_code="FR",
+        )
     pdf = render_labels_pdf(addresses, sender=sender)
-    pdf = overlay_stamps_on_labels_pdf(pdf, stamps_by_parcel)
+    pdf = overlay_stamps_on_labels_pdf(pdf, stamps_by_parcel, paired_sender_layout=include_sender)
     return Response(
         content=pdf,
         media_type="application/pdf",

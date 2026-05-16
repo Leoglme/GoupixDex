@@ -850,8 +850,66 @@ async function applyWardrobeSlot(p: WardrobeSlotPrefill) {
   await refreshOrderMatch()
 }
 
+/**
+ * Prefill the article form from a TCGdex card preview payload
+ * (used by ``Ma Collection → Préparer la vente``).
+ *
+ * Photos are optional: when ``photoUrl`` is provided we try to download the
+ * TCGdex HD image and attach it as the first file (best-effort, CORS may fail).
+ */
+async function applyCatalogPrefill(p: {
+  listing_preview: { title: string; description: string; suggested_price: number | null }
+  pokewallet: { set_code: string; card_number: string }
+  display_pokemon_name?: string
+  tcgdex?: { names?: { en?: string | null; fr?: string | null; ja?: string | null } }
+  image_url_high?: string | null
+  pricing?: {
+    cardmarket_eur: number | null
+    tcgplayer_usd: number | null
+    average_price_eur: number | null
+    error: string | null
+  }
+}) {
+  assignTitleFromExternal(p.listing_preview.title)
+  description.value = p.listing_preview.description
+  const fr = p.tcgdex?.names?.fr?.trim() ?? ''
+  const en = p.tcgdex?.names?.en?.trim() ?? ''
+  ocrPokemonFrench.value = fr
+  ocrPokemonEnglish.value = en
+  ocrPokemonPrinted.value = p.display_pokemon_name?.trim() ?? ''
+  pokemonName.value = p.display_pokemon_name?.trim() || fr || en
+  setCode.value = p.pokewallet.set_code
+  cardNumber.value = p.pokewallet.card_number
+  if (p.listing_preview.suggested_price != null) {
+    sellPrice.value = String(p.listing_preview.suggested_price)
+  }
+  isGraded.value = false
+  gradedGraderValueId.value = ''
+  gradedGradeValueId.value = ''
+  gradedCertNumber.value = ''
+  importIsSold.value = false
+  publishToVinted.value = false
+  publishToEbay.value = false
+  if (p.image_url_high) {
+    try {
+      const blob = await blobFromVintedPhotoUrl(p.image_url_high)
+      if (blob) {
+        const ext = blob.type.includes('png') ? 'png' : 'webp'
+        const file = new File([blob], `catalog-${Date.now()}.${ext}`, {
+          type: blob.type || 'image/webp',
+        })
+        addImageFiles([file])
+      }
+    } catch {
+      /* image is optional — CORS or HEAD-only servers shouldn't break the form */
+    }
+  }
+  await refreshOrderMatch()
+}
+
 defineExpose({
   applyScanPrefill,
+  applyCatalogPrefill,
   addImageFiles,
   buildCreateFormData,
   applyWardrobeSlot,

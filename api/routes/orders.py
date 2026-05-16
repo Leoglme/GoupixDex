@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.deps import get_current_user
+from models.cardmarket_order import CardmarketOrder
 from models.user import User
 from services.cardmarket_order_service import (
     get_order_detail,
@@ -36,6 +37,23 @@ def list_orders(
     (set, card number, name, line text).
     """
     return list_orders_summary(db, user.id, search=search)
+
+
+@router.get("/external-ids")
+def list_imported_external_ids(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[str]:
+    """Return the Cardmarket ``external_order_id``s already imported for the current user.
+
+    Used by the desktop sync worker to skip orders we already have locally.
+    """
+    rows = (
+        db.query(CardmarketOrder.external_order_id)
+        .filter(CardmarketOrder.user_id == user.id)
+        .all()
+    )
+    return [r[0] for r in rows]
 
 
 @router.get("/match")

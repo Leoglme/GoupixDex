@@ -375,9 +375,17 @@ function finalizeRun(): void {
   resetCloudflareBanner()
   wsCleanup?.()
   wsCleanup = null
+  void loadCardmarketSession()
 }
 
 function handleProgressPayload(p: CardmarketSearchProgressPayload): void {
+  if (p.type === 'session_status') {
+    void loadCardmarketSession()
+    if (p.logged_in === false && typeof p.message === 'string') {
+      appendLog(`⚠ ${p.message}`)
+    }
+    return
+  }
   if (p.type === 'log' && typeof p.message === 'string') {
     appendLog(p.message)
     return

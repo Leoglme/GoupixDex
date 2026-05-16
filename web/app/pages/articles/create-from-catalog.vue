@@ -5,6 +5,6 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
-/** Ancienne URL : la page catalogue vit désormais sous ``/articles/catalog``. */
-await navigateTo('/articles/catalog', { replace: true })
+/** Le catalogue est désormais piloté par ``Ma Collection`` (``/collection/add``). */
+await navigateTo('/collection/add', { replace: true })
 </script>

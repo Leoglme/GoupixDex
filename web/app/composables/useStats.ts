@@ -82,6 +82,17 @@ export interface FetchDashboardOptions {
   period?: DashboardPeriod
 }
 
+export interface SoldSalesResponse {
+  sales: RecentSaleRow[]
+  count: number
+  revenue_eur: number
+  profit_eur: number
+  vinted_count: number
+  ebay_count: number
+}
+
+export type SoldSalesChannelFilter = 'vinted' | 'ebay' | null
+
 /**
  * Serialize a `Date` as ISO string for dashboard query params.
  *
@@ -120,5 +131,17 @@ export function useStats() {
     return data
   }
 
-  return { fetchDashboard }
+  /**
+   * GET `/stats/sold-sales` — all sold articles (optional channel filter).
+   */
+  async function fetchSoldSales(saleSource: SoldSalesChannelFilter = null) {
+    const params: Record<string, string> = {}
+    if (saleSource) {
+      params.sale_source = saleSource
+    }
+    const { data } = await $api.get<SoldSalesResponse>('/stats/sold-sales', { params })
+    return data
+  }
+
+  return { fetchDashboard, fetchSoldSales }
 }

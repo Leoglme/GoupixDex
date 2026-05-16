@@ -50,7 +50,7 @@
           </template>
 
           <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-4 md:flex-row md:items-end">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-end">
               <UFormField label="Recherche" class="min-w-0 flex-1" required>
                 <UInput
                   v-model="q"
@@ -60,10 +60,19 @@
                   @keyup.enter="onSearchEnter"
                 />
               </UFormField>
-              <UFormField label="Fenêtre (vente)" class="w-full md:w-72">
+              <UFormField label="Fenêtre (vente)" class="w-full lg:w-56">
                 <USelect
                   v-model="windowKey"
                   :items="windowOptions"
+                  value-key="value"
+                  label-key="label"
+                  class="w-full"
+                />
+              </UFormField>
+              <UFormField label="Langue (item)" class="w-full lg:w-52">
+                <USelect
+                  v-model="languageKey"
+                  :items="languageOptions"
                   value-key="value"
                   label-key="label"
                   class="w-full"
@@ -134,9 +143,24 @@
           </div>
           <UProgress :model-value="progressPercent" :max="100" size="sm" color="primary" />
           <p class="text-muted text-xs">
-            {{ topScrape.totalObservedSoFar.value }} ventes uniques analysées — regroupement à la fin de l'analyse.
+            {{ totalObservedSoFar }} vente(s) analysée(s) · {{ streamingListRows.length }} dans la fenêtre ·
+            regroupement au terme de l’analyse.
           </p>
         </div>
+
+        <!-- Live streaming preview (list view only) — replaced by final list when complete -->
+        <template v-if="!displayError && viewMode === 'list' && loading && streamingListRows.length">
+          <p class="text-muted text-xs">
+            Aperçu en direct — la liste finale remplace cet aperçu à la fin de l’analyse.
+          </p>
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <GoupixDexEbaySoldCard
+              v-for="(row, idx) in streamingListRows"
+              :key="`stream-${row.item_id || idx}-${row.title.slice(0, 20)}`"
+              :row="row"
+            />
+          </div>
+        </template>
 
         <!-- List results -->
         <template v-if="!displayError && viewMode === 'list'">
@@ -165,7 +189,7 @@
             description="Essayez d'élargir à 7 jours ou reformulez la recherche."
           />
 
-          <GoupixDexEbaySoldCardSkeleton v-else-if="loading" :count="8" />
+          <GoupixDexEbaySoldCardSkeleton v-else-if="loading && !streamingListRows.length" :count="8" />
 
           <div
             v-else-if="!hasSearched"
@@ -267,6 +291,7 @@ useGoupixPageSeo(
 
 type ViewMode = 'list' | 'top-cards' | 'top-graded' | 'top-sealed'
 type WindowKey = '24h' | '7d' | '30d'
+type LanguageKey = 'any' | 'fr' | 'ja'
 
 const windowOptions = [
   { label: 'Dernières 24 heures', value: '24h' as const },
@@ -280,6 +305,12 @@ const WINDOW_HOURS: Record<WindowKey, number> = {
   '30d': 720,
 }
 
+const languageOptions = [
+  { label: 'Toutes les langues', value: 'any' as const },
+  { label: 'Français', value: 'fr' as const },
+  { label: 'Japonais', value: 'ja' as const },
+]
+
 const viewModeTabs: TabsItem[] = [
   { label: 'Liste des ventes', value: 'list', icon: 'i-lucide-list' },
   { label: 'Top cartes', value: 'top-cards', icon: 'i-lucide-layers' },
@@ -289,11 +320,13 @@ const viewModeTabs: TabsItem[] = [
 
 const q = ref('carte pokemon')
 const windowKey = ref<WindowKey>('7d')
+const languageKey = ref<LanguageKey>('any')
 const viewMode = ref<ViewMode>('list')
 /** True after the first explicit search — no auto-fetch on mount. */
 const hasSearched = ref(false)
 
 const windowHoursNum = computed(() => WINDOW_HOURS[windowKey.value])
+const languageApiValue = computed<string | null>(() => (languageKey.value === 'any' ? null : languageKey.value))
 
 const topScrape = useEbaySoldTop()
 const topResult = topScrape.result
@@ -310,11 +343,13 @@ interface ClientTopCacheEntry {
 }
 const topClientCache = new Map<string, ClientTopCacheEntry>()
 
-function topCacheKey(qVal: string, win: WindowKey): string {
-  return `${qVal.trim().toLowerCase()}|${win}`
+function topCacheKey(qVal: string, win: WindowKey, lang: LanguageKey): string {
+  return `${qVal.trim().toLowerCase()}|${win}|${lang}`
 }
 
 const listRows = computed<EbaySoldTopItem[]>(() => topResult.value?.items ?? [])
+const streamingListRows = computed<EbaySoldTopItem[]>(() => topScrape.partialItems.value ?? [])
+const totalObservedSoFar = computed<number>(() => topScrape.totalObservedSoFar.value)
 
 const currentTopRows = computed<EbaySoldTopRow[]>(() => {
   const r = topResult.value
@@ -433,7 +468,13 @@ const manualUrl = computed(() => {
     return fromApi
   }
   const kw = encodeURIComponent(q.value.trim())
-  return `https://www.ebay.fr/sch/i.html?_nkw=${kw}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=50&rt=nc`
+  let url = `https://www.ebay.fr/sch/i.html?_nkw=${kw}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=50&rt=nc`
+  if (languageKey.value === 'fr') {
+    url += '&Langue=Fran%C3%A7ais'
+  } else if (languageKey.value === 'ja') {
+    url += '&Langue=Japonais'
+  }
+  return url
 })
 
 /**
@@ -457,9 +498,9 @@ async function runLoad(): Promise<void> {
   }
   hasSearched.value = true
 
-  // Client cache: if we already have a result for (q, window), reuse it as-is
+  // Client cache: if we already have a result for (q, window, language), reuse it as-is
   // without calling the API.
-  const key = topCacheKey(q.value, windowKey.value)
+  const key = topCacheKey(q.value, windowKey.value, languageKey.value)
   const cached = topClientCache.get(key)
   if (cached) {
     topScrape.cancel()
@@ -470,6 +511,7 @@ async function runLoad(): Promise<void> {
     topScrape.pagesDone.value = cached.result.pages_requested
     topScrape.pagesTotal.value = cached.result.pages_requested
     topScrape.totalObservedSoFar.value = cached.result.total_observed
+    topScrape.partialItems.value = cached.result.items
     return
   }
 
@@ -480,6 +522,7 @@ async function runLoad(): Promise<void> {
     scrapeLimit: 1000,
     topLimit: 20,
     minCount: 1,
+    language: languageApiValue.value,
   })
   if (fresh) {
     topClientCache.set(key, {

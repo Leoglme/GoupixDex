@@ -5,6 +5,8 @@ export type CatalogLocale = 'en' | 'fr' | 'ja'
 export interface TcgdexSetBrief {
   id: string
   name: string
+  /** Latin-script label (FR/EN). Always present, replaces JA when needed. */
+  display_name?: string
   logo?: string
   symbol?: string
   cardCount?: { total?: number; official?: number }
@@ -14,6 +16,8 @@ export interface TcgdexSetBrief {
 export interface TcgdexSeriesBrief {
   id: string
   name: string
+  /** Latin-script label (FR/EN). Always present, replaces JA when needed. */
+  display_name?: string
   logo?: string
 }
 
@@ -37,6 +41,8 @@ export interface TcgdexCardInSetBrief {
   id: string
   localId: string
   name: string
+  /** Latin-script label (FR/EN) — used when ``name`` is in Japanese script. */
+  display_name?: string
   image?: string
   /** Ready-to-use thumbnail URL (``…/low.webp``), set by GoupixDex ``GET /catalog/sets/:id``. */
   image_low?: string

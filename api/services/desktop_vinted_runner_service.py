@@ -94,9 +94,25 @@ class DesktopVintedRunnerService:
             vp.cleanup_later(article_id)
 
     @staticmethod
-    async def run_vinted_unlist_after_ebay_sale(article_id: int, user_id: int, token: str, remote_base: str) -> None:
+    def _article_needs_vinted_unlist(article_d: dict[str, Any]) -> bool:
+        """True when GoupixDex still expects a live Vinted listing to be removed."""
+        return bool(
+            article_d.get("is_sold")
+            and str(article_d.get("sale_source") or "").lower() == "ebay"
+            and article_d.get("published_on_vinted")
+        )
+
+    @staticmethod
+    async def _run_vinted_listing_removal(
+        article_id: int,
+        user_id: int,
+        token: str,
+        remote_base: str,
+    ) -> None:
+        """Delete the Vinted listing in Chrome and call ``confirm-vinted-unlist`` on success."""
         hdrs = _headers(token)
         hdrs_json = {**hdrs, "Content-Type": "application/json"}
+        browser_started = False
         try:
             async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
                 ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
@@ -104,12 +120,9 @@ class DesktopVintedRunnerService:
                 article_d = ar.json()
                 if article_d.get("user_id") != user_id:
                     return
-                if not (
-                    article_d.get("is_sold")
-                    and str(article_d.get("sale_source") or "").lower() == "ebay"
-                    and article_d.get("published_on_vinted")
-                ):
+                if not article_d.get("published_on_vinted"):
                     return
+
                 cr = await client.get(f"{remote_base}/users/me/vinted-decrypted", headers=hdrs)
                 cr.raise_for_status()
                 creds: dict[str, Any] = cr.json()
@@ -134,8 +147,7 @@ class DesktopVintedRunnerService:
             raw_vid = article_d.get("vinted_id")
             item_id = int(raw_vid) if raw_vid is not None else None
 
-            await VintedService.init_browser()
-            await VintedService.init_page()
+            browser_started = await VintedService.ensure_browser_session()
             await VintedService.ensure_sign_in(email, password, form_progress=None)
             tab = VintedService._require_tab()
             if item_id is None:
@@ -163,7 +175,7 @@ class DesktopVintedRunnerService:
                 )
                 r.raise_for_status()
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Vinted unlist after eBay sale failed article_id=%s", article_id)
+            logger.exception("Vinted listing removal failed article_id=%s", article_id)
             try:
                 async with httpx.AsyncClient(timeout=25.0) as client:
                     await client.post(
@@ -174,10 +186,37 @@ class DesktopVintedRunnerService:
             except Exception:
                 pass
         finally:
-            try:
-                VintedService.close_browser()
-            except Exception:
-                pass
+            if browser_started:
+                try:
+                    VintedService.close_browser()
+                except Exception:
+                    pass
+
+    @staticmethod
+    async def run_remove_vinted_listing(article_id: int, user_id: int, token: str, remote_base: str) -> None:
+        """Retire l’annonce Vinted depuis la fiche article (worker local)."""
+        await DesktopVintedRunnerService._run_vinted_listing_removal(article_id, user_id, token, remote_base)
+
+    @staticmethod
+    async def run_vinted_unlist_after_ebay_sale(article_id: int, user_id: int, token: str, remote_base: str) -> None:
+        hdrs = _headers(token)
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
+                ar.raise_for_status()
+                article_d = ar.json()
+                if article_d.get("user_id") != user_id:
+                    return
+                if not DesktopVintedRunnerService._article_needs_vinted_unlist(article_d):
+                    logger.info(
+                        "Vinted unlist skipped article_id=%s (not pending / already unlisted in GoupixDex)",
+                        article_id,
+                    )
+                    return
+        except Exception:
+            logger.exception("Vinted unlist precheck failed article_id=%s", article_id)
+            return
+        await DesktopVintedRunnerService._run_vinted_listing_removal(article_id, user_id, token, remote_base)
 
     @staticmethod
     async def run_desktop_vinted_batch_job(

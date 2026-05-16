@@ -58,3 +58,7 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    collection_cards: Mapped[list["CollectionCard"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

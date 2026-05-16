@@ -37,7 +37,8 @@
                 (centré), sinon à <strong>droite</strong> de la feuille, aligné avec la paire destinataire / expéditeur
                 du colis — taille PDF identique au fichier La Poste. À l’impression, utilisez
                 <strong>taille réelle / 100 %</strong> (pas « ajuster à la page ») pour éviter une réduction visuelle.
-                Sinon une page suivante (facultatif). Configurez l’expéditeur dans Paramètres → Configuration.
+                Sinon une page suivante (facultatif). L’adresse expéditeur (Paramètres → Configuration) est
+                <strong>facultative</strong> : sans elle, seules les étiquettes destinataire sont imprimées.
               </p>
             </div>
           </template>
@@ -45,10 +46,10 @@
 
         <GoupixDexAlert
           v-if="!senderLoading && !senderAddressComplete"
-          variant="warning"
+          variant="info"
           icon="i-lucide-map-pin"
-          title="Adresse expéditeur manquante"
-          description="Renseignez votre adresse expéditeur dans Paramètres → Configuration avant de générer le PDF."
+          title="Adresse expéditeur non renseignée"
+          description="Le PDF contiendra uniquement les étiquettes destinataire (8 par page). Ajoutez votre adresse dans Paramètres → Configuration pour imprimer aussi l’expéditeur sous chaque colis."
         >
           <template #actions>
             <UButton to="/settings" size="xs" color="neutral" variant="subtle"> Ouvrir la configuration </UButton>

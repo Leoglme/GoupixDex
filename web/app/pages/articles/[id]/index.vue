@@ -42,6 +42,66 @@
             </div>
           </div>
 
+          <UCard
+            v-if="showMarketplaceActions"
+            class="ring-default/60 shadow-sm ring-1"
+            :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
+          >
+            <div class="space-y-1">
+              <p class="text-highlighted font-medium">Annonces en ligne</p>
+              <p class="text-muted text-sm">
+                Retirez l’annonce sur le marketplace sans supprimer la fiche GoupixDex. Vinted passe par le worker local
+                (application desktop).
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <UButton
+                v-if="article.published_on_ebay"
+                color="warning"
+                variant="soft"
+                icon="i-simple-icons-ebay"
+                :loading="removingEbay"
+                :disabled="removingVinted"
+                @click="onRemoveEbay"
+              >
+                Retirer de eBay
+              </UButton>
+              <UButton
+                v-if="article.published_on_vinted"
+                color="warning"
+                variant="soft"
+                icon="i-lucide-shirt"
+                :loading="removingVinted"
+                :disabled="removingEbay"
+                @click="onRemoveVinted"
+              >
+                Retirer de Vinted
+              </UButton>
+            </div>
+            <p v-if="article.published_on_vinted && !isDesktopApp" class="text-muted text-xs">
+              La suppression Vinted nécessite
+              <NuxtLink to="/downloads" class="text-primary underline underline-offset-2"
+                >l’application desktop</NuxtLink
+              >.
+            </p>
+            <UAlert
+              v-if="article.cross_ebay_removal_failed && article.published_on_ebay"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-alert-triangle"
+              title="Dernière suppression eBay échouée"
+              :description="article.cross_ebay_removal_error || 'Réessayez ci-dessus.'"
+            />
+            <UAlert
+              v-if="article.cross_vinted_removal_failed && article.published_on_vinted"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-alert-triangle"
+              title="Dernière suppression Vinted échouée"
+              :description="article.cross_vinted_removal_error || 'Réessayez ci-dessus.'"
+            />
+          </UCard>
+
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4' }">
               <p class="text-muted text-xs font-medium uppercase">Prix d'achat</p>
@@ -278,6 +338,7 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
+import { apiErrorMessage } from '~/composables/useApiError'
 import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useMarketSearch'
 import type { PricingLookup } from '~/composables/usePricing'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
@@ -288,7 +349,8 @@ definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
 const config = useRuntimeConfig()
-const { getArticle } = useArticles()
+const { getArticle, removeEbayListing, removeVintedListing } = useArticles()
+const { isDesktopApp } = useDesktopRuntime()
 const { lookup } = usePricing()
 const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarketSearch()
 const toast = useToast()
@@ -300,8 +362,14 @@ const pricingLoading: Ref<boolean> = ref(false)
 const ebayMarket: Ref<MarketSearchResponse | null> = ref(null)
 const ebayLoading: Ref<boolean> = ref(false)
 const ebayError: Ref<string | null> = ref(null)
+const removingEbay: Ref<boolean> = ref(false)
+const removingVinted: Ref<boolean> = ref(false)
 
 const id: ComputedRef<number> = computed(() => Number(route.params.id))
+
+const showMarketplaceActions: ComputedRef<boolean> = computed(() =>
+  Boolean(article.value?.published_on_ebay || article.value?.published_on_vinted),
+)
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -524,6 +592,86 @@ async function loadEbayMarket(a: Article): Promise<void> {
     }
   } finally {
     ebayLoading.value = false
+  }
+}
+
+async function reloadArticle(): Promise<void> {
+  article.value = await getArticle(id.value)
+}
+
+async function onRemoveEbay(): Promise<void> {
+  if (!article.value?.published_on_ebay) {
+    return
+  }
+  if (!window.confirm('Retirer cette annonce sur eBay ? La fiche GoupixDex sera conservée.')) {
+    return
+  }
+  removingEbay.value = true
+  try {
+    article.value = await removeEbayListing(id.value)
+    toast.add({ title: 'Annonce eBay retirée', color: 'success' })
+  } catch (e) {
+    toast.add({ title: 'Suppression eBay', description: apiErrorMessage(e), color: 'error' })
+    try {
+      await reloadArticle()
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    removingEbay.value = false
+  }
+}
+
+async function onRemoveVinted(): Promise<void> {
+  if (!article.value?.published_on_vinted) {
+    return
+  }
+  if (!isDesktopApp.value) {
+    toast.add({
+      title: 'Application desktop requise',
+      description: 'La suppression Vinted s’exécute sur le worker local (app GoupixDex).',
+      color: 'warning',
+    })
+    return
+  }
+  if (!window.confirm('Retirer cette annonce sur Vinted ? Chrome va s’ouvrir sur ce poste.')) {
+    return
+  }
+  removingVinted.value = true
+  try {
+    await removeVintedListing(id.value)
+    toast.add({
+      title: 'Vinted',
+      description: 'Suppression lancée sur ce poste. Actualisation dans quelques secondes…',
+      color: 'neutral',
+    })
+    setTimeout(() => {
+      void reloadArticle()
+        .then(() => {
+          if (!article.value?.published_on_vinted) {
+            toast.add({ title: 'Annonce Vinted retirée', color: 'success' })
+          }
+        })
+        .catch(() => {})
+    }, 7000)
+  } catch (e) {
+    const msg = apiErrorMessage(e)
+    if (msg.includes('VINTED_LOCAL_WORKER_REQUIRED')) {
+      toast.add({
+        title: 'Application desktop requise',
+        description: 'Ouvrez GoupixDex en version desktop pour retirer l’annonce Vinted.',
+        color: 'warning',
+      })
+    } else {
+      toast.add({ title: 'Suppression Vinted', description: msg, color: 'error' })
+    }
+    try {
+      await reloadArticle()
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    removingVinted.value = false
   }
 }
 

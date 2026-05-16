@@ -50,9 +50,11 @@ interface JobEnvelope {
   status: 'pending' | 'running' | 'completed' | 'failed'
   query: string
   window_hours: number
+  language: string | null
   pages_requested: number
   pages_done: number
   total_observed: number
+  partial_items: EbaySoldTopItem[]
   result: EbaySoldTopResultBody | null
   error: string | null
   created_at: number
@@ -70,6 +72,8 @@ export interface EbaySoldTopInput {
   scrapeLimit?: number
   topLimit?: number
   minCount?: number
+  /** Optional eBay `Langue` aspect filter (`fr` | `ja` | `null`). */
+  language?: string | null
 }
 
 const POLL_INTERVAL_MS = 800
@@ -98,6 +102,8 @@ export function useEbaySoldTop() {
   const pagesTotal: Ref<number> = ref(0)
   const totalObservedSoFar: Ref<number> = ref(0)
   const cached: Ref<boolean> = ref(false)
+  /** Streaming snapshot of in-window items collected so far during the job. */
+  const partialItems: Ref<EbaySoldTopItem[]> = ref([])
 
   /** Active job id — when changed by ``load``, in-flight polls are dropped. */
   const activeJobId: Ref<string | null> = ref(null)
@@ -122,6 +128,9 @@ export function useEbaySoldTop() {
     totalObservedSoFar.value = env.total_observed
     status.value = env.status
     ebaySearchUrl.value = env.ebay_sold_search_url ?? null
+    if (Array.isArray(env.partial_items)) {
+      partialItems.value = env.partial_items
+    }
     if (env.result) {
       result.value = env.result
     }
@@ -147,6 +156,7 @@ export function useEbaySoldTop() {
     pagesTotal.value = input.pages ?? 10
     totalObservedSoFar.value = 0
     cached.value = false
+    partialItems.value = []
 
     let env: JobEnvelope
     try {
@@ -159,6 +169,7 @@ export function useEbaySoldTop() {
           scrape_limit: input.scrapeLimit ?? 600,
           top_limit: input.topLimit ?? 20,
           min_count: input.minCount ?? 1,
+          language: input.language ?? null,
         },
         { timeout: 30_000 },
       )
@@ -260,6 +271,7 @@ export function useEbaySoldTop() {
     pagesTotal.value = 0
     totalObservedSoFar.value = 0
     cached.value = false
+    partialItems.value = []
     status.value = 'idle'
   }
 
@@ -273,6 +285,7 @@ export function useEbaySoldTop() {
     pagesTotal,
     totalObservedSoFar,
     cached,
+    partialItems,
     load,
     cancel,
     reset,

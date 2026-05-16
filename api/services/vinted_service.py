@@ -293,6 +293,25 @@ class VintedService:
                 logger.debug("taskkill Chrome post-stop: %s", exc)
 
     @classmethod
+    async def ensure_browser_session(cls, *, wait_after_page_ms: int = 80) -> bool:
+        """
+        Ensure Chrome and the main tab exist.
+
+        Returns:
+            True if this call started the browser (caller may ``close_browser`` in ``finally``).
+            False if a session was already active (do not close — another job may be using it).
+        """
+        started_browser = False
+        if cls._browser is None:
+            await cls.init_browser()
+            started_browser = True
+        if cls._tab is None:
+            await cls.init_page()
+            if wait_after_page_ms > 0:
+                await TimerService.wait(wait_after_page_ms)
+        return started_browser
+
+    @classmethod
     def _require_tab(cls) -> Tab:
         if cls._tab is None:
             raise RuntimeError("Tab is not initialized; call init_page() first")

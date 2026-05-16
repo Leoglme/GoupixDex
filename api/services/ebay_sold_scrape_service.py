@@ -75,8 +75,40 @@ class ScrapedSoldRow:
     approx_hours_ago: float | None
 
 
-def ebay_fr_sold_search_url(*, q: str, page_size: int = 50, page: int = 1) -> str:
-    """Human-readable same search as the scraper (for opening in a browser)."""
+#: eBay aspect-filter values for the « Langue » facet on ebay.fr. Mapped from a
+#: short locale code so the rest of the codebase doesn't hardcode the French label.
+_EBAY_LANGUAGE_FACET: dict[str, str] = {
+    "fr": "Français",
+    "ja": "Japonais",
+    "en": "Anglais",
+    "de": "Allemand",
+    "it": "Italien",
+    "es": "Espagnol",
+}
+
+
+def _normalize_language(language: str | None) -> str | None:
+    """Return the eBay aspect-filter value (e.g. ``Français``) or ``None`` when no filter."""
+    if not language:
+        return None
+    raw = language.strip()
+    if not raw or raw.lower() in {"any", "all", "*"}:
+        return None
+    # Allow callers to pass either ``"fr"`` / ``"ja"`` *or* the literal facet label.
+    return _EBAY_LANGUAGE_FACET.get(raw.lower(), raw)
+
+
+def ebay_fr_sold_search_url(
+    *, q: str, page_size: int = 50, page: int = 1, language: str | None = None,
+) -> str:
+    """
+    Human-readable same search as the scraper (for opening in a browser).
+
+    ``language`` accepts a short code (``fr``, ``ja``, …) or the literal facet
+    label (``Français``, ``Japonais``) and is forwarded to eBay as the
+    ``&Langue=…`` aspect filter — exactly the parameter eBay exposes when the
+    facet is selected from the SRP sidebar.
+    """
     params: dict[str, str] = {
         "_nkw": q.strip(),
         "LH_Sold": "1",
@@ -85,6 +117,9 @@ def ebay_fr_sold_search_url(*, q: str, page_size: int = 50, page: int = 1) -> st
         "_ipg": str(min(max(page_size, 10), 60)),
         "rt": "nc",
     }
+    lang_facet = _normalize_language(language)
+    if lang_facet:
+        params["Langue"] = lang_facet
     if page > 1:
         params["_pgn"] = str(page)
     return f"{EBAY_FR_SOLD_BASE}?{urlencode(params)}"
@@ -421,6 +456,7 @@ async def fetch_sold_listings_html(
     q: str,
     page_size: int = 50,
     page: int = 1,
+    language: str | None = None,
     app: AppSettings | None = None,
 ) -> str:
     """
@@ -431,7 +467,7 @@ async def fetch_sold_listings_html(
     the caller detects the challenge to surface a clean error to the user.
     """
     s = app or get_settings()
-    url = ebay_fr_sold_search_url(q=q, page_size=page_size, page=page)
+    url = ebay_fr_sold_search_url(q=q, page_size=page_size, page=page, language=language)
     proxy = (s.ebay_sold_scrape_proxy or "").strip() or None
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
@@ -476,8 +512,9 @@ async def scrape_sold_listings(
     window_hours: float,
     limit: int = 50,
     pages: int = 1,
+    language: str | None = None,
     app: AppSettings | None = None,
-    on_page_done: Callable[[int, int], Awaitable[None]] | None = None,
+    on_page_done: Callable[[int, int, list[dict[str, Any]]], Awaitable[None]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """
     Return ``(items_as_dicts, error_message_or_none)``.
@@ -489,8 +526,9 @@ async def scrape_sold_listings(
     between pages.
 
     ``on_page_done`` is awaited after each successfully parsed page with
-    ``(page_num, total_unique_observed_so_far)`` — useful for surfacing
-    progress to a long-running job consumer.
+    ``(page_num, total_unique_observed_so_far, partial_items_in_window)`` —
+    the third argument lets a consumer render results progressively (e.g. the
+    « Ventes terminées eBay » page) without waiting for the full scrape.
 
     On success ``error_message_or_none`` is ``None``.
     """
@@ -509,6 +547,7 @@ async def scrape_sold_listings(
                 q=q,
                 page_size=page_size,
                 page=page_num,
+                language=language,
                 app=app,
             )
         except EbayScrapeError as exc:
@@ -543,8 +582,10 @@ async def scrape_sold_listings(
             new_in_page += 1
 
         if on_page_done is not None:
+            partial_in_window = _filter_window(raw_rows, window_hours=window_hours)[:limit]
+            partial_items = [_row_to_dict(r) for r in partial_in_window]
             try:
-                await on_page_done(page_num, len(raw_rows))
+                await on_page_done(page_num, len(raw_rows), partial_items)
             except Exception:
                 logger.exception("on_page_done callback raised — ignoring")
 
@@ -561,17 +602,18 @@ async def scrape_sold_listings(
             q, window_hours, pages_total, len(raw_rows), len(in_window),
         )
 
-    items: list[dict[str, Any]] = []
-    for r in rows:
-        items.append(
-            {
-                "title": r.title,
-                "price_eur": r.price_eur,
-                "listing_url": r.listing_url,
-                "image_url": r.image_url,
-                "item_id": r.item_id,
-                "sold_caption": r.sold_caption,
-                "approx_hours_ago": r.approx_hours_ago,
-            },
-        )
+    items: list[dict[str, Any]] = [_row_to_dict(r) for r in rows]
     return items, err_msg
+
+
+def _row_to_dict(row: ScrapedSoldRow) -> dict[str, Any]:
+    """JSON shape for both the partial-progress stream and the final result."""
+    return {
+        "title": row.title,
+        "price_eur": row.price_eur,
+        "listing_url": row.listing_url,
+        "image_url": row.image_url,
+        "item_id": row.item_id,
+        "sold_caption": row.sold_caption,
+        "approx_hours_ago": row.approx_hours_ago,
+    }

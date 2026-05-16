@@ -12,6 +12,7 @@ import fitz  # PyMuPDF
 from services.shipping_label_service import (
     HORIZONTAL_PITCH_MM,
     LABEL_WIDTH_MM,
+    LABELS_PER_PAGE,
     LEFT_MARGIN_MM,
     TOP_MARGIN_MM,
     VERTICAL_PITCH_MM,
@@ -127,6 +128,85 @@ def _pair_vertical_bounds_mm(slot_index: int) -> tuple[float, float]:
     return top_mm, bottom_mm
 
 
+def _bottom_edge_below_recipient_mm(label_idx_on_page: int) -> float:
+    """Bottom edge of a single recipient sticker (mm from physical top of sheet)."""
+    row = label_idx_on_page // 2
+    return TOP_MARGIN_MM + (row + 1) * VERTICAL_PITCH_MM
+
+
+def _recipient_vertical_bounds_mm(label_idx_on_page: int) -> tuple[float, float]:
+    row = label_idx_on_page // 2
+    top_mm = TOP_MARGIN_MM + row * VERTICAL_PITCH_MM
+    bottom_mm = TOP_MARGIN_MM + (row + 1) * VERTICAL_PITCH_MM
+    return top_mm, bottom_mm
+
+
+def _below_recipient_safe(label_idx_on_page: int, labels_on_page: int) -> bool:
+    """True if no recipient sticker is printed directly below on the same column."""
+    below_idx = label_idx_on_page + 2
+    return below_idx >= labels_on_page
+
+
+def _paint_stamp_recipient_only(
+    target_page: fitz.Page,
+    *,
+    label_idx_on_page: int,
+    labels_on_page: int,
+    stamp_bytes: bytes,
+) -> bool:
+    """Place stamp for recipient-only sheets (8 labels per page, no sender row)."""
+    src = fitz.open(stream=stamp_bytes, filetype="pdf")
+    try:
+        if src.page_count < 1:
+            return False
+        sp = src[0]
+        clip = _stamp_artwork_clip_rect(sp)
+        if clip is None or clip.is_empty:
+            return False
+
+        pr = target_page.rect
+        w_pt, h_pt = pr.width, pr.height
+        stamp_w, stamp_h = clip.width, clip.height
+        bottom_margin_pt = mm_to_pt(2)
+        margin_pt = mm_to_pt(4)
+
+        recipient_bottom_mm = _bottom_edge_below_recipient_mm(label_idx_on_page)
+        y0_below_pt = mm_to_pt(recipient_bottom_mm + STAMP_GAP_MM)
+        y1_below_pt = y0_below_pt + stamp_h
+
+        if (
+            _below_recipient_safe(label_idx_on_page, labels_on_page)
+            and y1_below_pt <= h_pt - bottom_margin_pt
+        ):
+            col = label_idx_on_page % 2
+            cell_left_mm = LEFT_MARGIN_MM + col * HORIZONTAL_PITCH_MM
+            x_center_mm = cell_left_mm + LABEL_WIDTH_MM / 2
+            stamp_w_mm = pt_to_mm(stamp_w)
+            x0_pt = mm_to_pt(x_center_mm - stamp_w_mm / 2)
+            x0_pt = max(margin_pt, min(x0_pt, w_pt - margin_pt - stamp_w))
+            dest = fitz.Rect(x0_pt, y0_below_pt, x0_pt + stamp_w, y1_below_pt)
+            if dest.x1 <= w_pt - margin_pt + 0.01:
+                target_page.show_pdf_page(dest, src, 0, clip=clip)
+                return True
+
+        top_mm, bottom_mm = _recipient_vertical_bounds_mm(label_idx_on_page)
+        y_top_mm = (top_mm + bottom_mm) / 2 - pt_to_mm(stamp_h) / 2
+        y0_right_pt = mm_to_pt(y_top_mm)
+        y1_right_pt = y0_right_pt + stamp_h
+        x0_right_pt = w_pt - margin_pt - stamp_w
+        if (
+            x0_right_pt >= margin_pt - 0.01
+            and y0_right_pt >= margin_pt - 0.01
+            and y1_right_pt <= h_pt - bottom_margin_pt + 0.01
+        ):
+            dest_r = fitz.Rect(x0_right_pt, y0_right_pt, x0_right_pt + stamp_w, y1_right_pt)
+            target_page.show_pdf_page(dest_r, src, 0, clip=clip)
+            return True
+        return False
+    finally:
+        src.close()
+
+
 def _paint_stamp_native(
     target_page: fitz.Page,
     *,
@@ -223,27 +303,33 @@ def _append_stamp_overflow_page(doc: fitz.Document, stamp_bytes: bytes) -> None:
         src.close()
 
 
-def overlay_stamps_on_labels_pdf(labels_pdf_bytes: bytes, stamps_by_parcel_index: list[bytes | None]) -> bytes:
+def overlay_stamps_on_labels_pdf(
+    labels_pdf_bytes: bytes,
+    stamps_by_parcel_index: list[bytes | None],
+    *,
+    paired_sender_layout: bool = True,
+) -> bytes:
     """
     Composite stamps at native PDF scale.
 
-    Placement: directly under each parcel's sender vignette when the slot below is free on that column; otherwise
-    flush-right on the sheet, vertically aligned with that parcel's recipient+sender pair.
+    ``paired_sender_layout`` must match ``render_labels_pdf(..., sender=...)``: paired when sender labels are printed.
     """
     if not any(stamps_by_parcel_index):
         return labels_pdf_bytes
+
+    slots_per_page = PAIRS_PER_PAGE if paired_sender_layout else LABELS_PER_PAGE
 
     doc = fitz.open(stream=labels_pdf_bytes, filetype="pdf")
     try:
         total_parcels = len(stamps_by_parcel_index)
         for page_idx in range(doc.page_count):
             page = doc[page_idx]
-            remaining = total_parcels - page_idx * PAIRS_PER_PAGE
+            remaining = total_parcels - page_idx * slots_per_page
             if remaining <= 0:
                 break
-            parcels_on_page = min(PAIRS_PER_PAGE, remaining)
-            start = page_idx * PAIRS_PER_PAGE
-            for slot in range(PAIRS_PER_PAGE):
+            slots_on_page = min(slots_per_page, remaining)
+            start = page_idx * slots_per_page
+            for slot in range(slots_per_page):
                 parcel_i = start + slot
                 if parcel_i >= len(stamps_by_parcel_index):
                     break
@@ -251,12 +337,20 @@ def overlay_stamps_on_labels_pdf(labels_pdf_bytes: bytes, stamps_by_parcel_index
                 if not stamp_bytes:
                     continue
                 try:
-                    placed = _paint_stamp_native(
-                        page,
-                        slot_index=slot,
-                        parcels_on_page=parcels_on_page,
-                        stamp_bytes=stamp_bytes,
-                    )
+                    if paired_sender_layout:
+                        placed = _paint_stamp_native(
+                            page,
+                            slot_index=slot,
+                            parcels_on_page=slots_on_page,
+                            stamp_bytes=stamp_bytes,
+                        )
+                    else:
+                        placed = _paint_stamp_recipient_only(
+                            page,
+                            label_idx_on_page=slot,
+                            labels_on_page=slots_on_page,
+                            stamp_bytes=stamp_bytes,
+                        )
                     if not placed:
                         _append_stamp_overflow_page(doc, stamp_bytes)
                 except Exception as exc:

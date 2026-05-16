@@ -7,12 +7,12 @@
   >
     <template #header>
       <div>
-        <p class="text-highlighted text-sm font-medium">Dernières ventes</p>
-        <p class="text-muted text-xs">Les transactions les plus récentes en premier</p>
+        <p class="text-highlighted text-sm font-medium">{{ title }}</p>
+        <p class="text-muted text-xs">{{ subtitle }}</p>
       </div>
     </template>
 
-    <div v-if="sortedSales.length" class="max-h-96 overflow-auto">
+    <div v-if="sortedSales.length" :class="maxHeightClass">
       <table class="w-full border-separate border-spacing-0 text-sm">
         <thead class="sticky top-0 z-10">
           <tr class="bg-elevated/95 border-default border-y backdrop-blur">
@@ -79,16 +79,28 @@
         </tbody>
       </table>
     </div>
-    <p v-else class="text-muted px-4 py-8 text-center text-sm">Aucune vente pour l'instant.</p>
+    <p v-else class="text-muted px-4 py-8 text-center text-sm">{{ emptyMessage }}</p>
   </UCard>
 </template>
 
 <script setup lang="ts">
 import type { RecentSaleRow } from '~/composables/useStats'
 
-const props = defineProps<{
-  sales: RecentSaleRow[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    sales: RecentSaleRow[]
+    title?: string
+    subtitle?: string
+    emptyMessage?: string
+    maxHeightClass?: string
+  }>(),
+  {
+    title: 'Dernières ventes',
+    subtitle: 'Les transactions les plus récentes en premier',
+    emptyMessage: "Aucune vente pour l'instant.",
+    maxHeightClass: 'max-h-96 overflow-auto',
+  },
+)
 
 const eur = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
