@@ -29,7 +29,15 @@ export interface Article {
   vinted_published_at?: string | null
   published_on_ebay?: boolean
   ebay_listing_id?: string | null
+  ebay_inventory_sku?: string | null
   ebay_published_at?: string | null
+  vinted_id?: number | null
+  cross_ebay_removal_failed?: boolean
+  cross_vinted_removal_failed?: boolean
+  cross_ebay_removal_error?: string | null
+  cross_vinted_removal_error?: string | null
+  /** Vendu sur eBay mais annonce Vinted encore présente — action desktop ou réessai. */
+  pending_vinted_unlist?: boolean
   created_at: string
   sold_at: string | null
   order_line_id?: number | null
@@ -222,6 +230,30 @@ export function useArticles() {
   }
 
   /**
+   * POST `/articles/:id/retry-cross-ebay-removal` — relance la suppression eBay après vente Vinted.
+   *
+   * @param id - Article id.
+   * @returns {Promise<Article>} Article mis à jour après tentative de suppression eBay.
+   */
+  async function retryCrossEbayRemoval(id: number) {
+    const { data } = await $api.post<Article>(`/articles/${id}/retry-cross-ebay-removal`)
+    return data
+  }
+
+  /**
+   * POST worker local — retire l’annonce Vinted après vente eBay (nodriver).
+   *
+   * @param id - Article id.
+   * @returns {Promise<{ ok: boolean; status?: string }>} Accusé de réception du worker (202).
+   */
+  async function vintedUnlistAfterEbaySale(id: number) {
+    const { data } = await vintedHttp().post<{ ok: boolean; status?: string }>(
+      `/articles/${id}/vinted-unlist-after-ebay-sale`,
+    )
+    return data
+  }
+
+  /**
    * POST Vinted publish for one article (SSE stream path in response body).
    *
    * @param id - Article id.
@@ -287,6 +319,8 @@ export function useArticles() {
     deleteArticle,
     deleteArticlesBulk,
     markSold,
+    retryCrossEbayRemoval,
+    vintedUnlistAfterEbaySale,
     publishArticleToVinted,
     publishArticleToEbay,
     startVintedBatch,

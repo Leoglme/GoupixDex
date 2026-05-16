@@ -294,41 +294,7 @@
               <div v-if="row.sold_at">Vendu le {{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}</div>
             </td>
             <td class="border-default border-b px-3 py-3 text-end align-middle">
-              <UDropdownMenu
-                :items="[
-                  [
-                    { label: 'Modifier', icon: 'i-lucide-pencil', onSelect: () => emit('edit', row.id) },
-                    {
-                      label: 'Mettre en ligne sur Vinted',
-                      icon: 'i-lucide-store',
-                      disabled: !isDesktopApp || row.is_sold || !row.images?.length,
-                      onSelect: () => emit('publish-vinted', row),
-                    },
-                    ...(props.ebayPublishAvailable
-                      ? [
-                          {
-                            label: 'Mettre en ligne sur eBay',
-                            icon: 'i-lucide-shopping-bag',
-                            disabled: ebayRowDisabled(row),
-                            onSelect: () => emit('publish-ebay', row),
-                          },
-                        ]
-                      : []),
-                    {
-                      label: 'Marquer vendu',
-                      icon: 'i-lucide-circle-check',
-                      disabled: row.is_sold,
-                      onSelect: () => emit('sold', row),
-                    },
-                    {
-                      label: 'Supprimer',
-                      icon: 'i-lucide-trash-2',
-                      color: 'error',
-                      onSelect: () => emit('delete', row.id),
-                    },
-                  ],
-                ]"
-              >
+              <UDropdownMenu :items="buildRowMenu(row)">
                 <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" square />
               </UDropdownMenu>
             </td>
@@ -428,6 +394,25 @@
                 >
                   eBay
                 </UButton>
+                <UButton
+                  v-if="row.is_sold && row.sale_source === 'vinted' && row.cross_ebay_removal_failed"
+                  size="sm"
+                  variant="outline"
+                  icon="i-lucide-refresh-ccw"
+                  @click="emit('retry-cross-ebay', row.id)"
+                >
+                  Réessayer eBay
+                </UButton>
+                <UButton
+                  v-if="row.pending_vinted_unlist && (row.cross_vinted_removal_failed || isDesktopApp)"
+                  size="sm"
+                  variant="outline"
+                  icon="i-lucide-refresh-ccw"
+                  :disabled="!isDesktopApp"
+                  @click="emit('retry-cross-vinted', row.id)"
+                >
+                  Réessayer Vinted
+                </UButton>
                 <UButton size="sm" :disabled="row.is_sold" @click="emit('sold', row)"> Vendu </UButton>
                 <UButton size="sm" color="error" variant="soft" @click="emit('delete', row.id)"> Supprimer </UButton>
               </div>
@@ -476,6 +461,8 @@ const emit = defineEmits<{
   'bulk-publish-ebay': [ids: number[]]
   'bulk-publish-both': [ids: number[]]
   'bulk-sold': [articles: Article[]]
+  'retry-cross-ebay': [id: number]
+  'retry-cross-vinted': [id: number]
 }>()
 
 const { isDesktopApp } = useDesktopRuntime()
@@ -487,6 +474,67 @@ const { isDesktopApp } = useDesktopRuntime()
  */
 function ebayRowDisabled(row: Article): boolean {
   return row.is_sold || (row.published_on_ebay ?? false) || !row.images?.length
+}
+
+/**
+ * Actions du menu « … » pour une ligne (inclut réessais suppression croisée).
+ */
+function buildRowMenu(row: Article) {
+  const cross: {
+    label: string
+    icon: string
+    disabled?: boolean
+    onSelect: () => void
+  }[] = []
+  if (row.is_sold && row.sale_source === 'vinted' && row.cross_ebay_removal_failed) {
+    cross.push({
+      label: 'Réessayer suppression eBay',
+      icon: 'i-lucide-refresh-ccw',
+      onSelect: () => emit('retry-cross-ebay', row.id),
+    })
+  }
+  if (row.pending_vinted_unlist && (row.cross_vinted_removal_failed || isDesktopApp.value)) {
+    cross.push({
+      label: 'Réessayer suppression Vinted',
+      icon: 'i-lucide-refresh-ccw',
+      disabled: !isDesktopApp.value,
+      onSelect: () => emit('retry-cross-vinted', row.id),
+    })
+  }
+  return [
+    [
+      { label: 'Modifier', icon: 'i-lucide-pencil', onSelect: () => emit('edit', row.id) },
+      ...cross,
+      {
+        label: 'Mettre en ligne sur Vinted',
+        icon: 'i-lucide-store',
+        disabled: !isDesktopApp.value || row.is_sold || !row.images?.length,
+        onSelect: () => emit('publish-vinted', row),
+      },
+      ...(props.ebayPublishAvailable
+        ? [
+            {
+              label: 'Mettre en ligne sur eBay',
+              icon: 'i-lucide-shopping-bag',
+              disabled: ebayRowDisabled(row),
+              onSelect: () => emit('publish-ebay', row),
+            },
+          ]
+        : []),
+      {
+        label: 'Marquer vendu',
+        icon: 'i-lucide-circle-check',
+        disabled: row.is_sold,
+        onSelect: () => emit('sold', row),
+      },
+      {
+        label: 'Supprimer',
+        icon: 'i-lucide-trash-2',
+        color: 'error',
+        onSelect: () => emit('delete', row.id),
+      },
+    ],
+  ]
 }
 
 /**

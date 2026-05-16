@@ -34,6 +34,10 @@ class DesktopStubsService:
         a.sold_price = Decimal(str(sdp)) if sdp is not None else None
         a.sale_source = d.get("sale_source")
         a.is_sold = bool(d.get("is_sold", False))
+        a.published_on_vinted = bool(d.get("published_on_vinted", False))
+        a.published_on_ebay = bool(d.get("published_on_ebay", False))
+        vid = d.get("vinted_id")
+        a.vinted_id = int(vid) if vid is not None else None
         return a
 
     @staticmethod

@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlparse
@@ -2185,6 +2186,136 @@ class VintedService:
             "Could not read Vinted member id (user menu + users/me). "
             "Ensure the session is logged in on the home page."
         )
+
+    @staticmethod
+    def parse_vinted_numeric_item_id(item_url: str) -> int | None:
+        """Extrait l’identifiant numérique depuis une URL ou un chemin ``/items/{id}``."""
+        if not item_url:
+            return None
+        m = re.search(r"/items/(\d{6,})", str(item_url))
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _normalize_match_token(s: str) -> str:
+        return " ".join((s or "").lower().split())
+
+    @staticmethod
+    def _price_match_fragments(sell_price: Decimal | float | int | None) -> list[str]:
+        if sell_price is None:
+            return []
+        try:
+            d = Decimal(str(sell_price))
+        except Exception:  # noqa: BLE001
+            return []
+        s = f"{float(d):.2f}".replace(".", ",")
+        return [f"{s} €", f"{s}\u00a0€", f"{s}€"]
+
+    @classmethod
+    async def find_member_listing_item_id_for_match(
+        cls,
+        tab: "Tab",
+        *,
+        title: str,
+        sell_price: Decimal | float | int | None,
+        site_origin: str = "https://www.vinted.fr",
+    ) -> int | None:
+        """
+        Sur la page dressing (grille), trouve l’id article Vinted en recoupant titre / prix / état
+        avec l’attribut ``title`` des vignettes (comme sur la garde-robe membre).
+        """
+        origin = site_origin.rstrip("/")
+        url_now = (tab.target.url or "").lower()
+        if "/member/" not in url_now:
+            mid = await cls.fetch_logged_in_vinted_user_numeric_id()
+            await tab.get(f"{origin}/member/{mid}")
+            await asyncio.sleep(1.2)
+
+        nt = cls._normalize_match_token(title)
+        if not nt:
+            return None
+        price_frags = cls._price_match_fragments(sell_price)
+
+        js = r"""
+        () => {
+          const items = [];
+          for (const a of document.querySelectorAll('a.new-item-box__overlay--clickable[href*="/items/"]')) {
+            const href = a.getAttribute('href') || '';
+            const t = a.getAttribute('title') || '';
+            const m = href.match(/\/items\/(\d+)/);
+            if (!m) continue;
+            const id = parseInt(m[1], 10);
+            if (!Number.isFinite(id)) continue;
+            items.push({ id, title: t });
+          }
+          return JSON.stringify({ ok: true, items });
+        }
+        """
+
+        def _pick(rows: list[dict[str, Any]]) -> int | None:
+            hits: list[int] = []
+            for row in rows:
+                overlay = str(row.get("title") or "")
+                no = cls._normalize_match_token(overlay)
+                if nt not in no:
+                    continue
+                if price_frags and not any(p in overlay for p in price_frags):
+                    continue
+                if cond_n and cond_n not in no:
+                    continue
+                try:
+                    hits.append(int(row["id"]))
+                except (TypeError, ValueError, KeyError):
+                    continue
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                return hits[0]
+            return None
+
+        for _ in range(42):
+            raw = await tab.evaluate(js, return_by_value=True)
+            parsed = _parse_eval_dict_result(raw, context="member_listing_scan")
+            rows = parsed.get("items") if isinstance(parsed.get("items"), list) else []
+            picked = _pick([r for r in rows if isinstance(r, dict)])
+            if picked is not None:
+                return picked
+            await tab.evaluate("window.scrollBy(0, Math.min(1200, window.innerHeight * 0.95))")
+            await asyncio.sleep(0.45)
+
+        return None
+
+    @classmethod
+    async def delete_vinted_item_listing(
+        cls,
+        tab: "Tab",
+        item_id: int,
+        *,
+        site_origin: str = "https://www.vinted.fr",
+    ) -> None:
+        """Ouvre la fiche article, supprime (bouton + modal), attend le retour ``/member/``."""
+        origin = site_origin.rstrip("/")
+        await tab.get(f"{origin}/items/{int(item_id)}")
+        await asyncio.sleep(1.0)
+        del_btn = await tab.select('[data-testid="item-delete-button"]', timeout=25)
+        if del_btn is None:
+            raise RuntimeError("item_delete_button_not_found")
+        await del_btn.click()
+        conf = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=15)
+        if conf is None:
+            raise RuntimeError("item_delete_confirmation_not_found")
+        await conf.click()
+        deadline = time.monotonic() + 35.0
+        while time.monotonic() < deadline:
+            u = (tab.target.url or "").lower()
+            if "/member/" in u:
+                return
+            await asyncio.sleep(0.35)
+        raise RuntimeError("vinted_delete_no_member_redirect")
 
     #: Typical Vinted session cookie names / fragments (domain sometimes empty in CDP).
     _VINTED_COOKIE_NAME_HINTS: tuple[str, ...] = (

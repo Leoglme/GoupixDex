@@ -116,6 +116,8 @@
               @bulk-publish-vinted="onBulkPublishVinted"
               @bulk-publish-ebay="onBulkPublishEbay"
               @bulk-publish-both="onBulkPublishBoth"
+              @retry-cross-ebay="onRetryCrossEbay"
+              @retry-cross-vinted="onRetryCrossVinted"
             />
           </div>
         </UCard>
@@ -192,6 +194,8 @@ const {
   onBulkPublishEbay,
   onBulkPublishBoth,
   onPublishVinted,
+  onRetryCrossEbay,
+  onRetryCrossVinted,
   openSold,
 } = useArticlesListPageCore('stock')
 </script>

@@ -26,6 +26,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     deleteArticle,
     deleteArticlesBulk,
     markSold,
+    retryCrossEbayRemoval,
+    vintedUnlistAfterEbaySale,
     publishArticleToVinted,
     publishArticleToEbay,
     startVintedBatch,
@@ -197,6 +199,30 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
+   *
+   */
+  function triggerDesktopVintedUnlistIfNeeded(article: Article) {
+    if (!import.meta.client || !isDesktopApp.value) {
+      return
+    }
+    if (!article.pending_vinted_unlist) {
+      return
+    }
+    void vintedUnlistAfterEbaySale(article.id)
+      .then(() => {
+        toast.add({
+          title: 'Vinted',
+          description: 'Suppression de l’annonce lancée sur ce poste (quelques secondes).',
+          color: 'neutral',
+        })
+        setTimeout(() => void refresh(), 7000)
+      })
+      .catch((e) => {
+        toast.add({ title: 'Suppression Vinted', description: apiErrorMessage(e), color: 'error' })
+      })
+  }
+
+  /**
    * @param payload - Vente unitaire ou lot avec répartition calculée côté modale.
    */
   async function confirmSold(
@@ -219,17 +245,27 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         if (id == null) {
           return
         }
-        await markSold(id, {
+        const updated = await markSold(id, {
           sold_price: payload.soldPrice,
           sale_source: payload.saleSource,
         })
+        triggerDesktopVintedUnlistIfNeeded(updated)
         toast.add({ title: 'Article marqué comme vendu', color: 'success' })
+        if (payload.saleSource === 'ebay' && rows[0]?.published_on_vinted && !isDesktopApp.value) {
+          toast.add({
+            title: 'Vinted',
+            description:
+              'Pour retirer l’annonce encore en ligne sur Vinted, ouvrez l’application desktop puis « Réessayer suppression Vinted » dans le menu ⋯.',
+            color: 'warning',
+          })
+        }
       } else {
         for (const a of payload.allocations) {
-          await markSold(a.id, {
+          const updated = await markSold(a.id, {
             sold_price: a.soldPrice,
             sale_source: payload.saleSource,
           })
+          triggerDesktopVintedUnlistIfNeeded(updated)
         }
         toast.add({
           title:
@@ -238,6 +274,14 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
               : 'Article marqué comme vendu',
           color: 'success',
         })
+        if (payload.saleSource === 'ebay' && rows.some((r) => r.published_on_vinted) && !isDesktopApp.value) {
+          toast.add({
+            title: 'Vinted',
+            description:
+              'Pour retirer les annonces Vinted restantes, ouvrez l’application desktop puis « Réessayer suppression Vinted » dans le menu ⋯.',
+            color: 'warning',
+          })
+        }
       }
       soldOpen.value = false
       soldArticles.value = null
@@ -247,6 +291,44 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
     } finally {
       soldSubmitting.value = false
+    }
+  }
+
+  /**
+   *
+   */
+  async function onRetryCrossEbay(id: number) {
+    try {
+      await retryCrossEbayRemoval(id)
+      toast.add({ title: 'eBay', description: 'Suppression relancée.', color: 'success' })
+      await refresh()
+    } catch (e) {
+      toast.add({ title: 'Erreur eBay', description: apiErrorMessage(e), color: 'error' })
+    }
+  }
+
+  /**
+   *
+   */
+  async function onRetryCrossVinted(id: number) {
+    if (!isDesktopApp.value) {
+      toast.add({
+        title: 'Application desktop',
+        description: 'La suppression Vinted s’exécute sur le worker local (app GoupixDex).',
+        color: 'warning',
+      })
+      return
+    }
+    try {
+      await vintedUnlistAfterEbaySale(id)
+      toast.add({
+        title: 'Vinted',
+        description: 'Suppression relancée sur ce poste. Actualisation dans quelques secondes…',
+        color: 'neutral',
+      })
+      setTimeout(() => void refresh(), 7000)
+    } catch (e) {
+      toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
     }
   }
 
@@ -622,5 +704,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     onBulkPublishEbay,
     onBulkPublishBoth,
     onPublishVinted,
+    onRetryCrossEbay,
+    onRetryCrossVinted,
   }
 }

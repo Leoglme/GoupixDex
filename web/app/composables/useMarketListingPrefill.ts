@@ -36,7 +36,11 @@ const EXCLUDED_TOKENS = new Set([
 ])
 
 /**
+ * Mappe un libellé d’état eBay vers une condition article GoupixDex.
  *
+ * @param ebayCondition - Texte état côté eBay.
+ * @param isGraded - Carte sous slab.
+ * @returns {string} Valeur condition formulaire (ex. Near Mint).
  */
 export function mapMarketCondition(ebayCondition: string, isGraded: boolean): string {
   if (isGraded) {
@@ -62,7 +66,10 @@ export function mapMarketCondition(ebayCondition: string, isGraded: boolean): st
 }
 
 /**
+ * Construit une description article à partir d’une annonce marché.
  *
+ * @param listing - Annonce source (titre, état, grading).
+ * @returns {string} Texte multi-lignes pour le champ description.
  */
 export function buildMarketListingDescription(listing: MarketListing): string {
   const lines: string[] = [listing.title]
@@ -76,7 +83,10 @@ export function buildMarketListingDescription(listing: MarketListing): string {
 }
 
 /**
+ * Heuristique : extrait nom Pokémon, code set et numéro depuis le titre eBay.
  *
+ * @param title - Titre brut de l’annonce.
+ * @returns {{ pokemonName: string; setCode: string; cardNumber: string }} Champs partiellement remplis.
  */
 export function parseCardInfoFromTitle(title: string): {
   pokemonName: string
@@ -116,7 +126,10 @@ export function parseCardInfoFromTitle(title: string): {
 }
 
 /**
+ * Champs formulaire « nouvel article » préremplis depuis une annonce marché.
  *
+ * @param listing - Annonce eBay / marché analysée.
+ * @returns {Record<string, string>} Paires clé–valeur pour query ou FormData.
  */
 export function buildArticlePrefillFromListing(listing: MarketListing): Record<string, string> {
   const payload: Record<string, string> = {

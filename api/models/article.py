@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -60,10 +60,28 @@ class Article(Base):
         nullable=False,
     )
     ebay_listing_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: SKU Inventory API (requis pour retirer l’annonce sans parcourir tout le catalogue).
+    ebay_inventory_sku: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ebay_published_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
+    #: Identifiant numérique dans l’URL Vinted ``/items/{id}-…``.
+    vinted_id: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    cross_ebay_removal_failed: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    cross_vinted_removal_failed: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    cross_ebay_removal_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    cross_vinted_removal_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
     order_line_id: Mapped[int | None] = mapped_column(
         ForeignKey("cardmarket_order_lines.id", ondelete="SET NULL"),
         nullable=True,

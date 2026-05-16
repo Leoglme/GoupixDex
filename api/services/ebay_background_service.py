@@ -64,6 +64,7 @@ class EbayBackgroundService:
                     article_id,
                     user_id,
                     str(result["listing_id"]),
+                    inventory_sku=str(result.get("sku") or "") or None,
                 )
             if finish_session:
                 await progress_hub.finish(article_id, {"ebay": _ebay_sse_payload(result)})

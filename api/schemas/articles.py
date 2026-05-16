@@ -48,6 +48,18 @@ class SoldPatch(BaseModel):
     sale_source: Literal["vinted", "ebay"] = "vinted"
 
 
+class ConfirmVintedPublishBody(BaseModel):
+    """Corps optionnel pour ``POST …/confirm-vinted-publish`` (worker desktop)."""
+
+    vinted_id: int | None = Field(default=None, ge=1)
+
+
+class VintedCrossRemovalFailBody(BaseModel):
+    """Rapport d’échec du worker local (suppression Vinted après vente eBay)."""
+
+    detail: str = Field(default="Erreur inconnue", max_length=500)
+
+
 class BulkIdsBody(BaseModel):
     """Bulk delete articles (same owner)."""
 

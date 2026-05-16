@@ -85,13 +85,18 @@ export interface CatalogCardPreviewResponse {
 }
 
 /**
+ * Composable catalogue TCGdex (proxy GoupixDex authentifié).
  *
+ * @returns Helpers async pour séries, sets et prévisualisation carte.
  */
 export function useCardCatalog() {
   const { $api } = useNuxtApp()
 
   /**
+   * GET `/catalog/series` — liste des séries TCGdex.
    *
+   * @param params - Locale et filtre nom optionnel.
+   * @returns {Promise<CatalogSeriesListResponse>} Séries paginées côté API.
    */
   async function listSeries(params: { locale: CatalogLocale; name?: string }) {
     const { data } = await $api.get<CatalogSeriesListResponse>('/catalog/series', {
@@ -104,7 +109,11 @@ export function useCardCatalog() {
   }
 
   /**
+   * GET `/catalog/series/:id` — détail d’une série et ses extensions.
    *
+   * @param locale - Langue catalogue.
+   * @param seriesId - Identifiant série TCGdex.
+   * @returns {Promise<CatalogSeriesDetailResponse>} Série avec sets imbriqués.
    */
   async function getSeries(locale: CatalogLocale, seriesId: string) {
     const { data } = await $api.get<CatalogSeriesDetailResponse>(`/catalog/series/${encodeURIComponent(seriesId)}`, {
@@ -114,7 +123,10 @@ export function useCardCatalog() {
   }
 
   /**
+   * GET `/catalog/sets` — liste paginée des extensions.
    *
+   * @param params - Locale, pagination et filtre nom optionnel.
+   * @returns {Promise<CatalogSetsResponse>} Page de sets.
    */
   async function listSets(params: { locale: CatalogLocale; page?: number; perPage?: number; name?: string }) {
     const { data } = await $api.get<CatalogSetsResponse>('/catalog/sets', {
@@ -129,7 +141,11 @@ export function useCardCatalog() {
   }
 
   /**
+   * GET `/catalog/sets/:id` — détail d’une extension et ses cartes.
    *
+   * @param locale - Langue catalogue.
+   * @param setId - Identifiant set TCGdex.
+   * @returns {Promise<CatalogSetResponse>} Set avec cartes.
    */
   async function getSet(locale: CatalogLocale, setId: string) {
     const { data } = await $api.get<CatalogSetResponse>(`/catalog/sets/${encodeURIComponent(setId)}`, {
@@ -139,7 +155,12 @@ export function useCardCatalog() {
   }
 
   /**
+   * GET `/catalog/card-preview` — titre, description, prix et image pour préremplir un article.
    *
+   * @param tcgdxCardId - Identifiant carte TCGdex.
+   * @param pokewalletSetCode - Code set PokéWallet optionnel.
+   * @param browseLocale - Locale navigation pour le nom affiché.
+   * @returns {Promise<CatalogCardPreviewResponse>} Données de prévisualisation listing.
    */
   async function previewCard(
     tcgdxCardId: string,

@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -23,13 +23,17 @@ from schemas.articles import (
     ARTICLE_TITLE_MAX_LEN_VINTED,
     ArticleUpdate,
     BulkIdsBody,
+    ConfirmVintedPublishBody,
     SoldPatch,
     VintedBatchStartBody,
+    VintedCrossRemovalFailBody,
 )
 from services import article_service
 from services.cardmarket_order_service import assign_article_order_line
 from services.combined_marketplace_service import CombinedMarketplaceService
+from services.cross_marketplace_removal_service import run_background_ebay_removal_after_vinted_sale
 from services.ebay_background_service import EbayBackgroundService
+from services.ebay_listing_delete_service import clear_ebay_publication_fields, delete_ebay_listing_for_article
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
 from services.vinted_batch_session_service import VintedBatchSessionService as vinted_batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as vinted_progress_hub
@@ -415,15 +419,94 @@ def confirm_vinted_publish(
     article_id: int,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    body: ConfirmVintedPublishBody | None = Body(default=None),
 ) -> dict[str, bool]:
     """
-    Mark the article as published on Vinted after success from the local desktop worker.
+    Marque l’article comme publié sur Vinted après succès du worker desktop.
+    ``vinted_id`` (optionnel) : identifiant numérique de l’URL ``/items/{id}-…``.
     """
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    article_service.mark_article_published_on_vinted(article_id, user.id)
+    b = body or ConfirmVintedPublishBody()
+    article_service.mark_article_published_on_vinted(article_id, user.id, vinted_id=b.vinted_id)
     return {"ok": True}
+
+
+@router.post("/{article_id}/confirm-vinted-unlist", status_code=status.HTTP_200_OK)
+def confirm_vinted_unlist(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """Après suppression réelle sur Vinted (worker local) : aligne l’état GoupixDex."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not article.is_sold or (article.sale_source or "").lower() != "ebay":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Réservé aux articles marqués vendus sur eBay.",
+        )
+    article.published_on_vinted = False
+    article.vinted_published_at = None
+    article.vinted_id = None
+    article.cross_vinted_removal_failed = False
+    article.cross_vinted_removal_error = None
+    db.add(article)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{article_id}/fail-vinted-cross-removal", status_code=status.HTTP_200_OK)
+def fail_vinted_cross_removal(
+    article_id: int,
+    body: VintedCrossRemovalFailBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    article.cross_vinted_removal_failed = True
+    article.cross_vinted_removal_error = (body.detail or "Erreur inconnue")[:500]
+    db.add(article)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{article_id}/retry-cross-ebay-removal")
+async def retry_cross_ebay_removal(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Relance la suppression eBay après une vente Vinted (échec réseau / token, etc.)."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not article.is_sold or (article.sale_source or "").lower() != "vinted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Réservé aux articles vendus sur Vinted.",
+        )
+    if not article.published_on_ebay:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucune annonce eBay active à retirer pour cet article.",
+        )
+    ok, err = await delete_ebay_listing_for_article(db, article, user)
+    if ok:
+        clear_ebay_publication_fields(article)
+        article.cross_ebay_removal_failed = False
+        article.cross_ebay_removal_error = None
+    else:
+        article.cross_ebay_removal_failed = True
+        article.cross_ebay_removal_error = (err or "Erreur")[:500]
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    return article_service.article_to_dict(article)
 
 
 @router.post("/{article_id}/publish-ebay")
@@ -696,6 +779,7 @@ def update_article(
 def mark_sold(
     article_id: int,
     body: SoldPatch,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
@@ -706,8 +790,26 @@ def mark_sold(
     article.sold_at = dt.datetime.now(dt.UTC)
     article.sold_price = body.sold_price
     article.sale_source = body.sale_source
+    article.cross_ebay_removal_failed = False
+    article.cross_ebay_removal_error = None
+    article.cross_vinted_removal_failed = False
+    article.cross_vinted_removal_error = None
+
+    need_ebay_bg = (
+        body.sale_source == "vinted"
+        and article.published_on_ebay
+        and (bool(article.ebay_listing_id) or bool(article.ebay_inventory_sku))
+    )
     db.commit()
     db.refresh(article)
+
+    if need_ebay_bg:
+        background_tasks.add_task(
+            run_background_ebay_removal_after_vinted_sale,
+            article_id,
+            user.id,
+        )
+
     return article_service.article_to_dict(article)
 
 

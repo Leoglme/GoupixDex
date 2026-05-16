@@ -81,9 +81,20 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         else None,
         "published_on_ebay": bool(article.published_on_ebay),
         "ebay_listing_id": article.ebay_listing_id,
+        "ebay_inventory_sku": article.ebay_inventory_sku,
         "ebay_published_at": article.ebay_published_at.isoformat()
         if article.ebay_published_at
         else None,
+        "vinted_id": int(article.vinted_id) if article.vinted_id is not None else None,
+        "cross_ebay_removal_failed": bool(article.cross_ebay_removal_failed),
+        "cross_vinted_removal_failed": bool(article.cross_vinted_removal_failed),
+        "cross_ebay_removal_error": article.cross_ebay_removal_error,
+        "cross_vinted_removal_error": article.cross_vinted_removal_error,
+        "pending_vinted_unlist": bool(
+            article.is_sold
+            and (article.sale_source or "").lower() == "ebay"
+            and article.published_on_vinted
+        ),
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "order_line_id": article.order_line_id,
@@ -92,9 +103,12 @@ def article_to_dict(article: Article) -> dict[str, Any]:
     }
 
 
-def mark_article_published_on_vinted(article_id: int, user_id: int) -> bool:
+def mark_article_published_on_vinted(
+    article_id: int, user_id: int, *, vinted_id: int | None = None
+) -> bool:
     """
     Mark the article as published on Vinted (short DB session, suitable for long-running tasks).
+    Optionally persist ``vinted_id`` (identifiant URL Vinted).
     """
     db = SessionLocal()
     try:
@@ -103,13 +117,17 @@ def mark_article_published_on_vinted(article_id: int, user_id: int) -> bool:
             return False
         article.published_on_vinted = True
         article.vinted_published_at = dt.datetime.now(dt.UTC)
+        if vinted_id is not None and vinted_id > 0:
+            article.vinted_id = int(vinted_id)
         db.commit()
         return True
     finally:
         db.close()
 
 
-def mark_article_published_on_ebay(article_id: int, user_id: int, listing_id: str) -> bool:
+def mark_article_published_on_ebay(
+    article_id: int, user_id: int, listing_id: str, inventory_sku: str | None = None
+) -> bool:
     db = SessionLocal()
     try:
         article = get_article(db, article_id, user_id)
@@ -117,6 +135,8 @@ def mark_article_published_on_ebay(article_id: int, user_id: int, listing_id: st
             return False
         article.published_on_ebay = True
         article.ebay_listing_id = listing_id[:64]
+        if inventory_sku:
+            article.ebay_inventory_sku = inventory_sku.strip()[:50]
         article.ebay_published_at = dt.datetime.now(dt.UTC)
         db.commit()
         return True
@@ -179,7 +199,9 @@ def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
     if data.get("clear_vinted_publication") is True:
         article.published_on_vinted = False
         article.vinted_published_at = None
+        article.vinted_id = None
     if data.get("clear_ebay_publication") is True:
         article.published_on_ebay = False
         article.ebay_listing_id = None
+        article.ebay_inventory_sku = None
         article.ebay_published_at = None
