@@ -75,11 +75,7 @@ const toast = useToast()
 const workersRestarting: Ref<boolean> = ref(false)
 const dbSyncLoading: Ref<boolean> = ref(false)
 
-const showDevWorkerControls = computed(
-  () =>
-    // Production / site déployé : import.meta.dev est false → pas de panneau (ex. retour OAuth eBay vers EBAY_REDIRECT_URI prod).
-    import.meta.dev && Boolean(isDesktopApp.value),
-)
+const showDevWorkerControls = computed(() => import.meta.dev && Boolean(isDesktopApp.value))
 
 async function onRestartWorkers(): Promise<void> {
   workersRestarting.value = true

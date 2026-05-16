@@ -23,6 +23,7 @@ from services.ebay_oauth_service import (
     _api_base_url,
     refresh_user_access_token,
     token_has_fulfillment_scope,
+    token_scope_string,
 )
 from services.ebay_trading_card_grading import (
     EBAY_CONDITION_GRADED,
@@ -262,7 +263,8 @@ async def ensure_ebay_access_token(
                 "on your production app keyset (developer.ebay.com)."
             ) from exc
         raise
-    if require_fulfillment_scope and not token_has_fulfillment_scope(data):
+    scope_str = token_scope_string(data)
+    if require_fulfillment_scope and scope_str and not token_has_fulfillment_scope(data):
         raise RuntimeError(
             "ebay_fulfillment_scope_missing: le token OAuth ne contient pas sell.fulfillment. "
             "Activez ce scope sur developer.ebay.com (clés production), révoquez l'app sur eBay.fr, "

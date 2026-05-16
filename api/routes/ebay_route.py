@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Annotated, Any
 from urllib.parse import unquote
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -83,9 +86,8 @@ def ebay_authorize_url(
     force_login: Annotated[bool, Query()] = False,
 ) -> dict[str, str]:
     """Build the browser URL for eBay consent (User must open it)."""
-    app = get_settings()
     try:
-        url = build_authorization_url(state=state, force_login=force_login, app=app)
+        url = build_authorization_url(state=state, force_login=force_login)
     except RuntimeError as exc:
         if str(exc) == "ebay_oauth_not_configured":
             raise HTTPException(
@@ -93,8 +95,7 @@ def ebay_authorize_url(
                 detail="eBay OAuth is not configured on the server (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI).",
             ) from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    redirect = (app.ebay_redirect_uri or "").strip()
-    return {"authorization_url": url, "state": state, "redirect_uri": redirect}
+    return {"authorization_url": url, "state": state}
 
 
 @router.post("/oauth/exchange", status_code=status.HTTP_200_OK)
@@ -135,12 +136,36 @@ async def ebay_oauth_exchange(
     db.add(user)
     db.commit()
     db.refresh(user)
-    scope = token_scope_string(data)
+
+    # Auth-code exchange often omits ``scope``; refresh with all consented scopes so the access
+    # token includes sell.fulfillment (required for getOrders / shipping labels).
+    scope_data = data
+    rt_plain = decrypt_ebay_token(user.ebay_refresh_token)
+    if rt_plain:
+        try:
+            scope_data = await refresh_user_access_token(rt_plain, request_all_scopes=True)
+            access = scope_data.get("access_token")
+            if access and isinstance(access, str):
+                user.ebay_access_token = store_ebay_token(access)
+                expires_in = int(scope_data.get("expires_in", 7200))
+                user.ebay_access_expires_at = now + dt.timedelta(seconds=expires_in)
+            if scope_data.get("refresh_token"):
+                user.ebay_refresh_token = store_ebay_token(str(scope_data["refresh_token"]))
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except Exception as exc:
+            logger.warning("eBay post-exchange refresh failed (scopes may be incomplete): %s", exc)
+
+    scope = token_scope_string(scope_data)
+    has_fulfillment = token_has_fulfillment_scope(scope_data) or (
+        not scope and bool(decrypt_ebay_token(user.ebay_refresh_token))
+    )
     return {
         "ok": True,
         "ebay_connected": bool(decrypt_ebay_token(user.ebay_refresh_token)),
         "oauth_scope": scope,
-        "has_fulfillment_scope": token_has_fulfillment_scope(data),
+        "has_fulfillment_scope": has_fulfillment,
     }
 
 
