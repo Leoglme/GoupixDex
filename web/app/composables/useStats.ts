@@ -133,6 +133,8 @@ export function useStats() {
 
   /**
    * GET `/stats/sold-sales` — all sold articles (optional channel filter).
+   *
+   * @returns Sold sales list and aggregate totals for the selected channel.
    */
   async function fetchSoldSales(saleSource: SoldSalesChannelFilter = null) {
     const params: Record<string, string> = {}

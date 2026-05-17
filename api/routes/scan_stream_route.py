@@ -132,16 +132,13 @@ def list_recent_scans(
     return {"items": events}
 
 
-@router.websocket("/ws/scan-stream")
-async def scan_stream_socket(
-    ws: WebSocket,
-    db: Annotated[Session, Depends(get_db)],
-) -> None:
-    """
-    Authenticated WebSocket. The browser cannot send custom headers on
-    ``WebSocket``, so the JWT travels in ``?token=<jwt>``. We reuse
-    :func:`core.deps.get_bearer_or_query_token` via the dependency chain.
-    """
+@router.get("/scan-stream/health")
+def scan_stream_health() -> dict[str, Any]:
+    """Lightweight probe — confirms the scan-stream router is deployed."""
+    return {"ok": True, "websocket_paths": ["/ws/scan-stream", "/scan-stream/ws"]}
+
+
+async def _scan_stream_socket_impl(ws: WebSocket, db: Session) -> None:
     try:
         user = get_current_user_from_token_str(
             raw_token=ws.query_params.get("token", ""),
@@ -157,8 +154,6 @@ async def scan_stream_socket(
     try:
         for past in backlog:
             await ws.send_json(past)
-        # Keep the socket open; we never expect inbound frames but a tiny
-        # receive loop terminates cleanly on client disconnect / page reload.
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
@@ -167,3 +162,24 @@ async def scan_stream_socket(
         logger.exception("scan-stream socket crashed (user=%s)", user.id)
     finally:
         await hub.disconnect(user.id, ws)
+
+
+@router.websocket("/ws/scan-stream")
+async def scan_stream_socket(
+    ws: WebSocket,
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """
+    Authenticated WebSocket. The browser cannot send custom headers on
+    ``WebSocket``, so the JWT travels in ``?token=<jwt>``.
+    """
+    await _scan_stream_socket_impl(ws, db)
+
+
+@router.websocket("/scan-stream/ws")
+async def scan_stream_socket_alias(
+    ws: WebSocket,
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Alias for nginx configs that only proxy ``/scan-stream/*``."""
+    await _scan_stream_socket_impl(ws, db)

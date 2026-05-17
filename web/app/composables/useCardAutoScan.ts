@@ -22,30 +22,32 @@ export interface UseCardAutoScanOptions {
   onCapture: () => void | Promise<void>
 }
 
-/** ~4.5 samples / second — responsive without burning the main thread. */
-const SAMPLE_MS = 220
-/** Long edge of the downscaled analysis buffer (grayscale, ~card ratio). */
-const SAMPLE_W = 80
-const SAMPLE_H = 112
-/** Mean abs frame delta (0–255) that counts as "something moved". */
-const MOTION_DIFF = 8
-/** Frame delta below which the scene is considered "held still". */
-const STILL_DIFF = 2.6
-/** Consecutive still samples required before firing (~0.66 s). */
-const STILL_HITS = 3
-/** Min grayscale stddev so a blank background never triggers a capture. */
-const CONTENT_STDDEV_MIN = 10
-/** Floor between two captures, guards against micro-jitter double shots. */
-const MIN_COOLDOWN_MS = 1200
+/** ~8 samples / second when `requestVideoFrameCallback` is available. */
+const SAMPLE_MS = 125
+const SAMPLE_W = 96
+const SAMPLE_H = 134
+/** Center crop ratio — ignore desk edges that add false motion. */
+const CROP_RATIO = 0.72
+/**
+ * EMA of frame delta above this ⇒ "moving". High on purpose: phone AE flicker
+ * often sits at 12–25 even on a tripod.
+ */
+const STILL_EMA_MAX = 28
+const STILL_EMA_ALPHA = 0.35
+/** EMA must stay below threshold for this many ticks before capture. */
+const STILL_TICKS_REQUIRED = 5
+/** Min contrast in the center crop (empty desk ≈ 3–5, card ≈ 12+). */
+const CONTENT_STDDEV_MIN = 5
+/** Ignore re-shooting the same card until the scene changes this much. */
+const SCENE_CHANGE_DIFF = 4
+const MIN_COOLDOWN_MS = 1100
+/** After camera ready, force one capture if nothing fired (tripod / card already in frame). */
+const FORCE_CAPTURE_AFTER_MS = 2800
 
 /**
- * Touch-free "cash register" capture: watch the live camera, and the instant a
- * card is placed and held steady, fire `onCapture` once. The next shot only
- * arms after the scene changes again (card removed / swapped), so a single
- * card is never scanned twice.
- *
- * Pure frame-difference heuristics (no ML, no extra deps): a capture needs a
- * motion spike (card arriving) followed by a run of still, content-rich frames.
+ * Touch-free "cash register" capture: sample the live camera, detect a card-like
+ * center region, and fire `onCapture` when motion settles (EMA) or after a short
+ * timeout if the card was already in frame.
  *
  * @param opts - Preview element, enable flag, busy flag and capture callback.
  * @returns Reactive `phase` for UI feedback.
@@ -55,21 +57,25 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   const phase: Ref<AutoScanPhase> = ref('idle')
 
-  let timer: ReturnType<typeof setInterval> | null = null
   let canvas: HTMLCanvasElement | null = null
   let ctx: CanvasRenderingContext2D | null = null
   let prevGray: Float32Array | null = null
-  let stillRun = 0
-  let sawMotion = false
+  let lastShotGray: Float32Array | null = null
+  let motionEma = 99
+  let stillTicks = 0
   let lastCaptureAt = 0
+  let readySince = 0
+  let rafId: number | null = null
+  let intervalId: ReturnType<typeof setInterval> | null = null
 
   /**
-   * Grayscale (luma) + stddev of the current downscaled frame.
-   * @returns Sample, or `null` when the video isn't drawable yet.
+   * Downsample the central crop of the current video frame for motion detection.
+   *
+   * @returns Grayscale sample and luminance stddev, or `null` if the video is not ready.
    */
   function sampleFrame(): { gray: Float32Array; stddev: number } | null {
     const el = video.value
-    if (!el || !el.videoWidth || !el.videoHeight) {
+    if (!el || el.readyState < 2 || !el.videoWidth || !el.videoHeight) {
       return null
     }
     if (!canvas) {
@@ -81,7 +87,15 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     if (!ctx) {
       return null
     }
-    ctx.drawImage(el, 0, 0, SAMPLE_W, SAMPLE_H)
+
+    const vw = el.videoWidth
+    const vh = el.videoHeight
+    const cw = vw * CROP_RATIO
+    const ch = vh * CROP_RATIO
+    const sx = (vw - cw) / 2
+    const sy = (vh - ch) / 2
+
+    ctx.drawImage(el, sx, sy, cw, ch, 0, 0, SAMPLE_W, SAMPLE_H)
     const { data } = ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H)
     const n = SAMPLE_W * SAMPLE_H
     const gray = new Float32Array(n)
@@ -101,10 +115,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Mean absolute luma delta between two equal-length frames.
-   * @param a - Current frame luma buffer.
-   * @param b - Previous frame luma buffer.
-   * @returns Average per-pixel absolute difference (0–255).
+   * Mean absolute difference between two grayscale frames (0 = identical).
+   *
+   * @returns Average per-pixel luminance delta.
    */
   function frameDelta(a: Float32Array, b: Float32Array): number {
     let acc = 0
@@ -119,8 +132,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    */
   function resetCycle(): void {
     prevGray = null
-    stillRun = 0
-    sawMotion = false
+    motionEma = 99
+    stillTicks = 0
+    readySince = Date.now()
+  }
+
+  /**
+   *
+   */
+  function tryCapture(gray: Float32Array): void {
+    lastCaptureAt = Date.now()
+    lastShotGray = gray.slice()
+    stillTicks = 0
+    motionEma = 99
+    phase.value = 'captured'
+    void Promise.resolve(onCapture()).finally(() => {
+      phase.value = 'cooldown'
+    })
   }
 
   /**
@@ -132,76 +160,102 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     const sample = sampleFrame()
     if (!sample) {
-      return
-    }
-    const { gray, stddev } = sample
-    const prev = prevGray
-    prevGray = gray
-    if (!prev) {
-      return
-    }
-    const delta = frameDelta(gray, prev)
-
-    if (phase.value === 'cooldown') {
-      // Wait for the card to leave / be swapped before arming again.
-      if (delta >= MOTION_DIFF && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS) {
-        resetCycle()
-        phase.value = 'watching'
-      }
-      return
-    }
-
-    if (delta >= MOTION_DIFF) {
-      sawMotion = true
-      stillRun = 0
-      phase.value = 'settling'
-      return
-    }
-
-    if (!sawMotion) {
       phase.value = 'watching'
       return
     }
+    const { gray, stddev } = sample
 
-    // A card arrived and the frame is now calm — accumulate still samples.
-    if (delta <= STILL_DIFF && stddev >= CONTENT_STDDEV_MIN) {
-      stillRun += 1
-      phase.value = 'settling'
-      if (stillRun >= STILL_HITS && !busy.value && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS) {
-        lastCaptureAt = Date.now()
-        stillRun = 0
-        sawMotion = false
-        phase.value = 'captured'
-        void Promise.resolve(onCapture()).finally(() => {
-          phase.value = 'cooldown'
-        })
-      }
+    if (stddev < CONTENT_STDDEV_MIN) {
+      stillTicks = 0
+      motionEma = 99
+      phase.value = 'watching'
+      prevGray = gray
       return
     }
-    stillRun = 0
+
+    const prev = prevGray
+    prevGray = gray
+    if (prev) {
+      const delta = frameDelta(gray, prev)
+      motionEma = STILL_EMA_ALPHA * delta + (1 - STILL_EMA_ALPHA) * motionEma
+    }
+
+    const moving = motionEma > STILL_EMA_MAX
+    if (moving) {
+      stillTicks = 0
+      phase.value = 'watching'
+      return
+    }
+    stillTicks += 1
+
+    if (lastShotGray && frameDelta(gray, lastShotGray) < SCENE_CHANGE_DIFF) {
+      phase.value = 'cooldown'
+      return
+    }
+
+    const settled = stillTicks >= STILL_TICKS_REQUIRED
+    const forceByTime = readySince > 0 && Date.now() - readySince >= FORCE_CAPTURE_AFTER_MS && !lastShotGray
+    const canShoot = !busy.value && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS
+
+    if (canShoot && (settled || forceByTime)) {
+      tryCapture(gray)
+      return
+    }
+
+    phase.value = 'settling'
+  }
+
+  /**
+   *
+   */
+  function scheduleLoop(): void {
+    const el = video.value
+    if (el && typeof el.requestVideoFrameCallback === 'function') {
+      const onFrame = (): void => {
+        if (!enabled.value) {
+          return
+        }
+        tick()
+        rafId = el.requestVideoFrameCallback(onFrame)
+      }
+      rafId = el.requestVideoFrameCallback(onFrame)
+      return
+    }
+    intervalId = setInterval(tick, SAMPLE_MS)
+  }
+
+  /**
+   *
+   */
+  function stopLoop(): void {
+    const el = video.value
+    if (rafId !== null && el && typeof el.cancelVideoFrameCallback === 'function') {
+      el.cancelVideoFrameCallback(rafId)
+    }
+    rafId = null
+    if (intervalId !== null) {
+      clearInterval(intervalId)
+      intervalId = null
+    }
   }
 
   /**
    *
    */
   function start(): void {
-    if (timer !== null) {
-      return
-    }
+    stopLoop()
     resetCycle()
     lastCaptureAt = 0
+    lastShotGray = null
     phase.value = 'watching'
-    timer = setInterval(tick, SAMPLE_MS)
+    scheduleLoop()
   }
 
   /**
    *
    */
   function stop(): void {
-    if (timer !== null) {
-      clearInterval(timer)
-      timer = null
-    }
+    stopLoop()
     canvas = null
     ctx = null
     resetCycle()
@@ -218,6 +272,16 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       }
     },
     { immediate: true },
+  )
+
+  watch(
+    () => video.value,
+    () => {
+      if (enabled.value) {
+        stop()
+        start()
+      }
+    },
   )
 
   onBeforeUnmount(stop)

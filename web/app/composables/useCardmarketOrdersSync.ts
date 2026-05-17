@@ -45,6 +45,7 @@ export function useCardmarketOrdersSync() {
    *
    * @param onPayload - Called for every JSON event received.
    * @param openTimeoutMs - Maximum wait for `open`.
+   * @returns Open socket, or `null` when URL/auth is missing or open times out.
    */
   async function openProgressSocket(
     onPayload: (ev: OrdersSyncEvent) => void,

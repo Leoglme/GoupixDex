@@ -30,10 +30,14 @@
         </div>
 
         <!-- Caméra live + auto-capture (téléphone et desktop) ; import en repli. -->
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-3 sm:p-4 space-y-3' }">
+        <UCard
+          v-show="!(webcamActive && prefersFullscreenCamera)"
+          class="ring-default/60 shadow-sm ring-1"
+          :ui="{ body: 'p-3 sm:p-4 space-y-3' }"
+        >
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <USwitch
-              v-if="liveCameraSupported && webcamActive"
+              v-if="liveCameraSupported && webcamActive && !prefersFullscreenCamera"
               v-model="autoScan"
               label="Scan auto (caisse)"
               :description="autoScan ? 'Capture dès que la carte est immobile' : 'Capture manuelle uniquement'"
@@ -140,8 +144,8 @@
             @change="onFileChosen"
           />
 
-          <!-- Aperçu caméra live. -->
-          <div v-if="webcamActive" class="space-y-2">
+          <!-- Aperçu caméra inline (desktop). -->
+          <div v-if="webcamActive && !prefersFullscreenCamera" class="space-y-2">
             <div v-if="videoDevices.length > 1" class="flex flex-col gap-2 sm:flex-row sm:items-end">
               <UFormField label="Webcam" class="w-full sm:max-w-md">
                 <USelect
@@ -250,6 +254,114 @@
             </p>
           </div>
 
+          <Teleport to="body">
+            <div v-if="webcamActive && prefersFullscreenCamera" class="fixed inset-0 z-[300] flex flex-col bg-black">
+              <div
+                class="absolute top-0 right-0 left-0 z-10 flex items-center justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+              >
+                <UButton
+                  size="sm"
+                  color="neutral"
+                  variant="soft"
+                  icon="i-lucide-x"
+                  class="bg-black/40 text-white backdrop-blur-sm"
+                  @click.prevent="stopWebcam"
+                >
+                  Fermer
+                </UButton>
+                <UBadge
+                  :color="connectionColor"
+                  variant="solid"
+                  size="sm"
+                  class="bg-black/40 text-white backdrop-blur-sm"
+                >
+                  {{ connectionLabel }}
+                </UBadge>
+              </div>
+
+              <div class="relative min-h-0 flex-1" @wheel.prevent="onWebcamWheel">
+                <video
+                  ref="videoEl"
+                  autoplay
+                  playsinline
+                  muted
+                  class="absolute inset-0 h-full w-full object-cover transition-transform duration-150 ease-out"
+                  :style="webcamPreviewStyle"
+                />
+                <div
+                  v-if="!webcamReady"
+                  class="absolute inset-0 z-10 flex items-center justify-center bg-black/60 text-sm text-white/90"
+                >
+                  <UIcon name="i-lucide-loader-circle" class="text-primary mr-2 size-5 animate-spin" />
+                  Ouverture de la caméra…
+                </div>
+
+                <div
+                  v-if="webcamReady && autoScan"
+                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/55 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md"
+                >
+                  <span
+                    class="size-2.5 shrink-0 rounded-full"
+                    :class="{
+                      'bg-primary animate-pulse': autoScanStatus.color === 'primary',
+                      'bg-emerald-400': autoScanStatus.color === 'success',
+                      'bg-white/50': autoScanStatus.color === 'neutral',
+                    }"
+                  />
+                  {{ autoScanStatus.label }}
+                </div>
+              </div>
+
+              <div
+                class="border-t border-white/10 bg-black/80 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+              >
+                <div v-if="webcamReady" class="mb-2 flex items-center gap-2">
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-minus"
+                    class="text-white"
+                    :disabled="zoomLevel <= ZOOM_MIN"
+                    @click.prevent="adjustZoom(-0.25)"
+                  />
+                  <USlider
+                    :model-value="zoomLevel"
+                    :min="ZOOM_MIN"
+                    :max="ZOOM_MAX"
+                    :step="0.05"
+                    class="min-w-0 flex-1"
+                    @update:model-value="onZoomSliderChange"
+                  />
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-plus"
+                    class="text-white"
+                    :disabled="zoomLevel >= ZOOM_MAX"
+                    @click.prevent="adjustZoom(0.25)"
+                  />
+                  <span class="w-10 text-right text-xs text-white/80 tabular-nums">{{ zoomPercentLabel }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <USwitch v-model="autoScan" label="Scan auto" />
+                  <UButton
+                    v-if="!autoScan"
+                    size="md"
+                    color="primary"
+                    icon="i-lucide-camera"
+                    :loading="uploading"
+                    :disabled="!webcamReady"
+                    @click.prevent="captureFromWebcam"
+                  >
+                    Capturer
+                  </UButton>
+                </div>
+              </div>
+            </div>
+          </Teleport>
+
           <UAlert
             v-if="webcamError"
             color="warning"
@@ -264,12 +376,14 @@
           </p>
         </UCard>
 
-        <div class="flex items-center gap-2 px-1">
-          <span class="text-muted text-xs">Flux temps réel&nbsp;:</span>
-          <UBadge :color="connectionColor" variant="subtle" size="sm">
-            {{ connectionLabel }}
-          </UBadge>
-        </div>
+        <ClientOnly>
+          <div class="flex items-center gap-2 px-1">
+            <span class="text-muted text-xs">Flux temps réel&nbsp;:</span>
+            <UBadge :color="connectionColor" variant="subtle" size="sm">
+              {{ connectionLabel }}
+            </UBadge>
+          </div>
+        </ClientOnly>
 
         <UAlert
           v-if="lastError"
@@ -394,7 +508,8 @@ if (import.meta.client && isDesktopApp.value) {
   void navigateTo('/collection', { replace: true })
 }
 
-const { events, connected, connecting, lastError, connect, disconnect, refreshRecent, uploadPhoto } = useScanStream()
+const { events, connected, connecting, connectionMode, lastError, connect, disconnect, refreshRecent, uploadPhoto } =
+  useScanStream()
 
 // Physical language (fr / en / ja) is detected server-side from the OCR — no
 // manual picker, so Japanese and French cards can be chained without a stop.
@@ -426,6 +541,14 @@ const liveCameraSupported = computed<boolean>(() => {
   return (
     window.isSecureContext && 'mediaDevices' in navigator && typeof navigator.mediaDevices?.getUserMedia === 'function'
   )
+})
+
+/** Phones / tablets: fullscreen camera overlay (native-like). */
+const prefersFullscreenCamera = computed<boolean>(() => {
+  if (!import.meta.client) {
+    return false
+  }
+  return window.matchMedia('(pointer: coarse)').matches
 })
 
 interface VideoDeviceOption {
@@ -472,6 +595,51 @@ function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(value.toFixed(2))))
 }
 
+/** Labels that usually mean front / selfie camera — never pick these for card scan. */
+const FRONT_CAMERA_LABEL = /\b(front|user|selfie|self|facetime|face|frontal|avant|truedepth|inward)\b/i
+/** Labels that usually mean rear / environment camera. */
+const REAR_CAMERA_LABEL =
+  /\b(back|rear|arrière|arriere|environment|wide|world|telephoto|très\s*grand\s*angle|ultra\s*wide)\b/i
+
+function isFrontCameraLabel(label: string): boolean {
+  return FRONT_CAMERA_LABEL.test(label)
+}
+
+function isRearCameraLabel(label: string): boolean {
+  return REAR_CAMERA_LABEL.test(label)
+}
+
+function isFrontFacingTrack(track: MediaStreamTrack | undefined): boolean {
+  if (!track) {
+    return false
+  }
+  const settings = track.getSettings()
+  if (settings.facingMode === 'user') {
+    return true
+  }
+  if (settings.facingMode === 'environment') {
+    return false
+  }
+  return isFrontCameraLabel(track.label)
+}
+
+/**
+ * Pick the rear camera id from enumerated devices (labels are reliable after
+ * the first `getUserMedia` permission grant).
+ */
+function pickRearCameraId(devices: VideoDeviceOption[]): string | undefined {
+  const rear = devices.filter((d) => isRearCameraLabel(d.label) && !isFrontCameraLabel(d.label))
+  if (rear.length) {
+    return rear[0]?.id
+  }
+  const notFront = devices.filter((d) => !isFrontCameraLabel(d.label))
+  if (notFront.length) {
+    // On some phones the rear cam is listed last when labels are generic ("Caméra 2").
+    return notFront[notFront.length - 1]?.id
+  }
+  return undefined
+}
+
 function buildVideoConstraints(): MediaTrackConstraints {
   const hd: MediaTrackConstraints = {
     width: { min: 1280, ideal: 3840 },
@@ -481,20 +649,24 @@ function buildVideoConstraints(): MediaTrackConstraints {
   if (selectedCameraId.value) {
     return { ...hd, deviceId: { exact: selectedCameraId.value } }
   }
-  return { ...hd, facingMode: { ideal: 'environment' } }
+  // `exact` — never fall back to selfie when scanning cards.
+  return { ...hd, facingMode: { exact: 'environment' } }
 }
 
 async function enumerateVideoDevices(): Promise<void> {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices()
-    videoDevices.value = devices
+    const all = devices
       .filter((d) => d.kind === 'videoinput')
       .map((d, i) => ({
         id: d.deviceId,
         label: d.label || `Caméra ${i + 1}`,
       }))
-    if (videoDevices.value.length && !selectedCameraId.value) {
-      selectedCameraId.value = videoDevices.value[0]?.id
+    // UI list: rear cameras only (scan never uses selfie).
+    videoDevices.value = all.filter((d) => !isFrontCameraLabel(d.label))
+    const rearId = pickRearCameraId(all)
+    if (rearId) {
+      selectedCameraId.value = rearId
     }
   } catch {
     videoDevices.value = []
@@ -522,31 +694,71 @@ function readHardwareZoomCaps(track: MediaStreamTrack): void {
 }
 
 async function openVideoStream(): Promise<MediaStream> {
-  const attempts: MediaTrackConstraints[] = [
+  const attempts: MediaTrackConstraints[] = []
+
+  if (selectedCameraId.value) {
+    attempts.push({
+      deviceId: { exact: selectedCameraId.value },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30 },
+    })
+  }
+
+  attempts.push(
     buildVideoConstraints(),
     {
-      ...(selectedCameraId.value ? { deviceId: { exact: selectedCameraId.value } } : {}),
-      width: { min: 1920, ideal: 1920 },
-      height: { min: 1080, ideal: 1080 },
-      frameRate: { ideal: 30 },
+      facingMode: { exact: 'environment' },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
     },
+    { facingMode: { exact: 'environment' } },
     {
-      ...(selectedCameraId.value ? { deviceId: { exact: selectedCameraId.value } } : {}),
+      facingMode: { ideal: 'environment' },
       width: { ideal: 1280 },
       height: { ideal: 720 },
     },
-    selectedCameraId.value ? { deviceId: { exact: selectedCameraId.value } } : { facingMode: 'user' },
-  ]
+  )
+
+  const rejectFrontTrack = (stream: MediaStream): MediaStream | null => {
+    const track = stream.getVideoTracks()[0]
+    if (track && isFrontFacingTrack(track)) {
+      stream.getTracks().forEach((t) => t.stop())
+      return null
+    }
+    return stream
+  }
 
   let lastErr: unknown
   for (const video of attempts) {
     try {
-      return await navigator.mediaDevices.getUserMedia({ video, audio: false })
+      const stream = rejectFrontTrack(await navigator.mediaDevices.getUserMedia({ video, audio: false }))
+      if (stream) {
+        return stream
+      }
     } catch (e) {
       lastErr = e
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error('Impossible d’ouvrir la webcam')
+
+  // Desktop web: built-in webcam has no `environment` facing — allow default camera.
+  if (!prefersFullscreenCamera.value) {
+    try {
+      const stream = rejectFrontTrack(
+        await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+          audio: false,
+        }),
+      )
+      if (stream) {
+        return stream
+      }
+    } catch (e) {
+      lastErr = e
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error('Impossible d’ouvrir la caméra arrière')
 }
 
 async function applyZoomToTrack(level: number): Promise<void> {
@@ -614,12 +826,17 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
     return
   }
   videoEl.value.srcObject = stream
-  videoEl.value.onloadedmetadata = (): void => {
+  const onVideoReady = (): void => {
     webcamReady.value = true
     if (videoTrack) {
       updateResolutionLabel(videoTrack)
     }
     void applyZoomToTrack(zoomLevel.value)
+  }
+  videoEl.value.onloadedmetadata = onVideoReady
+  videoEl.value.onloadeddata = onVideoReady
+  if (videoEl.value.readyState >= 2) {
+    onVideoReady()
   }
   try {
     await videoEl.value.play()
@@ -628,34 +845,79 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   }
 }
 
-async function startWebcam(): Promise<void> {
+async function startWebcam(preserveDeviceSelection = false): Promise<void> {
   if (webcamActive.value || webcamStarting.value) {
     return
   }
   webcamError.value = null
   webcamStarting.value = true
   webcamReady.value = false
+  if (!preserveDeviceSelection) {
+    selectedCameraId.value = undefined
+  }
   try {
-    await enumerateVideoDevices()
-    const stream = await openVideoStream()
+    let stream = await openVideoStream()
+
+    if (!preserveDeviceSelection) {
+      await enumerateVideoDevices()
+
+      let track = stream.getVideoTracks()[0]
+      const activeId = track?.getSettings().deviceId
+      const rearId = selectedCameraId.value
+
+      const mustSwitchToRear =
+        Boolean(rearId && activeId && activeId !== rearId) || Boolean(track && isFrontFacingTrack(track))
+
+      if (mustSwitchToRear) {
+        stream.getTracks().forEach((t) => t.stop())
+        if (!rearId) {
+          throw new Error('Caméra arrière introuvable sur cet appareil.')
+        }
+        selectedCameraId.value = rearId
+        stream = await openVideoStream()
+        track = stream.getVideoTracks()[0]
+        if (track && isFrontFacingTrack(track)) {
+          throw new Error('La caméra avant s’est ouverte à la place de la caméra arrière.')
+        }
+      }
+    } else {
+      const track = stream.getVideoTracks()[0]
+      if (track && isFrontFacingTrack(track)) {
+        stream.getTracks().forEach((t) => t.stop())
+        throw new Error('La caméra avant s’est ouverte à la place de la caméra arrière.')
+      }
+    }
+
     await attachStreamToPreview(stream)
   } catch (err) {
     webcamError.value =
       err instanceof Error
-        ? `Accès webcam refusé : ${err.message}`
-        : 'Accès webcam refusé. Autorisez la caméra dans le navigateur pour utiliser le scan en direct.'
+        ? `Accès caméra refusé : ${err.message}`
+        : 'Accès caméra refusé. Autorisez la caméra arrière dans le navigateur pour utiliser le scan en direct.'
     stopWebcam()
   } finally {
     webcamStarting.value = false
   }
 }
 
-async function onCameraChanged(): Promise<void> {
-  if (!webcamActive.value) {
+async function onCameraChanged(deviceId: string | undefined): Promise<void> {
+  if (!webcamActive.value || !deviceId) {
+    return
+  }
+  const picked = videoDevices.value.find((d) => d.id === deviceId)
+  if (picked && isFrontCameraLabel(picked.label)) {
+    toast.add({
+      title: 'Caméra avant ignorée',
+      description: 'Utilisez la caméra arrière pour scanner vos cartes.',
+      color: 'warning',
+    })
+    selectedCameraId.value = pickRearCameraId(videoDevices.value)
+    stopWebcam()
+    await startWebcam(true)
     return
   }
   stopWebcam()
-  await startWebcam()
+  await startWebcam(true)
 }
 
 function stopWebcam(): void {
@@ -733,7 +995,10 @@ const connectionColor = computed<'success' | 'warning' | 'neutral'>(() => {
 })
 
 const connectionLabel = computed(() => {
-  if (connected.value) {
+  if (connected.value && connectionMode.value === 'websocket') {
+    return 'Connecté'
+  }
+  if (connected.value && connectionMode.value === 'polling') {
     return 'Connecté'
   }
   if (connecting.value) {
@@ -923,6 +1188,9 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
 onMounted(async () => {
   await refreshRecent()
   await connect()
+  if (liveCameraSupported.value) {
+    await startWebcam()
+  }
 })
 
 onBeforeUnmount(() => {

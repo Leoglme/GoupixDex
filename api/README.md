@@ -183,6 +183,7 @@ On Windows, `main.py` already calls `ensure_proactor_event_loop()`; the loop fro
 
 - Swagger UI: http://127.0.0.1:8000/docs
 - Health: `GET /health`
+- Scan stream: `GET /scan-stream/health`, `GET /scan-stream/recent`, `POST /scan-stream/photo`
 - Article images are stored in **Supabase Storage** (public URLs in DB).
 
 ### Local desktop worker (Tauri only)

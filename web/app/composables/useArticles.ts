@@ -259,6 +259,8 @@ export function useArticles() {
 
   /**
    * POST worker local — retire l’annonce Vinted (fiche article).
+   *
+   * @returns Worker ack with optional Vinted status.
    */
   async function removeVintedListing(id: number) {
     if (!import.meta.client || !isDesktopApp.value || !$vintedLocal) {
@@ -270,6 +272,8 @@ export function useArticles() {
 
   /**
    * POST `/articles/:id/remove-ebay-listing` — retire l’annonce eBay (API).
+   *
+   * @returns Updated article after eBay delist.
    */
   async function removeEbayListing(id: number) {
     const { data } = await $api.post<Article>(`/articles/${id}/remove-ebay-listing`)

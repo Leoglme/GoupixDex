@@ -141,6 +141,9 @@ export function buildScanStreamWebSocketUrl(): string | null {
   return `${wsBase}/ws/scan-stream?${qs.toString()}`
 }
 
+const POLL_INTERVAL_MS = 2_500
+const WS_GIVE_UP_AFTER_RETRIES = 4
+
 /**
  * Real-time scan stream: phone uploads + WebSocket fan-out to every tab of the
  * same authenticated user. Manages reconnect with exponential backoff, replays
@@ -154,12 +157,16 @@ export function useScanStream() {
   const events: Ref<ScanEvent[]> = ref([])
   const connected: Ref<boolean> = ref(false)
   const connecting: Ref<boolean> = ref(false)
+  /** `websocket` when the live socket is up; `polling` when we fall back to HTTP refresh. */
+  const connectionMode: Ref<'websocket' | 'polling' | 'offline'> = ref('offline')
   const lastError: Ref<string | null> = ref(null)
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
   let retries = 0
   let manualClose = false
+  let pollingActive = false
 
   /**
    *
@@ -181,11 +188,46 @@ export function useScanStream() {
   /**
    *
    */
+  function stopPolling(): void {
+    pollingActive = false
+    if (pollTimer !== null) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  /** HTTP fallback when WebSocket is unavailable (nginx 404, API pas à jour, etc.). */
+  function startPolling(): void {
+    if (pollingActive || manualClose) {
+      return
+    }
+    pollingActive = true
+    connectionMode.value = 'polling'
+    connected.value = true
+    connecting.value = false
+    lastError.value = null
+
+    const tick = (): void => {
+      void refreshRecent(50)
+    }
+    tick()
+    pollTimer = setInterval(tick, POLL_INTERVAL_MS)
+  }
+
+  /**
+   *
+   */
   function scheduleReconnect(): void {
     if (manualClose) {
       return
     }
+    if (!pollingActive) {
+      startPolling()
+    }
     clearReconnect()
+    if (retries >= WS_GIVE_UP_AFTER_RETRIES) {
+      return
+    }
     const delayMs = Math.min(15_000, 800 * 2 ** retries)
     retries += 1
     reconnectTimer = setTimeout(() => {
@@ -205,7 +247,9 @@ export function useScanStream() {
     }
     const url = buildScanStreamWebSocketUrl()
     if (!url) {
-      lastError.value = 'Session expirée — reconnectez-vous pour utiliser le scan en direct.'
+      if (!pollingActive) {
+        lastError.value = 'Session expirée — reconnectez-vous pour utiliser le scan en direct.'
+      }
       return
     }
 
@@ -226,7 +270,9 @@ export function useScanStream() {
       retries = 0
       connecting.value = false
       connected.value = true
+      connectionMode.value = 'websocket'
       lastError.value = null
+      stopPolling()
     }
     next.onmessage = (ev: MessageEvent): void => {
       try {
@@ -239,24 +285,34 @@ export function useScanStream() {
       }
     }
     next.onerror = (): void => {
-      lastError.value = 'Le flux temps réel a rencontré une erreur — nouvelle tentative…'
+      /* Polling keeps the UI live; WS errors are non-blocking. */
     }
     next.onclose = (): void => {
-      connected.value = false
-      connecting.value = false
       ws = null
-      if (!manualClose) {
-        scheduleReconnect()
+      if (manualClose) {
+        connected.value = false
+        connecting.value = false
+        connectionMode.value = 'offline'
+        return
       }
+      connecting.value = false
+      if (connectionMode.value === 'websocket') {
+        connected.value = false
+      }
+      scheduleReconnect()
     }
   }
 
   /**
-   * Open / reopen the WebSocket. Idempotent: calling it twice is safe.
+   * Start live updates: HTTP polling immediately (like eBay sold-top), then try
+   * WebSocket when the API route is deployed. No nginx change required.
    *
-   * @returns {Promise<void>} Resolves once the open attempt is in flight.
+   * @returns {Promise<void>} Resolves once polling + WS attempt are in flight.
    */
   async function connect(): Promise<void> {
+    manualClose = false
+    retries = 0
+    startPolling()
     await openSocket()
   }
 
@@ -268,6 +324,7 @@ export function useScanStream() {
   function disconnect(): void {
     manualClose = true
     clearReconnect()
+    stopPolling()
     if (ws) {
       try {
         ws.close()
@@ -278,6 +335,7 @@ export function useScanStream() {
     ws = null
     connected.value = false
     connecting.value = false
+    connectionMode.value = 'offline'
   }
 
   /**
@@ -296,9 +354,22 @@ export function useScanStream() {
       for (const ev of data.items) {
         map.set(ev.event_id, ev)
       }
+      for (const ev of events.value) {
+        if (!map.has(ev.event_id)) {
+          map.set(ev.event_id, ev)
+        }
+      }
       // Most-recent first in the UI
       events.value = Array.from(map.values()).sort((a, b) => b.ts - a.ts)
+      if (pollingActive) {
+        connected.value = true
+        lastError.value = null
+      }
     } catch (e) {
+      if (pollingActive) {
+        connected.value = false
+        connectionMode.value = 'offline'
+      }
       lastError.value = apiErrorMessage(e)
     }
   }
@@ -331,6 +402,11 @@ export function useScanStream() {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60_000,
     })
+    if (pollingActive || connectionMode.value !== 'websocket') {
+      window.setTimeout(() => {
+        void refreshRecent(50)
+      }, 400)
+    }
     return data
   }
 
@@ -338,6 +414,7 @@ export function useScanStream() {
     events,
     connected,
     connecting,
+    connectionMode,
     lastError,
     connect,
     disconnect,
