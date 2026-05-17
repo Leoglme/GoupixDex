@@ -40,7 +40,9 @@
               v-if="liveCameraSupported && webcamActive && !prefersFullscreenCamera"
               v-model="autoScan"
               label="Scan auto (caisse)"
-              :description="autoScan ? 'Capture dès que la carte est immobile' : 'Capture manuelle uniquement'"
+              :description="
+                autoScan ? 'Capture quand vous passez une carte puis la tenez immobile' : 'Capture manuelle uniquement'
+              "
             />
             <div v-else />
 
@@ -938,7 +940,7 @@ function stopWebcam(): void {
 }
 
 async function captureFromWebcam(): Promise<void> {
-  if (!webcamReady.value || !videoEl.value) {
+  if (uploading.value || !webcamReady.value || !videoEl.value) {
     return
   }
   const video = videoEl.value
@@ -1173,7 +1175,7 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   }
   switch (autoScanPhase.value) {
     case 'watching':
-      return { label: 'Présentez une carte', color: 'neutral' }
+      return { label: 'Passez une carte devant la caméra', color: 'neutral' }
     case 'settling':
       return { label: 'Lecture… tenez la carte immobile', color: 'primary' }
     case 'captured':

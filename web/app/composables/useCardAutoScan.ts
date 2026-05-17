@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
  * Auto-scan state, surfaced to the UI so the user knows what the camera is
  * doing without any button:
  * - `idle`      : detector stopped (camera off / disabled)
- * - `watching`  : waiting for a card to enter the frame
+ * - `watching`  : waiting for a card to be passed in front of the camera
  * - `settling`  : a card moved in, waiting for it to be held still
  * - `captured`  : a stable card was just shot and sent
  * - `cooldown`  : waiting for the card to leave before arming the next one
@@ -29,25 +29,33 @@ const SAMPLE_H = 134
 /** Center crop ratio — ignore desk edges that add false motion. */
 const CROP_RATIO = 0.72
 /**
- * EMA of frame delta above this ⇒ "moving". High on purpose: phone AE flicker
+ * EMA of frame delta below this ⇒ "still". High on purpose: phone AE flicker
  * often sits at 12–25 even on a tripod.
  */
 const STILL_EMA_MAX = 28
 const STILL_EMA_ALPHA = 0.35
+/**
+ * EMA must exceed this briefly to count as "a card was passed in".
+ * Higher than `STILL_EMA_MAX` so idle desk / AE noise does not arm a capture.
+ */
+const MOTION_ENTER_EMA_MIN = 38
+const MOTION_ENTER_TICKS_REQUIRED = 3
 /** EMA must stay below threshold for this many ticks before capture. */
-const STILL_TICKS_REQUIRED = 5
+const STILL_TICKS_REQUIRED = 6
 /** Min contrast in the center crop (empty desk ≈ 3–5, card ≈ 12+). */
-const CONTENT_STDDEV_MIN = 5
-/** Ignore re-shooting the same card until the scene changes this much. */
-const SCENE_CHANGE_DIFF = 4
-const MIN_COOLDOWN_MS = 1100
-/** After camera ready, force one capture if nothing fired (tripod / card already in frame). */
-const FORCE_CAPTURE_AFTER_MS = 2800
+const CONTENT_STDDEV_MIN = 8
+/** Scene must change this much after capture before we accept the next card. */
+const SCENE_LEAVE_DIFF = 11
+/** Empty-frame ticks required to consider the card removed (low contrast). */
+const EMPTY_LEAVE_TICKS = 4
+const MIN_COOLDOWN_MS = 2200
+const MIN_REARM_MS = 2800
+
+type ArmState = 'wait_pass' | 'settling' | 'wait_removal'
 
 /**
- * Touch-free "cash register" capture: sample the live camera, detect a card-like
- * center region, and fire `onCapture` when motion settles (EMA) or after a short
- * timeout if the card was already in frame.
+ * Touch-free "cash register" capture: only fires when the user *passes* a card
+ * (motion burst → still → capture), then waits until the card leaves the frame.
  *
  * @param opts - Preview element, enable flag, busy flag and capture callback.
  * @returns Reactive `phase` for UI feedback.
@@ -61,10 +69,13 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let ctx: CanvasRenderingContext2D | null = null
   let prevGray: Float32Array | null = null
   let lastShotGray: Float32Array | null = null
-  let motionEma = 99
+  let motionEma = 0
   let stillTicks = 0
+  let motionEnterTicks = 0
+  let emptyLeaveTicks = 0
   let lastCaptureAt = 0
-  let readySince = 0
+  let armedAt = 0
+  let armState: ArmState = 'wait_pass'
   let rafId: number | null = null
   let intervalId: ReturnType<typeof setInterval> | null = null
 
@@ -127,24 +138,27 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     return acc / a.length
   }
 
-  /**
-   *
-   */
-  function resetCycle(): void {
+  /** Reset motion counters when (re)arming for the next card pass. */
+  function resetForNextPass(): void {
     prevGray = null
-    motionEma = 99
+    motionEma = 0
     stillTicks = 0
-    readySince = Date.now()
+    motionEnterTicks = 0
+    emptyLeaveTicks = 0
+    armState = 'wait_pass'
+    armedAt = Date.now()
+    phase.value = 'watching'
   }
 
-  /**
-   *
-   */
+  /** Fire one capture and enter removal-wait state. */
   function tryCapture(gray: Float32Array): void {
     lastCaptureAt = Date.now()
     lastShotGray = gray.slice()
     stillTicks = 0
-    motionEma = 99
+    motionEnterTicks = 0
+    motionEma = 0
+    armState = 'wait_removal'
+    emptyLeaveTicks = 0
     phase.value = 'captured'
     void Promise.resolve(onCapture()).finally(() => {
       phase.value = 'cooldown'
@@ -152,8 +166,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
+   * True when the captured card is no longer in frame (safe to scan the next one).
    *
+   * @returns Whether the scene cleared enough to arm the next pass.
    */
+  function cardHasLeftFrame(gray: Float32Array, stddev: number): boolean {
+    if (stddev < CONTENT_STDDEV_MIN) {
+      emptyLeaveTicks += 1
+      return emptyLeaveTicks >= EMPTY_LEAVE_TICKS
+    }
+    emptyLeaveTicks = 0
+    if (!lastShotGray) {
+      return false
+    }
+    return frameDelta(gray, lastShotGray) >= SCENE_LEAVE_DIFF
+  }
+
+  /** One detector frame — never uploads unless a pass + settle happened. */
   function tick(): void {
     if (!enabled.value) {
       return
@@ -165,14 +194,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     const { gray, stddev } = sample
 
-    if (stddev < CONTENT_STDDEV_MIN) {
-      stillTicks = 0
-      motionEma = 99
-      phase.value = 'watching'
-      prevGray = gray
-      return
-    }
-
     const prev = prevGray
     prevGray = gray
     if (prev) {
@@ -180,34 +201,64 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       motionEma = STILL_EMA_ALPHA * delta + (1 - STILL_EMA_ALPHA) * motionEma
     }
 
-    const moving = motionEma > STILL_EMA_MAX
-    if (moving) {
-      stillTicks = 0
-      phase.value = 'watching'
+    if (busy.value) {
       return
     }
-    stillTicks += 1
 
-    if (lastShotGray && frameDelta(gray, lastShotGray) < SCENE_CHANGE_DIFF) {
+    if (armState === 'wait_removal') {
       phase.value = 'cooldown'
+      const rearmDelayOk = Date.now() - lastCaptureAt >= MIN_REARM_MS
+      if (rearmDelayOk && cardHasLeftFrame(gray, stddev)) {
+        resetForNextPass()
+      }
       return
     }
+
+    const hasContent = stddev >= CONTENT_STDDEV_MIN
+    const moving = motionEma > STILL_EMA_MAX
+
+    if (armState === 'wait_pass') {
+      phase.value = 'watching'
+      if (!hasContent) {
+        motionEnterTicks = 0
+        stillTicks = 0
+        return
+      }
+      if (motionEma >= MOTION_ENTER_EMA_MIN) {
+        motionEnterTicks += 1
+      } else {
+        motionEnterTicks = 0
+      }
+      if (motionEnterTicks >= MOTION_ENTER_TICKS_REQUIRED) {
+        armState = 'settling'
+        stillTicks = 0
+        motionEnterTicks = 0
+      }
+      return
+    }
+
+    // settling — card was passed in, wait until it stops moving
+    if (!hasContent || moving) {
+      stillTicks = 0
+      phase.value = moving ? 'watching' : 'watching'
+      if (!hasContent) {
+        armState = 'wait_pass'
+      }
+      return
+    }
+
+    stillTicks += 1
+    phase.value = 'settling'
 
     const settled = stillTicks >= STILL_TICKS_REQUIRED
-    const forceByTime = readySince > 0 && Date.now() - readySince >= FORCE_CAPTURE_AFTER_MS && !lastShotGray
-    const canShoot = !busy.value && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS
+    const canShoot = settled && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS && Date.now() - armedAt >= 400
 
-    if (canShoot && (settled || forceByTime)) {
+    if (canShoot) {
       tryCapture(gray)
-      return
     }
-
-    phase.value = 'settling'
   }
 
-  /**
-   *
-   */
+  /** Start sampling frames from the video element. */
   function scheduleLoop(): void {
     const el = video.value
     if (el && typeof el.requestVideoFrameCallback === 'function') {
@@ -224,9 +275,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     intervalId = setInterval(tick, SAMPLE_MS)
   }
 
-  /**
-   *
-   */
+  /** Stop the frame sampling loop. */
   function stopLoop(): void {
     const el = video.value
     if (rafId !== null && el && typeof el.cancelVideoFrameCallback === 'function') {
@@ -239,26 +288,22 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
   }
 
-  /**
-   *
-   */
+  /** Start the detector loop. */
   function start(): void {
     stopLoop()
-    resetCycle()
     lastCaptureAt = 0
     lastShotGray = null
-    phase.value = 'watching'
+    resetForNextPass()
     scheduleLoop()
   }
 
-  /**
-   *
-   */
+  /** Stop the detector and release canvas resources. */
   function stop(): void {
     stopLoop()
     canvas = null
     ctx = null
-    resetCycle()
+    lastShotGray = null
+    armState = 'wait_pass'
     phase.value = 'idle'
   }
 
