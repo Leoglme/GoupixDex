@@ -27,6 +27,7 @@ from typing import Any
 from core.database import SessionLocal
 from models.collection_card import CollectionCard
 from services import collection_card_service
+from services.card_image_gate import assess_card_image
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.ocr_service import extract_card_from_bytes
 from services.scan_service import detect_physical_language_from_ocr
@@ -39,6 +40,14 @@ logger = logging.getLogger(__name__)
 #: Max concurrent OCR calls across all users on this process.
 _GROQ_PARALLELISM = 4
 _groq_sem = asyncio.Semaphore(_GROQ_PARALLELISM)
+
+#: Per-user guards so a "cash register" frame stream becomes *one* Groq call
+#: per physical card instead of a burst (the source of the 429s).
+#: - ``_inflight``: a scan is already being processed for this user.
+#: - ``_last_accept``: epoch of the last frame that passed the gate.
+_MIN_OCR_INTERVAL_SEC = 2.5
+_inflight: set[int] = set()
+_last_accept: dict[int, float] = {}
 
 
 def _now_iso() -> float:
@@ -139,7 +148,7 @@ def _add_or_increment(
         db.close()
 
 
-async def _run_scan_pipeline(
+async def _process_scan(
     *,
     event_id: str,
     user_id: int,
@@ -149,7 +158,7 @@ async def _run_scan_pipeline(
     physical_language: str,
     user_hint: str | None,
 ) -> None:
-    """End-to-end processing for a single scan event."""
+    """End-to-end processing for a single scan event (gate already passed)."""
     hub = get_scan_stream_hub()
 
     preview = _short_preview_data_url(image_bytes, mime)
@@ -328,6 +337,65 @@ async def _run_scan_pipeline(
             created=created,
         ),
     )
+
+
+async def _run_scan_pipeline(
+    *,
+    event_id: str,
+    user_id: int,
+    image_bytes: bytes,
+    filename: str,
+    mime: str,
+    physical_language: str,
+    user_hint: str | None,
+) -> None:
+    """
+    Pre-Groq gate. A streaming camera sends many frames; we only let one
+    through per real card:
+
+    * **in-flight guard** — a scan is already running for this user → drop.
+    * **debounce** — last accepted frame < ``_MIN_OCR_INTERVAL_SEC`` ago → drop.
+    * **card pre-detection** — empty / blurry / not-a-card → drop.
+
+    Rejections are silent (no websocket event), so the live feed only shows
+    real cards — like the existing phone card-scanner apps. No Groq call is
+    made unless a frame clears every check, which is what stops the 429s.
+    """
+    now = time.time()
+    if user_id in _inflight:
+        logger.debug("scan-stream: drop (in-flight) user=%s", user_id)
+        return
+    if now - _last_accept.get(user_id, 0.0) < _MIN_OCR_INTERVAL_SEC:
+        logger.debug("scan-stream: drop (debounce) user=%s", user_id)
+        return
+
+    loop = asyncio.get_running_loop()
+    gate = await loop.run_in_executor(None, lambda: assess_card_image(image_bytes))
+    if not gate.is_card:
+        logger.debug(
+            "scan-stream: drop (%s) user=%s detail=%.1f focus=%.1f fill=%.2f",
+            gate.reason,
+            user_id,
+            gate.detail,
+            gate.focus,
+            gate.fill,
+        )
+        return
+
+    _inflight.add(user_id)
+    _last_accept[user_id] = now
+    try:
+        await _process_scan(
+            event_id=event_id,
+            user_id=user_id,
+            image_bytes=image_bytes,
+            filename=filename,
+            mime=mime,
+            physical_language=physical_language,
+            user_hint=user_hint,
+        )
+    finally:
+        _inflight.discard(user_id)
 
 
 def submit_scan(
