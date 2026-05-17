@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
  * Auto-scan state, surfaced to the UI so the user knows what the camera is
  * doing without any button:
  * - `idle`      : detector stopped (camera off / disabled)
- * - `watching`  : waiting for a card to be passed in front of the camera
+ * - `watching`  : waiting for a card to enter the frame
  * - `settling`  : a card moved in, waiting for it to be held still
  * - `captured`  : a stable card was just shot and sent
  * - `cooldown`  : waiting for the card to leave before arming the next one
@@ -28,34 +28,30 @@ const SAMPLE_W = 96
 const SAMPLE_H = 134
 /** Center crop ratio — ignore desk edges that add false motion. */
 const CROP_RATIO = 0.72
-/**
- * EMA of frame delta below this ⇒ "still". High on purpose: phone AE flicker
- * often sits at 12–25 even on a tripod.
- */
 const STILL_EMA_MAX = 28
 const STILL_EMA_ALPHA = 0.35
-/**
- * EMA must exceed this briefly to count as "a card was passed in".
- * Higher than `STILL_EMA_MAX` so idle desk / AE noise does not arm a capture.
- */
-const MOTION_ENTER_EMA_MIN = 38
-const MOTION_ENTER_TICKS_REQUIRED = 3
-/** EMA must stay below threshold for this many ticks before capture. */
-const STILL_TICKS_REQUIRED = 6
-/** Min contrast in the center crop (empty desk ≈ 3–5, card ≈ 12+). */
-const CONTENT_STDDEV_MIN = 8
-/** Scene must change this much after capture before we accept the next card. */
-const SCENE_LEAVE_DIFF = 11
-/** Empty-frame ticks required to consider the card removed (low contrast). */
-const EMPTY_LEAVE_TICKS = 4
-const MIN_COOLDOWN_MS = 2200
-const MIN_REARM_MS = 2800
+/** Brief motion when passing a card in front of the lens. */
+const MOTION_ENTER_EMA_MIN = 32
+const MOTION_ENTER_TICKS_REQUIRED = 2
+/** Stable frames before capture (~0,6–0,8 s). */
+const STILL_TICKS_REQUIRED = 5
+/** Empty desk ≈ 3–5 ; card in frame ≈ 10+. */
+const CONTENT_STDDEV_MIN = 7
+/** Stddev jump vs empty-scene baseline ⇒ card just entered (tripod / no hand wave). */
+const CONTENT_APPEAR_DELTA = 2.2
+/** Stable frames with a card visible but no big motion (phone on a stand). */
+const TRIPOD_STILL_TICKS = 7
+const SCENE_LEAVE_DIFF = 9
+const EMPTY_LEAVE_TICKS = 3
+const MIN_COOLDOWN_MS = 2000
+const MIN_REARM_MS = 2200
+const BASELINE_STDDEV_ALPHA = 0.12
 
 type ArmState = 'wait_pass' | 'settling' | 'wait_removal'
 
 /**
- * Touch-free "cash register" capture: only fires when the user *passes* a card
- * (motion burst → still → capture), then waits until the card leaves the frame.
+ * Touch-free capture: fires when a card enters the frame (motion pass, contrast
+ * jump, or held still on a stand) then stays sharp, then waits until removal.
  *
  * @param opts - Preview element, enable flag, busy flag and capture callback.
  * @returns Reactive `phase` for UI feedback.
@@ -70,11 +66,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let prevGray: Float32Array | null = null
   let lastShotGray: Float32Array | null = null
   let motionEma = 0
+  let baselineStddev = 4
   let stillTicks = 0
+  let tripodStillTicks = 0
   let motionEnterTicks = 0
   let emptyLeaveTicks = 0
   let lastCaptureAt = 0
-  let armedAt = 0
   let armState: ArmState = 'wait_pass'
   let rafId: number | null = null
   let intervalId: ReturnType<typeof setInterval> | null = null
@@ -143,10 +140,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     prevGray = null
     motionEma = 0
     stillTicks = 0
+    tripodStillTicks = 0
     motionEnterTicks = 0
     emptyLeaveTicks = 0
     armState = 'wait_pass'
-    armedAt = Date.now()
     phase.value = 'watching'
   }
 
@@ -155,6 +152,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     lastCaptureAt = Date.now()
     lastShotGray = gray.slice()
     stillTicks = 0
+    tripodStillTicks = 0
     motionEnterTicks = 0
     motionEma = 0
     armState = 'wait_removal'
@@ -182,7 +180,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     return frameDelta(gray, lastShotGray) >= SCENE_LEAVE_DIFF
   }
 
-  /** One detector frame — never uploads unless a pass + settle happened. */
+  /** One detector frame — never uploads unless a card entered and settled. */
   function tick(): void {
     if (!enabled.value) {
       return
@@ -217,27 +215,44 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const hasContent = stddev >= CONTENT_STDDEV_MIN
     const moving = motionEma > STILL_EMA_MAX
 
+    if (!hasContent) {
+      baselineStddev = BASELINE_STDDEV_ALPHA * stddev + (1 - BASELINE_STDDEV_ALPHA) * baselineStddev
+    }
+
     if (armState === 'wait_pass') {
       phase.value = 'watching'
       if (!hasContent) {
         motionEnterTicks = 0
-        stillTicks = 0
+        tripodStillTicks = 0
         return
       }
+
       if (motionEma >= MOTION_ENTER_EMA_MIN) {
         motionEnterTicks += 1
       } else {
         motionEnterTicks = 0
       }
-      if (motionEnterTicks >= MOTION_ENTER_TICKS_REQUIRED) {
+
+      if (!moving) {
+        tripodStillTicks += 1
+      } else {
+        tripodStillTicks = 0
+      }
+
+      const contentAppeared = stddev - baselineStddev >= CONTENT_APPEAR_DELTA
+      const motionPass = motionEnterTicks >= MOTION_ENTER_TICKS_REQUIRED
+      const tripodReady = tripodStillTicks >= TRIPOD_STILL_TICKS
+
+      if (contentAppeared || motionPass || tripodReady) {
         armState = 'settling'
         stillTicks = 0
         motionEnterTicks = 0
+        tripodStillTicks = 0
       }
       return
     }
 
-    // settling — card was passed in, wait until it stops moving
+    // settling — card is in frame, wait until it stops moving
     if (!hasContent || moving) {
       stillTicks = 0
       phase.value = moving ? 'watching' : 'watching'
@@ -251,7 +266,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     phase.value = 'settling'
 
     const settled = stillTicks >= STILL_TICKS_REQUIRED
-    const canShoot = settled && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS && Date.now() - armedAt >= 400
+    const canShoot = settled && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS
 
     if (canShoot) {
       tryCapture(gray)
@@ -293,6 +308,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     stopLoop()
     lastCaptureAt = 0
     lastShotGray = null
+    baselineStddev = 4
     resetForNextPass()
     scheduleLoop()
   }

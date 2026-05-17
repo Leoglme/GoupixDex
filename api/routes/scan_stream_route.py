@@ -23,6 +23,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     WebSocket,
     status,
@@ -130,6 +131,47 @@ def list_recent_scans(
     hub = get_scan_stream_hub()
     events = hub.history_snapshot(user.id, limit=max(1, min(int(limit), 100)))
     return {"items": events}
+
+
+@router.delete("/scan-stream/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def dismiss_scan_event(
+    event_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Remove one scan event from the live backlog (does not delete collection rows)."""
+    hub = get_scan_stream_hub()
+    if not hub.dismiss_event(user.id, event_id.strip()):
+        raise HTTPException(status_code=404, detail="Événement introuvable.")
+
+
+@router.delete("/scan-stream/events")
+def clear_scan_events(
+    user: Annotated[User, Depends(get_current_user)],
+    filter: Annotated[
+        str,
+        Query(description="failed | needs_review | problems (failed + needs_review)"),
+    ] = "problems",
+) -> dict[str, Any]:
+    """
+    Bulk-remove scan events from the backlog.
+
+    Does not touch cards already inserted in the collection — only the scan feed.
+    """
+    hub = get_scan_stream_hub()
+    key = filter.strip().lower()
+    if key in {"failed", "echec", "échec"}:
+        statuses = {"failed"}
+    elif key in {"needs_review", "review", "a_verifier", "à_vérifier"}:
+        statuses = {"needs_review"}
+    elif key in {"problems", "problem", "issues"}:
+        statuses = {"failed", "needs_review"}
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Filtre invalide. Utilisez problems, failed ou needs_review.",
+        )
+    removed = hub.clear_events(user.id, statuses=statuses)
+    return {"removed": removed}
 
 
 @router.get("/scan-stream/health")

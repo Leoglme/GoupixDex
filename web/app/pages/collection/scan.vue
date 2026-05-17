@@ -416,6 +416,19 @@
         </div>
 
         <!-- Liste live -->
+        <div v-if="events.length && counters.needs_review > 0" class="flex justify-end">
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="soft"
+            icon="i-lucide-eraser"
+            :loading="clearingProblems"
+            @click="onClearProblemScans"
+          >
+            Effacer échecs / à vérifier
+          </UButton>
+        </div>
+
         <div
           v-if="!events.length"
           class="border-default bg-elevated/20 rounded-xl border border-dashed p-6 text-center sm:p-8"
@@ -484,6 +497,16 @@
                 name="i-lucide-loader-circle"
                 class="text-primary size-4 animate-spin"
               />
+              <UButton
+                v-if="canDismissScan(ev.status)"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-trash-2"
+                :loading="dismissingId === ev.event_id"
+                aria-label="Retirer de la liste"
+                @click="onDismissScan(ev.event_id)"
+              />
             </div>
           </li>
         </ul>
@@ -510,8 +533,22 @@ if (import.meta.client && isDesktopApp.value) {
   void navigateTo('/collection', { replace: true })
 }
 
-const { events, connected, connecting, connectionMode, lastError, connect, disconnect, refreshRecent, uploadPhoto } =
-  useScanStream()
+const {
+  events,
+  connected,
+  connecting,
+  connectionMode,
+  lastError,
+  connect,
+  disconnect,
+  refreshRecent,
+  uploadPhoto,
+  dismissEvent,
+  clearProblemEvents,
+} = useScanStream()
+
+const clearingProblems = ref(false)
+const dismissingId = ref<string | null>(null)
 
 // Physical language (fr / en / ja) is detected server-side from the OCR — no
 // manual picker, so Japanese and French cards can be chained without a stop.
@@ -1101,6 +1138,44 @@ function statusBadgeColor(s: ScanEventStatus): 'primary' | 'success' | 'warning'
   }
 }
 
+function canDismissScan(s: ScanEventStatus): boolean {
+  return s === 'added' || s === 'failed' || s === 'needs_review'
+}
+
+async function onDismissScan(eventId: string): Promise<void> {
+  dismissingId.value = eventId
+  try {
+    await dismissEvent(eventId)
+  } catch (err) {
+    toast.add({
+      title: 'Suppression impossible',
+      description: apiErrorMessage(err),
+      color: 'error',
+    })
+  } finally {
+    dismissingId.value = null
+  }
+}
+
+async function onClearProblemScans(): Promise<void> {
+  clearingProblems.value = true
+  try {
+    const removed = await clearProblemEvents()
+    toast.add({
+      title: removed ? `${removed} scan(s) retiré(s)` : 'Liste déjà vide',
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({
+      title: 'Effacement impossible',
+      description: apiErrorMessage(err),
+      color: 'error',
+    })
+  } finally {
+    clearingProblems.value = false
+  }
+}
+
 function rowAccentClass(s: ScanEventStatus): string {
   if (s === 'added') {
     return 'ring-success/20 ring'
@@ -1175,7 +1250,7 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   }
   switch (autoScanPhase.value) {
     case 'watching':
-      return { label: 'Passez une carte devant la caméra', color: 'neutral' }
+      return { label: 'Placez ou passez une carte', color: 'neutral' }
     case 'settling':
       return { label: 'Lecture… tenez la carte immobile', color: 'primary' }
     case 'captured':

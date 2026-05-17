@@ -410,6 +410,29 @@ export function useScanStream() {
     return data
   }
 
+  /**
+   * Remove one event from the server backlog and the local list.
+   *
+   * @param eventId - Scan event id returned by upload / WebSocket.
+   */
+  async function dismissEvent(eventId: string): Promise<void> {
+    await $api.delete(`/scan-stream/events/${encodeURIComponent(eventId)}`)
+    events.value = events.value.filter((e) => e.event_id !== eventId)
+  }
+
+  /**
+   * Bulk-remove failed and needs-review events from the feed.
+   *
+   * @returns Number of events removed on the server.
+   */
+  async function clearProblemEvents(): Promise<number> {
+    const { data } = await $api.delete<{ removed: number }>('/scan-stream/events', {
+      params: { filter: 'problems' },
+    })
+    events.value = events.value.filter((e) => e.status !== 'failed' && e.status !== 'needs_review')
+    return Number(data.removed) || 0
+  }
+
   return {
     events,
     connected,
@@ -420,5 +443,7 @@ export function useScanStream() {
     disconnect,
     refreshRecent,
     uploadPhoto,
+    dismissEvent,
+    clearProblemEvents,
   }
 }

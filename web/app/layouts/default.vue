@@ -229,7 +229,7 @@ const links: ComputedRef<NavigationMenuItem[][]> = computed(() => {
   if (!isDesktopApp.value) {
     items.push({
       label: "Télécharger l'app",
-      icon: 'i-lucide-download',
+      icon: 'i-lucide-hard-drive-download',
       to: '/downloads',
       onSelect: () => {
         open.value = false

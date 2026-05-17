@@ -96,6 +96,41 @@ class ScanStreamHub:
             items = items[-limit:]
         return items
 
+    def dismiss_event(self, user_id: int, event_id: str) -> bool:
+        """Remove one event from the in-memory backlog (UI dismiss)."""
+        buf = self._history.get(user_id)
+        if not buf:
+            return False
+        kept = [item for item in buf if str(item.get("event_id")) != event_id]
+        if len(kept) == len(buf):
+            return False
+        self._history[user_id] = deque(kept, maxlen=_HISTORY_PER_USER)
+        return True
+
+    def clear_events(
+        self,
+        user_id: int,
+        *,
+        statuses: set[str] | None = None,
+    ) -> int:
+        """
+        Drop events from the backlog, optionally filtered by terminal ``status``.
+
+        When ``statuses`` is ``None``, clears the entire history for the user.
+        """
+        buf = self._history.get(user_id)
+        if not buf:
+            return 0
+        if statuses is None:
+            removed = len(buf)
+            self._history.pop(user_id, None)
+            return removed
+        kept = [item for item in buf if str(item.get("status")) not in statuses]
+        removed = len(buf) - len(kept)
+        if removed:
+            self._history[user_id] = deque(kept, maxlen=_HISTORY_PER_USER)
+        return removed
+
 
 _HUB = ScanStreamHub()
 

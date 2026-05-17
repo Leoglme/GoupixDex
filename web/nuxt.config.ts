@@ -99,6 +99,9 @@ export default defineNuxtConfig({
     clientBundle: {
       scan: true,
       sizeLimitKb: 1024,
+      // Icônes définies dans `computed()` (sidebar) : les inclure explicitement
+      // pour le bundle client desktop / `nuxt generate`.
+      icons: ['lucide:hard-drive-download', 'lucide:download', 'lucide:scan-line', 'lucide:eraser', 'lucide:trash-2'],
     },
   },
 
