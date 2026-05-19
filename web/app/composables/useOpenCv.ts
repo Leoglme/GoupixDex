@@ -29,44 +29,91 @@ export function loadOpenCv(): Promise<Cv> {
       return
     }
     const w = window as unknown as { cv?: any }
+    let done = false
 
-    const settle = (): void => {
+    const finish = (): boolean => {
       const cv = w.cv
-      if (!cv) {
-        reject(new Error('OpenCV global missing after load'))
-        return
+      if (done || !cv || typeof cv.Mat !== 'function') {
+        return false
       }
-      if (typeof cv.then === 'function') {
-        // Newer emscripten builds export a module factory promise.
-        cv.then((m: Cv) => {
-          w.cv = m
-          resolve(m)
-        }).catch(reject)
-        return
-      }
-      if (cv.Mat) {
-        resolve(cv)
-        return
-      }
-      cv.onRuntimeInitialized = (): void => resolve(w.cv)
+      done = true
+      resolve(cv)
+      return true
     }
 
+    // The docs.opencv.org build exposes a global `cv` that is an Emscripten
+    // Module: its `then` is NOT a real Promise (no `.catch`), and `cv.Mat`
+    // only appears once the wasm runtime is initialised. We hook every signal
+    // and, crucially, poll as a safety net so the promise ALWAYS settles
+    // (otherwise the page hangs forever on "chargement du moteur").
+    let wired = false
+    const wire = (): void => {
+      const cv = w.cv
+      if (!cv || wired) {
+        return
+      }
+      wired = true
+      try {
+        if (typeof cv.then === 'function') {
+          cv.then((m: Cv) => {
+            if (m && typeof m.Mat === 'function') {
+              w.cv = m
+            }
+            finish()
+          })
+        }
+      } catch {
+        /* Emscripten thenable can throw if called twice — ignored. */
+      }
+      cv.onRuntimeInitialized = (): void => {
+        finish()
+      }
+    }
+
+    let tries = 0
+    const poll = window.setInterval(() => {
+      tries += 1
+      wire()
+      if (finish()) {
+        window.clearInterval(poll)
+      } else if (tries >= 300) {
+        // ~30 s
+        window.clearInterval(poll)
+        if (!done) {
+          done = true
+          reject(new Error('OpenCV: délai d’initialisation dépassé'))
+        }
+      }
+    }, 100)
+
     if (w.cv) {
-      settle()
+      wire()
       return
     }
     const existing = document.getElementById('opencv-js') as HTMLScriptElement | null
     if (existing) {
-      existing.addEventListener('load', settle)
-      existing.addEventListener('error', () => reject(new Error('OpenCV failed to load')))
+      existing.addEventListener('load', wire)
+      existing.addEventListener('error', () => {
+        window.clearInterval(poll)
+        if (!done) {
+          done = true
+          reject(new Error('OpenCV failed to load'))
+        }
+      })
       return
     }
     const s = document.createElement('script')
     s.id = 'opencv-js'
     s.async = true
     s.src = OPENCV_URL
-    s.onload = settle
-    s.onerror = (): void => reject(new Error('OpenCV failed to load'))
+    s.onload = wire
+    s.onerror = (): void => {
+      window.clearInterval(poll)
+      if (!done) {
+        done = true
+        reject(new Error('OpenCV failed to load'))
+      }
+    }
     document.head.appendChild(s)
   })
   return cvPromise
