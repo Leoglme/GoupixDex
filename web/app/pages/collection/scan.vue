@@ -271,14 +271,36 @@
                 >
                   Fermer
                 </UButton>
-                <UBadge
-                  :color="connectionColor"
-                  variant="solid"
-                  size="sm"
-                  class="bg-black/40 text-white backdrop-blur-sm"
-                >
-                  {{ connectionLabel }}
-                </UBadge>
+                <div class="flex items-center gap-2">
+                  <UButton
+                    size="sm"
+                    color="neutral"
+                    variant="solid"
+                    :icon="soundOn ? 'i-lucide-volume-2' : 'i-lucide-volume-x'"
+                    class="bg-black/40 text-white backdrop-blur-sm"
+                    :aria-label="soundOn ? 'Couper le son' : 'Activer le son'"
+                    @click.prevent="soundOn = !soundOn"
+                  />
+                  <UButton
+                    v-if="torchSupported"
+                    size="sm"
+                    :color="torchOn ? 'warning' : 'neutral'"
+                    variant="solid"
+                    :icon="torchOn ? 'i-lucide-zap' : 'i-lucide-zap-off'"
+                    class="backdrop-blur-sm"
+                    :class="torchOn ? '' : 'bg-black/40 text-white'"
+                    :aria-label="torchOn ? 'Éteindre le flash' : 'Allumer le flash'"
+                    @click.prevent="toggleTorch"
+                  />
+                  <UBadge
+                    :color="connectionColor"
+                    variant="solid"
+                    size="sm"
+                    class="bg-black/40 text-white backdrop-blur-sm"
+                  >
+                    {{ connectionLabel }}
+                  </UBadge>
+                </div>
               </div>
 
               <div class="relative min-h-0 flex-1" @wheel.prevent="onWebcamWheel">
@@ -290,6 +312,21 @@
                   class="absolute inset-0 h-full w-full object-cover transition-transform duration-150 ease-out"
                   :style="webcamPreviewStyle"
                 />
+                <svg
+                  v-if="cardQuadPoints && videoIntrinsicW && videoIntrinsicH"
+                  class="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-150 ease-out"
+                  :style="webcamPreviewStyle"
+                  :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
+                  preserveAspectRatio="xMidYMid slice"
+                >
+                  <polygon
+                    :points="cardQuadPoints"
+                    fill="rgba(249,115,22,0.12)"
+                    stroke="#f97316"
+                    stroke-width="6"
+                    stroke-linejoin="round"
+                  />
+                </svg>
                 <div
                   v-if="!webcamReady"
                   class="absolute inset-0 z-10 flex items-center justify-center bg-black/60 text-sm text-white/90"
@@ -312,6 +349,60 @@
                   />
                   {{ autoScanStatus.label }}
                 </div>
+
+                <Transition name="fade">
+                  <div
+                    v-if="latestAdded?.collection_card"
+                    class="absolute right-3 bottom-3 left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
+                  >
+                    <div class="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-white/10">
+                      <img
+                        v-if="latestAdded.collection_card.image_url"
+                        :src="latestAdded.collection_card.image_url"
+                        :alt="latestAdded.collection_card.display_name"
+                        class="h-full w-full object-cover"
+                        referrerpolicy="no-referrer"
+                        decoding="async"
+                      />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-semibold">
+                        {{ latestAdded.collection_card.display_name }}
+                      </p>
+                      <p class="truncate text-xs text-white/70">
+                        {{ latestAdded.collection_card.set_name || latestAdded.collection_card.tcgdex_set_id }} · #{{
+                          latestAdded.collection_card.card_number
+                        }}
+                      </p>
+                      <p class="mt-0.5 text-xs text-emerald-400">
+                        Ajoutée à ma collection{{
+                          latestAdded.created === false ? ` (×${latestAdded.collection_card.quantity})` : ''
+                        }}
+                      </p>
+                    </div>
+                    <div class="flex shrink-0 flex-col gap-1">
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="solid"
+                        icon="i-lucide-external-link"
+                        class="bg-white/15"
+                        :to="`/collection/${latestAdded.collection_card.id}`"
+                      >
+                        Ouvrir
+                      </UButton>
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-x"
+                        class="text-white"
+                        aria-label="Masquer"
+                        @click.prevent="dismissedAddedId = latestAdded?.event_id ?? null"
+                      />
+                    </div>
+                  </div>
+                </Transition>
               </div>
 
               <div
@@ -416,7 +507,7 @@
         </div>
 
         <!-- Liste live -->
-        <div v-if="events.length && counters.needs_review > 0" class="flex justify-end">
+        <div v-if="displayedEvents.length && counters.needs_review > 0" class="flex justify-end">
           <UButton
             size="sm"
             color="neutral"
@@ -425,12 +516,12 @@
             :loading="clearingProblems"
             @click="onClearProblemScans"
           >
-            Effacer échecs / à vérifier
+            Effacer les échecs
           </UButton>
         </div>
 
         <div
-          v-if="!events.length"
+          v-if="!displayedEvents.length"
           class="border-default bg-elevated/20 rounded-xl border border-dashed p-6 text-center sm:p-8"
         >
           <UIcon name="i-lucide-scan-line" class="text-primary mx-auto size-9 sm:size-10" />
@@ -440,7 +531,7 @@
 
         <ul v-else class="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           <li
-            v-for="ev in events"
+            v-for="ev in displayedEvents"
             :key="ev.event_id"
             class="border-default bg-elevated/30 flex items-center gap-3 rounded-xl border p-2 transition-colors sm:p-3"
             :class="rowAccentClass(ev.status)"
@@ -605,6 +696,14 @@ const webcamActive = ref(false)
 const webcamStarting = ref(false)
 const webcamReady = ref(false)
 const webcamError = ref<string | null>(null)
+/** Hardware torch / flash (rear camera only; not all devices expose it). */
+const torchSupported = ref(false)
+const torchOn = ref(false)
+/** Intrinsic camera resolution — drives the tracking-overlay SVG viewBox. */
+const videoIntrinsicW = ref(0)
+const videoIntrinsicH = ref(0)
+/** Success beep on each scan (toggle from the camera bar). */
+const soundOn = ref(true)
 const webcamResolutionLabel = ref<string | null>(null)
 const videoDevices = ref<VideoDeviceOption[]>([])
 const selectedCameraId = ref<string | undefined>(undefined)
@@ -839,10 +938,38 @@ function onWebcamWheel(e: WheelEvent): void {
   void applyZoomToTrack(zoomLevel.value + delta)
 }
 
+/** Detect torch capability on the active rear track (Chrome/Android, some iOS). */
+function readTorchCap(track: MediaStreamTrack): void {
+  try {
+    const caps = track.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined
+    torchSupported.value = Boolean(caps && caps.torch)
+  } catch {
+    torchSupported.value = false
+  }
+  torchOn.value = false
+}
+
+/** Toggle the hardware flash; silently no-op if the device rejects it. */
+async function toggleTorch(): Promise<void> {
+  if (!videoTrack || !torchSupported.value) {
+    return
+  }
+  const next = !torchOn.value
+  try {
+    await videoTrack.applyConstraints({
+      advanced: [{ torch: next } as unknown as MediaTrackConstraintSet],
+    })
+    torchOn.value = next
+  } catch {
+    torchSupported.value = false
+  }
+}
+
 async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   videoTrack = stream.getVideoTracks()[0] ?? null
   if (videoTrack) {
     readHardwareZoomCaps(videoTrack)
+    readTorchCap(videoTrack)
     updateResolutionLabel(videoTrack)
     try {
       await videoTrack.applyConstraints({
@@ -867,6 +994,11 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   videoEl.value.srcObject = stream
   const onVideoReady = (): void => {
     webcamReady.value = true
+    const el = videoEl.value
+    if (el?.videoWidth && el.videoHeight) {
+      videoIntrinsicW.value = el.videoWidth
+      videoIntrinsicH.value = el.videoHeight
+    }
     if (videoTrack) {
       updateResolutionLabel(videoTrack)
     }
@@ -966,6 +1098,8 @@ function stopWebcam(): void {
   }
   videoTrack = null
   hardwareZoomCaps = null
+  torchSupported.value = false
+  torchOn.value = false
   if (videoEl.value) {
     videoEl.value.srcObject = null
   }
@@ -1046,20 +1180,25 @@ const connectionLabel = computed(() => {
   return 'Déconnecté'
 })
 
+// "Carte non identifiée…" (needs_review) is intentionally never surfaced in the
+// live feed — the user finds it noisy. Those scans stay server-side and can
+// still be bulk-cleared; we just don't render them.
+const displayedEvents = computed(() => events.value.filter((e) => e.status !== 'needs_review'))
+
 const counters = computed(() => {
   let added = 0
   let needs_review = 0
   let in_flight = 0
-  for (const ev of events.value) {
+  for (const ev of displayedEvents.value) {
     if (ev.status === 'added') {
       added += 1
-    } else if (ev.status === 'needs_review' || ev.status === 'failed') {
+    } else if (ev.status === 'failed') {
       needs_review += 1
     } else {
       in_flight += 1
     }
   }
-  return { total: events.value.length, added, needs_review, in_flight }
+  return { total: displayedEvents.value.length, added, needs_review, in_flight }
 })
 
 function thumbUrl(ev: ScanEvent): string | null {
@@ -1138,8 +1277,10 @@ function statusBadgeColor(s: ScanEventStatus): 'primary' | 'success' | 'warning'
   }
 }
 
-function canDismissScan(s: ScanEventStatus): boolean {
-  return s === 'added' || s === 'failed' || s === 'needs_review'
+function canDismissScan(_s: ScanEventStatus): boolean {
+  // Any scan can be removed from the feed, including ones still in
+  // "OCR…" / "Identification…" — they just vanish from the list.
+  return true
 }
 
 async function onDismissScan(eventId: string): Promise<void> {
@@ -1234,17 +1375,90 @@ async function onFileChosen(e: Event): Promise<void> {
   }
 }
 
-// Cash-register auto-capture: shoot a card as soon as it is held steady, then
-// re-arm only after it leaves the frame (so one card is never scanned twice).
+/** Short rising "ding" so a scan is confirmed without looking at the screen. */
+let audioCtx: AudioContext | null = null
+function playBeep(): void {
+  if (!soundOn.value || typeof window === 'undefined') {
+    return
+  }
+  try {
+    const Ctx =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) {
+      return
+    }
+    audioCtx = audioCtx ?? new Ctx()
+    const now = audioCtx.currentTime
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(880, now)
+    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.12)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
+    osc.connect(gain).connect(audioCtx.destination)
+    osc.start(now)
+    osc.stop(now + 0.24)
+  } catch {
+    /* audio is best-effort */
+  }
+}
+
+/** Upload the deskewed card the detector produced, then chime on success. */
+async function onDetectorCapture(file: File): Promise<void> {
+  uploading.value = true
+  try {
+    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS)
+    playBeep()
+  } catch (err) {
+    toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
+  } finally {
+    uploading.value = false
+  }
+}
+
+// Cash-register auto-capture: OpenCV tracks the card outline; once it is held
+// steady the deskewed crop is shot once, then re-arms when the card leaves.
 const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value && autoScan.value)
-const { phase: autoScanPhase } = useCardAutoScan({
+const {
+  phase: autoScanPhase,
+  quad: cardQuad,
+  ready: detectorReady,
+  loadError: detectorError,
+} = useCardAutoScan({
   video: videoEl,
   enabled: autoScanEnabled,
   busy: uploading,
-  onCapture: captureFromWebcam,
+  onCapture: onDetectorCapture,
+})
+
+/** `quad` (video-intrinsic px) → SVG points string; the SVG viewBox matches. */
+const cardQuadPoints = computed<string | null>(() => {
+  const q = cardQuad.value
+  if (!q) {
+    return null
+  }
+  return q.map((p) => `${p.x},${p.y}`).join(' ')
+})
+
+/** Most recent successfully-added card, for the bottom info overlay. */
+const dismissedAddedId = ref<string | null>(null)
+const latestAdded = computed(() => {
+  const ev = displayedEvents.value.find((e) => e.status === 'added' && e.collection_card)
+  if (!ev || ev.event_id === dismissedAddedId.value) {
+    return null
+  }
+  return ev
 })
 
 const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 'neutral' }>(() => {
+  if (detectorError.value) {
+    return { label: 'Moteur de scan indisponible', color: 'neutral' }
+  }
+  if (!detectorReady.value) {
+    return { label: 'Chargement du moteur de scan…', color: 'primary' }
+  }
   if (uploading.value) {
     return { label: 'Envoi…', color: 'primary' }
   }
