@@ -10,9 +10,9 @@
  *        → auto-Canny (thresholds derived from image median)
  *        → morphological close (bridges glare gaps)
  *        → external contours
- *        → score top-5 candidates on (aspect-ratio match, fill, convexity,
- *          convex-4 bonus) and pick the best
- *        → temporal robustness lives main-thread (smoothing)
+ *        → score top-N candidates on (aspect-ratio match, fill, convexity,
+ *          convex-4 bonus, border safety) and pick the best
+ *        → temporal voting + force-card-shape live main-thread
  *
  * Capture also measures sharpness (variance-of-Laplacian) so the main thread
  * can run a small "burst → pick sharpest" to combat hand-shake / focus hunt.
@@ -25,13 +25,14 @@
  * `corners` are always VIDEO-intrinsic pixel coords.
  */
 
-const MIN_AREA_RATIO = 0.07 // card must cover ≥7% of the frame (generous)
-const MAX_FILL = 0.96 // reject "the whole frame" (camera border / vignette)
-const AR_MIN = 1.05 // card ≈ 88/63 ≈ 1.40; generous for perspective tilt
-const AR_MAX = 2.6
+const MIN_AREA_RATIO = 0.06 // card must cover ≥6% of the frame
+const MAX_FILL = 0.6 // reject quads that fill > 60% (whole-frame artifacts)
+const BORDER_MARGIN = 0.015 // a real card never touches all four edges
+const AR_MIN = 1.15 // card ≈ 88/63 ≈ 1.40; reject squarish blobs (hand/wall)
+const AR_MAX = 1.95 // and overly elongated shapes
 const CARD_AR = 1.397 // 88/63 — Pokémon card ratio
-const MIN_SCORE = 0.4 // candidates below this are rejected
-const TOP_N_CANDIDATES = 6
+const MIN_SCORE = 0.5 // candidates below this are rejected (was 0.4 — too loose)
+const TOP_N_CANDIDATES = 8
 const WARP_W = 630
 const WARP_H = 880
 
@@ -67,19 +68,34 @@ function rrCorners(rr: any): { x: number; y: number }[] {
   ].map(([x, y]) => ({ x: rr.center.x + x * cos - y * sin, y: rr.center.y + x * sin + y * cos }))
 }
 
+/** True when the quad spans the WHOLE frame — that's not a card, that's noise. */
+function spansFullFrame(pts: { x: number; y: number }[], w: number, h: number): boolean {
+  const m = BORDER_MARGIN
+  let touchL = false
+  let touchR = false
+  let touchT = false
+  let touchB = false
+  for (const p of pts) {
+    if (p.x < w * m) touchL = true
+    if (p.x > w * (1 - m)) touchR = true
+    if (p.y < h * m) touchT = true
+    if (p.y > h * (1 - m)) touchB = true
+  }
+  return touchL && touchR && touchT && touchB
+}
+
 /**
- * Score one contour as a card candidate. Higher score = better card.
- * Returns null when the contour fails hard filters (size, aspect).
+ * Score one contour as a card candidate. Higher = better. Returns null when
+ * the contour fails hard filters (size, aspect, border safety).
  */
-function scoreCandidate(cnt: any, frameArea: number) {
+function scoreCandidate(cnt: any, w: number, h: number) {
+  const frameArea = w * h
   const hull = new cv.Mat()
   cv.convexHull(cnt, hull)
   const hullArea = Math.max(1, cv.contourArea(hull))
   const cntArea = cv.contourArea(cnt)
-  const convexity = Math.min(1, cntArea / hullArea) // ~1 for clean rectangular cards
+  const convexity = Math.min(1, cntArea / hullArea) // ~1 for clean cards
 
-  // Try multiple epsilons — a real card under perspective often needs a
-  // slightly looser approxPolyDP to collapse to 4 points.
   let pts: { x: number; y: number }[] | null = null
   let convex4Bonus = 1.0
   const peri = cv.arcLength(cnt, true)
@@ -91,7 +107,7 @@ function scoreCandidate(cnt: any, frameArea: number) {
       for (let r = 0; r < 4; r += 1) {
         pts.push({ x: approx.intPtr(r, 0)[0], y: approx.intPtr(r, 0)[1] })
       }
-      convex4Bonus = 1.55
+      convex4Bonus = 1.7
       approx.delete()
       break
     }
@@ -99,16 +115,17 @@ function scoreCandidate(cnt: any, frameArea: number) {
   }
 
   if (!pts) {
-    // Use the convex hull's min-area rect — cleaner than the raw contour and
-    // hugs the card much tighter than minAreaRect(cnt) when there's noise.
     pts = rrCorners(cv.minAreaRect(hull))
   }
   hull.delete()
 
   const ordered = orderCorners(pts)
+  if (spansFullFrame(ordered, w, h)) {
+    return null
+  }
+
   const polygon = polyArea(ordered)
   const fill = polygon / frameArea
-
   if (fill > MAX_FILL || fill < MIN_AREA_RATIO) {
     return null
   }
@@ -122,17 +139,18 @@ function scoreCandidate(cnt: any, frameArea: number) {
     return null
   }
 
-  // Reward a quad whose AR is close to the card's, with a soft falloff.
+  // Strongly reward AR near the card's. Narrow falloff (was 0.55).
   const arDelta = Math.abs(ar - CARD_AR)
-  const arScore = Math.max(0, 1 - arDelta / 0.55)
+  const arScore = Math.max(0, 1 - arDelta / 0.3)
 
-  // Prefer a moderately filled frame; penalise tiny or huge quads.
-  const fillScore = fill < 0.18 ? fill / 0.18 : fill > 0.78 ? Math.max(0, 1 - (fill - 0.78) / 0.18) : 1
+  // Prefer 20–55% fill. Anything over 60% already rejected above.
+  const fillScore = fill < 0.12 ? Math.max(0, fill / 0.12) : fill > 0.5 ? Math.max(0, 1 - (fill - 0.5) / 0.1) : 1
 
-  // Convexity boost is small but breaks ties in favour of clean card outlines.
-  const convexityScore = Math.min(1, convexity * 1.08)
+  // Convexity boost
+  const convexityScore = Math.min(1, convexity * 1.05)
 
-  const score = arScore * 0.52 + fillScore * 0.28 + convexityScore * 0.2
+  // Aspect ratio is now the dominant signal; the others are tie-breakers.
+  const score = arScore * 0.62 + fillScore * 0.22 + convexityScore * 0.16
   return { pts: ordered, score: score * convex4Bonus }
 }
 
@@ -184,9 +202,6 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
-    // CLAHE adaptively flattens lighting — flash washouts and dark scenes
-    // both end up with usable contrast for Canny. Fallback if the build of
-    // OpenCV.js doesn't expose CLAHE.
     let claheOk = false
     try {
       const clahe = new cv.CLAHE(2.5, new cv.Size(8, 8))
@@ -198,23 +213,17 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
     }
     const base = claheOk ? enhanced : gray
 
-    // Median blur preserves card borders far better than Gaussian.
     cv.medianBlur(base, blurred, 5)
 
-    // Auto-Canny: thresholds derived from the image's mean intensity (a fast
-    // proxy for median). Adapts per frame instead of guessing fixed values.
     const meanScalar = cv.mean(blurred)[0]
     const lower = Math.max(10, Math.round(0.66 * meanScalar))
     const upper = Math.max(lower + 25, Math.round(1.33 * meanScalar))
     cv.Canny(blurred, edges, lower, upper)
 
-    // Close gaps from glare/holo reflections (5×5 is enough — 7×7 was over-
-    // bridging unrelated edges, which inflated the largest contour).
     const k = cv.Mat.ones(5, 5, cv.CV_8U)
     cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, k)
     k.delete()
 
-    // RETR_EXTERNAL — only outer silhouettes, skip the card's own internal art.
     cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
     const frameArea = w * h
@@ -237,7 +246,7 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
     let bestScore = -1
     let bestPts: { x: number; y: number }[] | null = null
     for (const c of cands) {
-      const result = scoreCandidate(c.cnt, frameArea)
+      const result = scoreCandidate(c.cnt, w, h)
       if (result && result.score > bestScore) {
         bestScore = result.score
         bestPts = result.pts
@@ -266,10 +275,7 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   return chosen
 }
 
-/**
- * Perspective-deskew the card and measure focus sharpness (variance-of-
- * Laplacian proxy — the main thread keeps the sharpest of a small burst).
- */
+/** Perspective-deskew the card and measure focus sharpness. */
 function warp(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: number }[]) {
   const img = new ImageData(new Uint8ClampedArray(buf), w, h)
   const src = cv.matFromImageData(img)
@@ -287,8 +293,6 @@ function warp(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: n
     cv.warpPerspective(src, dst, M, new cv.Size(WARP_W, WARP_H), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar())
     M.delete()
 
-    // Sharpness = mean |Laplacian| of the deskewed gray. Cheap, robust enough
-    // to pick the in-focus frame out of a 2–3 shot burst.
     const gray = new cv.Mat()
     const lap = new cv.Mat()
     const absLap = new cv.Mat()

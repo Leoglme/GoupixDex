@@ -45,9 +45,18 @@ const BURST_COUNT = 2
 /** Gap between burst shots so focus / exposure has a chance to settle. */
 const BURST_INTERVAL_MS = 130
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
-const SMOOTH_LERP = 0.55
+const SMOOTH_LERP = 0.5
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
 const SCENE_CHANGE_FRAC = 0.22
+/** Two consecutive detections within this drift = confirmed (kills flicker). */
+const VOTE_DRIFT_FRAC = 0.12
+/** Empty detections we wait through before the overlay disappears (≈ 400 ms). */
+const MISS_LINGER_TICKS = 4
+/**
+ * Pokémon card ratio — we force the *displayed* rect to this so the overlay
+ * always reads as a card even when the underlying detection has slight noise.
+ */
+const CARD_AR = 1.397
 
 interface BurstShot {
   buf: ArrayBuffer
@@ -85,6 +94,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let capturing = false
   let lastCorners: Pt[] | null = null
   let displayedCorners: Pt[] | null = null
+  let pendingCorners: Pt[] | null = null
+  let missTicks = 0
   let steadyTicks = 0
   let lostTicks = 0
   let lastCaptureAt = 0
@@ -160,6 +171,60 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     return [0, 1, 2, 3].map((i) => ({
       x: prev[i]!.x * (1 - t) + next[i]!.x * t,
       y: prev[i]!.y * (1 - t) + next[i]!.y * t,
+    })) as Pt[]
+  }
+
+  /**
+   * Force the displayed rectangle to the Pokémon card aspect ratio (88/63),
+   * keeping the detected center + rotation. Detections under perspective are
+   * always trapezoids with small noise; rendering a forced-ratio rotated
+   * rectangle reads as "the card" instead of "some quad" — same trick the
+   * competitor uses for that locked-on look.
+   *
+   * @param q - Smoothed corners (any quadrilateral) in video-intrinsic px.
+   * @returns Card-AR rectangle corners at the same center, rotation and scale.
+   */
+  function forceCardShape(q: Pt[]): Pt[] {
+    const cx = (q[0]!.x + q[1]!.x + q[2]!.x + q[3]!.x) / 4
+    const cy = (q[0]!.y + q[1]!.y + q[2]!.y + q[3]!.y) / 4
+    const topDx = q[1]!.x - q[0]!.x
+    const topDy = q[1]!.y - q[0]!.y
+    const botDx = q[2]!.x - q[3]!.x
+    const botDy = q[2]!.y - q[3]!.y
+    const avgW = (Math.hypot(topDx, topDy) + Math.hypot(botDx, botDy)) / 2
+    const avgH =
+      (Math.hypot(q[3]!.x - q[0]!.x, q[3]!.y - q[0]!.y) + Math.hypot(q[2]!.x - q[1]!.x, q[2]!.y - q[1]!.y)) / 2
+    let w: number
+    let h: number
+    if (avgH >= avgW) {
+      w = avgW
+      h = avgW * CARD_AR
+    } else {
+      h = avgH
+      w = avgH * CARD_AR
+    }
+    const angle = Math.atan2((topDy + botDy) / 2, (topDx + botDx) / 2)
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const dx = w / 2
+    const dy = h / 2
+    const rot = (px: number, py: number): Pt => ({
+      x: cx + px * cos - py * sin,
+      y: cy + px * sin + py * cos,
+    })
+    return [rot(-dx, -dy), rot(dx, -dy), rot(dx, dy), rot(-dx, dy)]
+  }
+
+  /**
+   * Average two equal-length quads corner-by-corner.
+   * @param a - First quad.
+   * @param b - Second quad.
+   * @returns A quad whose corners are the midpoints of `a` and `b`.
+   */
+  function averageQuad(a: Pt[], b: Pt[]): Pt[] {
+    return [0, 1, 2, 3].map((i) => ({
+      x: (a[i]!.x + b[i]!.x) / 2,
+      y: (a[i]!.y + b[i]!.y) / 2,
     })) as Pt[]
   }
 
@@ -245,33 +310,62 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Apply the steady-then-capture state machine to a fresh detection.
+   * Apply voting + miss-linger + the steady-then-capture state machine to a
+   * fresh detection. Voting (two consecutive consistent detections) and a
+   * short linger on empty frames stop the overlay from flickering / morphing
+   * on every spurious frame — only confirmed cards reach the display.
+   *
    * @param corners - Ordered card corners in video-intrinsic px, or `null`.
    */
   function onDetection(corners: Pt[] | null): void {
     const el = video.value
-    if (!corners || !el) {
-      lastCorners = null
-      displayedCorners = null
-      quad.value = null
-      steadyTicks = 0
-      if (phase.value === 'cooldown') {
-        lostTicks += 1
-        if (lostTicks >= LOST_TICKS_REARM) {
+    if (!el) {
+      return
+    }
+    const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
+
+    // No card this tick — linger before clearing so a single bad frame doesn't
+    // hide the overlay we are tracking.
+    if (!corners) {
+      pendingCorners = null
+      missTicks += 1
+      if (missTicks >= MISS_LINGER_TICKS) {
+        lastCorners = null
+        displayedCorners = null
+        quad.value = null
+        steadyTicks = 0
+        if (phase.value === 'cooldown') {
+          lostTicks += 1
+          if (lostTicks >= LOST_TICKS_REARM) {
+            phase.value = 'watching'
+          }
+        } else if (phase.value !== 'idle' && !capturing) {
           phase.value = 'watching'
         }
-      } else if (phase.value !== 'idle' && !capturing) {
-        phase.value = 'watching'
       }
       return
     }
+    missTicks = 0
 
-    const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
+    // Voting: wait for two consecutive detections within VOTE_DRIFT_FRAC of
+    // each other before trusting the result. Hand-shake / texture flicker
+    // produces wildly varying quads and gets filtered here.
+    if (!pendingCorners) {
+      pendingCorners = corners
+      return
+    }
+    if (cornerDrift(corners, pendingCorners) > longEdge * VOTE_DRIFT_FRAC) {
+      pendingCorners = corners
+      return
+    }
+    const confirmed = averageQuad(pendingCorners, corners)
+    pendingCorners = corners
 
-    // Temporal smoothing for the overlay rectangle (UI only — the steady check
-    // below still uses raw detections so a hand-held card converges quickly).
-    displayedCorners = smoothCorners(displayedCorners, corners, longEdge)
-    quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
+    // Smooth toward the confirmed quad, then force a card-AR rectangle on top
+    // — the displayed rectangle reads as "the card" instead of "some shape".
+    displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
+    const shaped = forceCardShape(displayedCorners)
+    quad.value = [shaped[0]!, shaped[1]!, shaped[2]!, shaped[3]!]
     lostTicks = 0
 
     if (phase.value === 'cooldown' || capturing) {
@@ -395,6 +489,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     capturing = false
     lastCorners = null
     displayedCorners = null
+    pendingCorners = null
+    missTicks = 0
     burstCorners = null
     burstShots = []
     burstAwaiting = 0

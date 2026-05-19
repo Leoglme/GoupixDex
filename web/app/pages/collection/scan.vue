@@ -313,15 +313,21 @@
                   :style="webcamPreviewStyle"
                 />
                 <svg
-                  v-if="cardQuadPoints && videoIntrinsicW && videoIntrinsicH"
+                  v-if="cardOverlay && videoIntrinsicW && videoIntrinsicH"
                   class="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-150 ease-out"
                   :style="webcamPreviewStyle"
                   :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
                   preserveAspectRatio="xMidYMid slice"
                 >
-                  <polygon
-                    :points="cardQuadPoints"
-                    fill="rgba(249,115,22,0.12)"
+                  <rect
+                    :x="cardOverlay.cx - cardOverlay.w / 2"
+                    :y="cardOverlay.cy - cardOverlay.h / 2"
+                    :width="cardOverlay.w"
+                    :height="cardOverlay.h"
+                    :rx="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
+                    :ry="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
+                    :transform="`rotate(${cardOverlay.angleDeg} ${cardOverlay.cx} ${cardOverlay.cy})`"
+                    fill="rgba(249,115,22,0.10)"
                     stroke="#f97316"
                     stroke-width="6"
                     stroke-linejoin="round"
@@ -1408,12 +1414,21 @@ function playBeep(): void {
   }
 }
 
-/** Upload the deskewed card the detector produced, then chime on success. */
+/**
+ * Upload the deskewed card the detector produced. The success chime is
+ * triggered later, when the `added` event arrives and the info pop-up appears
+ * — that's the moment the user actually wants to hear confirmation.
+ */
 async function onDetectorCapture(file: File): Promise<void> {
   uploading.value = true
+  // A new card is being processed — drop the previous overlay right away so
+  // the user sees we've moved on. The new card's overlay will appear when the
+  // `added` event lands and the `latestAdded` watcher plays the chime.
+  if (latestAdded.value) {
+    dismissedAddedId.value = latestAdded.value.event_id
+  }
   try {
     await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS)
-    playBeep()
   } catch (err) {
     toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
   } finally {
@@ -1436,13 +1451,32 @@ const {
   onCapture: onDetectorCapture,
 })
 
-/** `quad` (video-intrinsic px) → SVG points string; the SVG viewBox matches. */
-const cardQuadPoints = computed<string | null>(() => {
+/**
+ * The detector forces the quad to the card aspect ratio, so the 4 points form
+ * a true rotated rectangle. Decompose them into {center, w, h, angle} so we
+ * can draw a rounded `<rect>` — matches the competitor's clean look.
+ */
+const cardOverlay = computed<{
+  cx: number
+  cy: number
+  w: number
+  h: number
+  angleDeg: number
+} | null>(() => {
   const q = cardQuad.value
   if (!q) {
     return null
   }
-  return q.map((p) => `${p.x},${p.y}`).join(' ')
+  const cx = (q[0].x + q[1].x + q[2].x + q[3].x) / 4
+  const cy = (q[0].y + q[1].y + q[2].y + q[3].y) / 4
+  const topDx = q[1].x - q[0].x
+  const topDy = q[1].y - q[0].y
+  const botDx = q[2].x - q[3].x
+  const botDy = q[2].y - q[3].y
+  const w = (Math.hypot(topDx, topDy) + Math.hypot(botDx, botDy)) / 2
+  const h = (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y)) / 2
+  const angleDeg = (Math.atan2((topDy + botDy) / 2, (topDx + botDx) / 2) * 180) / Math.PI
+  return { cx, cy, w, h, angleDeg }
 })
 
 /** Most recent successfully-added card, for the bottom info overlay. */
@@ -1453,6 +1487,16 @@ const latestAdded = computed(() => {
     return null
   }
   return ev
+})
+
+// Chime when the card is *identified* (info pop-up appears) — not on capture
+// — so the user gets a clear audible "ça y est, on l'a" matching the visual.
+let lastBeepedAddedId: string | null = null
+watch(latestAdded, (v) => {
+  if (v && v.event_id !== lastBeepedAddedId) {
+    lastBeepedAddedId = v.event_id
+    playBeep()
+  }
 })
 
 const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 'neutral' }>(() => {
