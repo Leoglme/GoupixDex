@@ -30,6 +30,8 @@ export interface UseCardAutoScanOptions {
 
 /** How often we ship a frame to the worker (ms). The heavy work is off-thread. */
 const FRAME_MS = 140
+/** Long edge of the downscaled frame sent for detection. */
+const PROC_EDGE = 480
 /** Steady tolerance as a fraction of the frame's long edge. */
 const STEADY_FRAC = 0.013
 /** Consecutive steady detections before firing (~0.5 s). */
@@ -60,8 +62,41 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   let worker: Worker | null = null
   let timer: ReturnType<typeof setInterval> | null = null
+  let grabCanvas: HTMLCanvasElement | null = null
+  let grabCtx: CanvasRenderingContext2D | null = null
   let detectInFlight = false
   let capturing = false
+
+  /**
+   * Draw the current video frame into the scratch canvas at `longEdge` and
+   * return its transferable RGBA buffer (no `createImageBitmap` — iOS-safe).
+   * @param longEdge - Target long-edge size (0 = full intrinsic resolution).
+   * @returns The frame buffer + its pixel dimensions, or `null`.
+   */
+  function grabFrame(longEdge: number): { buf: ArrayBuffer; w: number; h: number } | null {
+    const el = video.value
+    if (!el || el.readyState < 2 || !el.videoWidth || !el.videoHeight) {
+      return null
+    }
+    const vw = el.videoWidth
+    const vh = el.videoHeight
+    const scale = longEdge > 0 ? Math.min(1, longEdge / Math.max(vw, vh)) : 1
+    const w = Math.max(1, Math.round(vw * scale))
+    const h = Math.max(1, Math.round(vh * scale))
+    if (!grabCanvas) {
+      grabCanvas = document.createElement('canvas')
+    }
+    if (grabCanvas.width !== w || grabCanvas.height !== h) {
+      grabCanvas.width = w
+      grabCanvas.height = h
+      grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true })
+    }
+    if (!grabCtx) {
+      return null
+    }
+    grabCtx.drawImage(el, 0, 0, w, h)
+    return { buf: grabCtx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
+  }
   let lastCorners: Pt[] | null = null
   let steadyTicks = 0
   let lostTicks = 0
@@ -122,48 +157,34 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
-    // Steady, fresh card → ask the worker to deskew-crop it.
+    // Steady, fresh card → ask the worker to deskew-crop the full-res frame.
     capturing = true
     steadyTicks = 0
     phase.value = 'captured'
-    const w = worker
-    if (!w) {
+    const full = grabFrame(0)
+    if (!worker || !full) {
       capturing = false
+      phase.value = 'watching'
       return
     }
-    createImageBitmap(el)
-      .then((bmp) => {
-        w.postMessage({ t: 'warp', bmp, vw: el.videoWidth, vh: el.videoHeight, corners }, [bmp])
-      })
-      .catch(() => {
-        capturing = false
-        phase.value = 'watching'
-      })
+    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners }, [full.buf])
   }
 
-  /** Grab one frame and hand it to the worker for detection. */
+  /** Grab one downscaled frame and hand it to the worker for detection. */
   function pumpFrame(): void {
+    if (!worker || !enabled.value || detectInFlight || capturing || busy.value) {
+      return
+    }
     const el = video.value
-    if (
-      !worker ||
-      !enabled.value ||
-      detectInFlight ||
-      capturing ||
-      busy.value ||
-      !el ||
-      el.readyState < 2 ||
-      !el.videoWidth
-    ) {
+    if (!el || !el.videoWidth) {
+      return
+    }
+    const f = grabFrame(PROC_EDGE)
+    if (!f) {
       return
     }
     detectInFlight = true
-    createImageBitmap(el)
-      .then((bmp) => {
-        worker?.postMessage({ t: 'detect', bmp, vw: el.videoWidth, vh: el.videoHeight }, [bmp])
-      })
-      .catch(() => {
-        detectInFlight = false
-      })
+    worker.postMessage({ t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight }, [f.buf])
   }
 
   /**
@@ -176,7 +197,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'warped'; buf: ArrayBuffer }
+      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number }
     if (d.t === 'ready') {
       ready.value = true
       phase.value = 'watching'
@@ -201,19 +222,39 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
     if (d.t === 'warped') {
-      const file = new File([d.buf], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
       lastCaptureAt = Date.now()
       lostTicks = 0
-      void Promise.resolve(onCapture(file)).finally(() => {
+      const finishCooldown = (): void => {
         capturing = false
         phase.value = 'cooldown'
-      })
+      }
+      const cnv = document.createElement('canvas')
+      cnv.width = d.w
+      cnv.height = d.h
+      const c2 = cnv.getContext('2d')
+      if (!c2) {
+        finishCooldown()
+        return
+      }
+      c2.putImageData(new ImageData(new Uint8ClampedArray(d.buf), d.w, d.h), 0, 0)
+      cnv.toBlob(
+        (blob) => {
+          if (!blob) {
+            finishCooldown()
+            return
+          }
+          const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
+          void Promise.resolve(onCapture(file)).finally(finishCooldown)
+        },
+        'image/jpeg',
+        0.92,
+      )
     }
   }
 
   /** Spawn the worker and kick off OpenCV loading inside it. */
   function startWorker(): void {
-    if (worker || typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') {
+    if (worker || typeof Worker === 'undefined') {
       if (!worker) {
         loadError.value = 'Scan auto non supporté par ce navigateur'
       }
@@ -242,6 +283,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       worker.terminate()
       worker = null
     }
+    grabCanvas = null
+    grabCtx = null
     detectInFlight = false
     capturing = false
     lastCorners = null
