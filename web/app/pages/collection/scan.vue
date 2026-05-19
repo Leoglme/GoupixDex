@@ -24,7 +24,7 @@
             </h1>
             <p class="text-muted text-sm">
               Scannez vos cartes à la chaîne&nbsp;: la langue (FR / JP…) est reconnue automatiquement. En HTTPS, le mode
-              caisse capture chaque carte tenue immobile sans rien toucher.
+              caisse capture chaque carte dès qu'elle est tracée — vous pouvez bouger / pivoter pour aider l'OCR.
             </p>
           </div>
         </div>
@@ -41,7 +41,9 @@
               v-model="autoScan"
               label="Scan auto (caisse)"
               :description="
-                autoScan ? 'Capture quand vous passez une carte puis la tenez immobile' : 'Capture manuelle uniquement'
+                autoScan
+                  ? 'Capture dès qu\'une carte est tracée — vous pouvez bouger ou pivoter'
+                  : 'Capture manuelle uniquement'
               "
             />
             <div v-else />
@@ -249,8 +251,8 @@
             </div>
             <p class="text-muted text-[11px]">
               <template v-if="autoScan">
-                Présentez chaque carte bien à plat dans le cadre et tenez-la immobile&nbsp;: elle est capturée toute
-                seule, puis retirez-la pour enchaîner. Molette pour zoomer.
+                Présentez chaque carte dans le cadre&nbsp;: dès qu'elle est tracée, elle est capturée toute seule, puis
+                retirez-la pour enchaîner. Molette pour zoomer.
               </template>
               <template v-else>Molette sur l’aperçu pour zoomer. {{ zoomHint }}</template>
             </p>
@@ -1513,7 +1515,7 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
     case 'watching':
       return { label: 'Placez ou passez une carte', color: 'neutral' }
     case 'settling':
-      return { label: 'Lecture… tenez la carte immobile', color: 'primary' }
+      return { label: 'Lecture en cours…', color: 'primary' }
     case 'captured':
       return { label: 'Carte capturée', color: 'success' }
     case 'cooldown':

@@ -32,18 +32,19 @@ export interface UseCardAutoScanOptions {
 const FRAME_MS = 100
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
-/** Steady tolerance as a fraction of the frame's long edge. */
-const STEADY_FRAC = 0.014
-/** Consecutive steady detections before firing (~0.4 s @ 100 ms cadence). */
-const STEADY_TICKS = 4
 /** "No card" detections before re-arming after a shot (card removed). */
 const LOST_TICKS_REARM = 3
 /** Floor between two captures (anti double-shot). */
 const MIN_COOLDOWN_MS = 1500
-/** How many shots we take in a burst — we keep the sharpest for OCR. */
-const BURST_COUNT = 2
-/** Gap between burst shots so focus / exposure has a chance to settle. */
-const BURST_INTERVAL_MS = 130
+/**
+ * How many shots we take in a burst — we keep the sharpest for OCR. Pikacheck-
+ * style: a slightly larger burst over a longer window so the user can pivot
+ * the card during capture (revealing a glary corner, exposing missing text…)
+ * and the sharpest / clearest angle still wins.
+ */
+const BURST_COUNT = 3
+/** Gap between burst shots — wide enough for hand movement to expose new info. */
+const BURST_INTERVAL_MS = 280
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
 const SMOOTH_LERP = 0.5
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
@@ -96,7 +97,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let displayedCorners: Pt[] | null = null
   let pendingCorners: Pt[] | null = null
   let missTicks = 0
-  let steadyTicks = 0
   let lostTicks = 0
   let lastCaptureAt = 0
 
@@ -241,7 +241,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   /** Send the next warp request from the burst (or finalise if we've collected enough). */
   function requestWarp(): void {
-    if (!worker || !burstCorners) {
+    if (!worker) {
       finaliseBurst()
       return
     }
@@ -249,9 +249,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       finaliseBurst()
       return
     }
+    // Use the freshest detected corners so a pivot/move during the burst still
+    // yields a correctly cropped card. Fall back to the trigger corners if the
+    // detector hasn't returned a new quad yet.
+    const corners = lastCorners ?? burstCorners
     const full = grabFrame(0)
-    if (!full) {
-      // Skip this shot but keep trying — maybe the next one lands.
+    if (!corners || !full) {
       if (burstShots.length + 1 < burstAwaiting) {
         burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
       } else {
@@ -259,7 +262,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       }
       return
     }
-    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners: burstCorners }, [full.buf])
+    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners }, [full.buf])
   }
 
   /** Pick the sharpest shot from the burst, encode JPEG and hand it to `onCapture`. */
@@ -333,7 +336,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
-        steadyTicks = 0
         if (phase.value === 'cooldown') {
           lostTicks += 1
           if (lostTicks >= LOST_TICKS_REARM) {
@@ -368,28 +370,31 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     quad.value = [shaped[0]!, shaped[1]!, shaped[2]!, shaped[3]!]
     lostTicks = 0
 
+    lastCorners = corners
+
     if (phase.value === 'cooldown' || capturing) {
       return
     }
 
-    if (lastCorners && cornerDrift(corners, lastCorners) < longEdge * STEADY_FRAC) {
-      steadyTicks += 1
-    } else {
-      steadyTicks = 0
-    }
-    lastCorners = corners
-
-    if (steadyTicks < STEADY_TICKS || busy.value || Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
-      phase.value = 'settling'
+    // No "hold steady" wait — Pikacheck-style. As soon as a card is confirmed
+    // (vote passed) and we're past the cooldown, we shoot a burst. The user is
+    // free to pivot/move the card during the burst; each shot uses the freshest
+    // corners and the sharpest wins.
+    if (busy.value || Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
+      phase.value = 'watching'
       return
     }
 
     beginBurst(corners)
   }
 
-  /** Grab one downscaled frame and hand it to the worker for detection. */
+  /**
+   * Grab one downscaled frame and hand it to the worker for detection. Note we
+   * intentionally keep running during a capture burst so `lastCorners` stays
+   * fresh — each burst shot uses the latest detection, supporting movement.
+   */
   function pumpFrame(): void {
-    if (!worker || !enabled.value || detectInFlight || capturing || busy.value) {
+    if (!worker || !enabled.value || detectInFlight || busy.value) {
       return
     }
     const el = video.value
