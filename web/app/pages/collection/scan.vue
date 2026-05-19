@@ -984,7 +984,10 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
 
   webcamStream = stream
   webcamActive.value = true
-  zoomLevel.value = 1
+  // Default to a moderate zoom so the card "fills" the frame on opening —
+  // wide-angle phone cameras render the card very small at 1×. The user can
+  // dezoom with the slider; hardware zoom is preferred when available.
+  zoomLevel.value = 1.5
   softwareZoomFactor.value = 1
   await nextTick()
 

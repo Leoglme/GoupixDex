@@ -27,6 +27,7 @@ from typing import Any
 from core.database import SessionLocal
 from models.collection_card import CollectionCard
 from services import collection_card_service
+from services.card_image_enhance import enhance_for_ocr
 from services.card_image_gate import assess_card_image
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.ocr_service import extract_card_from_bytes
@@ -187,6 +188,10 @@ async def _process_scan(
                 image_preview_data_url=preview,
             ),
         )
+        # Auto-contrast + light sharpening on the deskewed card recovers OCR
+        # accuracy on soft / flat / over-lit shots without ever degrading a
+        # clean one. Runs in the executor so we don't block the loop.
+        ocr_bytes = await loop.run_in_executor(None, lambda: enhance_for_ocr(image_bytes))
         try:
             # PokéWallet enrichment is *on* here even though we skip pricing
             # later: it gives us a reliable English Pokémon name for JA prints
@@ -195,7 +200,7 @@ async def _process_scan(
             ocr_result = await loop.run_in_executor(
                 None,
                 lambda: extract_card_from_bytes(
-                    image_bytes,
+                    ocr_bytes,
                     filename,
                     enrich_from_pokewallet=True,
                     user_hint=user_hint,

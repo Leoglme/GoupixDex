@@ -28,26 +28,42 @@ export interface UseCardAutoScanOptions {
   onCapture: (file: File) => void | Promise<void>
 }
 
-/** How often we ship a frame to the worker (ms). The heavy work is off-thread. */
-const FRAME_MS = 140
-/** Long edge of the downscaled frame sent for detection. */
-const PROC_EDGE = 480
+/** ~10 fps cadence. The worker decides if it can keep up via the in-flight gate. */
+const FRAME_MS = 100
+/** Long edge of the downscaled frame sent for detection (more = sharper quad). */
+const PROC_EDGE = 640
 /** Steady tolerance as a fraction of the frame's long edge. */
-const STEADY_FRAC = 0.013
-/** Consecutive steady detections before firing (~0.5 s). */
+const STEADY_FRAC = 0.014
+/** Consecutive steady detections before firing (~0.4 s @ 100 ms cadence). */
 const STEADY_TICKS = 4
 /** "No card" detections before re-arming after a shot (card removed). */
 const LOST_TICKS_REARM = 3
 /** Floor between two captures (anti double-shot). */
 const MIN_COOLDOWN_MS = 1500
+/** How many shots we take in a burst — we keep the sharpest for OCR. */
+const BURST_COUNT = 2
+/** Gap between burst shots so focus / exposure has a chance to settle. */
+const BURST_INTERVAL_MS = 130
+/** Lerp weight (new vs previous) when tracking the displayed quad. */
+const SMOOTH_LERP = 0.55
+/** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
+const SCENE_CHANGE_FRAC = 0.22
+
+interface BurstShot {
+  buf: ArrayBuffer
+  w: number
+  h: number
+  sharpness: number
+}
 
 /**
  * Touch-free card scanner. All OpenCV work (contour detection + perspective
- * crop) runs in a **Web Worker** so the ~9 MB wasm never freezes the phone.
- * The worker streams back the card quad (video-pixel coords) which we expose as
- * `quad` for the tracking outline; once it is held steady we ask the worker to
- * deskew-crop the card and fire `onCapture` **once**. The next shot only arms
- * after the card leaves the frame — no quad ⇒ nothing happens (no spam).
+ * crop) runs in a Web Worker so the ~9 MB wasm never freezes the phone. The
+ * worker streams back the card quad (video-pixel coords) which we **smooth**
+ * before exposing as `quad` (the overlay rectangle follows your hand without
+ * jitter). Once the quad is held steady, a small **burst of captures** is
+ * sent and the **sharpest** one wins — much better OCR results under light
+ * hand shake / focus hunt.
  *
  * @param opts - Video element, enable/busy flags and the capture callback.
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
@@ -64,12 +80,24 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let timer: ReturnType<typeof setInterval> | null = null
   let grabCanvas: HTMLCanvasElement | null = null
   let grabCtx: CanvasRenderingContext2D | null = null
+
   let detectInFlight = false
   let capturing = false
+  let lastCorners: Pt[] | null = null
+  let displayedCorners: Pt[] | null = null
+  let steadyTicks = 0
+  let lostTicks = 0
+  let lastCaptureAt = 0
+
+  let burstCorners: Pt[] | null = null
+  let burstShots: BurstShot[] = []
+  let burstAwaiting = 0
+  let burstTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Draw the current video frame into the scratch canvas at `longEdge` and
    * return its transferable RGBA buffer (no `createImageBitmap` — iOS-safe).
+   *
    * @param longEdge - Target long-edge size (0 = full intrinsic resolution).
    * @returns The frame buffer + its pixel dimensions, or `null`.
    */
@@ -97,10 +125,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     grabCtx.drawImage(el, 0, 0, w, h)
     return { buf: grabCtx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
   }
-  let lastCorners: Pt[] | null = null
-  let steadyTicks = 0
-  let lostTicks = 0
-  let lastCaptureAt = 0
 
   /**
    * Mean corner displacement between two ordered quads (video px).
@@ -117,14 +141,119 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
+   * Smooth corner movement so the orange overlay follows the card without
+   * jittering on small detection noise — snap on big scene changes.
+   *
+   * @param prev - Previously displayed corners (or null).
+   * @param next - Fresh corners from the worker.
+   * @param longEdge - Frame long edge (video px) — used to scale the drift gate.
+   * @returns Smoothed corners ready to display.
+   */
+  function smoothCorners(prev: Pt[] | null, next: Pt[], longEdge: number): Pt[] {
+    if (!prev) {
+      return next
+    }
+    if (cornerDrift(prev, next) > longEdge * SCENE_CHANGE_FRAC) {
+      return next
+    }
+    const t = SMOOTH_LERP
+    return [0, 1, 2, 3].map((i) => ({
+      x: prev[i]!.x * (1 - t) + next[i]!.x * t,
+      y: prev[i]!.y * (1 - t) + next[i]!.y * t,
+    })) as Pt[]
+  }
+
+  /** Start a burst: send the first warp request; subsequent ones are scheduled. */
+  function beginBurst(corners: Pt[]): void {
+    burstCorners = corners
+    burstShots = []
+    burstAwaiting = BURST_COUNT
+    capturing = true
+    steadyTicks = 0
+    phase.value = 'captured'
+    requestWarp()
+  }
+
+  /** Send the next warp request from the burst (or finalise if we've collected enough). */
+  function requestWarp(): void {
+    if (!worker || !burstCorners) {
+      finaliseBurst()
+      return
+    }
+    if (burstShots.length >= burstAwaiting) {
+      finaliseBurst()
+      return
+    }
+    const full = grabFrame(0)
+    if (!full) {
+      // Skip this shot but keep trying — maybe the next one lands.
+      if (burstShots.length + 1 < burstAwaiting) {
+        burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
+      } else {
+        finaliseBurst()
+      }
+      return
+    }
+    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners: burstCorners }, [full.buf])
+  }
+
+  /** Pick the sharpest shot from the burst, encode JPEG and hand it to `onCapture`. */
+  function finaliseBurst(): void {
+    if (burstTimer !== null) {
+      clearTimeout(burstTimer)
+      burstTimer = null
+    }
+    if (!burstShots.length) {
+      burstCorners = null
+      capturing = false
+      phase.value = 'cooldown'
+      lastCaptureAt = Date.now()
+      return
+    }
+    burstShots.sort((a, b) => b.sharpness - a.sharpness)
+    const best = burstShots[0]!
+    burstShots = []
+    burstCorners = null
+
+    const cnv = document.createElement('canvas')
+    cnv.width = best.w
+    cnv.height = best.h
+    const ctx = cnv.getContext('2d')
+    const finishCooldown = (): void => {
+      capturing = false
+      phase.value = 'cooldown'
+    }
+    if (!ctx) {
+      finishCooldown()
+      return
+    }
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(best.buf), best.w, best.h), 0, 0)
+    cnv.toBlob(
+      (blob) => {
+        if (!blob) {
+          finishCooldown()
+          return
+        }
+        const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
+        lastCaptureAt = Date.now()
+        lostTicks = 0
+        void Promise.resolve(onCapture(file)).finally(finishCooldown)
+      },
+      'image/jpeg',
+      0.92,
+    )
+  }
+
+  /**
    * Apply the steady-then-capture state machine to a fresh detection.
    * @param corners - Ordered card corners in video-intrinsic px, or `null`.
    */
   function onDetection(corners: Pt[] | null): void {
     const el = video.value
     if (!corners || !el) {
-      quad.value = null
       lastCorners = null
+      displayedCorners = null
+      quad.value = null
       steadyTicks = 0
       if (phase.value === 'cooldown') {
         lostTicks += 1
@@ -137,14 +266,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
-    quad.value = [corners[0]!, corners[1]!, corners[2]!, corners[3]!]
+    const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
+
+    // Temporal smoothing for the overlay rectangle (UI only — the steady check
+    // below still uses raw detections so a hand-held card converges quickly).
+    displayedCorners = smoothCorners(displayedCorners, corners, longEdge)
+    quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
     lostTicks = 0
 
     if (phase.value === 'cooldown' || capturing) {
       return
     }
 
-    const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
     if (lastCorners && cornerDrift(corners, lastCorners) < longEdge * STEADY_FRAC) {
       steadyTicks += 1
     } else {
@@ -157,17 +290,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
-    // Steady, fresh card → ask the worker to deskew-crop the full-res frame.
-    capturing = true
-    steadyTicks = 0
-    phase.value = 'captured'
-    const full = grabFrame(0)
-    if (!worker || !full) {
-      capturing = false
-      phase.value = 'watching'
-      return
-    }
-    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners }, [full.buf])
+    beginBurst(corners)
   }
 
   /** Grab one downscaled frame and hand it to the worker for detection. */
@@ -197,7 +320,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number }
+      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
     if (d.t === 'ready') {
       ready.value = true
       phase.value = 'watching'
@@ -222,33 +345,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
     if (d.t === 'warped') {
-      lastCaptureAt = Date.now()
-      lostTicks = 0
-      const finishCooldown = (): void => {
-        capturing = false
-        phase.value = 'cooldown'
+      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness })
+      if (burstShots.length < burstAwaiting) {
+        burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
+      } else {
+        finaliseBurst()
       }
-      const cnv = document.createElement('canvas')
-      cnv.width = d.w
-      cnv.height = d.h
-      const c2 = cnv.getContext('2d')
-      if (!c2) {
-        finishCooldown()
-        return
-      }
-      c2.putImageData(new ImageData(new Uint8ClampedArray(d.buf), d.w, d.h), 0, 0)
-      cnv.toBlob(
-        (blob) => {
-          if (!blob) {
-            finishCooldown()
-            return
-          }
-          const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
-          void Promise.resolve(onCapture(file)).finally(finishCooldown)
-        },
-        'image/jpeg',
-        0.92,
-      )
     }
   }
 
@@ -279,6 +381,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       clearInterval(timer)
       timer = null
     }
+    if (burstTimer !== null) {
+      clearTimeout(burstTimer)
+      burstTimer = null
+    }
     if (worker) {
       worker.terminate()
       worker = null
@@ -288,6 +394,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     detectInFlight = false
     capturing = false
     lastCorners = null
+    displayedCorners = null
+    burstCorners = null
+    burstShots = []
+    burstAwaiting = 0
     steadyTicks = 0
     lostTicks = 0
     quad.value = null
