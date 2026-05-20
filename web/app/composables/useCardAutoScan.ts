@@ -234,7 +234,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstShots = []
     burstAwaiting = BURST_COUNT
     capturing = true
-    steadyTicks = 0
     phase.value = 'captured'
     requestWarp()
   }
@@ -499,7 +498,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstCorners = null
     burstShots = []
     burstAwaiting = 0
-    steadyTicks = 0
     lostTicks = 0
     quad.value = null
     ready.value = false
