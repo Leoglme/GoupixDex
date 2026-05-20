@@ -32,19 +32,20 @@ export interface UseCardAutoScanOptions {
 const FRAME_MS = 100
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
-/** "No card" detections before re-arming after a shot (card removed). */
-const LOST_TICKS_REARM = 3
-/** Floor between two captures (anti double-shot). */
-const MIN_COOLDOWN_MS = 1500
+/**
+ * Floor between two captures. Short on purpose: as soon as it elapses the next
+ * confirmed card fires, even if the previous card is still in frame — no more
+ * "remove the card to re-arm" gate (the cause of stuck "Présentez une carte").
+ */
+const MIN_COOLDOWN_MS = 600
 /**
  * How many shots we take in a burst — we keep the sharpest for OCR. Pikacheck-
- * style: a slightly larger burst over a longer window so the user can pivot
- * the card during capture (revealing a glary corner, exposing missing text…)
- * and the sharpest / clearest angle still wins.
+ * style: a longer window so the user has time to pivot the card during capture
+ * (revealing a glary corner, exposing missing text…) and the best angle wins.
  */
-const BURST_COUNT = 3
+const BURST_COUNT = 4
 /** Gap between burst shots — wide enough for hand movement to expose new info. */
-const BURST_INTERVAL_MS = 280
+const BURST_INTERVAL_MS = 300
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
 const SMOOTH_LERP = 0.5
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
@@ -97,7 +98,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let displayedCorners: Pt[] | null = null
   let pendingCorners: Pt[] | null = null
   let missTicks = 0
-  let lostTicks = 0
   let lastCaptureAt = 0
 
   let burstCorners: Pt[] | null = null
@@ -303,7 +303,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
         }
         const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
         lastCaptureAt = Date.now()
-        lostTicks = 0
         void Promise.resolve(onCapture(file)).finally(finishCooldown)
       },
       'image/jpeg',
@@ -335,18 +334,19 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
-        if (phase.value === 'cooldown') {
-          lostTicks += 1
-          if (lostTicks >= LOST_TICKS_REARM) {
-            phase.value = 'watching'
-          }
-        } else if (phase.value !== 'idle' && !capturing) {
+        if (phase.value !== 'idle' && !capturing) {
           phase.value = 'watching'
         }
       }
       return
     }
     missTicks = 0
+
+    // Cooldown is now purely time-based — once it elapses, the next confirmed
+    // quad fires regardless of whether the previous card left the frame.
+    if (phase.value === 'cooldown' && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS) {
+      phase.value = 'watching'
+    }
 
     // Voting: wait for two consecutive detections within VOTE_DRIFT_FRAC of
     // each other before trusting the result. Hand-shake / texture flicker
@@ -367,20 +367,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
     const shaped = forceCardShape(displayedCorners)
     quad.value = [shaped[0]!, shaped[1]!, shaped[2]!, shaped[3]!]
-    lostTicks = 0
 
     lastCorners = corners
 
-    if (phase.value === 'cooldown' || capturing) {
+    if (capturing) {
       return
     }
 
-    // No "hold steady" wait — Pikacheck-style. As soon as a card is confirmed
-    // (vote passed) and we're past the cooldown, we shoot a burst. The user is
-    // free to pivot/move the card during the burst; each shot uses the freshest
-    // corners and the sharpest wins.
+    // No "hold steady" wait and no "card must leave" gate — Pikacheck-style.
+    // As soon as a card is confirmed (vote passed) and the short time cooldown
+    // is past, we shoot a burst. The user is free to swap cards directly; each
+    // burst shot uses the freshest corners so a pivot during capture wins.
     if (busy.value || Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
-      phase.value = 'watching'
       return
     }
 
@@ -498,7 +496,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstCorners = null
     burstShots = []
     burstAwaiting = 0
-    lostTicks = 0
     quad.value = null
     ready.value = false
     phase.value = 'idle'
