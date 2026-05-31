@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session, joinedload
 from models.article import Article
 from models.cardmarket_order import CardmarketOrder
 from models.cardmarket_order_line import CardmarketOrderLine
-from services.cardmarket_pdf_parser import ParsedCardmarketPdf, normalize_card_number_token, normalize_pokemon_key
+from schemas.orders import OrderLineUpdate
+from services.cardmarket_pdf_parser import ParsedCardLine, ParsedCardmarketPdf, normalize_card_number_token, normalize_pokemon_key
 
 def _order_by_paid_at_desc_nulls_last() -> tuple:
     """
@@ -385,6 +386,81 @@ def _condition_matches(app_condition: str | None, line_cond: str | None) -> bool
     return line_cond.upper() == cm.upper()
 
 
+def _pokemon_key_display_label(pokemon_key: str | None) -> str:
+    """Turn normalized ``pokemon_key`` into a short human-readable label."""
+    if not pokemon_key:
+        return "—"
+    return " ".join(w.capitalize() for w in pokemon_key.split() if w)
+
+
+def _line_linkable_search_haystack(ln: CardmarketOrderLine, order: CardmarketOrder) -> str:
+    parts = [
+        order.external_order_id,
+        ln.pokemon_key or "",
+        ln.set_code or "",
+        ln.card_number or "",
+        ln.language_code or "",
+        ln.condition_label or "",
+        ln.raw_label or "",
+    ]
+    return " ".join(parts).lower()
+
+
+def list_linkable_order_lines(
+    db: Session,
+    user_id: int,
+    search: str | None = None,
+    *,
+    limit: int = 300,
+) -> list[dict[str, Any]]:
+    """
+    Purchase lines with remaining link slots (for manual article assignment).
+
+    @param db - Session.
+    @param user_id - Owner.
+    @param search - Optional space-separated filter tokens.
+    @param limit - Max rows returned (newest orders first).
+    @returns Serializable rows sorted by paid date desc.
+    """
+    tokens = _orders_search_tokens(search)
+    rows = (
+        db.query(CardmarketOrderLine, CardmarketOrder)
+        .join(CardmarketOrder, CardmarketOrder.id == CardmarketOrderLine.order_id)
+        .filter(CardmarketOrder.user_id == user_id)
+        .order_by(*_order_by_paid_at_desc_nulls_last(), CardmarketOrderLine.line_index.asc())
+        .limit(max(limit * 3, limit))
+        .all()
+    )
+    out: list[dict[str, Any]] = []
+    for ln, order in rows:
+        remaining = remaining_units(db, ln.id)
+        if remaining <= 0:
+            continue
+        if tokens:
+            hay = _line_linkable_search_haystack(ln, order)
+            if not all(t in hay for t in tokens):
+                continue
+        out.append(
+            {
+                "order_line_id": ln.id,
+                "order_id": order.id,
+                "external_order_id": order.external_order_id,
+                "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                "unit_price_eur": float(ln.unit_price_eur),
+                "remaining_units": remaining,
+                "pokemon_key": ln.pokemon_key,
+                "pokemon_label": _pokemon_key_display_label(ln.pokemon_key),
+                "set_code": ln.set_code,
+                "card_number": ln.card_number,
+                "language_code": ln.language_code,
+                "condition_label": ln.condition_label,
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def match_order_lines(
     db: Session,
     user_id: int,
@@ -540,5 +616,223 @@ def validate_order_line_owner(db: Session, user_id: int, order_line_id: int) -> 
         .first()
     )
     return row is not None
+
+
+def get_order_line_for_user(
+    db: Session,
+    user_id: int,
+    line_id: int,
+) -> CardmarketOrderLine | None:
+    """Load a purchase line if it belongs to the user."""
+    return (
+        db.query(CardmarketOrderLine)
+        .join(CardmarketOrder, CardmarketOrder.id == CardmarketOrderLine.order_id)
+        .filter(CardmarketOrderLine.id == line_id, CardmarketOrder.user_id == user_id)
+        .first()
+    )
+
+
+def _line_snapshot(ln: CardmarketOrderLine) -> dict[str, Any]:
+    """Serializable line fields for reimport diff UI."""
+    return {
+        "pokemon_key": ln.pokemon_key,
+        "card_number": ln.card_number,
+        "language_code": ln.language_code,
+        "condition_label": ln.condition_label,
+        "set_code": ln.set_code,
+        "variant_token": ln.variant_token,
+        "unit_price_eur": float(ln.unit_price_eur),
+        "quantity": int(ln.quantity),
+    }
+
+
+def _parsed_line_snapshot(pl: ParsedCardLine) -> dict[str, Any]:
+    return {
+        "pokemon_name": pl.pokemon_name_raw,
+        "pokemon_key": normalize_pokemon_key(pl.pokemon_name_raw),
+        "card_number": normalize_card_number_token(pl.card_number),
+        "language_code": pl.language_code.upper(),
+        "condition_label": pl.condition_label.upper(),
+        "set_code": pl.set_code.lower(),
+        "variant_token": pl.variant_token[:512],
+        "unit_price_eur": float(pl.unit_price_eur),
+        "quantity": int(pl.quantity),
+    }
+
+
+def _line_differs_from_parsed(ln: CardmarketOrderLine, pl: ParsedCardLine) -> bool:
+    snap = _parsed_line_snapshot(pl)
+    return (
+        (ln.pokemon_key or "") != snap["pokemon_key"]
+        or (ln.card_number or "") != snap["card_number"]
+        or (ln.language_code or "").upper() != snap["language_code"]
+        or (ln.condition_label or "").upper() != snap["condition_label"]
+        or (ln.set_code or "").lower() != snap["set_code"]
+        or (ln.variant_token or "") != snap["variant_token"]
+        or float(ln.unit_price_eur) != snap["unit_price_eur"]
+        or int(ln.quantity) != snap["quantity"]
+    )
+
+
+def _apply_parsed_line_to_row(ln: CardmarketOrderLine, pl: ParsedCardLine, *, update_raw_label: bool) -> None:
+    """Copy parsed PDF fields onto an existing order line row."""
+    ln.quantity = int(pl.quantity)
+    if update_raw_label:
+        ln.raw_label = pl.invoice_line_text
+    ln.pokemon_key = normalize_pokemon_key(pl.pokemon_name_raw)
+    ln.card_number = normalize_card_number_token(pl.card_number)
+    ln.language_code = pl.language_code.upper()[:16]
+    ln.condition_label = pl.condition_label.upper()[:128]
+    ln.set_code = pl.set_code.lower()[:64]
+    ln.variant_token = pl.variant_token[:512]
+    ln.unit_price_eur = pl.unit_price_eur
+
+
+def _apply_order_header_from_parsed(order: CardmarketOrder, parsed: ParsedCardmarketPdf, source_filename: str | None) -> None:
+    order.seller_username = parsed.seller_username
+    order.seller_display_name = parsed.seller_display_name
+    order.seller_country_code = parsed.seller_country_code
+    order.paid_at = parsed.paid_at
+    order.shipped_at = parsed.shipped_at
+    order.delivered_at = parsed.delivered_at
+    order.items_subtotal = parsed.items_subtotal
+    order.shipping_fee = parsed.shipping_fee
+    order.order_total = parsed.order_total
+    if source_filename:
+        order.source_filename = source_filename[:500]
+
+
+def update_order_line(
+    db: Session,
+    user_id: int,
+    line_id: int,
+    body: OrderLineUpdate,
+) -> CardmarketOrderLine:
+    """
+    Update structured fields on a purchase line (manual correction).
+
+    @raises ValueError - Line not found, or quantity below linked article count.
+    """
+    ln = get_order_line_for_user(db, user_id, line_id)
+    if ln is None:
+        raise ValueError("purchase_line_not_found")
+
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        return ln
+
+    if "quantity" in data:
+        linked = _linked_units_for_line(db, ln.id)
+        if int(data["quantity"]) < linked:
+            raise ValueError("quantity_below_linked_articles")
+
+    if "pokemon_name" in data:
+        ln.pokemon_key = normalize_pokemon_key(data.pop("pokemon_name"))
+    if "set_code" in data:
+        ln.set_code = (data.pop("set_code") or "").lower()[:64]
+    if "card_number" in data:
+        ln.card_number = normalize_card_number_token(data.pop("card_number"))
+    if "language_code" in data:
+        ln.language_code = (data.pop("language_code") or "").upper()[:16]
+    if "condition_label" in data:
+        ln.condition_label = (data.pop("condition_label") or "").upper()[:128]
+    if "unit_price_eur" in data:
+        ln.unit_price_eur = data.pop("unit_price_eur")
+    if "quantity" in data:
+        ln.quantity = int(data.pop("quantity"))
+
+    db.commit()
+    db.refresh(ln)
+    return ln
+
+
+def reimport_order_from_parsed(
+    db: Session,
+    user_id: int,
+    order_id: int,
+    parsed: ParsedCardmarketPdf,
+    source_filename: str | None,
+    confirm_linked_line_indexes: set[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Merge a re-uploaded PDF into an existing order by ``line_index``.
+
+    Lines without linked articles are updated when the PDF differs.
+    Lines with linked articles require their index in ``confirm_linked_line_indexes``.
+    Extra PDF rows append new lines; DB lines missing from the PDF are left unchanged.
+
+    @raises ValueError - Order not found, or PDF order id mismatch.
+    """
+    confirm = confirm_linked_line_indexes or set()
+    order = (
+        db.query(CardmarketOrder)
+        .options(joinedload(CardmarketOrder.lines))
+        .filter(CardmarketOrder.id == order_id, CardmarketOrder.user_id == user_id)
+        .first()
+    )
+    if order is None:
+        raise ValueError("order_not_found")
+    if parsed.external_order_id != order.external_order_id:
+        raise ValueError("pdf_order_id_mismatch")
+
+    lines_by_index = {int(ln.line_index): ln for ln in order.lines}
+    updated_indexes: list[int] = []
+    added_indexes: list[int] = []
+    pending_linked: list[dict[str, Any]] = []
+
+    for idx, pl in enumerate(parsed.lines):
+        existing = lines_by_index.get(idx)
+        if existing is None:
+            key = normalize_pokemon_key(pl.pokemon_name_raw)
+            new_line = CardmarketOrderLine(
+                order_id=order.id,
+                line_index=idx,
+                quantity=pl.quantity,
+                raw_label=pl.invoice_line_text,
+                pokemon_key=key,
+                card_number=normalize_card_number_token(pl.card_number),
+                language_code=pl.language_code.upper()[:16],
+                condition_label=pl.condition_label.upper()[:128],
+                set_code=pl.set_code.lower(),
+                variant_token=pl.variant_token[:512],
+                unit_price_eur=pl.unit_price_eur,
+            )
+            db.add(new_line)
+            lines_by_index[idx] = new_line
+            added_indexes.append(idx)
+            continue
+
+        if not _line_differs_from_parsed(existing, pl):
+            continue
+
+        linked = _linked_units_for_line(db, existing.id) > 0
+        if linked and idx not in confirm:
+            pending_linked.append(
+                {
+                    "line_index": idx,
+                    "line_id": existing.id,
+                    "linked_article_count": linked,
+                    "current": _line_snapshot(existing),
+                    "from_pdf": _parsed_line_snapshot(pl),
+                }
+            )
+            continue
+
+        _apply_parsed_line_to_row(existing, pl, update_raw_label=True)
+        updated_indexes.append(idx)
+
+    _apply_order_header_from_parsed(order, parsed, source_filename)
+    db.commit()
+    db.refresh(order)
+
+    detail = get_order_detail(db, user_id, order.id)
+    if detail is None:
+        raise ValueError("order_not_found")
+    detail["reimport_summary"] = {
+        "updated_line_indexes": updated_indexes,
+        "added_line_indexes": added_indexes,
+        "pending_linked": pending_linked,
+    }
+    return detail
 
 

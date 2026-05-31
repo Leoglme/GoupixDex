@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+import json
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,11 +14,16 @@ from core.database import get_db
 from core.deps import get_current_user
 from models.cardmarket_order import CardmarketOrder
 from models.user import User
+from schemas.orders import OrderLineUpdate
 from services.cardmarket_order_service import (
     get_order_detail,
+    get_order_line_for_user,
+    list_linkable_order_lines,
     list_orders_summary,
     match_order_lines,
     persist_order_from_parsed,
+    reimport_order_from_parsed,
+    update_order_line,
 )
 from services.cardmarket_pdf_parser import parse_cardmarket_pdf_bytes
 
@@ -56,6 +63,20 @@ def list_imported_external_ids(
     return [r[0] for r in rows]
 
 
+@router.get("/lines/linkable")
+def list_lines_linkable(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    search: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Purchase lines that still have free link slots (manual article assignment).
+
+    Optional ``search``: space-separated tokens matched on order id, card name, set, number, etc.
+    """
+    return list_linkable_order_lines(db, user.id, search=search)
+
+
 @router.get("/match")
 def match_lines(
     db: Annotated[Session, Depends(get_db)],
@@ -91,6 +112,94 @@ def get_order(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
     return row
+
+
+def _order_value_error_to_http(exc: ValueError) -> HTTPException:
+    code = str(exc)
+    if code == "purchase_line_not_found":
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase line not found.")
+    if code == "order_not_found":
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    if code == "quantity_below_linked_articles":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quantity cannot be lower than the number of linked articles on this line.",
+        )
+    if code == "pdf_order_id_mismatch":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This PDF belongs to a different Cardmarket order.",
+        )
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=code)
+
+
+@router.patch("/lines/{line_id}")
+def patch_order_line(
+    line_id: int,
+    body: OrderLineUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Update one purchase line (manual correction after import)."""
+    ln = get_order_line_for_user(db, user.id, line_id)
+    if ln is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase line not found.")
+    try:
+        update_order_line(db, user.id, line_id, body)
+    except ValueError as exc:
+        raise _order_value_error_to_http(exc) from exc
+    detail = get_order_detail(db, user.id, ln.order_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    return detail
+
+
+@router.post("/{order_id}/reimport")
+async def reimport_order_pdf(
+    order_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    file: Annotated[UploadFile, File()],
+    confirm_linked_line_indexes: str | None = Form(None),
+) -> dict[str, Any]:
+    """
+    Re-merge a Cardmarket PDF into an existing order (by line_index).
+
+    Optional form field ``confirm_linked_line_indexes``: JSON array of line indexes
+    to overwrite even when articles are linked.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file.")
+    try:
+        parsed = parse_cardmarket_pdf_bytes(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    confirm: set[int] = set()
+    if confirm_linked_line_indexes and confirm_linked_line_indexes.strip():
+        try:
+            parsed_indexes = json.loads(confirm_linked_line_indexes)
+            if not isinstance(parsed_indexes, list):
+                raise ValueError("expected JSON array")
+            confirm = {int(x) for x in parsed_indexes}
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid confirm_linked_line_indexes (expected JSON array of integers).",
+            ) from exc
+
+    try:
+        return reimport_order_from_parsed(
+            db,
+            user.id,
+            order_id,
+            parsed,
+            file.filename,
+            confirm_linked_line_indexes=confirm,
+        )
+    except ValueError as exc:
+        raise _order_value_error_to_http(exc) from exc
 
 
 @router.post("/import", status_code=status.HTTP_201_CREATED)

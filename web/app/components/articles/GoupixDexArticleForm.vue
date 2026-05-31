@@ -72,19 +72,47 @@
     </div>
 
     <UCard
-      v-if="mode === 'create' && (orderMatchLoading || orderMatchCandidates.length > 0)"
+      v-if="mode === 'create'"
       class="ring-default/60 border-primary/15 from-primary/5 bg-elevated/40 shadow-sm ring-1"
       :ui="{ body: 'p-4 sm:p-5 space-y-3' }"
     >
       <div class="flex items-center justify-between gap-2">
         <p class="text-highlighted text-sm font-medium">Achats Cardmarket</p>
-        <UIcon v-if="orderMatchLoading" name="i-lucide-loader-2" class="text-primary size-5 shrink-0 animate-spin" />
+        <div class="flex items-center gap-2">
+          <UIcon
+            v-if="orderMatchLoading || linkableLoading"
+            name="i-lucide-loader-2"
+            class="text-primary size-5 shrink-0 animate-spin"
+          />
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-lucide-refresh-cw"
+            :loading="linkableLoading"
+            aria-label="Actualiser les lignes d’achat"
+            @click="loadLinkableOrderLines"
+          />
+        </div>
       </div>
       <p v-if="!orderMatchLoading && orderMatchCandidates.length" class="text-muted text-xs leading-relaxed">
-        Lignes trouvées pour cette carte. Par défaut, la commande la plus ancienne avec stock (FIFO) est liée ; le prix
-        d’achat affiché correspond à votre achat le plus récent parmi les lignes encore disponibles.
+        Correspondance automatique : {{ orderMatchCandidates.length }} ligne(s). La plus ancienne avec stock (FIFO) est
+        sélectionnée par défaut ; le prix d’achat vient de votre achat le plus récent parmi ces lignes.
       </p>
-      <UFormField v-if="orderMatchCandidates.length" label="Lier à une ligne d’achat">
+      <p
+        v-else-if="!orderMatchLoading && !linkableLoading && linkableLines.length"
+        class="text-muted text-xs leading-relaxed"
+      >
+        Aucune ligne ne correspond exactement à la carte — choisissez manuellement une ligne d’achat ci-dessous.
+      </p>
+      <p
+        v-else-if="!orderMatchLoading && !linkableLoading && !linkableLines.length"
+        class="text-muted text-xs leading-relaxed"
+      >
+        Aucune ligne d’achat avec stock disponible. Importez une commande Cardmarket ou libérez du stock sur une ligne
+        existante.
+      </p>
+      <UFormField label="Lier à une ligne d’achat">
         <USelect
           v-model="selectedOrderLineIdStr"
           :items="orderLineSelectItems"
@@ -92,11 +120,12 @@
           label-key="label"
           class="w-full"
           placeholder="Choisir une ligne…"
+          :disabled="linkableLoading && !linkableLines.length"
         />
       </UFormField>
       <div v-if="orderMatchCandidates.length" class="space-y-1.5">
-        <p class="text-muted text-xs font-medium uppercase">Historique (date · prix)</p>
-        <ul class="text-muted max-h-40 space-y-1 overflow-y-auto text-xs">
+        <p class="text-muted text-xs font-medium uppercase">Correspondances auto (date · prix)</p>
+        <ul class="text-muted max-h-32 space-y-1 overflow-y-auto text-xs">
           <li v-for="c in orderMatchCandidates" :key="c.order_line_id" class="flex justify-between gap-2 tabular-nums">
             <span>{{ formatOrderMatchRow(c) }}</span>
           </li>
@@ -278,8 +307,12 @@ import type { ComputedRef, Ref } from 'vue'
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 import type { AppSettings } from '~/composables/useSettings'
 import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
-import type { OrderMatchResponse } from '~/types/Orders'
+import type { OrderLinkableLine, OrderMatchResponse } from '~/types/Orders'
 import { EBAY_GRADE_OPTIONS, EBAY_PROFESSIONAL_GRADER_OPTIONS } from '~/utils/ebayTradingCardGrading'
+import {
+  normalizeVintedTitleUppercaseRuns,
+  titleWithinVintedUppercaseRunRule as titlePassesVintedUppercaseRule,
+} from '~/utils/vintedTitle'
 
 const props = withDefaults(
   defineProps<{
@@ -305,8 +338,6 @@ const emit = defineEmits<{
 }>()
 
 const VINTED_TITLE_MAX_CHARS: number = 100
-/** Vinted rejects 4+ consecutive uppercase letters in the listing title (e.g. "VSTAR"); runs of at most 3 are OK. */
-const VINTED_TITLE_UPPERCASE_RUN_RE = /\p{Lu}{4,}/u
 
 const title: Ref<string> = ref('')
 const description: Ref<string> = ref('')
@@ -335,9 +366,12 @@ const clearEbayPublication: Ref<boolean> = ref(false)
 const purchasePrice: Ref<string> = ref('')
 const sellPrice: Ref<string> = ref('')
 const toast = useToast()
-const { matchOrderLines } = useOrders()
+const { matchOrderLines, listLinkableOrderLines } = useOrders()
 const orderMatchLoading: Ref<boolean> = ref(false)
 const orderMatchCandidates: Ref<OrderMatchResponse['candidates']> = ref([])
+const linkableLines: Ref<OrderLinkableLine[]> = ref([])
+const linkableLoading: Ref<boolean> = ref(false)
+const orderLineTouchedByUser: Ref<boolean> = ref(false)
 const selectedOrderLineId: Ref<number | null> = ref(null)
 const ocrLanguageCode: Ref<string> = ref('')
 let orderMatchDebounce: ReturnType<typeof setTimeout> | null = null
@@ -347,19 +381,22 @@ const selectedOrderLineIdStr: ComputedRef<string> = computed({
     return selectedOrderLineId.value != null ? String(selectedOrderLineId.value) : ''
   },
   set(v: string): void {
+    orderLineTouchedByUser.value = true
     selectedOrderLineId.value = v ? Number(v) : null
-    applyPricesFromSelectedLine()
+    void applyPricesFromSelectedLine()
   },
 })
 
-const orderLineSelectItems: ComputedRef<{ label: string; value: string }[]> = computed(() =>
-  orderMatchCandidates.value.map((c) => ({
-    value: String(c.order_line_id),
-    label: `${formatShortDate(c.paid_at)} · ${eurFmt.format(c.unit_price_eur)} · reste ${c.remaining_units} · #${
-      c.external_order_id
-    }`,
-  })),
-)
+const orderLineSelectItems: ComputedRef<{ label: string; value: string }[]> = computed(() => {
+  const items: { label: string; value: string }[] = [{ value: '', label: '— Aucune liaison —' }]
+  for (const ln of linkableLines.value) {
+    items.push({
+      value: String(ln.order_line_id),
+      label: formatLinkableLineLabel(ln),
+    })
+  }
+  return items
+})
 
 const eurFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -374,6 +411,23 @@ const eurFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 function formatOrderMatchRow(c: OrderMatchResponse['candidates'][number]): string {
   const d = formatShortDate(c.paid_at)
   return `${d} · ${eurFmt.format(c.unit_price_eur)} · commande #${c.external_order_id}`
+}
+
+/**
+ * Label for manual purchase-line picker options.
+ * @param ln - Linkable row from GET /orders/lines/linkable.
+ */
+function formatLinkableLineLabel(ln: OrderLinkableLine): string {
+  const card = [ln.pokemon_label, ln.set_code, ln.card_number].filter(Boolean).join(' · ')
+  const state = [ln.language_code, ln.condition_label].filter(Boolean).join('·')
+  const bits = [
+    `#${ln.external_order_id}`,
+    card || '—',
+    state,
+    eurFmt.format(ln.unit_price_eur),
+    `reste ${ln.remaining_units}`,
+  ].filter(Boolean)
+  return bits.join(' · ')
 }
 
 /**
@@ -401,7 +455,7 @@ async function applyPricesFromSelectedLine(): Promise<void> {
   if (id == null) {
     return
   }
-  const row = orderMatchCandidates.value.find((x) => x.order_line_id === id)
+  const row = linkableLines.value.find((x) => x.order_line_id === id)
   if (!row) {
     return
   }
@@ -458,6 +512,29 @@ function normalizeLangForOrderMatch(raw: string): string | undefined {
  * Fetch matching Cardmarket lines and prefill purchase / FIFO link when creating an article.
  * @returns {Promise<void>} Nothing.
  */
+/**
+ * Load all purchase lines with remaining stock (manual picker).
+ */
+async function loadLinkableOrderLines(): Promise<void> {
+  if (props.mode !== 'create') {
+    return
+  }
+  linkableLoading.value = true
+  try {
+    linkableLines.value = await listLinkableOrderLines()
+    if (selectedOrderLineId.value != null) {
+      const still = linkableLines.value.some((x) => x.order_line_id === selectedOrderLineId.value)
+      if (!still) {
+        selectedOrderLineId.value = null
+      }
+    }
+  } catch {
+    linkableLines.value = []
+  } finally {
+    linkableLoading.value = false
+  }
+}
+
 async function refreshOrderMatch(): Promise<void> {
   if (props.mode !== 'create') {
     return
@@ -467,7 +544,9 @@ async function refreshOrderMatch(): Promise<void> {
   const cn = cardNumber.value.trim()
   if (!pk || !sc || !cn) {
     orderMatchCandidates.value = []
-    selectedOrderLineId.value = null
+    if (!orderLineTouchedByUser.value) {
+      selectedOrderLineId.value = null
+    }
     return
   }
   orderMatchLoading.value = true
@@ -482,9 +561,10 @@ async function refreshOrderMatch(): Promise<void> {
       language_code: lang,
     })
     orderMatchCandidates.value = res.candidates
-    const fifo = res.fifo_order_line_id
-    selectedOrderLineId.value = fifo
-    if (res.suggested_purchase_price != null) {
+    if (!orderLineTouchedByUser.value) {
+      selectedOrderLineId.value = res.fifo_order_line_id
+    }
+    if (res.suggested_purchase_price != null && !orderLineTouchedByUser.value) {
       let margin = 20
       try {
         const s = await getSettings()
@@ -499,7 +579,9 @@ async function refreshOrderMatch(): Promise<void> {
     }
   } catch {
     orderMatchCandidates.value = []
-    selectedOrderLineId.value = null
+    if (!orderLineTouchedByUser.value) {
+      selectedOrderLineId.value = null
+    }
   } finally {
     orderMatchLoading.value = false
   }
@@ -544,25 +626,18 @@ function titleWithinVintedLimit(): boolean {
   return titleLenVinted.value <= VINTED_TITLE_MAX_CHARS
 }
 
-/**
- * Whether the title avoids 4+ consecutive uppercase Latin letters (Vinted rule).
- * @returns {boolean} True when compliant
- */
-function titleWithinVintedUppercaseRunRule(): boolean {
-  return !VINTED_TITLE_UPPERCASE_RUN_RE.test(title.value.trim())
-}
-
 const vintedTitleUppercaseRunInvalid = computed(
-  () => title.value.trim().length > 0 && !titleWithinVintedUppercaseRunRule(),
+  () => title.value.trim().length > 0 && !titlePassesVintedUppercaseRule(title.value),
 )
 
 /**
- * Assign title from an external source (market search / clipboard), clamped to Vinted max length.
+ * Assign title from an external source (scan, market, catalog), normalized for Vinted rules.
  * @param raw - Raw title text
  * @returns {void} Nothing
  */
 function assignTitleFromExternal(raw: string): void {
-  title.value = raw.trim().slice(0, VINTED_TITLE_MAX_CHARS)
+  const normalized = normalizeVintedTitleUppercaseRuns(raw.trim())
+  title.value = normalized.slice(0, VINTED_TITLE_MAX_CHARS)
 }
 
 const titleFieldDescription = computed(() => {
@@ -577,6 +652,9 @@ onMounted(async () => {
     svcSettings.value = await getSettings()
   } catch {
     svcSettings.value = null
+  }
+  if (props.mode === 'create') {
+    await loadLinkableOrderLines()
   }
 })
 
@@ -924,7 +1002,7 @@ function buildCreateFormData(): FormData {
   if (!titleWithinVintedLimit()) {
     throw new Error('ARTICLE_TITLE_TOO_LONG')
   }
-  if (!titleWithinVintedUppercaseRunRule()) {
+  if (!titlePassesVintedUppercaseRule(title.value)) {
     throw new Error('ARTICLE_TITLE_VINTED_UPPERCASE')
   }
   const fd = new FormData()
@@ -1014,7 +1092,7 @@ function submit() {
     })
     return
   }
-  if (!titleWithinVintedUppercaseRunRule()) {
+  if (!titlePassesVintedUppercaseRule(title.value)) {
     toast.add({
       title: 'Titre Vinted',
       description:

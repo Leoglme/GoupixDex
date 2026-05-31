@@ -69,6 +69,8 @@ export interface OrderDetail {
   created_at: string
   sold_articles_count: number
   lines: OrderDetailLine[]
+  /** Present after POST /orders/:id/reimport. */
+  reimport_summary?: OrderReimportSummary
 }
 
 /**
@@ -96,6 +98,63 @@ export interface OrdersSyncEvent {
   totals?: { discovered?: number; imported?: number; skipped?: number; failed?: number }
   /** Final summary on `done`. */
   summary?: { discovered: number; imported: number; skipped: number; failed: number }
+}
+
+/**
+ * Line fields for reimport diff display.
+ */
+export interface OrderReimportLineSnapshot {
+  pokemon_key?: string | null
+  pokemon_name?: string | null
+  card_number?: string | null
+  language_code?: string | null
+  condition_label?: string | null
+  set_code?: string | null
+  variant_token?: string | null
+  unit_price_eur: number
+  quantity: number
+}
+
+export interface OrderReimportLineDiff {
+  line_index: number
+  line_id: number
+  linked_article_count: number
+  current: OrderReimportLineSnapshot
+  from_pdf: OrderReimportLineSnapshot
+}
+
+export interface OrderReimportSummary {
+  updated_line_indexes: number[]
+  added_line_indexes: number[]
+  pending_linked: OrderReimportLineDiff[]
+}
+
+export interface OrderLineUpdateBody {
+  pokemon_name?: string
+  set_code?: string
+  card_number?: string
+  language_code?: string
+  condition_label?: string
+  unit_price_eur?: number
+  quantity?: number
+}
+
+/**
+ * Row from GET /orders/lines/linkable (manual line picker).
+ */
+export interface OrderLinkableLine {
+  order_line_id: number
+  order_id: number
+  external_order_id: string
+  paid_at: string | null
+  unit_price_eur: number
+  remaining_units: number
+  pokemon_key: string | null
+  pokemon_label: string
+  set_code: string | null
+  card_number: string | null
+  language_code: string | null
+  condition_label: string | null
 }
 
 /**

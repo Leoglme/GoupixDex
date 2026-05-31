@@ -5,6 +5,26 @@
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #right>
+          <div v-if="order" class="flex flex-wrap items-center gap-2">
+            <input
+              ref="reimportInputRef"
+              type="file"
+              accept="application/pdf"
+              class="hidden"
+              @change="onReimportFileSelected"
+            />
+            <UButton
+              color="neutral"
+              variant="soft"
+              icon="i-lucide-file-input"
+              :loading="reimporting"
+              @click="openReimportPicker"
+            >
+              Réimporter le PDF
+            </UButton>
+          </div>
+        </template>
       </UDashboardNavbar>
     </template>
 
@@ -160,12 +180,15 @@
           <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-0 sm:p-0' }">
             <div class="border-default border-b px-4 py-3 sm:px-5">
               <p class="text-highlighted text-sm font-medium">Lignes d’achat</p>
-              <p class="text-muted text-xs">Articles liés à vos fiches GoupixDex et statut de vente.</p>
+              <p class="text-muted text-xs">
+                Cliquez sur le crayon pour corriger une ligne, ou réimportez le PDF pour fusionner les changements.
+              </p>
             </div>
             <div class="overflow-x-auto">
               <table class="min-w-full border-separate border-spacing-0 text-sm">
                 <thead class="bg-elevated/60 text-muted text-left text-xs uppercase">
                   <tr>
+                    <th class="border-default w-10 border-b px-4 py-2 font-medium" />
                     <th class="border-default border-b px-4 py-2 font-medium">Qté</th>
                     <th class="border-default border-b px-4 py-2 font-medium">Carte</th>
                     <th class="border-default border-b px-4 py-2 font-medium">Set</th>
@@ -178,6 +201,16 @@
                 </thead>
                 <tbody>
                   <tr v-for="ln in order.lines" :key="ln.id" class="border-default hover:bg-elevated/40 border-t">
+                    <td class="border-default border-b px-2 py-3 align-middle">
+                      <UButton
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        icon="i-lucide-pencil"
+                        aria-label="Modifier la ligne"
+                        @click="openEditLine(ln)"
+                      />
+                    </td>
                     <td class="border-default border-b px-4 py-3 align-middle tabular-nums">{{ ln.quantity }}</td>
                     <td class="text-highlighted border-default border-b px-4 py-3 align-middle font-medium">
                       {{ formatPokemonLabel(ln) }}
@@ -222,22 +255,47 @@
       </div>
     </template>
   </UDashboardPanel>
+
+  <GoupixDexOrderLineEditModal
+    v-model:open="editOpen"
+    :line="editLine"
+    :pokemon-label="editLine ? formatPokemonLabel(editLine) : ''"
+    :submitting="editSubmitting"
+    @submit="onEditSubmit"
+  />
+
+  <GoupixDexOrderReimportLinkedModal
+    v-model:open="reimportConfirmOpen"
+    :pending="reimportPending"
+    :submitting="reimporting"
+    @confirm="onReimportConfirmLinked"
+    @ignore="onReimportIgnoreLinked"
+  />
 </template>
 
 <script setup lang="ts">
+import type { OrderLineEditPayload } from '~/components/orders/GoupixDexOrderLineEditModal.vue'
 import type { ComputedRef, Ref } from 'vue'
-import type { OrderDetail, OrderDetailLine } from '~/types/Orders'
+import type { OrderDetail, OrderDetailLine, OrderReimportLineDiff } from '~/types/Orders'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
 definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
-const { getOrder } = useOrders()
+const { getOrder, updateOrderLine, reimportOrderPdf } = useOrders()
 const toast = useToast()
 
 const order: Ref<OrderDetail | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
+const editOpen: Ref<boolean> = ref(false)
+const editLine: Ref<OrderDetailLine | null> = ref(null)
+const editSubmitting: Ref<boolean> = ref(false)
+const reimporting: Ref<boolean> = ref(false)
+const reimportConfirmOpen: Ref<boolean> = ref(false)
+const reimportPending: Ref<OrderReimportLineDiff[]> = ref([])
+const reimportInputRef: Ref<HTMLInputElement | null> = ref(null)
+const pendingReimportFile: Ref<File | null> = ref(null)
 
 const id: ComputedRef<number> = computed(() => Number(route.params.id))
 
@@ -282,17 +340,122 @@ function formatWhen(iso: string | null): string {
 }
 
 /**
- * Derive a readable Pokémon label from structured line fields.
+ * Human-readable label from normalized pokemon_key or raw PDF line.
  * @param ln - Purchase line.
- * @returns Title-case-ish card label.
+ * @returns Display name.
  */
 function formatPokemonLabel(ln: OrderDetailLine): string {
+  if (ln.pokemon_key) {
+    return ln.pokemon_key
+      .split(' ')
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : ''))
+      .join(' ')
+  }
   const raw = ln.raw_label || ''
   const first = raw.split(/\s+\d+(?:\/\d+)?\s+[A-Z]{2}\s+/)[0]
   if (first && /^\d+\s/.test(first.trim())) {
-    return first.replace(/^\d+\s+/, '').trim() || ln.pokemon_key || raw
+    return first.replace(/^\d+\s+/, '').trim() || raw
   }
-  return ln.pokemon_key || raw.slice(0, 80) || '—'
+  return raw.slice(0, 80) || '—'
+}
+
+function openEditLine(ln: OrderDetailLine): void {
+  editLine.value = ln
+  editOpen.value = true
+}
+
+async function onEditSubmit(payload: OrderLineEditPayload): Promise<void> {
+  if (!editLine.value) {
+    return
+  }
+  editSubmitting.value = true
+  try {
+    order.value = await updateOrderLine(editLine.value.id, {
+      pokemon_name: payload.pokemon_name,
+      set_code: payload.set_code,
+      card_number: payload.card_number,
+      language_code: payload.language_code,
+      condition_label: payload.condition_label,
+      unit_price_eur: payload.unit_price_eur,
+      quantity: payload.quantity,
+    })
+    editOpen.value = false
+    toast.add({ title: 'Ligne mise à jour', color: 'success' })
+  } catch (e) {
+    toast.add({ title: 'Échec de la mise à jour', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
+function openReimportPicker(): void {
+  reimportInputRef.value?.click()
+}
+
+function applyOrderFromReimport(detail: OrderDetail): void {
+  const summary = detail.reimport_summary
+  const { reimport_summary: _drop, ...rest } = detail
+  order.value = rest as OrderDetail
+
+  if (!summary) {
+    return
+  }
+  const updated = summary.updated_line_indexes.length + summary.added_line_indexes.length
+  if (updated > 0) {
+    toast.add({
+      title: 'PDF fusionné',
+      description: `${updated} ligne(s) mise(s) à jour.`,
+      color: 'success',
+    })
+  }
+}
+
+async function runReimport(file: File, confirmIndexes: number[] = []): Promise<void> {
+  reimporting.value = true
+  try {
+    const detail = await reimportOrderPdf(id.value, file, confirmIndexes)
+    applyOrderFromReimport(detail)
+    const pending = detail.reimport_summary?.pending_linked ?? []
+    if (pending.length > 0) {
+      reimportPending.value = pending
+      pendingReimportFile.value = file
+      reimportConfirmOpen.value = true
+    } else if ((detail.reimport_summary?.updated_line_indexes.length ?? 0) === 0 && confirmIndexes.length === 0) {
+      toast.add({ title: 'Aucun changement détecté dans le PDF', color: 'neutral' })
+    }
+  } catch (e) {
+    toast.add({ title: 'Réimport échoué', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    reimporting.value = false
+  }
+}
+
+async function onReimportFileSelected(ev: Event): Promise<void> {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) {
+    return
+  }
+  await runReimport(file)
+}
+
+function onReimportIgnoreLinked(): void {
+  pendingReimportFile.value = null
+  reimportPending.value = []
+}
+
+async function onReimportConfirmLinked(indexes: number[]): Promise<void> {
+  const file = pendingReimportFile.value
+  if (!file || indexes.length === 0) {
+    reimportConfirmOpen.value = false
+    pendingReimportFile.value = null
+    return
+  }
+  await runReimport(file, indexes)
+  reimportConfirmOpen.value = false
+  pendingReimportFile.value = null
+  reimportPending.value = []
 }
 
 async function load(): Promise<void> {

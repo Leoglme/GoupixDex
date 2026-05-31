@@ -1,4 +1,10 @@
-import type { OrderDetail, OrderListRow, OrderMatchResponse } from '~/types/Orders'
+import type {
+  OrderDetail,
+  OrderLineUpdateBody,
+  OrderLinkableLine,
+  OrderListRow,
+  OrderMatchResponse,
+} from '~/types/Orders'
 
 /**
  * Cardmarket orders API (import PDF, list, detail, match).
@@ -48,6 +54,19 @@ export function useOrders() {
   }
 
   /**
+   * GET `/orders/lines/linkable` — lines with remaining stock for manual linking.
+   *
+   * @param params.search - Optional filter tokens.
+   * @returns Rows available for manual article assignment.
+   */
+  async function listLinkableOrderLines(params?: { search?: string }): Promise<OrderLinkableLine[]> {
+    const { data } = await $api.get<OrderLinkableLine[]>('/orders/lines/linkable', {
+      params: params?.search?.trim() ? { search: params.search.trim() } : {},
+    })
+    return data
+  }
+
+  /**
    * GET `/orders/match` — purchase lines matching article fields.
    *
    * @param params - Card identity fields (subset optional).
@@ -64,5 +83,49 @@ export function useOrders() {
     return data
   }
 
-  return { listOrders, getOrder, importOrderPdf, matchOrderLines }
+  /**
+   * PATCH `/orders/lines/:id` — correct a purchase line after a bad import.
+   *
+   * @param lineId - Purchase line primary key.
+   * @param body - Fields to update (all optional).
+   * @returns Refreshed order detail.
+   */
+  async function updateOrderLine(lineId: number, body: OrderLineUpdateBody): Promise<OrderDetail> {
+    const { data } = await $api.patch<OrderDetail>(`/orders/lines/${lineId}`, body)
+    return data
+  }
+
+  /**
+   * POST `/orders/:id/reimport` — merge PDF rows by line_index into an existing order.
+   *
+   * @param orderId - Internal order id.
+   * @param file - Cardmarket purchase PDF.
+   * @param confirmLinkedLineIndexes - Line indexes to overwrite when articles are linked.
+   * @returns Order detail plus optional ``reimport_summary``.
+   */
+  async function reimportOrderPdf(
+    orderId: number,
+    file: File,
+    confirmLinkedLineIndexes: number[] = [],
+  ): Promise<OrderDetail> {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (confirmLinkedLineIndexes.length > 0) {
+      fd.append('confirm_linked_line_indexes', JSON.stringify(confirmLinkedLineIndexes))
+    }
+    const { data } = await $api.post<OrderDetail>(`/orders/${orderId}/reimport`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  }
+
+  return {
+    listOrders,
+    getOrder,
+    importOrderPdf,
+    listLinkableOrderLines,
+    matchOrderLines,
+    updateOrderLine,
+    reimportOrderPdf,
+  }
 }

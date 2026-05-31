@@ -127,7 +127,8 @@ _RE_MONEY_EUR = re.compile(r"([\d,]+)\s*EUR", re.IGNORECASE)
 _RE_LINE_UNIT_EUR = re.compile(r"([\d]+(?:[.,]\d{1,2})?)\s*EUR\s*$", re.IGNORECASE)
 _RE_DATETIME_TOKEN = re.compile(r"(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?")
 
-# Cardmarket invoice lines: quantity, name…, card #, LANG, condition, set, variant [, optional seller note…].
+# Cardmarket invoice columns after quantity:
+# name… | card # | LANG | condition | set | variant | [optional seller note…] | price
 _KNOWN_CM_LANG_CODES: frozenset[str] = frozenset(
     {
         "JP",
@@ -193,8 +194,45 @@ _KNOWN_CM_LANG_CODES: frozenset[str] = frozenset(
         "AD",
         "SM",
         "VA",
-        # Avoid two-letter words from English remarks (e.g. "in the back") matching as codes.
-        # Use full locale tokens in PDF if India is ever needed, or extend parser.
+    }
+)
+
+_KNOWN_CM_CONDITIONS: frozenset[str] = frozenset(
+    {
+        "M",
+        "NM",
+        "EX",
+        "GD",
+        "LP",
+        "PL",
+        "PO",
+        "MP",
+        "HP",
+        "DMG",
+        "PR",
+    }
+)
+
+_KNOWN_CM_VARIANTS: frozenset[str] = frozenset(
+    {
+        "ART",
+        "UR",
+        "CHR",
+        "HIR",
+        "AR",
+        "SIR",
+        "FA",
+        "RH",
+        "V",
+        "VMAX",
+        "VSTAR",
+        "EX",
+        "GX",
+        "LV",
+        "LVX",
+        "PROMO",
+        "HOLO",
+        "REV",
     }
 )
 
@@ -211,51 +249,92 @@ def _looks_like_card_number_token(tok: str) -> bool:
     return bool(re.match(r"^[A-Za-z0-9][A-Za-z0-9\-/\.]*$", tok))
 
 
+def _is_uppercase_lang_token(tok: str) -> bool:
+    """Cardmarket language column is always an uppercase two-letter code."""
+    return len(tok) == 2 and tok.isupper() and tok in _KNOWN_CM_LANG_CODES
+
+
+def _looks_like_set_code(tok: str) -> bool:
+    """Set/expansion code (``sv9a``, ``m2a``, ``s8b``, ``m1L``…)."""
+    if not tok or len(tok) > 16:
+        return False
+    return bool(re.match(r"^[A-Za-z0-9][A-Za-z0-9\-/\.]*$", tok))
+
+
+def _looks_like_variant_token(tok: str) -> bool:
+    """Card type / rarity column (``ART``, ``UR``, ``CHR``…)."""
+    if not tok or len(tok) > 12:
+        return False
+    upper = tok.upper()
+    if upper in _KNOWN_CM_VARIANTS:
+        return True
+    return bool(re.match(r"^[A-Z0-9]{2,8}$", upper))
+
+
+def _find_fixed_column_block_idx(rest: list[str]) -> int | None:
+    """
+    Locate the card-number index of the fixed Cardmarket column block.
+
+    Columns: card # | LANG | condition | set | variant
+    When several candidates match, keep the last one (closest to the seller note).
+    """
+    last_match: int | None = None
+    for i in range(2, len(rest) - 4):
+        if not _looks_like_card_number_token(rest[i]):
+            continue
+        if not _is_uppercase_lang_token(rest[i + 1]):
+            continue
+        if rest[i + 2].upper() not in _KNOWN_CM_CONDITIONS:
+            continue
+        if not _looks_like_set_code(rest[i + 3]):
+            continue
+        if not _looks_like_variant_token(rest[i + 4]):
+            continue
+        last_match = i
+    return last_match
+
+
 def _parse_invoice_rest_tokens(
     rest: list[str],
     qty: int,
     unit_price: Decimal,
     invoice_line_text: str,
-) -> ParsedCardLine | None:
+) -> ParsedCardLine:
     """
-    Parse tokens between quantity and ``… EUR`` using the language column as anchor.
-
-    Handles optional free-text seller notes after the variant (e.g. condition remarks).
+    Parse tokens between quantity and ``… EUR`` using Cardmarket fixed columns.
 
     @param rest - Tokens including leading quantity.
     @param qty - Parsed quantity (must match rest[0]).
     @param unit_price - Parsed unit price.
     @param invoice_line_text - Original PDF line for storage.
-    @returns Parsed line or None if this strategy does not apply.
+    @returns Parsed line.
+    @raises ValueError - When the fixed column block cannot be located.
     """
     if len(rest) < 7:
-        return None
-    lang_idx: int | None = None
-    for i in range(2, len(rest) - 3):
-        upper = rest[i].upper()
-        if upper not in _KNOWN_CM_LANG_CODES:
-            continue
-        if not _looks_like_card_number_token(rest[i - 1]):
-            continue
-        lang_idx = i
-        break
-    if lang_idx is None:
-        return None
-    card_no = rest[lang_idx - 1]
-    name_tokens = rest[1 : lang_idx - 1]
+        raise ValueError(f"Could not parse Cardmarket line (too few tokens): {invoice_line_text!r}")
+
+    block_idx = _find_fixed_column_block_idx(rest)
+    if block_idx is None:
+        raise ValueError(f"Could not parse Cardmarket line (fixed columns not found): {invoice_line_text!r}")
+
+    name_tokens = rest[1:block_idx]
     if not name_tokens:
-        return None
+        raise ValueError(f"Could not parse Cardmarket line (empty card name): {invoice_line_text!r}")
+
     pokemon_raw = " ".join(name_tokens)
-    condition_label = rest[lang_idx + 1]
-    set_code = rest[lang_idx + 2]
-    variant_base = rest[lang_idx + 3]
-    tail = rest[lang_idx + 4 :]
-    variant_token = variant_base if not tail else f"{variant_base} {' '.join(tail)}"
+    card_no = rest[block_idx]
+    lang = rest[block_idx + 1]
+    condition_label = rest[block_idx + 2]
+    set_code = rest[block_idx + 3]
+    variant_base = rest[block_idx + 4]
+    seller_note_tokens = rest[block_idx + 5 :]
+    variant_token = variant_base if not seller_note_tokens else f"{variant_base} {' '.join(seller_note_tokens)}"
+
     return ParsedCardLine(
         quantity=qty,
         pokemon_name_raw=pokemon_raw,
         card_number=card_no,
-        language_code=rest[lang_idx].upper(),
+        language_code=lang.upper(),
         condition_label=condition_label,
         set_code=set_code,
         variant_token=variant_token,
@@ -379,32 +458,7 @@ def _parse_lines_section(body: str) -> list[ParsedCardLine]:
         if not qty_s.isdigit():
             continue
         qty = int(qty_s)
-        anchored = _parse_invoice_rest_tokens(rest, qty, unit_price, ln)
-        if anchored is not None:
-            out.append(anchored)
-            continue
-        variant = rest[-1]
-        set_code = rest[-2]
-        condition_label = rest[-3]
-        lang = rest[-4]
-        card_no = rest[-5]
-        name_tokens = rest[1:-5]
-        if not name_tokens:
-            continue
-        pokemon_raw = " ".join(name_tokens)
-        out.append(
-            ParsedCardLine(
-                quantity=qty,
-                pokemon_name_raw=pokemon_raw,
-                card_number=card_no,
-                language_code=lang,
-                condition_label=condition_label,
-                set_code=set_code,
-                variant_token=variant,
-                unit_price_eur=unit_price,
-                invoice_line_text=ln,
-            )
-        )
+        out.append(_parse_invoice_rest_tokens(rest, qty, unit_price, ln))
     return out
 
 
