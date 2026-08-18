@@ -25,16 +25,19 @@ _CARD_FORM_SUFFIX_RE = re.compile(
     r"\s+(?:ex|v|vmax|vstar|gx|tag\s*team|tt|break|lv\.?\s*x|lvx|mega)\s*$",
     re.IGNORECASE,
 )
+# ``Team Rocket's Murkrow`` → ``Murkrow``. Requires a space after ``'s`` so ``Farfetch'd`` stays intact.
+_TRAINER_POSSESSIVE_RE = re.compile(r"^.+['’]s\s+", re.IGNORECASE)
 
 
 def english_tcg_display_name_to_species_label(english: str) -> str:
-    """Strip trailing stage / form markers (``ex``, ``V``, …) for ``pokemon-species`` lookup."""
+    """Strip trainer possessives and trailing stage / form markers for ``pokemon-species`` lookup."""
     s = english.strip()
     prev = None
     while s != prev:
         prev = s
         s = _CARD_FORM_SUFFIX_RE.sub("", s).strip()
-    return s
+    stripped_trainer = _TRAINER_POSSESSIVE_RE.sub("", s).strip()
+    return stripped_trainer or s
 
 
 class SpeciesLocaleNamesService:

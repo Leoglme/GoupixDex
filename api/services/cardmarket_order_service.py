@@ -475,10 +475,10 @@ def match_order_lines(
 
     @param db - Session.
     @param user_id - Owner.
-    @param pokemon_name - Pokémon name(s): pipe ``|`` separates variants (FR / EN); ``/`` splits
-        slash labels. Matched against invoice ``pokemon_key`` (any variant).
+    @param pokemon_name - Pipe-separated FR/EN/printed names; ignored when set+number are both set
+        (invoice names often differ, e.g. Cornebre vs OCR Corboss).
     @param set_code - Set code (case-insensitive).
-    @param card_number - Card number / fraction.
+    @param card_number - Card number / fraction (matched on the collector index, e.g. ``106``).
     @param app_condition - GoupixDex condition label.
     @param language_code - Optional ISO language (e.g. JP).
     @returns Candidate lines, fifo id, suggested purchase from latest buy with stock.
@@ -487,18 +487,19 @@ def match_order_lines(
     num = normalize_card_number_token(card_number or "")
     set_c = (set_code or "").strip().lower()
     lang = _normalize_cardmarket_language_for_match(language_code)
+    identity_by_set_and_number = bool(set_c and num)
 
     q = (
         db.query(CardmarketOrderLine)
         .join(CardmarketOrder, CardmarketOrder.id == CardmarketOrderLine.order_id)
         .filter(CardmarketOrder.user_id == user_id)
     )
-    if keys:
-        q = q.filter(CardmarketOrderLine.pokemon_key.in_(keys))
     if set_c:
         q = q.filter(func.lower(CardmarketOrderLine.set_code) == set_c)
     if num:
         q = q.filter(CardmarketOrderLine.card_number == num)
+    if keys and not identity_by_set_and_number:
+        q = q.filter(CardmarketOrderLine.pokemon_key.in_(keys))
     if lang:
         q = q.filter(CardmarketOrderLine.language_code == lang)
 
