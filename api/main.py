@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import get_settings
 from routes import access_requests as access_requests_routes
@@ -69,14 +70,45 @@ app.add_middleware(
 )
 
 
+def _with_cors(request: Request, response: JSONResponse) -> JSONResponse:
+    """Echo CORS on error responses so desktop (Tauri) can read the JSON body."""
+    if response.headers.get("Access-Control-Allow-Origin"):
+        return response
+    origin = request.headers.get("origin")
+    if not origin:
+        return response
+    if _origins != ["*"] and origin not in _origins:
+        return response
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    vary = response.headers.get("Vary", "")
+    if "Origin" not in vary:
+        response.headers["Vary"] = "Origin" if not vary else f"{vary}, Origin"
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(
+    request: Request,
+    exc: StarletteHTTPException,
+) -> JSONResponse:
+    return _with_cors(
+        request,
+        JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}),
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "body": exc.body},
+    return _with_cors(
+        request,
+        JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors(), "body": exc.body},
+        ),
     )
 
 
@@ -85,14 +117,19 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
+    if isinstance(exc, StarletteHTTPException):
+        return await http_exception_handler(request, exc)
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": str(exc) or "Internal Server Error",
-            "error": "internal_server_error",
-            "path": request.url.path,
-        },
+    return _with_cors(
+        request,
+        JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": str(exc) or "Internal Server Error",
+                "error": "internal_server_error",
+                "path": request.url.path,
+            },
+        ),
     )
 
 

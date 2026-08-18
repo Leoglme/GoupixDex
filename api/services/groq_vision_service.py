@@ -21,8 +21,10 @@ from services.species_locale_names_service import fetch_species_locale_names
 
 DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 ENV_API_KEY = "GROQ_API_KEY"
+ENV_MODEL = "GROQ_VISION_MODEL"
 ENV_POKE_WALLET_KEY = "POKE_WALLET_API_KEY"
-DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+# Llama 4 Scout was shut down on Groq on 2026-07-17. Qwen 3.6 27B is the current vision model.
+DEFAULT_MODEL = "qwen/qwen3.6-27b"
 MAX_BASE64_IMAGE_BYTES = 4 * 1024 * 1024
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 SET_CODE_CROP_MAX_COMPLETION_TOKENS = 64
@@ -168,7 +170,7 @@ class GroqVisionService:
             raise RuntimeError(msg)
 
         opts = options or {}
-        model = opts.get("model", DEFAULT_MODEL)
+        model = self._resolve_model_id(opts)
         temperature = float(opts.get("temperature", 0))
         include_raw = opts.get("include_raw_assistant_json") is True
         hint = self._normalize_user_hint(opts.get("user_hint"))
@@ -189,6 +191,7 @@ class GroqVisionService:
                 },
             ],
         }
+        body.update(self._chat_completion_extras(model))
         url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
         headers = {
             "Content-Type": "application/json",
@@ -457,7 +460,7 @@ class GroqVisionService:
             if len(data_url.encode("utf-8")) > MAX_BASE64_IMAGE_BYTES:
                 return None
             opts = options or {}
-            model = opts.get("model", DEFAULT_MODEL)
+            model = self._resolve_model_id(opts)
             hint = self._normalize_user_hint(opts.get("user_hint"))
             crop_user_text = (
                 "Transcribe setCode from the first dark box on the bottom-left collector row, "
@@ -499,6 +502,7 @@ class GroqVisionService:
                     },
                 ],
             }
+            body.update(self._chat_completion_extras(model))
             url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
             headers = {
                 "Content-Type": "application/json",
@@ -543,6 +547,27 @@ class GroqVisionService:
         out = io.BytesIO()
         cropped.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
         return out.getvalue()
+
+    @staticmethod
+    def _resolve_model_id(options: GroqVisionExtractOptions | None) -> str:
+        """Prefer an explicit option, then ``GROQ_VISION_MODEL``, then the current Groq vision default."""
+        opts = options or {}
+        from_opts = opts.get("model")
+        if isinstance(from_opts, str):
+            trimmed_opts = from_opts.strip()
+            if trimmed_opts:
+                return trimmed_opts
+        from_env = os.environ.get(ENV_MODEL, "").strip()
+        if from_env:
+            return from_env
+        return DEFAULT_MODEL
+
+    @staticmethod
+    def _chat_completion_extras(model: str) -> dict[str, Any]:
+        """Qwen 3.6 thinks by default; disable it so OCR stays JSON-only and within token budgets."""
+        if model.startswith("qwen/"):
+            return {"reasoning_effort": "none"}
+        return {}
 
     @staticmethod
     def _normalize_set_code_candidate(value: str | None) -> str | None:
