@@ -1,0 +1,15 @@
+---
+description: Toujours push main et attendre le déploiement
+alwaysApply: true
+---
+
+# Déploiement
+
+Après un correctif ou une feature prêt à livrer :
+
+- Commit sur `main` (ne pas demander confirmation pour push).
+- `git push origin main` tout de suite.
+- Attendre la fin réelle des workflows GitHub concernés (`Deploy API` si `api/**`, `Deploy web` si `web/**`).
+- Ne confirmer à Léo que lorsque le deploy est **success**. Si ça échoue, le dire avec le lien du run.
+
+Ne pas proposer « tu veux que je push ? ».
