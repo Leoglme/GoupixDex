@@ -41,6 +41,7 @@ export function useScanCard() {
     }
     const { data } = await $api.post<ScanCardResponse>('/scan-card', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180_000,
     })
     return data
   }

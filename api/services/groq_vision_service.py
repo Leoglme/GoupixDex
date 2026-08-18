@@ -5,8 +5,11 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -28,6 +31,13 @@ DEFAULT_MODEL = "qwen/qwen3.6-27b"
 MAX_BASE64_IMAGE_BYTES = 4 * 1024 * 1024
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 SET_CODE_CROP_MAX_COMPLETION_TOKENS = 64
+# Qwen 3.6 free tier is 8k TPM; vision tokens scale with tiles (~(edge/32)²). Scout had 30k TPM.
+VISION_MAX_LONG_EDGE_PX = 1024
+VISION_JPEG_QUALITY = 78
+_MAX_429_RETRIES = 4
+_RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)\s*s", re.IGNORECASE)
+_GROQ_HTTP_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 RESIZE_LONG_EDGE_PX: tuple[int, ...] = (2048, 1600, 1280, 1024, 800, 640)
 JPEG_QUALITY_STEPS: tuple[int, ...] = (88, 78, 68, 58, 48)
@@ -101,19 +111,14 @@ class GroqVisionService:
 
         Args:
             data: Raw image file bytes (JPEG, PNG, or WebP).
-            mime_type: MIME type for the data URL.
+            mime_type: Unused after JPEG re-encode (kept for call-site compatibility).
             options: Optional model override, temperature, and debug flags.
 
         Raises:
             RuntimeError: When the image cannot be shrunk under Groq limits or the API response is invalid.
         """
-        payload_bytes = data
-        payload_mime: GroqVisionImageMimeType = mime_type
-        initial_b64 = base64.b64encode(payload_bytes).decode("ascii")
-        initial_data_url = f"data:{payload_mime};base64,{initial_b64}"
-        if len(initial_data_url.encode("utf-8")) > MAX_BASE64_IMAGE_BYTES:
-            payload_bytes = self._shrink_image_bytes_for_groq_limit(data)
-            payload_mime = "image/jpeg"
+        payload_bytes = self._prepare_image_bytes_for_vision(data)
+        payload_mime: GroqVisionImageMimeType = "image/jpeg"
         b64 = base64.b64encode(payload_bytes).decode("ascii")
         data_url = f"data:{payload_mime};base64,{b64}"
         if len(data_url.encode("utf-8")) > MAX_BASE64_IMAGE_BYTES:
@@ -124,23 +129,15 @@ class GroqVisionService:
             raise RuntimeError(msg)
 
         collector = self.extract_card_collector_from_data_url(data_url, options)
+        if (collector.get("set_code") or "").strip():
+            return collector
         refined_raw = self._extract_set_code_from_bottom_left_crop(
             payload_bytes,
             payload_mime,
             options,
         )
         refined_value = refined_raw.strip() if refined_raw else None
-        cur_code = collector.get("set_code")
-        cur_trim = (cur_code or "").strip()
-        # Only fill from the tight bottom-left crop when the primary pass did not yield a set code.
-        # Replacing a non-empty primary value often regresses (e.g. misreading SV5a as SV4K on tiny glyphs).
-        needs_refresh = (
-            refined_value is not None
-            and refined_value != ""
-            and cur_trim == ""
-            and self._should_override_set_code(cur_code, refined_value)
-        )
-        if not needs_refresh:
+        if not refined_value:
             return collector
         out = dict(collector)
         out["set_code"] = refined_value
@@ -192,16 +189,7 @@ class GroqVisionService:
             ],
         }
         body.update(self._chat_completion_extras(model))
-        url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._api_key}",
-        }
-        response = httpx.post(url, headers=headers, json=body, timeout=120.0)
-        body_text = response.text
-        if not response.is_success:
-            msg = f"Groq request failed ({response.status_code} {response.reason_phrase}): {body_text}"
-            raise RuntimeError(msg)
+        body_text = self._post_chat_completion(body)
         parsed = self._parse_json_body(body_text)
         content = self._pick_assistant_content(parsed)
         if content is None or content == "":
@@ -418,6 +406,71 @@ class GroqVisionService:
             s = pat.sub("", s).strip()
         return s
 
+    def _prepare_image_bytes_for_vision(self, data: bytes) -> bytes:
+        """Downscale so Groq vision tiles stay within the free-tier TPM budget."""
+        try:
+            buf = io.BytesIO(data)
+            img = Image.open(buf)
+            img = ImageOps.exif_transpose(img)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.thumbnail((VISION_MAX_LONG_EDGE_PX, VISION_MAX_LONG_EDGE_PX), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            img.save(out_buf, format="JPEG", quality=VISION_JPEG_QUALITY, optimize=True)
+            out = out_buf.getvalue()
+            candidate_url = f"data:image/jpeg;base64,{base64.b64encode(out).decode('ascii')}"
+            if len(candidate_url.encode("utf-8")) <= MAX_BASE64_IMAGE_BYTES:
+                return out
+        except OSError:
+            pass
+        return self._shrink_image_bytes_for_groq_limit(data)
+
+    def _post_chat_completion(self, body: dict[str, Any]) -> str:
+        """POST Groq chat completions; serialize calls and retry 429 TPM limits."""
+        url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_key}",
+        }
+        with _GROQ_HTTP_LOCK:
+            response: httpx.Response | None = None
+            for attempt in range(_MAX_429_RETRIES + 1):
+                response = httpx.post(url, headers=headers, json=body, timeout=120.0)
+                if response.status_code != 429:
+                    break
+                if attempt >= _MAX_429_RETRIES:
+                    break
+                wait = self._retry_after_seconds(response)
+                logger.warning(
+                    "Groq 429 TPM; retry %s/%s in %.1fs",
+                    attempt + 1,
+                    _MAX_429_RETRIES,
+                    wait,
+                )
+                time.sleep(wait)
+            if response is None:
+                raise RuntimeError("Groq request failed: empty response.")
+            body_text = response.text
+            if not response.is_success:
+                msg = (
+                    f"Groq request failed ({response.status_code} {response.reason_phrase}): {body_text}"
+                )
+                raise RuntimeError(msg)
+            return body_text
+
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> float:
+        header = response.headers.get("retry-after")
+        if header:
+            try:
+                return min(45.0, max(0.5, float(header)))
+            except ValueError:
+                pass
+        match = _RETRY_AFTER_RE.search(response.text)
+        if match:
+            return min(45.0, max(0.5, float(match.group(1))))
+        return 8.0
+
     def _shrink_image_bytes_for_groq_limit(self, source: bytes) -> bytes:
         last_too_large: int | None = None
         last_sharp_error: str | None = None
@@ -503,14 +556,9 @@ class GroqVisionService:
                 ],
             }
             body.update(self._chat_completion_extras(model))
-            url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._api_key}",
-            }
-            response = httpx.post(url, headers=headers, json=body, timeout=120.0)
-            body_text = response.text
-            if not response.is_success:
+            try:
+                body_text = self._post_chat_completion(body)
+            except RuntimeError:
                 return None
             parsed = self._parse_json_body(body_text)
             content = self._pick_assistant_content(parsed)

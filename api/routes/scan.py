@@ -62,7 +62,9 @@ async def scan_card(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        detail = str(exc)
+        status = 429 if "429" in detail or "rate_limit" in detail.lower() else 502
+        raise HTTPException(status_code=status, detail=detail) from exc
     set_code = ocr.get("set_code")
     card_number = ocr.get("card_number")
     pokemon = ocr.get("pokemon_name_english") or ocr.get("pokemon_name")

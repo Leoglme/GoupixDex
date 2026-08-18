@@ -12,7 +12,7 @@ Design goals (in priority order):
    ocr_done → identified → added | failed) is published right away so the
    listener can animate the card landing in the binder.
 3. **Tolerate Groq backpressure.** A module-level :class:`asyncio.Semaphore`
-   caps concurrent vision calls (default 4) — busy uploads queue silently
+   caps concurrent vision calls (default 1) — busy uploads queue silently
    rather than tipping the rate limit.
 """
 
@@ -39,7 +39,8 @@ from services.tcgdex_lookup_service import resolve_tcgdex_card_id_from_ocr
 logger = logging.getLogger(__name__)
 
 #: Max concurrent OCR calls across all users on this process.
-_GROQ_PARALLELISM = 4
+#: Qwen 3.6 free tier is 8k TPM — more than one inflight vision call 429s immediately.
+_GROQ_PARALLELISM = 1
 _groq_sem = asyncio.Semaphore(_GROQ_PARALLELISM)
 
 #: Per-user guards so a "cash register" frame stream becomes *one* Groq call

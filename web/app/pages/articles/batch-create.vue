@@ -305,6 +305,7 @@ async function onBulkScanFiles(e: Event): Promise<void> {
   }
 
   scanning.value = true
+  let filled = 0
   try {
     for (let idx = 0; idx < chunks.length; idx++) {
       const comp = formRefs.value[idx]
@@ -313,8 +314,17 @@ async function onBulkScanFiles(e: Event): Promise<void> {
         continue
       }
       const first = chunk[0]!
-      const result = await scan(first, 20, slotHints.value[idx] ?? '')
-      await comp.applyScanPrefill(result)
+      try {
+        const result = await scan(first, 20, slotHints.value[idx] ?? '')
+        await comp.applyScanPrefill(result)
+        filled += 1
+      } catch (err) {
+        toast.add({
+          title: `Échec du scan (article ${idx + 1})`,
+          description: apiErrorMessage(err),
+          color: 'error',
+        })
+      }
       comp.addImageFiles(chunk)
       slotScanFiles.value[idx] = first
       const prev = slotScanPreviews.value[idx]
@@ -325,8 +335,8 @@ async function onBulkScanFiles(e: Event): Promise<void> {
     }
     toast.add({
       title: 'Préremplissage scan terminé',
-      description: `${chunks.length} formulaire(s) alimenté(s) automatiquement.`,
-      color: 'success',
+      description: `${filled}/${chunks.length} formulaire(s) alimenté(s) automatiquement.`,
+      color: filled === chunks.length ? 'success' : 'warning',
     })
   } catch (err) {
     toast.add({
