@@ -268,6 +268,38 @@ def _block_rank(set_id: str) -> int:
     return len(_BLOCK_PRIORITY) + 1
 
 
+def _set_official_count(client: TcgdexClientService, locale: str, set_id: str) -> int | None:
+    """Official card count of a set (the ``/165`` denominator printed on cards)."""
+    detail = _set_detail_cached(client, locale, set_id)
+    card_count = detail.get("cardCount")
+    if isinstance(card_count, dict):
+        official = card_count.get("official")
+        if isinstance(official, int) and official > 0:
+            return official
+    return None
+
+
+def _denominator_matches_set(
+    client: TcgdexClientService,
+    locales: list[str],
+    set_id: str,
+    denominator: int,
+) -> bool | None:
+    """
+    Compare a set's official count with the OCR ``/NNN`` denominator.
+
+    Returns ``True``/``False`` on a confirmed comparison, ``None`` when the
+    count could not be fetched (never treat a network miss as a mismatch).
+    """
+    for locale in locales:
+        if locale not in SUPPORTED_LOCALES:
+            continue
+        official = _set_official_count(client, locale, set_id)
+        if official is not None:
+            return official == denominator
+    return None
+
+
 def _pick_best_candidate(
     candidates: list[dict[str, Any]],
     *,
@@ -276,6 +308,7 @@ def _pick_best_candidate(
     target_set_code: str,
     locale: str,
     client: TcgdexClientService,
+    target_denominator: int | None = None,
 ) -> dict[str, Any] | None:
     """Among multiple name-matching cards, pick the one matching set_code / localId / recency."""
     if not candidates:
@@ -297,6 +330,21 @@ def _pick_best_candidate(
         return None
     if len(matches) == 1:
         return matches[0]
+
+    # The printed "/165" denominator is the strongest set discriminator: keep
+    # only sets whose official count matches, when that leaves at least one.
+    if target_denominator is not None:
+        confirmed: list[dict[str, Any]] = []
+        for c in matches:
+            sid = _set_id_from_card_id(str(c.get("id") or ""))
+            if not sid:
+                continue
+            if _denominator_matches_set(client, [locale], sid, target_denominator) is True:
+                confirmed.append(c)
+        if confirmed:
+            matches = confirmed
+            if len(matches) == 1:
+                return matches[0]
 
     if target_code:
         for c in matches:
@@ -321,11 +369,16 @@ def resolve_tcgdex_card_id_from_ocr(
     ocr_pokemon_name_english: str | None = None,
     ocr_pokemon_name: str | None = None,
     physical_language: str | None = None,
+    ocr_card_number_denominator: str | None = None,
     client: TcgdexClientService | None = None,
 ) -> str | None:
     """
     Translate the OCR triplet (set abbreviation, collector number, language) into a
     TCGdex card id usable by :func:`services.collection_card_lookup_service.fetch_card_for_collection`.
+
+    ``ocr_card_number_denominator`` is the ``/165`` part of the printed number.
+    It cross-checks the resolved set's official card count: an OCR-misread set
+    code (``SV4A`` for ``SV2a``) otherwise lands the card in the wrong set.
 
     Returns ``None`` when nothing matches — callers should record a
     ``needs_review`` scan event and let the user disambiguate manually.
@@ -340,17 +393,22 @@ def resolve_tcgdex_card_id_from_ocr(
     set_code_raw = (ocr_set_code or "").strip()
     digits = _digits_only(raw_local)
     target_local_int = int(digits) if digits.isdigit() else None
+    denom_digits = _digits_only((ocr_card_number_denominator or "").strip())
+    target_denominator = int(denom_digits) if denom_digits.isdigit() and int(denom_digits) > 0 else None
 
     # --- Strategy 1: OCR set code looks like a real TCGdex id → direct probe.
     if set_code_raw and _looks_like_tcgdex_set_id(set_code_raw):
         candidate_set_id = set_code_raw.lower()
-        for candidate_local in _build_local_id_candidates(raw_local):
-            cid = f"{candidate_set_id}-{candidate_local}"
-            for locale in _candidate_locales(physical_language):
-                if locale not in SUPPORTED_LOCALES:
-                    continue
-                if _card_exists(cl, locale, cid):
-                    return cid
+        locales = [loc for loc in _candidate_locales(physical_language) if loc in SUPPORTED_LOCALES]
+        denominator_ok = True
+        if target_denominator is not None:
+            denominator_ok = _denominator_matches_set(cl, locales, candidate_set_id, target_denominator) is not False
+        if denominator_ok:
+            for candidate_local in _build_local_id_candidates(raw_local):
+                cid = f"{candidate_set_id}-{candidate_local}"
+                for locale in locales:
+                    if _card_exists(cl, locale, cid):
+                        return cid
 
     # --- Strategy 2: search by Pokémon name + match localId.
     name_candidates: list[str] = []
@@ -375,6 +433,7 @@ def resolve_tcgdex_card_id_from_ocr(
                 target_set_code=set_code_raw,
                 locale=locale,
                 client=cl,
+                target_denominator=target_denominator,
             )
             if best is None:
                 continue

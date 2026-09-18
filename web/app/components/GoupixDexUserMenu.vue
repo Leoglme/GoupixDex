@@ -29,6 +29,7 @@ defineProps<{
 
 const colorMode = useColorMode()
 const { me, logout } = useAuth()
+const { isDesktopApp } = useDesktopRuntime()
 
 const items: ComputedRef<DropdownMenuItem[][]> = computed(() => [
   [
@@ -44,6 +45,15 @@ const items: ComputedRef<DropdownMenuItem[][]> = computed(() => [
       icon: 'i-lucide-settings',
       to: '/settings',
     },
+    ...(isDesktopApp.value
+      ? []
+      : [
+          {
+            label: "Télécharger l'app",
+            icon: 'i-lucide-hard-drive-download',
+            to: '/downloads',
+          },
+        ]),
   ],
   [
     {

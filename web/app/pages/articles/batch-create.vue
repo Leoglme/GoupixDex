@@ -1,42 +1,36 @@
 <template>
   <UDashboardPanel id="articles-batch-create">
     <template #header>
-      <UDashboardNavbar title="Création groupée">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
+        </template>
         <template #right>
-          <div class="flex flex-wrap items-center gap-2">
-            <UButton color="neutral" variant="ghost" icon="i-lucide-package" to="/articles/stock"> Mon stock </UButton>
-            <UButton color="neutral" variant="subtle" icon="i-lucide-plus" @click="addForm">
-              Ajouter un formulaire
-            </UButton>
-          </div>
+          <UButton color="neutral" variant="ghost" icon="i-lucide-package" to="/articles/stock"> Mes articles </UButton>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="w-full space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8">
-        <!-- Bandeau contexte -->
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-5 py-5 sm:px-7 sm:py-7"
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Création groupée"
+          description="Remplissez plusieurs fiches puis lancez la création (et la publication Vinted groupée) en un clic — idéal après une session de scan."
         >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-48 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-24 -left-10 size-44 rounded-full blur-3xl" />
-          <div class="relative max-w-3xl space-y-3">
-            <p class="text-primary text-xs font-medium tracking-wide uppercase">Création groupée d'articles</p>
-            <h1 class="text-highlighted text-xl font-semibold tracking-tight sm:text-2xl">
-              Préparez plusieurs cartes en une seule passe
-            </h1>
-            <p class="text-muted text-sm leading-relaxed sm:text-base">
-              Remplissez plusieurs fiches, puis lancez la création (et éventuellement la publication Vinted groupée) en
-              un seul clic. Idéal après une grosse session de scan ou de tri.
-            </p>
-          </div>
-        </div>
+          <template #actions>
+            <UButton color="neutral" variant="subtle" icon="i-lucide-plus" @click="addForm">
+              Ajouter un formulaire
+            </UButton>
+          </template>
+        </GoupixDexPageHeader>
 
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
+        <UCard :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
           <div class="border-primary/20 bg-primary/5 space-y-4 rounded-xl border p-4 sm:p-5">
             <div class="flex flex-col gap-2">
               <p class="text-highlighted font-medium">Ajouter plusieurs photos et préremplir les articles</p>
@@ -106,7 +100,7 @@
             :key="slot.id"
             class="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.1fr)] lg:items-start"
           >
-            <UCard class="ring-default/60 shadow-sm ring-1">
+            <UCard>
               <template #header>
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <p class="text-highlighted font-medium">Article {{ idx + 1 }} — Détails</p>

@@ -83,6 +83,12 @@ def _pick_name_for_languages(
     return None
 
 
+# Species names are immutable — cache successful lookups for the process
+# lifetime (a live scan calls this up to twice per card otherwise).
+_SPECIES_CACHE: dict[str, SpeciesLocaleNamesService] = {}
+_SPECIES_CACHE_MAX = 2048
+
+
 def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNamesService:
     """
     Fetch official French and Japanese (katakana preferred) species names in one HTTP request.
@@ -98,6 +104,9 @@ def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNamesS
     slug = english_species_name_to_poke_api_slug(base if base else trimmed)
     if slug == "":
         return SpeciesLocaleNamesService(None, None)
+    cached = _SPECIES_CACHE.get(slug)
+    if cached is not None:
+        return cached
     url = f"{POKEAPI_SPECIES_URL}/{quote(slug, safe='')}"
     try:
         req = Request(url, headers=DEFAULT_REQUEST_HEADERS)
@@ -109,7 +118,11 @@ def fetch_species_locale_names(english_species_name: str) -> SpeciesLocaleNamesS
             return SpeciesLocaleNamesService(None, None)
         fr = _pick_name_for_languages(names, (FRENCH_LANGUAGE_NAME,))
         ja = _pick_name_for_languages(names, (JAPANESE_KANA_LANGUAGE_NAME, JAPANESE_LANGUAGE_NAME))
-        return SpeciesLocaleNamesService(fr, ja)
+        result = SpeciesLocaleNamesService(fr, ja)
+        # Only cache hits (transient network failures must stay retryable).
+        if len(_SPECIES_CACHE) < _SPECIES_CACHE_MAX:
+            _SPECIES_CACHE[slug] = result
+        return result
     except (OSError, HTTPError, URLError, json.JSONDecodeError, TimeoutError):
         return SpeciesLocaleNamesService(None, None)
 

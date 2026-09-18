@@ -1,45 +1,30 @@
 <template>
   <UDashboardPanel id="vendus-ebay">
     <template #header>
-      <UDashboardNavbar title="Ventes terminées eBay">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
-        <template #right>
-          <UButton to="/market" color="neutral" variant="soft" icon="i-lucide-trending-up"> Prix du marché </UButton>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="w-full space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8">
-        <!-- Bandeau contexte -->
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-5 py-5 sm:px-7 sm:py-7"
-        >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-48 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-24 -left-10 size-44 rounded-full blur-3xl" />
-          <div class="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div class="max-w-2xl space-y-2">
-              <p class="text-primary text-xs font-medium tracking-wide uppercase">Ventes terminées · eBay France</p>
-              <h1 class="text-highlighted text-xl font-semibold tracking-tight sm:text-2xl">
-                Cartes et lots récemment vendus sur eBay France
-              </h1>
-              <p class="text-muted text-sm leading-relaxed sm:text-base">
-                Explorez les ventes récentes correspondant à votre recherche : dernier prix affiché et période au choix
-                (24 h à 30 jours), puis comparez aussi les tops les plus fréquents.
-              </p>
-            </div>
-            <div
-              class="bg-primary/15 hidden size-24 shrink-0 items-center justify-center rounded-2xl text-[#E53238] lg:flex"
-            >
-              <UIcon name="i-simple-icons-ebay" class="size-12" />
-            </div>
-          </div>
-        </div>
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Marché eBay"
+          description="Ventes récemment conclues sur eBay France : dernier prix constaté sur la fenêtre de votre choix (24 h à 30 jours)."
+        />
+
+        <GoupixDexPageTabs :items="MARKET_PAGE_TABS" />
 
         <!-- Formulaire de recherche -->
-        <UCard class="ring-default/60 shadow-sm ring-1">
+        <UCard>
           <template #header>
             <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <p class="text-highlighted font-medium">Paramètres de recherche</p>
@@ -285,7 +270,7 @@ import type { EbaySoldTopItem, EbaySoldTopResultBody, EbaySoldTopRow } from '~/c
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Ventes terminées eBay',
+  'Marché eBay — Ventes terminées',
   'Ventes terminées Pokémon TCG sur eBay France (page publique, sans scope Marketplace Insights).',
 )
 

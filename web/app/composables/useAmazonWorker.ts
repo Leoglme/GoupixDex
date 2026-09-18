@@ -23,11 +23,21 @@ function buildQueryParams(p: AmazonInvitesFetchParams): Record<string, string | 
 }
 
 /**
- * Full WebSocket URL for `/ws/progress` (JWT + remote API as query params).
- *
- * @returns URL string, or `null` when token or bases are missing (client-only).
+ * WebSocket connection target for `/ws/progress`.
+ * The JWT travels as a `goupix-jwt.<token>` subprotocol instead of a query param,
+ * so it never lands in worker access logs; `remote_api` stays in the query string.
  */
-export function buildAmazonProgressWebSocketUrl(): string | null {
+export type AmazonProgressWebSocketTarget = {
+  url: string
+  protocols: string[]
+}
+
+/**
+ * Build the `/ws/progress` connection target (URL + auth subprotocol).
+ *
+ * @returns Target object, or `null` when token or bases are missing (client-only).
+ */
+export function buildAmazonProgressWebSocketUrl(): AmazonProgressWebSocketTarget | null {
   if (!import.meta.client) {
     return null
   }
@@ -42,8 +52,11 @@ export function buildAmazonProgressWebSocketUrl(): string | null {
     return null
   }
   const wsBase = base.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'))
-  const q = new URLSearchParams({ token: token.trim(), remote_api: apiBase })
-  return `${wsBase}/ws/progress?${q.toString()}`
+  const q = new URLSearchParams({ remote_api: apiBase })
+  return {
+    url: `${wsBase}/ws/progress?${q.toString()}`,
+    protocols: [`goupix-jwt.${token.trim()}`],
+  }
 }
 
 /**
@@ -118,11 +131,23 @@ export function useAmazonWorker() {
     return data
   }
 
+  /**
+   * POST `/amazon/browser/close` — closes the login Chromium so the profile
+   * flushes its cookies (the on-disk session detection needs the window gone).
+   *
+   * @returns Worker response `{ closed, message }`.
+   */
+  async function closeLoginBrowser(): Promise<{ closed: boolean; message: string | null }> {
+    const { data } = await client.value.post<{ closed: boolean; message: string | null }>('/amazon/browser/close')
+    return data
+  }
+
   return {
     fetchSession,
     fetchInvites,
     refreshInvites,
     requestInvite,
     openLoginBrowser,
+    closeLoginBrowser,
   }
 }

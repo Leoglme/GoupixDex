@@ -1,42 +1,34 @@
 <template>
   <UDashboardPanel id="panier-cardmarket">
     <template #header>
-      <UDashboardNavbar title="Panier Cardmarket">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
-        <template #right>
-          <UButton color="primary" icon="i-lucide-plus" @click="openCreate = true"> Nouveau panier </UButton>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Achats
+          </span>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-5 py-5 sm:px-7 sm:py-7"
+      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Paniers Cardmarket"
+          description="Collez vos liens de singles, GoupixDex classe les vendeurs par couverture et surcoût pour limiter les frais de port."
         >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-48 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-24 -left-10 size-44 rounded-full blur-3xl" />
-          <div class="relative max-w-3xl space-y-2">
-            <p class="text-primary text-xs font-medium tracking-wide uppercase">Cardmarket · Achat groupé</p>
-            <h1 class="text-highlighted text-xl font-semibold tracking-tight sm:text-2xl">
-              Trouvez les vendeurs qui couvrent le plus de cartes
-            </h1>
-            <p class="text-muted text-sm leading-relaxed sm:text-base">
-              Collez les liens produit Cardmarket (singles), lancez l’analyse depuis l’app bureau : GoupixDex agrège les
-              offres, classe les vendeurs par nombre de cartes et par surcoût par rapport au meilleur prix connu.
-            </p>
-          </div>
-        </div>
+          <template #actions>
+            <UButton color="primary" icon="i-lucide-plus" @click="openCreate = true"> Nouveau panier </UButton>
+          </template>
+        </GoupixDexPageHeader>
 
-        <UAlert
+        <GoupixDexDesktopOnlyNotice
           v-if="!isDesktopApp"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-monitor-down"
-          title="Application bureau requise"
-          description="L’analyse utilise Chrome sur votre machine (nodriver). Ouvrez GoupixDex en version desktop pour lancer une recherche."
+          feature-label="Analyse des paniers"
+          reason="L'analyse pilote Chrome sur votre machine (nodriver) : lancez une recherche depuis l'application desktop."
         />
 
         <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
@@ -111,7 +103,7 @@ import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Panier Cardmarket',
+  'Paniers Cardmarket',
   'Enregistrez des listes de liens Cardmarket et identifiez les vendeurs les plus rentables pour limiter les frais de port.',
 )
 

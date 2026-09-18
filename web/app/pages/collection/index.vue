@@ -1,64 +1,66 @@
 <template>
   <UDashboardPanel id="my-collection-page">
     <template #header>
-      <UDashboardNavbar title="Ma collection">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Collection
+          </span>
+        </template>
         <template #right>
           <UButton color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :loading="loading" @click="load" />
-          <UButton v-if="!isDesktopApp" color="neutral" variant="soft" icon="i-lucide-camera" to="/collection/scan">
-            Scanner
-          </UButton>
-          <UButton color="primary" variant="solid" icon="i-lucide-plus" to="/collection/add">
-            Ajouter à ma collection
-          </UButton>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="w-full space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8">
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <UPageCard
-            icon="i-lucide-layers"
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Ma collection"
+          description="Votre binder personnel : cartes possédées, extensions et mises en vente."
+        >
+          <template #actions>
+            <UButton v-if="!isDesktopApp" color="neutral" variant="subtle" icon="i-lucide-camera" to="/collection/scan">
+              Scanner
+            </UButton>
+            <UButton color="primary" variant="solid" icon="i-lucide-plus" to="/collection/add">
+              Ajouter à ma collection
+            </UButton>
+          </template>
+        </GoupixDexPageHeader>
+
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <GoupixDexStatsCard
             title="Cartes uniques"
-            variant="subtle"
-            :ui="{ leading: 'p-2.5 rounded-full bg-primary/10 ring ring-inset ring-primary/25 flex-col' }"
-          >
-            <p class="text-highlighted text-2xl font-semibold">{{ stats.unique_cards }}</p>
-            <p class="text-muted text-xs">Cartes distinctes dans le binder</p>
-          </UPageCard>
-          <UPageCard
-            icon="i-lucide-package"
+            :value="stats.unique_cards"
+            description="Cartes distinctes dans le binder"
+            icon="i-lucide-layers"
+          />
+          <GoupixDexStatsCard
             title="Exemplaires"
-            variant="subtle"
-            :ui="{ leading: 'p-2.5 rounded-full bg-primary/10 ring ring-inset ring-primary/25 flex-col' }"
-          >
-            <p class="text-highlighted text-2xl font-semibold">{{ stats.total_quantity }}</p>
-            <p class="text-muted text-xs">Quantité totale possédée</p>
-          </UPageCard>
-          <UPageCard
-            icon="i-lucide-bookmark"
+            :value="stats.total_quantity"
+            description="Quantité totale possédée"
+            icon="i-lucide-package"
+          />
+          <GoupixDexStatsCard
             title="Extensions"
-            variant="subtle"
-            :ui="{ leading: 'p-2.5 rounded-full bg-primary/10 ring ring-inset ring-primary/25 flex-col' }"
-          >
-            <p class="text-highlighted text-2xl font-semibold">{{ stats.unique_sets }}</p>
-            <p class="text-muted text-xs">Sets représentés</p>
-          </UPageCard>
-          <UPageCard
-            icon="i-lucide-tag"
+            :value="stats.unique_sets"
+            description="Sets représentés"
+            icon="i-lucide-bookmark"
+          />
+          <GoupixDexStatsCard
             title="En vente"
-            variant="subtle"
-            :ui="{ leading: 'p-2.5 rounded-full bg-primary/10 ring ring-inset ring-primary/25 flex-col' }"
-          >
-            <p class="text-highlighted text-2xl font-semibold">{{ stats.with_article }}</p>
-            <p class="text-muted text-xs">Cartes liées à un article</p>
-          </UPageCard>
+            :value="stats.with_article"
+            description="Cartes liées à un article"
+            icon="i-lucide-tag"
+          />
         </div>
 
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
+        <UCard :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div class="flex flex-1 flex-col gap-3 sm:flex-row sm:items-end">
               <UFormField label="Recherche" class="flex-1">
@@ -101,11 +103,7 @@
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
         </div>
 
-        <UCard
-          v-else-if="!loading && filteredItems.length === 0"
-          class="ring-default/60 shadow-sm ring-1"
-          :ui="{ body: 'p-10 text-center space-y-4' }"
-        >
+        <UCard v-else-if="!loading && filteredItems.length === 0" :ui="{ body: 'p-10 text-center space-y-4' }">
           <UIcon name="i-lucide-album" class="text-muted mx-auto size-14" />
           <div class="space-y-1">
             <p class="text-highlighted text-lg font-semibold">Aucune carte dans votre collection</p>
@@ -169,7 +167,7 @@
           </UCard>
         </div>
 
-        <UCard v-else class="ring-default/60 overflow-hidden shadow-sm ring-1" :ui="{ body: 'p-0' }">
+        <UCard v-else class="overflow-hidden" :ui="{ body: 'p-0' }">
           <table class="w-full border-separate border-spacing-0 text-sm">
             <thead class="sticky top-0 z-10">
               <tr class="bg-elevated/95 border-default border-y backdrop-blur">

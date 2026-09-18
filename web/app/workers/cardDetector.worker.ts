@@ -7,7 +7,7 @@
  * Pipeline:
  *   gray → CLAHE (adaptive contrast, fixes flash + low light)
  *        → median blur (preserves card edges, kills sensor noise)
- *        → auto-Canny (thresholds derived from image median)
+ *        → auto-Canny (thresholds derived from the true image median)
  *        → morphological close (bridges glare gaps)
  *        → external contours
  *        → score top-N candidates on (aspect-ratio match, fill, convexity,
@@ -18,30 +18,47 @@
  * can run a small "burst → pick sharpest" to combat hand-shake / focus hunt.
  *
  * Protocol (main ⇄ worker):
- *   → { t:'init', url }                              ← { t:'ready' } | { t:'error', m }
- *   → { t:'detect', buf, w, h, vw, vh }              ← { t:'quad', corners } | { t:'nq' }
- *   → { t:'warp', buf, w, h, corners }               ← { t:'warped', buf, w, h, sharpness } | { t:'error', m }
+ *   → { t:'init', url }                  ← { t:'ready' } | { t:'error', m }   (fatal: engine unavailable)
+ *   → { t:'detect', buf, w, h, vw, vh }  ← { t:'quad', corners } | { t:'nq' }
+ *   → { t:'warp', buf, w, h, corners }   ← { t:'warped', buf, w, h, sharpness } | { t:'warp_failed', m }
+ *
+ * `warp_failed` is NON-fatal: the main thread must recover (skip the shot)
+ * instead of tearing the whole scanner down.
  *
  * `corners` are always VIDEO-intrinsic pixel coords.
  */
 
 const MIN_AREA_RATIO = 0.06 // card must cover ≥6% of the frame
-const MAX_FILL = 0.6 // reject quads that fill > 60% (whole-frame artifacts)
+const MAX_FILL = 0.9 // "cash register" mode: a close-up card is the normal case
 const BORDER_MARGIN = 0.015 // a real card never touches all four edges
-const AR_MIN = 1.15 // card ≈ 88/63 ≈ 1.40; reject squarish blobs (hand/wall)
-const AR_MAX = 1.95 // and overly elongated shapes
+const AR_MIN = 1.05 // card ≈ 88/63 ≈ 1.40; perspective can compress the ratio a lot
+const AR_MAX = 1.95 // reject overly elongated shapes
 const CARD_AR = 1.397 // 88/63 — Pokémon card ratio
-const MIN_SCORE = 0.5 // candidates below this are rejected (was 0.4 — too loose)
+const MIN_SCORE = 0.45
 const TOP_N_CANDIDATES = 8
 const WARP_W = 630
 const WARP_H = 880
 
 let cv: any = null
 
+/**
+ * Order 4 points as TL, TR, BR, BL. TL/BR come from the x+y extremes; the two
+ * remaining points are split on x−y. Identity-based so a rotated (diamond)
+ * quad can never yield the same point twice — the old sum/diff double-sort
+ * did, which made getPerspectiveTransform throw and killed the scanner.
+ */
 function orderCorners(pts: { x: number; y: number }[]): { x: number; y: number }[] {
   const bySum = [...pts].sort((a, b) => a.x + a.y - (b.x + b.y))
-  const byDiff = [...pts].sort((a, b) => a.y - a.x - (b.y - b.x))
-  return [bySum[0], byDiff[0], bySum[3], byDiff[3]]
+  const tl = bySum[0]
+  const br = bySum[3]
+  const rest = pts.filter((p) => p !== tl && p !== br)
+  if (rest.length !== 2) {
+    return pts.slice(0, 4)
+  }
+  const [p1, p2] = rest
+  const tr = p1.x - p1.y >= p2.x - p2.y ? p1 : p2
+  const bl = tr === p1 ? p2 : p1
+  return [tl, tr, br, bl]
 }
 
 function polyArea(p: { x: number; y: number }[]): number {
@@ -51,6 +68,18 @@ function polyArea(p: { x: number; y: number }[]): number {
     s += p[i].x * p[j].y - p[j].x * p[i].y
   }
   return Math.abs(s) / 2
+}
+
+/** True when any two corners are (near) coincident — warp would be degenerate. */
+function hasDegenerateCorners(pts: { x: number; y: number }[]): boolean {
+  for (let i = 0; i < pts.length; i += 1) {
+    for (let j = i + 1; j < pts.length; j += 1) {
+      if (Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) < 4) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 /** 4 corners of an OpenCV RotatedRect ({center,size,angle°}). */
@@ -84,6 +113,18 @@ function spansFullFrame(pts: { x: number; y: number }[], w: number, h: number): 
   return touchL && touchR && touchT && touchB
 }
 
+/** True median of an 8-bit single-channel Mat (sampled — plenty at 640 px). */
+function matMedian(mat: any): number {
+  const data = mat.data
+  const step = Math.max(1, Math.floor(data.length / 40_000))
+  const sample: number[] = []
+  for (let i = 0; i < data.length; i += step) {
+    sample.push(data[i])
+  }
+  sample.sort((a, b) => a - b)
+  return sample[Math.floor(sample.length / 2)] ?? 128
+}
+
 /**
  * Score one contour as a card candidate. Higher = better. Returns null when
  * the contour fails hard filters (size, aspect, border safety).
@@ -91,36 +132,42 @@ function spansFullFrame(pts: { x: number; y: number }[], w: number, h: number): 
 function scoreCandidate(cnt: any, w: number, h: number) {
   const frameArea = w * h
   const hull = new cv.Mat()
-  cv.convexHull(cnt, hull)
-  const hullArea = Math.max(1, cv.contourArea(hull))
-  const cntArea = cv.contourArea(cnt)
-  const convexity = Math.min(1, cntArea / hullArea) // ~1 for clean cards
-
   let pts: { x: number; y: number }[] | null = null
   let convex4Bonus = 1.0
-  const peri = cv.arcLength(cnt, true)
-  for (const ratio of [0.015, 0.02, 0.025, 0.03, 0.04, 0.05]) {
-    const approx = new cv.Mat()
-    cv.approxPolyDP(cnt, approx, ratio * peri, true)
-    if (approx.rows === 4 && cv.isContourConvex(approx)) {
-      pts = []
-      for (let r = 0; r < 4; r += 1) {
-        pts.push({ x: approx.intPtr(r, 0)[0], y: approx.intPtr(r, 0)[1] })
-      }
-      convex4Bonus = 1.7
-      approx.delete()
-      break
-    }
-    approx.delete()
-  }
+  let convexity = 0
+  try {
+    cv.convexHull(cnt, hull)
+    const hullArea = Math.max(1, cv.contourArea(hull))
+    const cntArea = cv.contourArea(cnt)
+    convexity = Math.min(1, cntArea / hullArea) // ~1 for clean cards
 
-  if (!pts) {
-    pts = rrCorners(cv.minAreaRect(hull))
+    const peri = cv.arcLength(cnt, true)
+    for (const ratio of [0.015, 0.02, 0.025, 0.03, 0.04, 0.05]) {
+      const approx = new cv.Mat()
+      try {
+        cv.approxPolyDP(cnt, approx, ratio * peri, true)
+        if (approx.rows === 4 && cv.isContourConvex(approx)) {
+          pts = []
+          for (let r = 0; r < 4; r += 1) {
+            pts.push({ x: approx.intPtr(r, 0)[0], y: approx.intPtr(r, 0)[1] })
+          }
+          convex4Bonus = 1.7
+          break
+        }
+      } finally {
+        approx.delete()
+      }
+    }
+
+    if (!pts) {
+      pts = rrCorners(cv.minAreaRect(hull))
+    }
+  } finally {
+    hull.delete()
   }
-  hull.delete()
 
   const ordered = orderCorners(pts)
-  if (spansFullFrame(ordered, w, h)) {
+  if (spansFullFrame(ordered, w, h) || hasDegenerateCorners(ordered)) {
     return null
   }
 
@@ -139,18 +186,19 @@ function scoreCandidate(cnt: any, w: number, h: number) {
     return null
   }
 
-  // Strongly reward AR near the card's. Narrow falloff (was 0.55).
+  // Reward AR near the card's, with a falloff wide enough to survive the
+  // perspective compression of a tilted card.
   const arDelta = Math.abs(ar - CARD_AR)
-  const arScore = Math.max(0, 1 - arDelta / 0.3)
+  const arScore = Math.max(0, 1 - arDelta / 0.45)
 
-  // Prefer 20–55% fill. Anything over 60% already rejected above.
-  const fillScore = fill < 0.12 ? Math.max(0, fill / 0.12) : fill > 0.5 ? Math.max(0, 1 - (fill - 0.5) / 0.1) : 1
+  // Plateau between 15% and 75% fill — both "card on the table" and
+  // "card filling the frame" are legitimate cash-register shots.
+  const fillScore = fill < 0.15 ? Math.max(0, fill / 0.15) : fill > 0.75 ? Math.max(0, 1 - (fill - 0.75) / 0.15) : 1
 
   // Convexity boost
   const convexityScore = Math.min(1, convexity * 1.05)
 
-  // Aspect ratio is now the dominant signal; the others are tie-breakers.
-  const score = arScore * 0.62 + fillScore * 0.22 + convexityScore * 0.16
+  const score = arScore * 0.5 + fillScore * 0.3 + convexityScore * 0.2
   return { pts: ordered, score: score * convex4Bonus }
 }
 
@@ -198,6 +246,7 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   const edges = new cv.Mat()
   const contours = new cv.MatVector()
   const hierarchy = new cv.Mat()
+  const cands: { cnt: any; area: number }[] = []
   let chosen: { x: number; y: number }[] | null = null
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
@@ -215,9 +264,11 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
 
     cv.medianBlur(base, blurred, 5)
 
-    const meanScalar = cv.mean(blurred)[0]
-    const lower = Math.max(10, Math.round(0.66 * meanScalar))
-    const upper = Math.max(lower + 25, Math.round(1.33 * meanScalar))
+    // Canny thresholds from the true median (mean drifts badly on dark or
+    // very bright backgrounds and used to make detection light-dependent).
+    const median = matMedian(blurred)
+    const lower = Math.max(20, Math.round(0.66 * median))
+    const upper = Math.max(lower + 30, Math.round(1.33 * median))
     cv.Canny(blurred, edges, lower, upper)
 
     const k = cv.Mat.ones(5, 5, cv.CV_8U)
@@ -227,7 +278,6 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
     cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
     const frameArea = w * h
-    const cands: { cnt: any; area: number }[] = []
     for (let i = 0; i < contours.size(); i += 1) {
       const cnt = contours.get(i)
       const area = cv.contourArea(cnt)
@@ -252,9 +302,6 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
         bestPts = result.pts
       }
     }
-    for (const c of cands) {
-      c.cnt.delete()
-    }
 
     if (bestPts && bestScore >= MIN_SCORE) {
       const fx = vw / w
@@ -264,6 +311,14 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   } catch {
     chosen = null
   } finally {
+    // Candidate contours are deleted here (not mid-loop) so a throwing
+    // scoreCandidate can never leak the remaining Mats — at 10 fps a leak
+    // grows the wasm heap until the tab dies.
+    for (const c of cands) {
+      try {
+        c.cnt.delete()
+      } catch {}
+    }
     src.delete()
     gray.delete()
     enhanced.delete()
@@ -329,10 +384,11 @@ self.onmessage = (e: MessageEvent): void => {
     )
     return
   }
-  if (!cv) {
-    return
-  }
   if (d.t === 'detect') {
+    if (!cv) {
+      ;(self as any).postMessage({ t: 'nq' })
+      return
+    }
     let corners = null
     try {
       corners = detect(d.buf, d.w, d.h, d.vw, d.vh)
@@ -343,11 +399,16 @@ self.onmessage = (e: MessageEvent): void => {
     return
   }
   if (d.t === 'warp') {
+    if (!cv) {
+      ;(self as any).postMessage({ t: 'warp_failed', m: 'Moteur non initialisé' })
+      return
+    }
     try {
       const { out, sharpness } = warp(d.buf, d.w, d.h, d.corners)
       ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness }, [out])
     } catch {
-      ;(self as any).postMessage({ t: 'error', m: 'Découpe carte impossible' })
+      // Non-fatal: the main thread skips this shot and keeps scanning.
+      ;(self as any).postMessage({ t: 'warp_failed', m: 'Découpe carte impossible' })
     }
     return
   }

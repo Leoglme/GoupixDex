@@ -1,41 +1,32 @@
 <template>
   <UDashboardPanel id="downloads">
     <template #header>
-      <UDashboardNavbar title="Télécharger l'application">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Application
+          </span>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="mx-auto w-full max-w-7xl space-y-8 px-4 py-6 sm:px-8 sm:py-10">
-        <div
-          class="border-default from-primary/10 via-elevated/50 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br p-8 sm:p-10"
+      <div class="mx-auto w-full max-w-7xl space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Télécharger l'application"
+          description="Windows ou macOS, choisissez la ligne adaptée à votre processeur. La publication Vinted n'existe que dans l'app desktop — le site web gère le reste."
         >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-64 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-20 -left-12 size-56 rounded-full blur-3xl" />
-          <div class="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div class="max-w-2xl space-y-3">
-              <p class="text-primary text-sm font-medium">Application desktop GoupixDex</p>
-              <h1 class="text-highlighted text-2xl font-semibold tracking-tight sm:text-3xl">
-                Installez l'app sur votre ordinateur
-              </h1>
-              <p class="text-muted text-base leading-relaxed">
-                Choisissez la ligne qui correspond à votre système : Windows ou macOS, puis le bon type de processeur.
-                La publication Vinted n'est disponible que dans cette application — le site web sert à gérer le reste.
-              </p>
+          <template #actions>
+            <div class="border-default bg-elevated/80 flex items-center gap-2 rounded-xl border px-4 py-2.5">
+              <UIcon name="i-simple-icons-windows" class="size-6 text-[#0078D4]" />
+              <UIcon name="i-simple-icons-apple" class="text-highlighted size-6" />
             </div>
-            <div class="flex shrink-0 gap-3 sm:flex-col sm:items-end">
-              <div
-                class="bg-elevated/80 border-default flex items-center gap-2 rounded-xl border px-4 py-3 backdrop-blur-sm"
-              >
-                <UIcon name="i-simple-icons-windows" class="size-8 text-[#0078D4]" />
-                <UIcon name="i-simple-icons-apple" class="text-highlighted size-8" />
-              </div>
-            </div>
-          </div>
-        </div>
+          </template>
+        </GoupixDexPageHeader>
 
         <UAlert
           color="info"
@@ -45,7 +36,7 @@
           description="Sous Windows, privilégiez l'installateur « recommandé ». Sur Mac récent (puce M), prenez la ligne Apple Silicon ; sur Mac Intel, la ligne Intel."
         />
 
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'sm:p-8 p-6' }">
+        <UCard :ui="{ body: 'sm:p-8 p-6' }">
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-3 px-1">
               <div class="min-w-0 space-y-1">

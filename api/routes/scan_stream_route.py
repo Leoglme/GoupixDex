@@ -28,10 +28,9 @@ from fastapi import (
     WebSocket,
     status,
 )
-from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
-from core.database import get_db
+from core.database import SessionLocal
 from core.deps import get_current_user, get_current_user_from_token_str
 from models.user import User
 from services.scan_stream_hub import get_scan_stream_hub
@@ -79,6 +78,14 @@ def _clean_hint(value: str | None) -> str | None:
     return text[:500]
 
 
+def _clean_direction(value: str | None) -> str:
+    """``in`` (add to the collection, default) or ``out`` (checkout / decrement)."""
+    raw = (value or "").strip().lower()
+    if raw == "out":
+        return "out"
+    return "in"
+
+
 @router.post("/scan-stream/photo", status_code=status.HTTP_202_ACCEPTED)
 async def upload_scan_photo(
     user: Annotated[User, Depends(get_current_user)],
@@ -86,12 +93,17 @@ async def upload_scan_photo(
     language: Annotated[
         str, Form(description="Langue physique : auto (détection OCR) | fr | en | ja")
     ] = "auto",
+    direction: Annotated[
+        str, Form(description="in (ajout à la collection) | out (sortie / décrément)")
+    ] = "in",
     hint: Annotated[str | None, Form(description="Indice optionnel pour l'OCR")] = None,
 ) -> dict[str, Any]:
     """
-    Accept one card photo, enqueue the OCR + TCGdex + insert pipeline, and
-    return an ``event_id``. The phone can fire-and-forget; the desktop UI
-    receives the same ``event_id`` over the WebSocket as the scan progresses.
+    Accept one card photo, enqueue the OCR + TCGdex pipeline, and return an
+    ``event_id``. Depending on ``direction``, the identified card is added to
+    (``in``) or removed from (``out``) the collection. The phone can
+    fire-and-forget; the desktop UI receives the same ``event_id`` over the
+    WebSocket as the scan progresses.
     """
     data = await file.read()
     if not data:
@@ -104,6 +116,7 @@ async def upload_scan_photo(
 
     mime = _resolve_mime(file)
     physical_language = _clean_language(language)
+    scan_direction = _clean_direction(direction)
     user_hint = _clean_hint(hint)
 
     event_id = submit_scan(
@@ -112,6 +125,7 @@ async def upload_scan_photo(
         filename=file.filename or "scan.jpg",
         mime=mime,
         physical_language=physical_language,
+        direction=scan_direction,  # type: ignore[arg-type]
         user_hint=user_hint,
     )
 
@@ -119,6 +133,7 @@ async def upload_scan_photo(
         "event_id": event_id,
         "status": "queued",
         "physical_language": physical_language,
+        "direction": scan_direction,
     }
 
 
@@ -162,9 +177,9 @@ def clear_scan_events(
     if key in {"failed", "echec", "échec"}:
         statuses = {"failed"}
     elif key in {"needs_review", "review", "a_verifier", "à_vérifier"}:
-        statuses = {"needs_review"}
+        statuses = {"needs_review", "not_in_collection"}
     elif key in {"problems", "problem", "issues"}:
-        statuses = {"failed", "needs_review"}
+        statuses = {"failed", "needs_review", "not_in_collection"}
     else:
         raise HTTPException(
             status_code=400,
@@ -180,48 +195,53 @@ def scan_stream_health() -> dict[str, Any]:
     return {"ok": True, "websocket_paths": ["/ws/scan-stream", "/scan-stream/ws"]}
 
 
-async def _scan_stream_socket_impl(ws: WebSocket, db: Session) -> None:
+async def _scan_stream_socket_impl(ws: WebSocket) -> None:
+    # Auth uses a short-lived session released immediately: a WebSocket lives
+    # for hours and must never pin a connection from the SQLAlchemy pool.
+    db = SessionLocal()
     try:
-        user = get_current_user_from_token_str(
-            raw_token=ws.query_params.get("token", ""),
-            db=db,
-        )
-    except HTTPException as exc:
-        await ws.close(code=4401, reason=str(exc.detail))
-        return
+        try:
+            user = get_current_user_from_token_str(
+                raw_token=ws.query_params.get("token", ""),
+                db=db,
+            )
+        except HTTPException as exc:
+            await ws.close(code=4401, reason=str(exc.detail))
+            return
+        if str(user.status or "") != "approved":
+            await ws.close(code=4403, reason="Compte non approuvé.")
+            return
+        user_id = int(user.id)
+    finally:
+        db.close()
 
     hub = get_scan_stream_hub()
-    backlog = await hub.connect(user.id, ws)
+    # ``connect`` accepts the socket and replays the backlog itself, under the
+    # hub's per-user send lock (no concurrent send with live publishes).
+    await hub.connect(user_id, ws)
 
     try:
-        for past in backlog:
-            await ws.send_json(past)
         while True:
+            # Inbound frames are only client keep-alive pings; content ignored.
             await ws.receive_text()
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("scan-stream socket crashed (user=%s)", user.id)
+        logger.exception("scan-stream socket crashed (user=%s)", user_id)
     finally:
-        await hub.disconnect(user.id, ws)
+        await hub.disconnect(user_id, ws)
 
 
 @router.websocket("/ws/scan-stream")
-async def scan_stream_socket(
-    ws: WebSocket,
-    db: Annotated[Session, Depends(get_db)],
-) -> None:
+async def scan_stream_socket(ws: WebSocket) -> None:
     """
     Authenticated WebSocket. The browser cannot send custom headers on
     ``WebSocket``, so the JWT travels in ``?token=<jwt>``.
     """
-    await _scan_stream_socket_impl(ws, db)
+    await _scan_stream_socket_impl(ws)
 
 
 @router.websocket("/scan-stream/ws")
-async def scan_stream_socket_alias(
-    ws: WebSocket,
-    db: Annotated[Session, Depends(get_db)],
-) -> None:
+async def scan_stream_socket_alias(ws: WebSocket) -> None:
     """Alias for nginx configs that only proxy ``/scan-stream/*``."""
-    await _scan_stream_socket_impl(ws, db)
+    await _scan_stream_socket_impl(ws)

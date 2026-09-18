@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="market">
     <template #header>
-      <UDashboardNavbar title="Prix du marché">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
         </template>
         <template #right>
           <UButton to="/articles/create" color="primary" variant="soft" icon="i-lucide-plus"> Nouvel article </UButton>
@@ -12,34 +18,16 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8">
-        <!-- Bandeau contexte -->
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-5 py-5 sm:px-7 sm:py-7"
-        >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-48 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-24 -left-10 size-44 rounded-full blur-3xl" />
-          <div class="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div class="max-w-2xl space-y-2">
-              <p class="text-primary text-xs font-medium tracking-wide uppercase">Recherche en direct · eBay France</p>
-              <h1 class="text-highlighted text-xl font-semibold tracking-tight sm:text-2xl">
-                Évaluez un produit scellé ou une carte en quelques secondes
-              </h1>
-              <p class="text-muted text-sm leading-relaxed sm:text-base">
-                GoupixDex interroge l'API eBay pour remonter les annonces actives correspondant à votre recherche, puis
-                calcule automatiquement le prix minimum, médian, moyen et maximum — sur la période de votre choix.
-              </p>
-            </div>
-            <div
-              class="bg-primary/15 text-primary hidden size-24 shrink-0 items-center justify-center rounded-2xl lg:flex"
-            >
-              <UIcon name="i-lucide-trending-up" class="size-12" />
-            </div>
-          </div>
-        </div>
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Marché eBay"
+          description="Estimez une carte ou un produit scellé : annonces actives et prix min / médian / moyen / max sur eBay France."
+        />
+
+        <GoupixDexPageTabs :items="MARKET_PAGE_TABS" />
 
         <!-- Formulaire de recherche -->
-        <UCard class="ring-default/60 shadow-sm ring-1">
+        <UCard>
           <template #header>
             <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <p class="text-highlighted font-medium">Paramètres de recherche</p>
@@ -169,12 +157,13 @@
 
 <script setup lang="ts">
 import type { MarketListing, MarketSearchInput } from '~/composables/useMarketSearch'
+import { buildArticlePrefillFromListing } from '~/composables/useMarketListingPrefill'
 import { parseMarketSearchFromQuery } from '~/utils/marketSearchQuery'
 
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Prix du marché',
+  'Marché eBay — Annonces en cours',
   'Analysez en direct les prix des cartes Pokémon et produits scellés sur eBay France : prix minimum, moyen, médian et maximum des annonces actives.',
 )
 
@@ -232,166 +221,12 @@ if (import.meta.client) {
 }
 
 /**
- * Build `articles/create` query fields from a market listing row.
- * @param listing - Selected eBay row
- * @returns {Record<string, string>} Query key/value map
- */
-function buildPrefillPayload(listing: MarketListing): Record<string, string> {
-  const payload: Record<string, string> = {
-    title: listing.title,
-    purchase_price: String(listing.price_eur),
-    condition: mapCondition(listing.condition, !!listing.graded),
-  }
-  const description = buildDescription(listing)
-  if (description) {
-    payload.description = description
-  }
-  const parsed = parseCardInfo(listing.title)
-  if (parsed.pokemonName) {
-    payload.pokemon_name = parsed.pokemonName
-  }
-  if (parsed.setCode) {
-    payload.set_code = parsed.setCode
-  }
-  if (parsed.cardNumber) {
-    payload.card_number = parsed.cardNumber
-  }
-  if (listing.image_url) {
-    payload.image_url = listing.image_url
-  }
-  payload.source_url = listing.listing_url
-  return payload
-}
-
-/**
- * Map eBay condition hints to GoupixDex article condition enum strings.
- * @param ebayCondition - Raw marketplace condition label
- * @param isGraded - Listing flagged as graded/slabbed
- * @returns {string} Internal condition label
- */
-function mapCondition(ebayCondition: string, isGraded: boolean): string {
-  if (isGraded) {
-    return 'Mint'
-  }
-  const c = (ebayCondition || '').toLowerCase()
-  if (c.includes('new') || c.includes('neuf') || c.includes('scellé') || c.includes('scelle')) {
-    return 'Mint'
-  }
-  if (c.includes('like new') || c.includes('comme neuf')) {
-    return 'Near Mint'
-  }
-  if (c.includes('excellent') || c.includes('très bon')) {
-    return 'Excellent'
-  }
-  if (c.includes('good') || c.includes('bon')) {
-    return 'Good'
-  }
-  if (c.includes('played') || c.includes('acceptable')) {
-    return 'Played'
-  }
-  return 'Near Mint'
-}
-
-/**
- * Optional article description block copied from the marketplace listing.
- * @param listing - Selected listing row
- * @returns {string} Multi-line description text
- */
-function buildDescription(listing: MarketListing): string {
-  const lines: string[] = [listing.title]
-  if (listing.condition) {
-    lines.push('', `État eBay : ${listing.condition}`)
-  }
-  if (listing.graded) {
-    lines.push(`Gradée ${listing.graded.grader}${listing.graded.grade ? ` ${listing.graded.grade}` : ''}`)
-  }
-  return lines.join('\n').trim()
-}
-
-const EXCLUDED_TOKENS = new Set([
-  'NEW',
-  'SEALED',
-  'SCELLE',
-  'SCELLÉ',
-  'MINT',
-  'NM',
-  'EX',
-  'EXCELLENT',
-  'FR',
-  'FRENCH',
-  'FRANCAIS',
-  'FRANÇAIS',
-  'FRANCE',
-  'ENGLISH',
-  'ENG',
-  'JP',
-  'JAPAN',
-  'JAPONAIS',
-  'POKEMON',
-  'POKÉMON',
-  'PSA',
-  'CGC',
-  'BGS',
-  'BECKETT',
-  'GRADED',
-  'VMAX',
-  'VSTAR',
-  'V',
-  'GX',
-  'EX',
-  'TAG',
-  'TEAM',
-])
-
-/**
- * Best-effort Pokémon name / set code / card number extraction from listing title tokens.
- * @param title - Full marketplace title string
- * @returns {{ pokemonName: string; setCode: string; cardNumber: string }} Parsed fragments
- */
-function parseCardInfo(title: string): {
-  pokemonName: string
-  setCode: string
-  cardNumber: string
-} {
-  const result = { pokemonName: '', setCode: '', cardNumber: '' }
-  const numberMatch = title.match(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/)
-  if (numberMatch) {
-    result.cardNumber = numberMatch[1]!
-  }
-  const setMatch = title.match(
-    /\b(SWSH\d{1,3}[a-z]?|SV\d{1,3}[a-z]?|SM\d{1,3}[a-z]?|BW\d{1,3}[a-z]?|XY\d{1,3}[a-z]?|EB\d{1,3}[a-z]?|EV\d{1,3}[a-z]?|BKS?\d{1,3}[a-z]?)\b/i,
-  )
-  if (setMatch) {
-    result.setCode = setMatch[1]!.toUpperCase()
-  }
-  const cleaned = title.replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
-  const tokens = cleaned.split(/\s+/).filter(Boolean)
-  for (const tok of tokens) {
-    const upper = tok.toUpperCase()
-    if (EXCLUDED_TOKENS.has(upper)) {
-      continue
-    }
-    if (/^\d+$/.test(tok)) {
-      continue
-    }
-    if (tok.length < 3) {
-      continue
-    }
-    if (/^[A-ZÀ-ÖØ-Ý]/u.test(tok[0] ?? '')) {
-      result.pokemonName = tok
-      break
-    }
-  }
-  return result
-}
-
-/**
  * Navigate to article creation with query params prefilled from the listing.
  * @param listing - Selected marketplace row
  * @returns {Promise<void>} Resolves after navigation is triggered
  */
 async function onCreateArticle(listing: MarketListing): Promise<void> {
-  const payload = buildPrefillPayload(listing)
+  const payload = buildArticlePrefillFromListing(listing)
   await navigateTo({ path: '/articles/create', query: payload })
 }
 </script>

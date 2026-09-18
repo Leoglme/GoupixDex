@@ -1,12 +1,29 @@
 <template>
   <UDashboardPanel id="orders">
     <template #header>
-      <UDashboardNavbar title="Commandes Cardmarket">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Achats
+          </span>
+        </template>
         <template #right>
-          <div class="flex flex-wrap items-center gap-2">
+          <UButton color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :loading="loading" @click="load" />
+        </template>
+      </UDashboardNavbar>
+    </template>
+
+    <template #body>
+      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Commandes Cardmarket"
+          description="Vos achats Cardmarket importés depuis les factures PDF ou la synchronisation automatique."
+        >
+          <template #actions>
             <input
               ref="pdfInputRef"
               type="file"
@@ -15,6 +32,13 @@
               class="hidden"
               @change="onPdfSelected"
             />
+            <UTooltip
+              text="Collez vos liens de singles : GoupixDex classe les vendeurs pour économiser les frais de port."
+            >
+              <UButton to="/panier-cardmarket" color="neutral" variant="subtle" icon="i-lucide-shopping-basket">
+                Optimiser un panier
+              </UButton>
+            </UTooltip>
             <UButton
               v-if="isDesktopApp"
               color="primary"
@@ -39,14 +63,8 @@
             <UButton color="primary" icon="i-lucide-file-up" :loading="importing" @click="openPdfPicker">
               Importer des PDF
             </UButton>
-            <UButton color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :loading="loading" @click="load" />
-          </div>
-        </template>
-      </UDashboardNavbar>
-    </template>
-
-    <template #body>
-      <div class="space-y-4 p-4 sm:p-6">
+          </template>
+        </GoupixDexPageHeader>
         <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
 
         <UAlert
@@ -58,7 +76,7 @@
           :description="cloudflareMessage"
         />
 
-        <UCard v-if="syncRunning || syncLogLines.length" class="ring-default/60 shadow-sm ring-1">
+        <UCard v-if="syncRunning || syncLogLines.length">
           <template #header>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex items-center gap-2">

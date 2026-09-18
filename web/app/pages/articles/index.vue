@@ -1,32 +1,32 @@
 <template>
   <UDashboardPanel id="articles">
     <template #header>
-      <UDashboardNavbar title="Articles">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
-        <template #right>
-          <div class="flex flex-wrap items-center gap-2">
-            <UButton to="/articles/stock" color="neutral" variant="subtle" icon="i-lucide-package"> Mon stock </UButton>
-            <UButton to="/articles/sold" color="neutral" variant="subtle" icon="i-lucide-badge-check">
-              Articles vendus
-            </UButton>
-            <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
-              Création groupée
-            </UButton>
-            <UButton to="/articles/create" icon="i-lucide-plus"> Nouvel article </UButton>
-          </div>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8">
-        <UCard
-          v-if="!loading && !hasAnyArticles"
-          class="ring-primary/25 border-primary/20 shadow-sm ring-1"
-          :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
-        >
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader title="Mes articles" description="Annonces actuellement en ligne sur Vinted ou eBay.">
+          <template #actions>
+            <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
+              Création groupée
+            </UButton>
+            <UButton to="/articles/create" icon="i-lucide-plus"> Nouvel article </UButton>
+          </template>
+        </GoupixDexPageHeader>
+
+        <GoupixDexPageTabs :items="ARTICLES_PAGE_TABS" />
+        <UCard v-if="!loading && !hasAnyArticles" class="ring-primary/25 ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
           <div class="space-y-2">
             <p class="text-highlighted text-sm font-medium">Aucun article pour l'instant</p>
             <p class="text-muted text-sm leading-relaxed">
@@ -56,7 +56,6 @@
 
         <UCard
           v-else-if="!loading && hasAnyArticles && displayedArticles.length === 0"
-          class="ring-default/60 shadow-sm ring-1"
           :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
         >
           <p class="text-highlighted text-sm font-medium">Aucune annonce en ligne sur Vinted ni eBay</p>
@@ -71,7 +70,7 @@
           </UButton>
         </UCard>
 
-        <UCard v-else class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-0 sm:p-0' }">
+        <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
           <div class="p-3 sm:p-4">
             <GoupixDexArticleList
               :articles="displayedArticles"
@@ -140,7 +139,7 @@
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Articles en vente',
+  'Mes articles — En ligne',
   'Annonces déjà en ligne sur Vinted ou eBay : suivi, mise à jour et vente dans GoupixDex.',
 )
 

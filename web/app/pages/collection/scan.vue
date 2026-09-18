@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="collection-scan">
     <template #header>
-      <UDashboardNavbar title="Scanner mes cartes">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Collection
+          </span>
         </template>
         <template #right>
           <UButton to="/collection" color="neutral" variant="ghost" icon="i-lucide-album"> Ma collection </UButton>
@@ -13,26 +19,37 @@
 
     <template #body>
       <div class="w-full space-y-4 px-3 py-4 sm:space-y-5 sm:px-5 sm:py-5">
-        <!-- Hero / mode d'emploi -->
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-3 py-3 sm:px-5 sm:py-4"
-        >
-          <div class="flex flex-col gap-2">
-            <p class="text-primary text-xs font-medium tracking-wide uppercase">Scan en direct</p>
-            <h1 class="text-highlighted text-base font-semibold sm:text-lg">
-              Photographiez vos cartes à la chaîne — elles arrivent dans votre collection en temps réel.
-            </h1>
-            <p class="text-muted text-sm">
-              Scannez vos cartes à la chaîne&nbsp;: la langue (FR / JP…) est reconnue automatiquement. En HTTPS, le mode
-              caisse capture chaque carte dès qu'elle est tracée — vous pouvez bouger / pivoter pour aider l'OCR.
-            </p>
-          </div>
-        </div>
+        <GoupixDexPageHeader
+          title="Scanner mes cartes"
+          description="Photographiez vos cartes à la chaîne : langue reconnue automatiquement, capture en mode caisse (HTTPS) et arrivée en temps réel dans la collection."
+        />
 
-        <!-- Caméra live + auto-capture (téléphone et desktop) ; import en repli. -->
+        <!-- Desktop (Tauri) : pas de caméra pertinente — QR code vers le téléphone,
+             la page sert d'écran de contrôle du flux temps réel. -->
+        <UCard v-if="isDesktopApp" :ui="{ body: 'p-4 sm:p-5' }">
+          <div class="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
+            <img
+              v-if="phoneScanQrDataUrl"
+              :src="phoneScanQrDataUrl"
+              alt="QR code vers la page de scan"
+              class="h-36 w-36 shrink-0 rounded-xl bg-white p-2"
+            />
+            <div class="min-w-0 space-y-1.5 text-center sm:text-left">
+              <p class="text-highlighted text-sm font-semibold">Scannez avec votre téléphone</p>
+              <p class="text-muted text-sm leading-relaxed">
+                Ouvrez ce QR code avec l'appareil photo du téléphone : la page de scan s'ouvre avec la caméra arrière.
+                Les cartes scannées apparaissent ici en temps réel.
+              </p>
+              <p class="text-muted font-mono text-xs break-all">{{ phoneScanUrl }}</p>
+            </div>
+          </div>
+        </UCard>
+
+        <!-- Caméra live + auto-capture (téléphone et web) ; import en repli. -->
         <UCard
+          v-else
           v-show="!(webcamActive && prefersFullscreenCamera)"
-          class="ring-default/60 shadow-sm ring-1"
+          class="ring-default ring-1"
           :ui="{ body: 'p-3 sm:p-4 space-y-3' }"
         >
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -128,6 +145,36 @@
             </div>
           </div>
 
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="border-default flex overflow-hidden rounded-full border">
+              <button
+                type="button"
+                class="flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold transition-colors"
+                :class="scanDirection === 'in' ? 'bg-success text-inverted' : 'text-muted hover:text-highlighted'"
+                @click="setScanDirection('in')"
+              >
+                <UIcon name="i-lucide-plus" class="size-3.5" />
+                Entrée
+              </button>
+              <button
+                type="button"
+                class="flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold transition-colors"
+                :class="scanDirection === 'out' ? 'bg-error text-inverted' : 'text-muted hover:text-highlighted'"
+                @click="setScanDirection('out')"
+              >
+                <UIcon name="i-lucide-minus" class="size-3.5" />
+                Sortie
+              </button>
+            </div>
+            <p class="text-muted text-xs">
+              {{
+                scanDirection === 'in'
+                  ? 'Chaque carte scannée est ajoutée à la collection.'
+                  : 'Chaque carte scannée est retirée de la collection (vendue / échangée).'
+              }}
+            </p>
+          </div>
+
           <UAlert
             v-if="showAutoScanHelp && isDev"
             color="info"
@@ -174,7 +221,7 @@
               @wheel.prevent="onWebcamWheel"
             >
               <video
-                ref="videoEl"
+                ref="videoElInline"
                 autoplay
                 playsinline
                 muted
@@ -307,7 +354,7 @@
 
               <div class="relative min-h-0 flex-1" @wheel.prevent="onWebcamWheel">
                 <video
-                  ref="videoEl"
+                  ref="videoElFullscreen"
                   autoplay
                   playsinline
                   muted
@@ -382,10 +429,11 @@
                           latestAdded.collection_card.card_number
                         }}
                       </p>
-                      <p class="mt-0.5 text-xs text-emerald-400">
-                        Ajoutée à ma collection{{
-                          latestAdded.created === false ? ` (×${latestAdded.collection_card.quantity})` : ''
-                        }}
+                      <p
+                        class="mt-0.5 text-xs"
+                        :class="latestAdded.status === 'removed' ? 'text-orange-300' : 'text-emerald-400'"
+                      >
+                        {{ outcomeLine(latestAdded) }}
                       </p>
                     </div>
                     <div class="flex shrink-0 flex-col gap-1">
@@ -445,6 +493,28 @@
                   />
                   <span class="w-10 text-right text-xs text-white/80 tabular-nums">{{ zoomPercentLabel }}</span>
                 </div>
+                <div class="mb-2 flex justify-center">
+                  <div class="flex overflow-hidden rounded-full border border-white/20 bg-black/40">
+                    <button
+                      type="button"
+                      class="flex cursor-pointer items-center gap-1.5 px-5 py-2 text-sm font-semibold transition-colors"
+                      :class="scanDirection === 'in' ? 'bg-emerald-500 text-white' : 'text-white/70'"
+                      @click="setScanDirection('in')"
+                    >
+                      <UIcon name="i-lucide-plus" class="size-4" />
+                      Entrée
+                    </button>
+                    <button
+                      type="button"
+                      class="flex cursor-pointer items-center gap-1.5 px-5 py-2 text-sm font-semibold transition-colors"
+                      :class="scanDirection === 'out' ? 'bg-red-500 text-white' : 'text-white/70'"
+                      @click="setScanDirection('out')"
+                    >
+                      <UIcon name="i-lucide-minus" class="size-4" />
+                      Sortie
+                    </button>
+                  </div>
+                </div>
                 <div class="flex items-center justify-between gap-2">
                   <USwitch v-model="autoScan" label="Scan auto" />
                   <UButton
@@ -461,6 +531,12 @@
                 </div>
               </div>
             </div>
+          </Teleport>
+
+          <Teleport to="body">
+            <Transition name="fade">
+              <div v-if="flashKind" class="pointer-events-none fixed inset-0 z-[400]" :class="flashOverlayClass" />
+            </Transition>
           </Teleport>
 
           <UAlert
@@ -495,7 +571,7 @@
         />
 
         <!-- Compteurs -->
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        <div class="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3">
           <div class="border-default bg-elevated/30 rounded-xl border p-2.5 text-center sm:p-3">
             <p class="text-muted text-[10px] uppercase">Scannées</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums sm:text-xl">{{ counters.total }}</p>
@@ -503,6 +579,10 @@
           <div class="border-default bg-elevated/30 rounded-xl border p-2.5 text-center sm:p-3">
             <p class="text-muted text-[10px] uppercase">Ajoutées</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums sm:text-xl">{{ counters.added }}</p>
+          </div>
+          <div class="border-default bg-elevated/30 rounded-xl border p-2.5 text-center sm:p-3">
+            <p class="text-muted text-[10px] uppercase">Retirées</p>
+            <p class="text-highlighted text-lg font-semibold tabular-nums sm:text-xl">{{ counters.removed }}</p>
           </div>
           <div class="border-default bg-elevated/30 rounded-xl border p-2.5 text-center sm:p-3">
             <p class="text-muted text-[10px] uppercase">À vérifier</p>
@@ -572,7 +652,7 @@
 
             <div class="flex shrink-0 flex-col items-end gap-1">
               <UButton
-                v-if="ev.status === 'added' && ev.collection_card"
+                v-if="(ev.status === 'added' || (ev.status === 'removed' && !ev.deleted)) && ev.collection_card"
                 size="xs"
                 color="neutral"
                 variant="ghost"
@@ -615,7 +695,8 @@
 </template>
 
 <script setup lang="ts">
-import type { ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
+import { renderSVG } from 'uqr'
+import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -624,13 +705,32 @@ useGoupixPageSeo(
   'Scannez vos cartes Pokémon depuis votre téléphone et voyez-les apparaître dans votre collection en direct.',
 )
 
-// Le scan est conçu pour le téléphone (caméra arrière). Sur la version desktop
-// (Tauri), on renvoie l'utilisateur vers sa collection pour éviter de proposer
-// une fonctionnalité non pertinente — la sidebar masque déjà le raccourci.
+// Le scan photo se fait depuis le téléphone (caméra arrière). Sur la version
+// desktop (Tauri), la page sert d'écran de contrôle : QR code pour ouvrir le
+// scan sur le téléphone + flux temps réel des cartes qui rentrent / sortent.
 const { isDesktopApp } = useDesktopRuntime()
-if (import.meta.client && isDesktopApp.value) {
-  void navigateTo('/collection', { replace: true })
-}
+const runtimeConfig = useRuntimeConfig()
+
+/** URL of this page on the deployed site — what the phone should open. */
+const phoneScanUrl = computed<string>(() => {
+  let base = String(runtimeConfig.public.siteUrl || '').replace(/\/$/, '')
+  // `NUXT_PUBLIC_SITE_URL=` (empty) overrides the default at runtime; fall
+  // back to the current origin when it is a reachable http(s) URL.
+  if (!base && import.meta.client && /^https?:/i.test(window.location.origin)) {
+    base = window.location.origin
+  }
+  return `${base || 'https://goupixdex.dibodev.fr'}/collection/scan`
+})
+
+/** QR code of {@link phoneScanUrl} as an SVG data URL (desktop helper panel). */
+const phoneScanQrDataUrl = computed<string>(() => {
+  try {
+    const svg = renderSVG(phoneScanUrl.value, { pixelSize: 4 })
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  } catch {
+    return ''
+  }
+})
 
 const {
   events,
@@ -638,6 +738,7 @@ const {
   connecting,
   connectionMode,
   lastError,
+  lastDroppedEvent,
   connect,
   disconnect,
   refreshRecent,
@@ -656,8 +757,45 @@ const SCAN_LANGUAGE = 'auto'
 // "Cash register" mode: auto-capture a card the instant it is held steady.
 const autoScan = ref(true)
 
+/**
+ * Cash-register direction: `in` adds each scanned card to the collection,
+ * `out` removes it (sold / traded away). Resets to `in` on every visit —
+ * a sticky "out" mode would silently empty the binder.
+ */
+const scanDirection = ref<ScanDirection>('in')
+
+/**
+ * Switch the cash-register direction (with an audio unlock, since it's a gesture).
+ * @param direction - `in` or `out`.
+ */
+function setScanDirection(direction: ScanDirection): void {
+  scanDirection.value = direction
+  unlockAudio()
+}
+
+/** Tint of the outcome flash overlay. */
+const flashOverlayClass = computed<string>(() => {
+  if (flashKind.value === 'success') {
+    return 'bg-emerald-500/35'
+  }
+  if (flashKind.value === 'removed') {
+    return 'bg-orange-500/35'
+  }
+  return 'bg-red-600/40'
+})
+
 const fileInput = ref<HTMLInputElement | null>(null)
-const videoEl = ref<HTMLVideoElement | null>(null)
+/**
+ * The inline (desktop) and fullscreen (phone) previews are two distinct
+ * `<video>` elements. They used to share one `ref`, and whichever unmounted
+ * last nulled it — black camera with no error. One ref each + a computed
+ * pointing at the active one.
+ */
+const videoElInline = ref<HTMLVideoElement | null>(null)
+const videoElFullscreen = ref<HTMLVideoElement | null>(null)
+const videoEl = computed<HTMLVideoElement | null>(() =>
+  prefersFullscreenCamera.value ? videoElFullscreen.value : videoElInline.value,
+)
 const uploading = ref(false)
 const toast = useToast()
 
@@ -787,9 +925,11 @@ function pickRearCameraId(devices: VideoDeviceOption[]): string | undefined {
 }
 
 function buildVideoConstraints(): MediaTrackConstraints {
+  // 1920 is plenty: the OCR crop is 630×880. Asking for 4K used to make every
+  // capture-frame grab allocate ~33 MB and freeze mid-range phones.
   const hd: MediaTrackConstraints = {
-    width: { min: 1280, ideal: 3840 },
-    height: { min: 720, ideal: 2160 },
+    width: { min: 1280, ideal: 1920 },
+    height: { min: 720, ideal: 1080 },
     frameRate: { ideal: 30 },
   }
   if (selectedCameraId.value) {
@@ -916,10 +1056,19 @@ async function applyZoomToTrack(level: number): Promise<void> {
     const t = (clamped - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)
     const target = hardwareZoomCaps.min + t * (hardwareZoomCaps.max - hardwareZoomCaps.min)
     try {
-      await videoTrack.applyConstraints({ zoom: target } as MediaTrackConstraintSet)
+      // Android Chrome expects `advanced` for zoom (like the torch); keep the
+      // plain form as a fallback for engines that only accept the direct key.
+      await videoTrack.applyConstraints({
+        advanced: [{ zoom: target } as unknown as MediaTrackConstraintSet],
+      })
       hardwareMagnification = target / hardwareZoomCaps.min
     } catch {
-      hardwareMagnification = 1
+      try {
+        await videoTrack.applyConstraints({ zoom: target } as MediaTrackConstraintSet)
+        hardwareMagnification = target / hardwareZoomCaps.min
+      } catch {
+        hardwareMagnification = 1
+      }
     }
   }
 
@@ -979,15 +1128,9 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
     readHardwareZoomCaps(videoTrack)
     readTorchCap(videoTrack)
     updateResolutionLabel(videoTrack)
-    try {
-      await videoTrack.applyConstraints({
-        width: { ideal: 3840 },
-        height: { ideal: 2160 },
-      })
-      updateResolutionLabel(videoTrack)
-    } catch {
-      /* device may reject a second bump — keep negotiated resolution */
-    }
+    // Camera stolen by a call / another app / revoked permission: recover
+    // instead of leaving a frozen black preview with the detector running.
+    videoTrack.onended = onCameraTrackEnded
   }
 
   webcamStream = stream
@@ -1005,18 +1148,19 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   videoEl.value.srcObject = stream
   const onVideoReady = (): void => {
     webcamReady.value = true
-    const el = videoEl.value
-    if (el?.videoWidth && el.videoHeight) {
-      videoIntrinsicW.value = el.videoWidth
-      videoIntrinsicH.value = el.videoHeight
-    }
+    webcamError.value = null
+    syncIntrinsicSize()
     if (videoTrack) {
       updateResolutionLabel(videoTrack)
     }
-    void applyZoomToTrack(zoomLevel.value)
+    applyZoomToTrack(zoomLevel.value)
+    acquireWakeLock()
   }
   videoEl.value.onloadedmetadata = onVideoReady
   videoEl.value.onloadeddata = onVideoReady
+  // Orientation change swaps videoWidth/videoHeight — the overlay viewBox must
+  // follow or the orange rectangle lands in the wrong place.
+  videoEl.value.onresize = syncIntrinsicSize
   if (videoEl.value.readyState >= 2) {
     onVideoReady()
   }
@@ -1027,10 +1171,39 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   }
 }
 
+/**
+ * Mirror the current video intrinsic size into the overlay viewBox refs.
+ */
+function syncIntrinsicSize(): void {
+  const el = videoEl.value
+  if (el?.videoWidth && el.videoHeight) {
+    videoIntrinsicW.value = el.videoWidth
+    videoIntrinsicH.value = el.videoHeight
+  }
+}
+
+/**
+ * The active camera track died (call, camera app, permission revoked).
+ * Stop cleanly, tell the user, and try one automatic restart.
+ */
+function onCameraTrackEnded(): void {
+  if (!webcamActive.value) {
+    return
+  }
+  stopWebcam()
+  webcamError.value = 'La caméra a été interrompue — reprise en cours…'
+  window.setTimeout(() => {
+    if (!webcamActive.value && liveCameraSupported.value && !document.hidden) {
+      startWebcam(true)
+    }
+  }, 1_000)
+}
+
 async function startWebcam(preserveDeviceSelection = false): Promise<void> {
   if (webcamActive.value || webcamStarting.value) {
     return
   }
+  unlockAudio()
   webcamError.value = null
   webcamStarting.value = true
   webcamReady.value = false
@@ -1082,24 +1255,29 @@ async function startWebcam(preserveDeviceSelection = false): Promise<void> {
   }
 }
 
+/** Guard against two rapid camera switches racing each other. */
+let cameraSwitching = false
+
 async function onCameraChanged(deviceId: string | undefined): Promise<void> {
-  if (!webcamActive.value || !deviceId) {
+  if (!webcamActive.value || !deviceId || cameraSwitching) {
     return
   }
-  const picked = videoDevices.value.find((d) => d.id === deviceId)
-  if (picked && isFrontCameraLabel(picked.label)) {
-    toast.add({
-      title: 'Caméra avant ignorée',
-      description: 'Utilisez la caméra arrière pour scanner vos cartes.',
-      color: 'warning',
-    })
-    selectedCameraId.value = pickRearCameraId(videoDevices.value)
+  cameraSwitching = true
+  try {
+    const picked = videoDevices.value.find((d) => d.id === deviceId)
+    if (picked && isFrontCameraLabel(picked.label)) {
+      toast.add({
+        title: 'Caméra avant ignorée',
+        description: 'Utilisez la caméra arrière pour scanner vos cartes.',
+        color: 'warning',
+      })
+      selectedCameraId.value = pickRearCameraId(videoDevices.value)
+    }
     stopWebcam()
     await startWebcam(true)
-    return
+  } finally {
+    cameraSwitching = false
   }
-  stopWebcam()
-  await startWebcam(true)
 }
 
 function stopWebcam(): void {
@@ -1107,11 +1285,17 @@ function stopWebcam(): void {
     webcamStream.getTracks().forEach((t) => t.stop())
     webcamStream = null
   }
+  if (videoTrack) {
+    videoTrack.onended = null
+  }
   videoTrack = null
   hardwareZoomCaps = null
   torchSupported.value = false
   torchOn.value = false
   if (videoEl.value) {
+    videoEl.value.onloadedmetadata = null
+    videoEl.value.onloadeddata = null
+    videoEl.value.onresize = null
     videoEl.value.srcObject = null
   }
   webcamActive.value = false
@@ -1119,6 +1303,7 @@ function stopWebcam(): void {
   webcamResolutionLabel.value = null
   zoomLevel.value = 1
   softwareZoomFactor.value = 1
+  releaseWakeLock()
 }
 
 async function captureFromWebcam(): Promise<void> {
@@ -1156,7 +1341,7 @@ async function captureFromWebcam(): Promise<void> {
   const file = new File([blob], `webcam-${Date.now()}.jpg`, { type: 'image/jpeg' })
   uploading.value = true
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS)
+    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
   } catch (err) {
     toast.add({
       title: 'Envoi impossible',
@@ -1191,25 +1376,28 @@ const connectionLabel = computed(() => {
   return 'Déconnecté'
 })
 
-// "Carte non identifiée…" (needs_review) is intentionally never surfaced in the
-// live feed — the user finds it noisy. Those scans stay server-side and can
-// still be bulk-cleared; we just don't render them.
-const displayedEvents = computed(() => events.value.filter((e) => e.status !== 'needs_review'))
+// Every scan gets a visible outcome — a cash register that stays silent on a
+// failed read is exactly what made the old page feel broken. Unidentified
+// cards show as "À vérifier" rows and can still be bulk-cleared.
+const displayedEvents = computed(() => events.value)
 
 const counters = computed(() => {
   let added = 0
+  let removed = 0
   let needs_review = 0
   let in_flight = 0
   for (const ev of displayedEvents.value) {
     if (ev.status === 'added') {
       added += 1
-    } else if (ev.status === 'failed') {
+    } else if (ev.status === 'removed') {
+      removed += 1
+    } else if (ev.status === 'failed' || ev.status === 'needs_review' || ev.status === 'not_in_collection') {
       needs_review += 1
     } else {
       in_flight += 1
     }
   }
-  return { total: displayedEvents.value.length, added, needs_review, in_flight }
+  return { total: displayedEvents.value.length, added, removed, needs_review, in_flight }
 })
 
 function thumbUrl(ev: ScanEvent): string | null {
@@ -1266,6 +1454,12 @@ function statusLabel(s: ScanEventStatus): string {
       return 'À vérifier'
     case 'added':
       return 'Ajoutée'
+    case 'removed':
+      return 'Retirée'
+    case 'not_in_collection':
+      return 'Absente de la collection'
+    case 'dropped':
+      return 'Ignorée'
     case 'failed':
       return 'Échec'
   }
@@ -1275,7 +1469,10 @@ function statusBadgeColor(s: ScanEventStatus): 'primary' | 'success' | 'warning'
   switch (s) {
     case 'added':
       return 'success'
+    case 'removed':
+      return 'primary'
     case 'needs_review':
+    case 'not_in_collection':
       return 'warning'
     case 'failed':
       return 'error'
@@ -1332,7 +1529,10 @@ function rowAccentClass(s: ScanEventStatus): string {
   if (s === 'added') {
     return 'ring-success/20 ring'
   }
-  if (s === 'failed' || s === 'needs_review') {
+  if (s === 'removed') {
+    return 'ring-primary/25 ring'
+  }
+  if (s === 'failed' || s === 'needs_review' || s === 'not_in_collection') {
     return 'ring-warning/20 ring'
   }
   return ''
@@ -1373,7 +1573,7 @@ async function onFileChosen(e: Event): Promise<void> {
   }
   uploading.value = true
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE)
+    await uploadPhoto(file, SCAN_LANGUAGE, undefined, undefined, scanDirection.value)
   } catch (err) {
     toast.add({
       title: 'Envoi impossible',
@@ -1386,10 +1586,16 @@ async function onFileChosen(e: Event): Promise<void> {
   }
 }
 
-/** Short rising "ding" so a scan is confirmed without looking at the screen. */
+// Audio feedback. The context must be created + resumed inside a user gesture
+// (iOS keeps it `suspended` otherwise — the old beep was simply mute there).
 let audioCtx: AudioContext | null = null
-function playBeep(): void {
-  if (!soundOn.value || typeof window === 'undefined') {
+
+/**
+ * Create / resume the AudioContext. Call from every user gesture that starts
+ * a scan session (camera button, auto-scan switch, sound toggle).
+ */
+function unlockAudio(): void {
+  if (typeof window === 'undefined') {
     return
   }
   try {
@@ -1399,20 +1605,138 @@ function playBeep(): void {
       return
     }
     audioCtx = audioCtx ?? new Ctx()
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+    }
+  } catch {
+    /* audio is best-effort */
+  }
+}
+
+/**
+ * Play a short two-point sine sweep.
+ * @param from - Start frequency (Hz).
+ * @param to - End frequency (Hz).
+ * @param volume - Peak gain.
+ */
+function playTone(from: number, to: number, volume: number): void {
+  if (!soundOn.value || !audioCtx) {
+    return
+  }
+  try {
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+    }
     const now = audioCtx.currentTime
     const osc = audioCtx.createOscillator()
     const gain = audioCtx.createGain()
     osc.type = 'sine'
-    osc.frequency.setValueAtTime(880, now)
-    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.12)
+    osc.frequency.setValueAtTime(from, now)
+    osc.frequency.exponentialRampToValueAtTime(to, now + 0.12)
     gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(volume, now + 0.02)
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
     osc.connect(gain).connect(audioCtx.destination)
     osc.start(now)
     osc.stop(now + 0.24)
   } catch {
     /* audio is best-effort */
+  }
+}
+
+/** Rising "ding" — card added. */
+function playBeep(): void {
+  playTone(880, 1320, 0.25)
+}
+
+/** Falling "dong" — card removed (checkout). */
+function playRemoveBeep(): void {
+  playTone(660, 440, 0.25)
+}
+
+/** Low buzz — scan failed / needs review / rejected. */
+function playErrorBeep(): void {
+  playTone(300, 180, 0.3)
+}
+
+/**
+ * Haptic feedback (Android Chrome; silently ignored elsewhere).
+ * @param pattern - Vibration pattern in ms.
+ */
+function vibrate(pattern: number | number[]): void {
+  try {
+    navigator.vibrate?.(pattern)
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Full-screen flash tint confirming the outcome without looking at the list. */
+const flashKind = ref<'success' | 'removed' | 'error' | null>(null)
+let flashTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Trigger the outcome flash overlay for ~260 ms.
+ * @param kind - Visual outcome family.
+ */
+function triggerFlash(kind: 'success' | 'removed' | 'error'): void {
+  flashKind.value = kind
+  if (flashTimer !== null) {
+    clearTimeout(flashTimer)
+  }
+  flashTimer = setTimeout(() => {
+    flashKind.value = null
+    flashTimer = null
+  }, 260)
+}
+
+/** Keep the phone screen awake during a scan session (best-effort). */
+let wakeLock: { release: () => Promise<void> } | null = null
+
+/**
+ * Request a screen wake lock while the camera runs.
+ */
+async function acquireWakeLock(): Promise<void> {
+  try {
+    const wl = (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<never> } }).wakeLock
+    if (!wl || wakeLock) {
+      return
+    }
+    wakeLock = (await wl.request('screen')) as unknown as { release: () => Promise<void> }
+  } catch {
+    wakeLock = null
+  }
+}
+
+/**
+ * Release the screen wake lock.
+ */
+function releaseWakeLock(): void {
+  const held = wakeLock
+  wakeLock = null
+  if (held) {
+    held.release().catch(() => undefined)
+  }
+}
+
+/** Camera paused because the tab went to the background — resume on return. */
+let resumeCameraOnVisible = false
+
+/**
+ * Background/foreground handling: iOS freezes the stream when the tab hides,
+ * and the detector would then re-capture the same frozen frame on return.
+ */
+function onVisibilityChange(): void {
+  if (document.hidden) {
+    if (webcamActive.value) {
+      resumeCameraOnVisible = true
+      stopWebcam()
+    }
+    return
+  }
+  if (resumeCameraOnVisible && liveCameraSupported.value) {
+    resumeCameraOnVisible = false
+    startWebcam(true)
   }
 }
 
@@ -1430,7 +1754,7 @@ async function onDetectorCapture(file: File): Promise<void> {
     dismissedAddedId.value = latestAdded.value.event_id
   }
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS)
+    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
   } catch (err) {
     toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
   } finally {
@@ -1481,24 +1805,83 @@ const cardOverlay = computed<{
   return { cx, cy, w, h, angleDeg }
 })
 
-/** Most recent successfully-added card, for the bottom info overlay. */
+/** Most recent settled card (added or removed), for the bottom info overlay. */
 const dismissedAddedId = ref<string | null>(null)
 const latestAdded = computed(() => {
-  const ev = displayedEvents.value.find((e) => e.status === 'added' && e.collection_card)
+  const ev = displayedEvents.value.find((e) => (e.status === 'added' || e.status === 'removed') && e.collection_card)
   if (!ev || ev.event_id === dismissedAddedId.value) {
     return null
   }
   return ev
 })
 
-// Chime when the card is *identified* (info pop-up appears) — not on capture
-// — so the user gets a clear audible "ça y est, on l'a" matching the visual.
-let lastBeepedAddedId: string | null = null
-watch(latestAdded, (v) => {
-  if (v && v.event_id !== lastBeepedAddedId) {
-    lastBeepedAddedId = v.event_id
-    playBeep()
+/** One-line outcome text under the overlay card name. */
+function outcomeLine(ev: ScanEvent): string {
+  if (ev.status === 'removed') {
+    if (ev.deleted) {
+      return 'Retirée de ma collection (dernier exemplaire)'
+    }
+    return `Retirée de ma collection (reste ×${ev.remaining_quantity ?? '?'})`
   }
+  return `Ajoutée à ma collection${ev.created === false && ev.collection_card ? ` (×${ev.collection_card.quantity})` : ''}`
+}
+
+// Sound + vibration + flash the moment each scan settles — the whole point of
+// a cash register is to confirm without looking at the screen.
+const notifiedOutcomeIds = new Set<string>()
+watch(
+  events,
+  (list) => {
+    for (const ev of list) {
+      if (notifiedOutcomeIds.has(ev.event_id)) {
+        continue
+      }
+      if (ev.status === 'added') {
+        notifiedOutcomeIds.add(ev.event_id)
+        playBeep()
+        vibrate(60)
+        triggerFlash('success')
+      } else if (ev.status === 'removed') {
+        notifiedOutcomeIds.add(ev.event_id)
+        playRemoveBeep()
+        vibrate([40, 60, 40])
+        triggerFlash('removed')
+      } else if (ev.status === 'needs_review' || ev.status === 'failed' || ev.status === 'not_in_collection') {
+        notifiedOutcomeIds.add(ev.event_id)
+        playErrorBeep()
+        vibrate(220)
+        triggerFlash('error')
+      }
+    }
+    // The feed is capped: keep the notified set from growing forever.
+    if (notifiedOutcomeIds.size > 300) {
+      notifiedOutcomeIds.clear()
+      for (const ev of list) {
+        notifiedOutcomeIds.add(ev.event_id)
+      }
+    }
+  },
+  { deep: true },
+)
+
+// Server-side frame rejections (blurry, queue full…) are transient events —
+// give an immediate "nothing happened" cue instead of silent dropping.
+watch(lastDroppedEvent, (ev) => {
+  if (!ev) {
+    return
+  }
+  // Debounce drops are expected with capture bursts — stay quiet on those.
+  if (ev.drop_reason === 'debounce') {
+    return
+  }
+  playErrorBeep()
+  vibrate(120)
+  triggerFlash('error')
+  toast.add({
+    title: 'Photo ignorée',
+    description: ev.error ?? 'Le serveur a rejeté cette photo.',
+    color: 'warning',
+  })
 })
 
 const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 'neutral' }>(() => {
@@ -1525,16 +1908,38 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   }
 })
 
+// Sound / auto-scan toggles happen inside a tap: unlock audio right there so
+// the confirmation beep is audible on iOS (context stays suspended otherwise).
+watch(autoScan, (): void => {
+  unlockAudio()
+})
+watch(soundOn, (on: boolean): void => {
+  if (on) {
+    unlockAudio()
+  }
+})
+
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
   await refreshRecent()
   await connect()
-  if (liveCameraSupported.value) {
+  // Desktop is a monitor screen (QR + live feed) — no camera to open there.
+  if (!isDesktopApp.value && liveCameraSupported.value) {
     await startWebcam()
   }
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopWebcam()
   disconnect()
+  if (flashTimer !== null) {
+    clearTimeout(flashTimer)
+    flashTimer = null
+  }
+  if (audioCtx) {
+    audioCtx.close().catch(() => undefined)
+    audioCtx = null
+  }
 })
 </script>

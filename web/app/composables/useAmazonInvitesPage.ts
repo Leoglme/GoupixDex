@@ -50,10 +50,6 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
     if (status != null && status >= 500) {
       return 'Le service est temporairement indisponible. Réessayez dans quelques minutes.'
     }
-    return fallback
-  }
-  if (e instanceof Error && e.message && !e.message.includes('Network')) {
-    return fallback
   }
   return fallback
 }
@@ -148,8 +144,22 @@ export function useAmazonInvitesPage() {
       if (p?.statusFilter != null) {
         statusFilter.value = migratePersistedStatusFilter(p.statusFilter)
       }
+      // Show the last fetched list immediately; `load()` replaces it when the worker answers.
+      if (p?.cachedInvites?.length && !items.value.length) {
+        items.value = p.cachedInvites
+        refreshedAt.value = p.cachedRefreshedAt ?? null
+      }
     }
   })
+
+  /**
+   * Persist the current invite list so the page is not empty on the next visit.
+   */
+  function saveInvitesCache(): void {
+    if (import.meta.client) {
+      saveAmazonInvitesPrefs({ cachedInvites: items.value, cachedRefreshedAt: refreshedAt.value })
+    }
+  }
 
   watch([searchQuery, hideExpired, optionalSearch, maxPages, statusFilter], (): void => {
     if (import.meta.client) {
@@ -175,8 +185,12 @@ export function useAmazonInvitesPage() {
       const params = fetchParams.value
       const [s, inv] = await Promise.all([fetchSession(), fetchInvites(params)])
       session.value = s
-      items.value = inv.items
-      refreshedAt.value = inv.refreshed_at ?? null
+      // A restarted worker answers with an empty cache: keep the locally cached list in that case.
+      if (inv.items.length || !items.value.length) {
+        items.value = inv.items
+        refreshedAt.value = inv.refreshed_at ?? null
+        saveInvitesCache()
+      }
     } catch (e: unknown) {
       error.value = errorMessageFromUnknown(e, 'Impossible de charger vos invitations pour le moment.')
     } finally {
@@ -197,16 +211,21 @@ export function useAmazonInvitesPage() {
     refreshPhaseHint.value = ''
     streamingInvites.value = []
 
-    const wsUrl = buildAmazonProgressWebSocketUrl()
+    const wsTarget = buildAmazonProgressWebSocketUrl()
     let ws: WebSocket | null = null
-    if (wsUrl) {
-      ws = await openAmazonProgressWebSocket(wsUrl, (payload: AmazonWorkerProgressPayload) => {
-        if (payload.message) {
-          refreshPhaseHint.value = payload.message
-        }
-        mergeInvitePreviewFromWs(payload)
-        refreshLogLines.value = [...refreshLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
-      })
+    if (wsTarget) {
+      ws = await openAmazonProgressWebSocket(
+        wsTarget.url,
+        (payload: AmazonWorkerProgressPayload) => {
+          if (payload.message) {
+            refreshPhaseHint.value = payload.message
+          }
+          mergeInvitePreviewFromWs(payload)
+          refreshLogLines.value = [...refreshLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
+        },
+        5000,
+        wsTarget.protocols,
+      )
       if (!ws) {
         refreshLogLines.value = [
           '[info] Connexion au flux temps réel impossible — la recherche continue (logs détaillés indisponibles).',
@@ -226,6 +245,7 @@ export function useAmazonInvitesPage() {
       if (res.refreshed_at) {
         refreshedAt.value = res.refreshed_at
       }
+      saveInvitesCache()
       session.value = await fetchSession()
       if (res.message && !refreshPhaseHint.value) {
         refreshPhaseHint.value = res.message
@@ -319,12 +339,14 @@ export function useAmazonInvitesPage() {
         })
         return
       }
-      if (res.invite) {
+      const updated = res.invite
+      if (updated) {
         const key = asin.toUpperCase()
-        items.value = items.value.map((row) => ((row.asin ?? '').trim().toUpperCase() === key ? res.invite! : row))
+        items.value = items.value.map((row) => ((row.asin ?? '').trim().toUpperCase() === key ? updated : row))
         streamingInvites.value = streamingInvites.value.map((row) =>
-          (row.asin ?? '').trim().toUpperCase() === key ? res.invite! : row,
+          (row.asin ?? '').trim().toUpperCase() === key ? updated : row,
         )
+        saveInvitesCache()
       }
       toast.add({
         title: 'Invitation demandée',

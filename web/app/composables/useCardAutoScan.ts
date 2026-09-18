@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { OPENCV_URL } from '~/composables/useOpenCv'
 
 /**
@@ -19,9 +19,9 @@ interface Pt {
 
 export interface UseCardAutoScanOptions {
   /** Live preview element frames are sampled from. */
-  video: Ref<HTMLVideoElement | null>
+  video: Ref<HTMLVideoElement | null> | ComputedRef<HTMLVideoElement | null>
   /** Detector only runs while this is `true`. */
-  enabled: Ref<boolean>
+  enabled: Ref<boolean> | ComputedRef<boolean>
   /** `true` while an upload is in flight; never capture then. */
   busy: Ref<boolean>
   /** Called once per card with the deskewed, cropped card JPEG. */
@@ -33,19 +33,28 @@ const FRAME_MS = 100
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
 /**
- * Floor between two captures. Short on purpose: as soon as it elapses the next
- * confirmed card fires, even if the previous card is still in frame — no more
- * "remove the card to re-arm" gate (the cause of stuck "Présentez une carte").
+ * Long edge of the frame used for the capture warp. The deskewed card is only
+ * 630×880 — a 1920 source is plenty for OCR, and grabbing the raw 4K stream
+ * here used to allocate ~33 MB per shot (freezes + crashes on phones).
  */
+const CAPTURE_EDGE = 1920
+/** Floor between two captures (safety net on top of the re-arm gate). */
 const MIN_COOLDOWN_MS = 600
 /**
- * How many shots we take in a burst — we keep the sharpest for OCR. Pikacheck-
- * style: a longer window so the user has time to pivot the card during capture
- * (revealing a glary corner, exposing missing text…) and the best angle wins.
+ * Empty detection ticks (~100 ms each) required after a capture before the
+ * next card can fire. This is the "cash register" rhythm: pass a card, it
+ * beeps, pull it out, pass the next one. Without this gate a card left in
+ * frame was re-captured every 600 ms and flooded the server with duplicates.
  */
-const BURST_COUNT = 4
+const CLEAR_TICKS_TO_REARM = 3
+/** How many shots we take in a burst — we keep the sharpest for OCR. */
+const BURST_COUNT = 3
 /** Gap between burst shots — wide enough for hand movement to expose new info. */
-const BURST_INTERVAL_MS = 300
+const BURST_INTERVAL_MS = 220
+/** Hard cap on a burst's lifetime; a stuck worker must never freeze the scanner. */
+const BURST_WATCHDOG_MS = BURST_COUNT * BURST_INTERVAL_MS + 2500
+/** A detect round-trip longer than this counts as lost (worker hiccup). */
+const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
 const SMOOTH_LERP = 0.5
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
@@ -72,9 +81,9 @@ interface BurstShot {
  * crop) runs in a Web Worker so the ~9 MB wasm never freezes the phone. The
  * worker streams back the card quad (video-pixel coords) which we **smooth**
  * before exposing as `quad` (the overlay rectangle follows your hand without
- * jitter). Once the quad is held steady, a small **burst of captures** is
- * sent and the **sharpest** one wins — much better OCR results under light
- * hand shake / focus hunt.
+ * jitter). Once a card is confirmed, a small **burst of captures** is sent and
+ * the **sharpest** one wins; the scanner then waits for the card to leave the
+ * frame before re-arming — pass a card, beep, next card.
  *
  * @param opts - Video element, enable/busy flags and the capture callback.
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
@@ -89,11 +98,20 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   let worker: Worker | null = null
   let timer: ReturnType<typeof setInterval> | null = null
-  let grabCanvas: HTMLCanvasElement | null = null
-  let grabCtx: CanvasRenderingContext2D | null = null
+  // Two dedicated canvases: resizing one shared canvas between the 640 px
+  // detection grabs and the full-size capture grabs reallocated its backing
+  // store several times per second.
+  let detectCanvas: HTMLCanvasElement | null = null
+  let detectCtx: CanvasRenderingContext2D | null = null
+  let captureCanvas: HTMLCanvasElement | null = null
+  let captureCtx: CanvasRenderingContext2D | null = null
 
   let detectInFlight = false
+  let detectSentAt = 0
   let capturing = false
+  /** False right after a capture — set back to true once the frame is clear. */
+  let armed = true
+  let clearTicks = 0
   let lastCorners: Pt[] | null = null
   let displayedCorners: Pt[] | null = null
   let pendingCorners: Pt[] | null = null
@@ -102,39 +120,53 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   let burstCorners: Pt[] | null = null
   let burstShots: BurstShot[] = []
-  let burstAwaiting = 0
+  let burstMisses = 0
   let burstTimer: ReturnType<typeof setTimeout> | null = null
+  let burstWatchdog: ReturnType<typeof setTimeout> | null = null
 
   /**
-   * Draw the current video frame into the scratch canvas at `longEdge` and
-   * return its transferable RGBA buffer (no `createImageBitmap` — iOS-safe).
+   * Draw the current video frame into the right scratch canvas and return its
+   * transferable RGBA buffer (no `createImageBitmap` — iOS-safe).
    *
-   * @param longEdge - Target long-edge size (0 = full intrinsic resolution).
+   * @param longEdge - Target long-edge size.
+   * @param forCapture - Use the capture canvas (full quality) instead of the detection one.
    * @returns The frame buffer + its pixel dimensions, or `null`.
    */
-  function grabFrame(longEdge: number): { buf: ArrayBuffer; w: number; h: number } | null {
+  function grabFrame(longEdge: number, forCapture: boolean = false): { buf: ArrayBuffer; w: number; h: number } | null {
     const el = video.value
     if (!el || el.readyState < 2 || !el.videoWidth || !el.videoHeight) {
       return null
     }
     const vw = el.videoWidth
     const vh = el.videoHeight
-    const scale = longEdge > 0 ? Math.min(1, longEdge / Math.max(vw, vh)) : 1
+    const scale = Math.min(1, longEdge / Math.max(vw, vh))
     const w = Math.max(1, Math.round(vw * scale))
     const h = Math.max(1, Math.round(vh * scale))
-    if (!grabCanvas) {
-      grabCanvas = document.createElement('canvas')
+    let canvas = forCapture ? captureCanvas : detectCanvas
+    let ctx = forCapture ? captureCtx : detectCtx
+    if (!canvas) {
+      canvas = document.createElement('canvas')
+      if (forCapture) {
+        captureCanvas = canvas
+      } else {
+        detectCanvas = canvas
+      }
     }
-    if (grabCanvas.width !== w || grabCanvas.height !== h) {
-      grabCanvas.width = w
-      grabCanvas.height = h
-      grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true })
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+      ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (forCapture) {
+        captureCtx = ctx
+      } else {
+        detectCtx = ctx
+      }
     }
-    if (!grabCtx) {
+    if (!ctx) {
       return null
     }
-    grabCtx.drawImage(el, 0, 0, w, h)
-    return { buf: grabCtx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
+    ctx.drawImage(el, 0, 0, w, h)
+    return { buf: ctx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
   }
 
   /**
@@ -178,8 +210,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    * Force the displayed rectangle to the Pokémon card aspect ratio (88/63),
    * keeping the detected center + rotation. Detections under perspective are
    * always trapezoids with small noise; rendering a forced-ratio rotated
-   * rectangle reads as "the card" instead of "some quad" — same trick the
-   * competitor uses for that locked-on look.
+   * rectangle reads as "the card" instead of "some quad".
    *
    * @param q - Smoothed corners (any quadrilateral) in video-intrinsic px.
    * @returns Card-AR rectangle corners at the same center, rotation and scale.
@@ -232,19 +263,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   function beginBurst(corners: Pt[]): void {
     burstCorners = corners
     burstShots = []
-    burstAwaiting = BURST_COUNT
+    burstMisses = 0
     capturing = true
     phase.value = 'captured'
+    if (burstWatchdog !== null) {
+      clearTimeout(burstWatchdog)
+    }
+    // Whatever happens to the worker, the scanner must re-arm itself.
+    burstWatchdog = setTimeout(finaliseBurst, BURST_WATCHDOG_MS)
     requestWarp()
   }
 
   /** Send the next warp request from the burst (or finalise if we've collected enough). */
   function requestWarp(): void {
-    if (!worker) {
-      finaliseBurst()
+    if (!capturing) {
       return
     }
-    if (burstShots.length >= burstAwaiting) {
+    if (!worker || burstShots.length + burstMisses >= BURST_COUNT) {
       finaliseBurst()
       return
     }
@@ -252,29 +287,53 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     // yields a correctly cropped card. Fall back to the trigger corners if the
     // detector hasn't returned a new quad yet.
     const corners = lastCorners ?? burstCorners
-    const full = grabFrame(0)
+    const full = grabFrame(CAPTURE_EDGE, true)
     if (!corners || !full) {
-      if (burstShots.length + 1 < burstAwaiting) {
-        burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
-      } else {
-        finaliseBurst()
-      }
+      onBurstShotMissed()
       return
     }
-    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners }, [full.buf])
+    // Corners are in video-intrinsic coords; scale them to the capture frame.
+    const el = video.value
+    const scale = el && el.videoWidth ? full.w / el.videoWidth : 1
+    const scaled = corners.map((p) => ({ x: p.x * scale, y: p.y * scale }))
+    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners: scaled }, [full.buf])
+  }
+
+  /** One burst shot could not be produced — count it and keep the burst going. */
+  function onBurstShotMissed(): void {
+    burstMisses += 1
+    if (burstShots.length + burstMisses >= BURST_COUNT) {
+      finaliseBurst()
+    } else {
+      burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
+    }
   }
 
   /** Pick the sharpest shot from the burst, encode JPEG and hand it to `onCapture`. */
   function finaliseBurst(): void {
+    if (!capturing) {
+      return
+    }
     if (burstTimer !== null) {
       clearTimeout(burstTimer)
       burstTimer = null
     }
+    if (burstWatchdog !== null) {
+      clearTimeout(burstWatchdog)
+      burstWatchdog = null
+    }
+    // Every exit path below goes through this: re-arm only after the card
+    // leaves the frame (cash-register rhythm), never mid-frame.
+    const finishCooldown = (): void => {
+      capturing = false
+      armed = false
+      clearTicks = 0
+      lastCaptureAt = Date.now()
+      phase.value = 'cooldown'
+    }
     if (!burstShots.length) {
       burstCorners = null
-      capturing = false
-      phase.value = 'cooldown'
-      lastCaptureAt = Date.now()
+      finishCooldown()
       return
     }
     burstShots.sort((a, b) => b.sharpness - a.sharpness)
@@ -286,10 +345,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     cnv.width = best.w
     cnv.height = best.h
     const ctx = cnv.getContext('2d')
-    const finishCooldown = (): void => {
-      capturing = false
-      phase.value = 'cooldown'
-    }
     if (!ctx) {
       finishCooldown()
       return
@@ -302,7 +357,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
           return
         }
         const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
-        lastCaptureAt = Date.now()
         void Promise.resolve(onCapture(file)).finally(finishCooldown)
       },
       'image/jpeg',
@@ -311,10 +365,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Apply voting + miss-linger + the steady-then-capture state machine to a
-   * fresh detection. Voting (two consecutive consistent detections) and a
-   * short linger on empty frames stop the overlay from flickering / morphing
-   * on every spurious frame — only confirmed cards reach the display.
+   * Apply voting + miss-linger + the capture / re-arm state machine to a fresh
+   * detection. Voting (two consecutive consistent detections) and a short
+   * linger on empty frames stop the overlay from flickering on every spurious
+   * frame — only confirmed cards reach the display.
    *
    * @param corners - Ordered card corners in video-intrinsic px, or `null`.
    */
@@ -325,28 +379,31 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
 
-    // No card this tick — linger before clearing so a single bad frame doesn't
-    // hide the overlay we are tracking.
+    // No card this tick — this is what re-arms the scanner after a capture.
     if (!corners) {
       pendingCorners = null
       missTicks += 1
+      if (!armed) {
+        clearTicks += 1
+        if (clearTicks >= CLEAR_TICKS_TO_REARM) {
+          armed = true
+          if (!capturing) {
+            phase.value = 'watching'
+          }
+        }
+      }
       if (missTicks >= MISS_LINGER_TICKS) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
-        if (phase.value !== 'idle' && !capturing) {
+        if (phase.value !== 'idle' && !capturing && armed) {
           phase.value = 'watching'
         }
       }
       return
     }
     missTicks = 0
-
-    // Cooldown is now purely time-based — once it elapses, the next confirmed
-    // quad fires regardless of whether the previous card left the frame.
-    if (phase.value === 'cooldown' && Date.now() - lastCaptureAt >= MIN_COOLDOWN_MS) {
-      phase.value = 'watching'
-    }
+    clearTicks = 0
 
     // Voting: wait for two consecutive detections within VOTE_DRIFT_FRAC of
     // each other before trusting the result. Hand-shake / texture flicker
@@ -374,10 +431,13 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
-    // No "hold steady" wait and no "card must leave" gate — Pikacheck-style.
-    // As soon as a card is confirmed (vote passed) and the short time cooldown
-    // is past, we shoot a burst. The user is free to swap cards directly; each
-    // burst shot uses the freshest corners so a pivot during capture wins.
+    // Not re-armed yet: the previous card is still in frame. The UI shows
+    // "Retirez la carte" — and that label is now actually true.
+    if (!armed) {
+      phase.value = 'cooldown'
+      return
+    }
+
     if (busy.value || Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
       return
     }
@@ -391,8 +451,16 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    * fresh — each burst shot uses the latest detection, supporting movement.
    */
   function pumpFrame(): void {
-    if (!worker || !enabled.value || detectInFlight || busy.value) {
+    if (!worker || !enabled.value || busy.value) {
       return
+    }
+    if (detectInFlight) {
+      // A worker hiccup must not kill the loop forever.
+      if (Date.now() - detectSentAt > DETECT_TIMEOUT_MS) {
+        detectInFlight = false
+      } else {
+        return
+      }
     }
     const el = video.value
     if (!el || !el.videoWidth) {
@@ -403,6 +471,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
     detectInFlight = true
+    detectSentAt = Date.now()
     worker.postMessage({ t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight }, [f.buf])
   }
 
@@ -417,17 +486,25 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
       | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
+      | { t: 'warp_failed'; m: string }
     if (d.t === 'ready') {
       ready.value = true
-      phase.value = 'watching'
-      if (timer === null) {
-        timer = setInterval(pumpFrame, FRAME_MS)
+      loadError.value = null
+      if (enabled.value) {
+        phase.value = 'watching'
+        startPump()
       }
       return
     }
     if (d.t === 'error') {
+      // Fatal engine failure (OpenCV never loaded / crashed). Reset every
+      // transient flag so a later retry starts clean instead of deadlocking.
       loadError.value = d.m
       ready.value = false
+      detectInFlight = false
+      if (capturing) {
+        finaliseBurst()
+      }
       return
     }
     if (d.t === 'quad') {
@@ -440,9 +517,19 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       onDetection(null)
       return
     }
+    if (d.t === 'warp_failed') {
+      // Non-fatal: skip this shot, the burst keeps going.
+      if (capturing) {
+        onBurstShotMissed()
+      }
+      return
+    }
     if (d.t === 'warped') {
+      if (!capturing) {
+        return
+      }
       burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness })
-      if (burstShots.length < burstAwaiting) {
+      if (burstShots.length + burstMisses < BURST_COUNT) {
         burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
       } else {
         finaliseBurst()
@@ -450,12 +537,24 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
   }
 
+  /** Start the detection interval (idempotent). */
+  function startPump(): void {
+    if (timer === null) {
+      timer = setInterval(pumpFrame, FRAME_MS)
+    }
+  }
+
   /** Spawn the worker and kick off OpenCV loading inside it. */
   function startWorker(): void {
-    if (worker || typeof Worker === 'undefined') {
-      if (!worker) {
-        loadError.value = 'Scan auto non supporté par ce navigateur'
+    if (worker) {
+      if (ready.value) {
+        phase.value = 'watching'
+        startPump()
       }
+      return
+    }
+    if (typeof Worker === 'undefined') {
+      loadError.value = 'Scan auto non supporté par ce navigateur'
       return
     }
     try {
@@ -471,8 +570,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     worker.postMessage({ t: 'init', url: OPENCV_URL })
   }
 
-  /** Tear everything down (disable / unmount). */
-  function stopAll(): void {
+  /** Reset the per-session detection state (keeps the worker + OpenCV warm). */
+  function resetTransientState(): void {
     if (timer !== null) {
       clearInterval(timer)
       timer = null
@@ -481,22 +580,45 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       clearTimeout(burstTimer)
       burstTimer = null
     }
-    if (worker) {
-      worker.terminate()
-      worker = null
+    if (burstWatchdog !== null) {
+      clearTimeout(burstWatchdog)
+      burstWatchdog = null
     }
-    grabCanvas = null
-    grabCtx = null
     detectInFlight = false
     capturing = false
+    armed = true
+    clearTicks = 0
     lastCorners = null
     displayedCorners = null
     pendingCorners = null
     missTicks = 0
     burstCorners = null
     burstShots = []
-    burstAwaiting = 0
+    burstMisses = 0
     quad.value = null
+    phase.value = ready.value ? 'idle' : phase.value
+  }
+
+  /**
+   * Pause detection without killing the worker: re-enabling used to reload the
+   * whole ~9 MB OpenCV wasm on every switch toggle or camera change.
+   */
+  function pause(): void {
+    resetTransientState()
+    phase.value = 'idle'
+  }
+
+  /** Tear everything down (page unmount only). */
+  function stopAll(): void {
+    resetTransientState()
+    if (worker) {
+      worker.terminate()
+      worker = null
+    }
+    detectCanvas = null
+    detectCtx = null
+    captureCanvas = null
+    captureCtx = null
     ready.value = false
     phase.value = 'idle'
   }
@@ -507,7 +629,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       if (on) {
         startWorker()
       } else {
-        stopAll()
+        pause()
       }
     },
     { immediate: true },

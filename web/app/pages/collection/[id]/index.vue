@@ -12,14 +12,14 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6">
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
         <div v-if="loading" class="flex items-center justify-center py-20">
           <UIcon name="i-lucide-loader-2" class="text-primary size-10 animate-spin" />
         </div>
 
         <template v-else-if="card">
           <div class="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr] lg:items-start lg:gap-6">
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
               <div class="bg-muted/20 mx-auto aspect-[63/88] w-full max-w-[300px] overflow-hidden rounded-xl">
                 <img
                   v-if="card.image_url"
@@ -97,7 +97,7 @@
               </UAlert>
             </UCard>
 
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-6 space-y-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4 sm:p-6 space-y-4' }">
               <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div class="space-y-1">
                   <p class="text-muted text-xs font-medium tracking-wide uppercase">Préparer la vente</p>
@@ -162,7 +162,7 @@
           </div>
         </template>
 
-        <UCard v-else class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-10 text-center space-y-3' }">
+        <UCard v-else class="ring-default ring-1" :ui="{ body: 'p-10 text-center space-y-3' }">
           <UIcon name="i-lucide-album-x" class="text-muted mx-auto size-12" />
           <p class="text-highlighted text-base font-medium">Carte introuvable dans la collection.</p>
           <UButton color="primary" variant="soft" to="/collection" icon="i-lucide-arrow-left">

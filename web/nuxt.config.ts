@@ -91,6 +91,19 @@ export default defineNuxtConfig({
   },
 
   /**
+   * Self-hosted Google fonts (via `@nuxt/fonts`, bundled with Nuxt UI).
+   * Weights are pinned because the defaults (400/700) miss the 500/600
+   * used across labels, titles and buttons.
+   */
+  fonts: {
+    families: [
+      { name: 'Nunito Sans', provider: 'google', weights: [400, 500, 600, 700, 800] },
+      { name: 'Fredoka', provider: 'google', weights: [400, 500, 600] },
+      { name: 'JetBrains Mono', provider: 'google', weights: [400, 500, 600] },
+    ],
+  },
+
+  /**
    * App desktop / `nuxt generate` : sans SSR, Nuxt Icon utilise le provider `iconify` côté client.
    * `clientBundle.scan` embarque les icônes détectées dans les `.vue` (via `@iconify-json/*` local)
    * pour éviter chargements partiels / courses au premier rendu.
@@ -99,9 +112,25 @@ export default defineNuxtConfig({
     clientBundle: {
       scan: true,
       sizeLimitKb: 1024,
-      // Icônes définies dans `computed()` (sidebar) : les inclure explicitement
+      // Icônes définies dans `computed()` (sidebar / menus) : les inclure explicitement
       // pour le bundle client desktop / `nuxt generate`.
-      icons: ['lucide:hard-drive-download', 'lucide:download', 'lucide:scan-line', 'lucide:eraser', 'lucide:trash-2'],
+      icons: [
+        'lucide:hard-drive-download',
+        'lucide:download',
+        'lucide:scan-line',
+        'lucide:eraser',
+        'lucide:trash-2',
+        'lucide:layout-dashboard',
+        'lucide:package',
+        'lucide:trending-up',
+        'lucide:mailbox',
+        'lucide:album',
+        'lucide:file-text',
+        'lucide:shopping-basket',
+        'lucide:users',
+        'lucide:flame',
+        'simple-icons:amazon',
+      ],
     },
   },
 

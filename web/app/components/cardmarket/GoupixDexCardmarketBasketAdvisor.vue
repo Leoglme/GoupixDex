@@ -1,5 +1,5 @@
 <template>
-  <UCard class="ring-default/60 shadow-sm ring-1">
+  <UCard class="ring-default ring-1">
     <template #header>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -58,19 +58,19 @@
 
       <div v-if="suggestion" class="space-y-4">
         <div class="grid gap-3 sm:grid-cols-4">
-          <div class="bg-elevated/40 ring-default/60 rounded-lg p-3 ring-1">
+          <div class="bg-elevated/40 ring-default rounded-lg p-3 ring-1">
             <p class="text-muted text-xs">Cartes couvertes</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums">
               {{ suggestion.covered_cards }} / {{ suggestion.total_cards }}
             </p>
           </div>
-          <div class="bg-elevated/40 ring-default/60 rounded-lg p-3 ring-1">
+          <div class="bg-elevated/40 ring-default rounded-lg p-3 ring-1">
             <p class="text-muted text-xs">Total panier</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums">
               {{ formatPrice(suggestion.total_price_eur) }}
             </p>
           </div>
-          <div class="bg-elevated/40 ring-default/60 rounded-lg p-3 ring-1">
+          <div class="bg-elevated/40 ring-default rounded-lg p-3 ring-1">
             <p class="text-muted text-xs">Vendeurs</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums">
               {{ suggestion.sellers.length }}
@@ -79,7 +79,7 @@
               </span>
             </p>
           </div>
-          <div class="bg-elevated/40 ring-default/60 rounded-lg p-3 ring-1">
+          <div class="bg-elevated/40 ring-default rounded-lg p-3 ring-1">
             <p class="text-muted text-xs">Budget restant</p>
             <p class="text-highlighted text-lg font-semibold tabular-nums">
               {{ formatPrice(suggestion.remaining_budget_eur) }}

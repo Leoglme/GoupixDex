@@ -134,7 +134,7 @@
             </UPageCard>
           </UPageGrid>
 
-          <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
+          <UCard class="ring-default ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
             <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p class="text-muted text-xs font-medium uppercase">Vendeur</p>
@@ -177,7 +177,7 @@
             </p>
           </UCard>
 
-          <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-0 sm:p-0' }">
+          <UCard class="ring-default ring-1" :ui="{ body: 'p-0 sm:p-0' }">
             <div class="border-default border-b px-4 py-3 sm:px-5">
               <p class="text-highlighted text-sm font-medium">Lignes d’achat</p>
               <p class="text-muted text-xs">

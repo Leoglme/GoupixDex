@@ -67,7 +67,7 @@
         </UAlert>
 
         <template v-if="detail">
-          <UCard class="ring-default/60 shadow-sm ring-1">
+          <UCard>
             <template #header>
               <p class="text-highlighted font-medium">Configuration</p>
             </template>
@@ -110,7 +110,7 @@
             </div>
           </UCard>
 
-          <UCard v-if="running || logLines.length" class="ring-default/60 shadow-sm ring-1">
+          <UCard v-if="running || logLines.length">
             <template #header>
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex items-center gap-2">
@@ -143,7 +143,7 @@
               lorsque l’analyse est terminée.
             </p>
             <div class="grid gap-6 lg:grid-cols-2">
-              <UCard class="ring-default/60 shadow-sm ring-1">
+              <UCard>
                 <template #header>
                   <p class="text-highlighted font-medium">Top vendeurs (couverture)</p>
                   <p class="text-muted text-xs">≥ 2 cartes — tri : nombre de cartes puis total €</p>
@@ -157,7 +157,7 @@
                   </div>
                 </div>
               </UCard>
-              <UCard class="ring-default/60 shadow-sm ring-1">
+              <UCard>
                 <template #header>
                   <p class="text-highlighted font-medium">Top vendeurs (surcoût vs min)</p>
                   <p class="text-muted text-xs">≥ 2 cartes — tri : % surcoût total puis nombre de cartes</p>
@@ -175,7 +175,7 @@
 
             <GoupixDexCardmarketBasketAdvisor v-if="resultCards.length" :cards="resultCards" />
 
-            <UCard v-if="missingCards.length" class="ring-default/60 shadow-sm ring-1">
+            <UCard v-if="missingCards.length">
               <template #header>
                 <p class="text-highlighted font-medium">Sans offre (filtres)</p>
               </template>

@@ -27,7 +27,7 @@ ENV_API_KEY = "GROQ_API_KEY"
 ENV_MODEL = "GROQ_VISION_MODEL"
 ENV_POKE_WALLET_KEY = "POKE_WALLET_API_KEY"
 # Llama 4 Scout was shut down on Groq on 2026-07-17. Qwen 3.6 27B is the current vision model.
-DEFAULT_MODEL = "qwen/qwen3.6-27b"
+DEFAULT_MODEL = "qwen/qwen3.8-27b"
 MAX_BASE64_IMAGE_BYTES = 4 * 1024 * 1024
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 SET_CODE_CROP_MAX_COMPLETION_TOKENS = 64

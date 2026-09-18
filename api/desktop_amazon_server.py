@@ -25,6 +25,7 @@ import hashlib
 import logging
 import os
 import re
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -380,31 +381,154 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
 
 
+#: Localized "please sign in" greetings shown in Amazon's nav when signed out.
+_SIGNED_OUT_GREETING_MARKERS = ("identifiez", "s'identifier", "s’identifier", "sign in", "connectez")
+
+#: JS snippet returning the nav greeting text ("" outside store pages / during /ap/ flows).
+_GREETING_JS = (
+    "(() => { const el = document.querySelector('#nav-link-accountList-nav-line-1');"
+    " return el && el.textContent ? el.textContent.trim() : ''; })()"
+)
+
+
+async def _detect_session_via_live_browser() -> str | None:
+    """
+    Ask the *running* login window whether the user is signed in, via the DOM.
+
+    While the window is open, Chromium holds the on-disk Cookies DB locked (and
+    Chrome 127+ App-Bound Encryption can even fail with "requires admin"), so
+    the profile-file detection is unusable — which used to make "Actualiser
+    l'état" look broken right after a successful sign-in.
+
+    We deliberately do NOT read cookies over CDP: the pinned nodriver version
+    crashes parsing modern Chrome cookie payloads (``KeyError: 'sameParty'``)
+    and that poisons the whole CDP connection. Amazon's nav greeting
+    ("Bonjour, <prénom>" vs "Bonjour, Identifiez-vous") is just as decisive.
+
+    Returns ``None`` when no browser is running (caller falls back to the
+    profile file), ``ready``/``needs_login`` otherwise.
+    """
+    tab = _amazon_tab
+    if _amazon_browser is None or tab is None:
+        return None
+    try:
+        greeting = await asyncio.wait_for(tab.evaluate(_GREETING_JS), timeout=8)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Amazon live greeting read failed: %s: %s", type(exc).__name__, exc)
+        return None
+    text = str(greeting or "").strip()
+    if not text:
+        # Login / OTP pages have no nav greeting — the user is mid sign-in.
+        return "needs_login"
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _SIGNED_OUT_GREETING_MARKERS):
+        return "needs_login"
+    return "ready"
+
+
+#: Written next to the profile when a signed-in session was positively seen
+#: (live CDP read). Lets the profile detection answer "ready" even when the
+#: cookie DB itself is undecryptable (Chrome App-Bound Encryption).
+_SESSION_MARKER_NAME = "goupix-session-ok.json"
+_SESSION_MARKER_MAX_AGE_SEC = 7 * 24 * 3600
+
+
+def _write_session_marker() -> None:
+    """Persist "a signed-in session was confirmed at <now>" beside the profile."""
+    try:
+        marker = _amazon_profile_dir() / _SESSION_MARKER_NAME
+        marker.write_text(json.dumps({"confirmed_at": time.time()}), encoding="utf-8")
+    except OSError as exc:
+        logger.debug("Amazon session marker write failed: %s", exc)
+
+
+def _session_marker_fresh() -> bool:
+    """True when a signed-in session was confirmed less than a week ago."""
+    try:
+        marker = _amazon_profile_dir() / _SESSION_MARKER_NAME
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        confirmed_at = float(payload.get("confirmed_at") or 0.0)
+        return 0 < time.time() - confirmed_at < _SESSION_MARKER_MAX_AGE_SEC
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 @router.get("/session")
 async def amazon_session(
     _user_id: Annotated[int, Depends(get_user_id_introspected)],
 ) -> dict[str, object]:
+    live = await _detect_session_via_live_browser()
+    if live == "ready":
+        _write_session_marker()
+        return {
+            "state": "ready",
+            "message": "Session détectée dans la fenêtre Chrome ouverte.",
+            "browser_open": True,
+            "last_sync_at": _refreshed_at,
+        }
+    if live == "needs_login":
+        return {
+            "state": "needs_login",
+            "message": "Fenêtre Chrome ouverte — connectez-vous à Amazon, l'état se mettra à jour tout seul.",
+            "browser_open": True,
+            "last_sync_at": _refreshed_at,
+        }
+
     profile = _amazon_profile_dir()
     det = detect_amazon_session_from_profile(profile)
     if det == "busy":
         return {
             "state": "busy",
-            "message": "Amazon Chrome appears open — close the window or wait, then try again.",
+            "message": "Un Chrome Amazon semble ouvert — fermez la fenêtre ou attendez, puis réessayez.",
+            "browser_open": False,
             "last_sync_at": _refreshed_at,
         }
     if det == "ready":
+        _write_session_marker()
         return {
             "state": "ready",
             "message": None,
+            "browser_open": False,
+            "last_sync_at": _refreshed_at,
+        }
+    if det == "unreadable" and _session_marker_fresh():
+        # Cookie DB undecryptable but a signed-in session was positively seen
+        # recently — trust it rather than sending the user back to the login.
+        return {
+            "state": "ready",
+            "message": "Session confirmée récemment (cookies illisibles sur ce Chrome, comportement normal).",
+            "browser_open": False,
             "last_sync_at": _refreshed_at,
         }
     return {
         "state": "needs_login",
-        "message": (
-            "Use « Open Chrome » in marketplace settings, sign in, then refresh status."
-        ),
+        "message": "Utilisez « Ouvrir Chrome » dans les réglages marketplace, connectez-vous, l'état suivra.",
+        "browser_open": False,
         "last_sync_at": _refreshed_at,
     }
+
+
+@router.post("/browser/close")
+async def amazon_browser_close(
+    _user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    """
+    Close the login Chromium cleanly so the profile flushes its cookies to disk
+    (the on-disk detection then works without the window in the way).
+    """
+    global _amazon_browser, _amazon_tab
+    async with _amazon_browser_lock:
+        browser = _amazon_browser
+        _amazon_browser = None
+        _amazon_tab = None
+    if browser is None:
+        return {"closed": False, "message": "Aucune fenêtre Chrome ouverte par le worker."}
+    try:
+        browser.stop()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Amazon browser close failed: %s", exc)
+        return {"closed": False, "message": f"Fermeture incomplète : {exc}"}
+    return {"closed": True, "message": None}
 
 
 async def _amazon_browser_open_login_impl() -> dict[str, object]:
@@ -717,13 +841,37 @@ app.add_middleware(
 app.include_router(router)
 
 
+_WS_JWT_SUBPROTOCOL_PREFIX = "goupix-jwt."
+
+
+def _token_from_ws_subprotocols(websocket: WebSocket) -> tuple[str | None, str | None]:
+    """Extract the JWT from a ``goupix-jwt.<token>`` subprotocol entry.
+
+    Returns ``(token, subprotocol)`` so ``accept()`` can echo the selected
+    subprotocol back (browsers drop the connection otherwise).
+    """
+    header = websocket.headers.get("sec-websocket-protocol", "")
+    for entry in header.split(","):
+        entry = entry.strip()
+        if entry.startswith(_WS_JWT_SUBPROTOCOL_PREFIX):
+            token = entry[len(_WS_JWT_SUBPROTOCOL_PREFIX) :]
+            if token:
+                return token, entry
+    return None, None
+
+
 @app.websocket("/ws/progress")
 async def amazon_progress_websocket(websocket: WebSocket) -> None:
     """
     Real-time JSON events during ``POST /amazon/invites/refresh`` (search progress).
-    Connect with ``?token=JWT&remote_api=https://...`` (same token and API as local workers).
+
+    Auth: preferred via the ``goupix-jwt.<token>`` WebSocket subprotocol (keeps the JWT
+    out of access logs); the legacy ``?token=JWT`` query param is still accepted.
+    ``?remote_api=https://...`` selects the introspection API (same as local workers).
     """
-    raw_token = websocket.query_params.get("token")
+    raw_token, chosen_subprotocol = _token_from_ws_subprotocols(websocket)
+    if not raw_token:
+        raw_token = websocket.query_params.get("token")
     remote_raw = websocket.query_params.get("remote_api") or os.environ.get("GOUPIX_REMOTE_API", "")
     remote = str(remote_raw).strip().rstrip("/") if remote_raw else ""
     if not raw_token or not remote:
@@ -734,7 +882,7 @@ async def amazon_progress_websocket(websocket: WebSocket) -> None:
     except HTTPException:
         await websocket.close(code=1008)
         return
-    await websocket.accept()
+    await websocket.accept(subprotocol=chosen_subprotocol)
     _progress_ws_clients.add(websocket)
     try:
         while True:

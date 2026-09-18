@@ -26,7 +26,7 @@
     </section>
 
     <main class="mx-auto flex w-full max-w-5xl justify-center px-5 py-14 sm:px-8 sm:py-20">
-      <UCard class="ring-default/60 w-full max-w-4xl shadow-sm ring-1">
+      <UCard class="ring-default w-full max-w-4xl ring-1">
         <div class="text-toned space-y-8 text-sm leading-7 sm:text-base">
           <section class="space-y-2">
             <h2 class="text-highlighted text-xl font-semibold">1. Responsable du traitement</h2>

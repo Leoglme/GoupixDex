@@ -178,6 +178,8 @@ const canShowRequestCta: ComputedRef<boolean> = computed(() => {
   if (!productLink.value) {
     return false
   }
-  return props.invite.status === 'not_requested'
+  // `listing_only` means Amazon shows the product as invite-gated: requesting is exactly
+  // what the user wants to do there, same as a row not requested yet.
+  return props.invite.status === 'not_requested' || props.invite.status === 'listing_only'
 })
 </script>

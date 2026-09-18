@@ -7,20 +7,27 @@ Single frontend shared between:
 
 ## Pages overview
 
-| Route                       | Access    | Purpose                                                                                                              |
-| --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------- |
-| `/`                         | Public    | Marketing landing (Vinted + eBay + wardrobe sync pitch).                                                             |
-| `/request`                  | Public    | Submit an access request (`POST /access-requests`).                                                                  |
-| `/login`                    | Public    | JWT sign-in (rejects `pending` / `rejected` / `banned`).                                                             |
-| `/setup-password/[token]`   | Public    | One-time password setup from an admin-issued link.                                                                   |
-| `/dashboard`                | Auth      | KPIs, revenue timeline, channel split (Vinted vs eBay).                                                              |
-| `/articles`, `/articles/**` | Auth      | Inventory CRUD, scan flow, batch publish.                                                                            |
-| `/settings`                 | Auth      | Profile, notifications, security.                                                                                    |
-| `/settings/marketplaces`    | Auth      | Toggle Vinted/eBay, link Vinted account (`VintedAccountCard`), eBay OAuth + onboarding.                              |
-| `/users`                    | **Admin** | User list (avatar via PokeAPI, status, margin, Vinted/eBay flags) + approve / reject / ban / generate password link. |
-| `/downloads`                | Auth      | Download the Tauri desktop bundle (Windows / macOS).                                                                 |
+The sidebar is grouped into **Pilotage / Vente / Collection / Achats / Administration**:
 
-The **admin** is the user seeded from the API (`SEED_USER_EMAIL`). The sidebar conditionally shows the _Utilisateurs_ link when `is_admin` is true (`useAuth().user`). Admin-only pages are guarded by [`app/middleware/admin.ts`](app/middleware/admin.ts).
+| Route                                                | Group / Access         | Purpose                                                                                                                 |
+| ---------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `/`                                                  | Public                 | Marketing landing (Vinted + eBay + wardrobe sync pitch).                                                                |
+| `/request`                                           | Public                 | Submit an access request (`POST /access-requests`).                                                                     |
+| `/login`                                             | Public                 | JWT sign-in (rejects `pending` / `rejected` / `banned`).                                                                |
+| `/setup-password/[token]`                            | Public                 | One-time password setup from an admin-issued link.                                                                      |
+| `/dashboard`                                         | Pilotage               | KPIs, revenue timeline, channel split (Vinted vs eBay).                                                                 |
+| `/articles/stock`, `/articles`, `/articles/sold`     | Vente ("Mes articles") | One section with three tabs: Stock / En ligne / Vendus (shared tab strip `ARTICLES_PAGE_TABS`).                         |
+| `/market`, `/top-ventes-ebay`                        | Vente ("Marché eBay")  | One section with two tabs: active listings / completed sales (`MARKET_PAGE_TABS`).                                      |
+| `/shipping-labels`                                   | Vente                  | Avery L7173 label PDF generator for eBay orders.                                                                        |
+| `/collection`, `/collection/add`, `/collection/scan` | Collection             | Personal binder, TCGdex catalog, live phone scan with in/out (cash-register) mode; desktop shows a QR code + live feed. |
+| `/orders`, `/orders/[id]`                            | Achats                 | Cardmarket purchase orders (PDF import everywhere; sync desktop-only).                                                  |
+| `/panier-cardmarket`                                 | Achats _(desktop)_     | Basket analysis via the local nodriver worker — no sidebar entry; reachable from the Commandes page header and Ctrl+K.  |
+| `/amazon-invites`                                    | Achats _(desktop)_     | Amazon invite-only products — hidden from the web sidebar, web shows a desktop-only notice.                             |
+| `/settings`, `/settings/marketplaces`                | User menu              | Margin + sender address / marketplace accounts (Vinted, eBay OAuth, Amazon, Cardmarket).                                |
+| `/users`                                             | **Admin**              | User list + approve / reject / ban / generate password link.                                                            |
+| `/downloads`                                         | User menu (web)        | Download the Tauri desktop bundle (Windows / macOS).                                                                    |
+
+The **admin** is the user seeded from the API (`SEED_USER_EMAIL`). The sidebar conditionally shows the _Utilisateurs_ group when `is_admin` is true (`useAuth().user`). Admin-only pages are guarded by [`app/middleware/admin.ts`](app/middleware/admin.ts).
 
 ## Vinted behavior
 

@@ -24,6 +24,8 @@ export type AmazonSessionState = 'ready' | 'needs_login' | 'busy' | 'error'
 export interface AmazonSessionResponse {
   state: AmazonSessionState
   message?: string
+  /** True when the worker's login Chromium window is currently open. */
+  browser_open?: boolean
   last_sync_at?: string | null
 }
 

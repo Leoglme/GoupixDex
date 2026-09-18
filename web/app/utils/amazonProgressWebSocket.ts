@@ -2,21 +2,23 @@ import type { AmazonWorkerProgressPayload } from '~/types/amazonWorkerProgress'
 
 /**
  * Open `/ws/progress` on the Amazon local worker and forward JSON payloads.
- * @param wsUrl - Full WebSocket URL including `token` and `remote_api` query params.
+ * @param wsUrl - Full WebSocket URL including the `remote_api` query param.
  * @param onPayload - Called for each JSON message from the worker.
  * @param openTimeoutMs - Max wait for the socket to open (refresh still runs if this fails).
+ * @param protocols - WebSocket subprotocols (carries the `goupix-jwt.<token>` auth entry).
  * @returns Connected socket, or `null` if URL was invalid or open failed.
  */
 export async function openAmazonProgressWebSocket(
   wsUrl: string,
   onPayload: (payload: AmazonWorkerProgressPayload) => void,
   openTimeoutMs: number = 5000,
+  protocols: string[] = [],
 ): Promise<WebSocket | null> {
   if (!import.meta.client || !/^wss?:\/\//i.test(wsUrl)) {
     return null
   }
 
-  const ws = new WebSocket(wsUrl)
+  const ws = new WebSocket(wsUrl, protocols.length ? protocols : undefined)
 
   ws.onmessage = (ev: MessageEvent): void => {
     try {

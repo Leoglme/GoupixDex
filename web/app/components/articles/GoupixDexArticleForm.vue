@@ -73,7 +73,7 @@
 
     <UCard
       v-if="mode === 'create'"
-      class="ring-default/60 border-primary/15 from-primary/5 bg-elevated/40 shadow-sm ring-1"
+      class="ring-default border-primary/15 from-primary/5 bg-elevated/40 ring-1"
       :ui="{ body: 'p-4 sm:p-5 space-y-3' }"
     >
       <div class="flex items-center justify-between gap-2">

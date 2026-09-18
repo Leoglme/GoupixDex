@@ -1,39 +1,48 @@
 <template>
   <UDashboardPanel id="dashboard">
     <template #header>
-      <UDashboardNavbar title="Tableau de bord">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Pilotage
+          </span>
         </template>
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
         </template>
       </UDashboardNavbar>
-
-      <UDashboardToolbar>
-        <template #left>
-          <GoupixDexDashboardRangePresetSelect v-model="range" />
-          <GoupixDexDashboardDateRangePicker v-model="range" class="-ms-1" />
-        </template>
-      </UDashboardToolbar>
     </template>
 
     <template #body>
-      <div class="space-y-8 p-4 sm:p-6">
+      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Tableau de bord"
+          description="Vue d'ensemble de votre activité : ventes, marges et stock."
+        >
+          <template #actions>
+            <GoupixDexDashboardRangePresetSelect v-model="range" />
+            <GoupixDexDashboardDateRangePicker v-model="range" />
+          </template>
+        </GoupixDexPageHeader>
+
         <div v-if="loading && !stats" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
         </div>
 
         <template v-else-if="stats">
           <!-- Profit / revenue stat cards -->
-          <UPageGrid class="gap-4 sm:gap-6 lg:grid-cols-4 lg:gap-px">
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <GoupixDexStatsCard
-              title="Bénéfice de la période"
+              title="Bénéfice période"
               :value="eur.format(stats.profit_period_eur)"
               icon="i-lucide-trending-up"
             />
             <GoupixDexStatsCard
-              title="Vente de la période"
+              title="Ventes période"
               :value="eur.format(stats.revenue_period_eur)"
               :description="`${numberFmt.format(stats.period_sales_count)} vente${stats.period_sales_count > 1 ? 's' : ''}`"
               icon="i-lucide-shopping-bag"
@@ -44,11 +53,11 @@
               icon="i-lucide-piggy-bank"
             />
             <GoupixDexStatsCard
-              title="Vente total"
+              title="Ventes total"
               :value="eur.format(stats.vinted_revenue_eur)"
               icon="i-lucide-coins"
             />
-          </UPageGrid>
+          </div>
 
           <div class="grid gap-6 lg:grid-cols-2">
             <!-- Inventory for sale -->

@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="collection-add-page">
     <template #header>
-      <UDashboardNavbar title="Catalogue Pokémon">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Collection
+          </span>
         </template>
         <template #right>
           <UButton to="/collection" color="neutral" variant="ghost" icon="i-lucide-album"> Ma collection </UButton>
@@ -12,8 +18,12 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-4 py-5 sm:space-y-5 sm:px-6 sm:py-6">
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Catalogue Pokémon"
+          description="Parcourez les séries et extensions TCGdex pour ajouter des cartes à votre collection."
+        />
+        <UCard :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
             <UFormField label="Langue du catalogue" class="w-full lg:w-56">
               <USelect

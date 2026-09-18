@@ -1,16 +1,19 @@
 """
 Async pipeline: a card photo arrives, we run OCR, resolve the TCGdex id,
-insert / increment a ``CollectionCard`` row, and broadcast each phase to the
-user's WebSocket via :mod:`services.scan_stream_hub`.
+then either insert / increment a ``CollectionCard`` row (``direction='in'``)
+or decrement / delete it (``direction='out'``, "cash register" checkout),
+broadcasting each phase to the user's WebSocket via
+:mod:`services.scan_stream_hub`.
 
 Design goals (in priority order):
 
 1. **Never block the phone request.** ``submit_scan`` returns an ``event_id``
    in < 100 ms after persisting the image bytes; the heavy work runs in an
    ``asyncio`` background task.
-2. **Make the desktop UI feel "snappy".** Every state transition (queued →
-   ocr_done → identified → added | failed) is published right away so the
-   listener can animate the card landing in the binder.
+2. **Every frame gets an answer.** Frames rejected by the pre-OCR gate publish
+   a transient ``dropped`` event (with the reason) instead of disappearing:
+   the phone can vibrate/flash so the user never wonders whether the scan
+   "worked".
 3. **Tolerate Groq backpressure.** A module-level :class:`asyncio.Semaphore`
    caps concurrent vision calls (default 1) — busy uploads queue silently
    rather than tipping the rate limit.
@@ -22,7 +25,7 @@ import asyncio
 import logging
 import secrets
 import time
-from typing import Any
+from typing import Any, Literal
 
 from core.database import SessionLocal
 from models.collection_card import CollectionCard
@@ -38,22 +41,43 @@ from services.tcgdex_lookup_service import resolve_tcgdex_card_id_from_ocr
 
 logger = logging.getLogger(__name__)
 
+ScanDirection = Literal["in", "out"]
+
 #: Max concurrent OCR calls across all users on this process.
 #: Qwen 3.6 free tier is 8k TPM — more than one inflight vision call 429s immediately.
 _GROQ_PARALLELISM = 1
 _groq_sem = asyncio.Semaphore(_GROQ_PARALLELISM)
 
-#: Per-user guards so a "cash register" frame stream becomes *one* Groq call
-#: per physical card instead of a burst (the source of the 429s).
-#: - ``_inflight``: a scan is already being processed for this user.
-#: - ``_last_accept``: epoch of the last frame that passed the gate.
-_MIN_OCR_INTERVAL_SEC = 2.5
-_inflight: set[int] = set()
+#: Per-user debounce so a "cash register" frame stream becomes *one* Groq call
+#: per physical card instead of a burst (the source of the 429s). The client
+#: re-arms only after the card left the frame, so 1.5 s is enough to catch
+#: stray duplicate frames without eating a legitimate next card.
+_MIN_OCR_INTERVAL_SEC = 1.5
 _last_accept: dict[int, float] = {}
+
+#: Accepted frames wait in a small per-user FIFO instead of being dropped
+#: while the previous card is still in the (slow) OCR pipeline — the user can
+#: chain cards at their own pace and nothing is lost.
+_MAX_QUEUED_PER_USER = 3
+_user_queues: dict[int, asyncio.Queue[dict[str, Any]]] = {}
+_user_consumers: dict[int, asyncio.Task[None]] = {}
+
+#: Keep strong references to background tasks: ``asyncio.create_task`` results
+#: may otherwise be garbage-collected mid-flight (scans silently vanishing).
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _now_iso() -> float:
     return time.time()
+
+
+def _prune_last_accept(now: float) -> None:
+    """Bound the per-user debounce map (long-lived process hygiene)."""
+    if len(_last_accept) <= 500:
+        return
+    stale = [uid for uid, ts in _last_accept.items() if now - ts > 3600]
+    for uid in stale:
+        _last_accept.pop(uid, None)
 
 
 def _public_event(
@@ -62,12 +86,16 @@ def _public_event(
     user_id: int,
     status: str,
     physical_language: str,
+    direction: ScanDirection = "in",
     image_preview_data_url: str | None = None,
     ocr: dict[str, Any] | None = None,
     tcgdex_card_id: str | None = None,
     collection_card: dict[str, Any] | None = None,
     error: str | None = None,
     created: bool | None = None,
+    deleted: bool | None = None,
+    remaining_quantity: int | None = None,
+    drop_reason: str | None = None,
 ) -> dict[str, Any]:
     """Shape published to the WebSocket (snake_case, JSON-serialisable)."""
     return {
@@ -75,11 +103,15 @@ def _public_event(
         "user_id": user_id,
         "status": status,
         "physical_language": physical_language,
+        "direction": direction,
         "image_preview_data_url": image_preview_data_url,
         "ocr": ocr,
         "tcgdex_card_id": tcgdex_card_id,
         "collection_card": collection_card,
         "created": created,
+        "deleted": deleted,
+        "remaining_quantity": remaining_quantity,
+        "drop_reason": drop_reason,
         "error": error,
         "ts": _now_iso(),
     }
@@ -97,6 +129,14 @@ def _short_preview_data_url(image_bytes: bytes, mime: str) -> str | None:
 
     encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{mime};base64,{encoded}"
+
+
+def _short_error(exc: Exception, prefix: str) -> str:
+    """User-facing error line — never dump a raw provider response body."""
+    text = " ".join(str(exc).split())
+    if len(text) > 160:
+        text = text[:160] + "…"
+    return f"{prefix} : {text}" if text else prefix
 
 
 def _add_or_increment(
@@ -150,6 +190,59 @@ def _add_or_increment(
         db.close()
 
 
+def _decrement_or_delete(
+    user_id: int,
+    tcgdex_card_id: str,
+    language: str,
+) -> tuple[dict[str, Any] | None, bool, int]:
+    """
+    Checkout counterpart of :func:`_add_or_increment`.
+
+    Finds the user's row for ``tcgdex_card_id`` — exact language first, then
+    any language when exactly one row matches — and decrements its quantity,
+    deleting the row when it reaches zero.
+
+    Returns ``(card_dict, deleted, remaining_quantity)``;
+    ``card_dict`` is ``None`` when the card is not in the collection.
+    """
+    db = SessionLocal()
+    try:
+        row = collection_card_service.find_existing_for_user(
+            db,
+            user_id,
+            tcgdex_card_id=tcgdex_card_id,
+            language=language,
+        )
+        if row is None:
+            candidates = (
+                db.query(CollectionCard)
+                .filter(
+                    CollectionCard.user_id == user_id,
+                    CollectionCard.tcgdex_card_id == tcgdex_card_id,
+                )
+                .all()
+            )
+            if len(candidates) == 1:
+                row = candidates[0]
+        if row is None:
+            return None, False, 0
+
+        snapshot = collection_card_service.collection_card_to_dict(row)
+        remaining = int(row.quantity) - 1
+        if remaining <= 0:
+            db.delete(row)
+            db.commit()
+            snapshot["quantity"] = 0
+            return snapshot, True, 0
+
+        row.quantity = remaining
+        db.commit()
+        db.refresh(row)
+        return collection_card_service.collection_card_to_dict(row), False, remaining
+    finally:
+        db.close()
+
+
 async def _process_scan(
     *,
     event_id: str,
@@ -158,27 +251,21 @@ async def _process_scan(
     filename: str,
     mime: str,
     physical_language: str,
+    direction: ScanDirection,
     user_hint: str | None,
 ) -> None:
-    """End-to-end processing for a single scan event (gate already passed)."""
+    """
+    End-to-end processing for a single scan event. The gate already passed and
+    the ``queued`` event (with preview) was already published at admission.
+    """
     hub = get_scan_stream_hub()
-
     preview = _short_preview_data_url(image_bytes, mime)
-    await hub.publish(
-        user_id,
-        _public_event(
-            event_id=event_id,
-            user_id=user_id,
-            status="queued",
-            physical_language=physical_language,
-            image_preview_data_url=preview,
-        ),
-    )
-
     loop = asyncio.get_running_loop()
 
     # --- 1. OCR (Groq vision). Sync function in a thread to avoid blocking.
     async with _groq_sem:
+        # Intermediate events skip the preview on purpose: the client merges by
+        # event_id and keeps the thumbnail it already has (smaller WS frames).
         await hub.publish(
             user_id,
             _public_event(
@@ -186,7 +273,7 @@ async def _process_scan(
                 user_id=user_id,
                 status="ocr_running",
                 physical_language=physical_language,
-                image_preview_data_url=preview,
+                direction=direction,
             ),
         )
         # Auto-contrast + light sharpening on the deskewed card recovers OCR
@@ -216,8 +303,9 @@ async def _process_scan(
                     user_id=user_id,
                     status="failed",
                     physical_language=physical_language,
+                    direction=direction,
                     image_preview_data_url=preview,
-                    error=f"OCR indisponible : {exc}",
+                    error=_short_error(exc, "OCR indisponible"),
                 ),
             )
             return
@@ -239,7 +327,7 @@ async def _process_scan(
             user_id=user_id,
             status="ocr_done",
             physical_language=resolved_language,
-            image_preview_data_url=preview,
+            direction=direction,
             ocr=ocr_payload,
         ),
     )
@@ -254,6 +342,7 @@ async def _process_scan(
                 ocr_pokemon_name_english=ocr_payload.get("pokemon_name_english"),
                 ocr_pokemon_name=ocr_payload.get("pokemon_name"),
                 physical_language=resolved_language,
+                ocr_card_number_denominator=ocr_payload.get("card_number_denominator"),
             ),
         )
     except Exception as exc:
@@ -268,6 +357,7 @@ async def _process_scan(
                 user_id=user_id,
                 status="needs_review",
                 physical_language=resolved_language,
+                direction=direction,
                 image_preview_data_url=preview,
                 ocr=ocr_payload,
                 error=(
@@ -278,7 +368,68 @@ async def _process_scan(
         )
         return
 
-    # --- 3. Fetch full metadata + insert into ``collection_cards``.
+    # --- 3a. Checkout mode: decrement / delete straight from the local row —
+    # no TCGdex metadata fetch needed, the row already carries everything.
+    if direction == "out":
+        try:
+            card_dict, deleted, remaining = await loop.run_in_executor(
+                None,
+                lambda: _decrement_or_delete(user_id, tcgdex_card_id, resolved_language),
+            )
+        except Exception as exc:
+            logger.exception("scan-stream DB decrement failed event=%s", event_id)
+            await hub.publish(
+                user_id,
+                _public_event(
+                    event_id=event_id,
+                    user_id=user_id,
+                    status="failed",
+                    physical_language=resolved_language,
+                    direction=direction,
+                    image_preview_data_url=preview,
+                    ocr=ocr_payload,
+                    tcgdex_card_id=tcgdex_card_id,
+                    error=_short_error(exc, "Sortie impossible"),
+                ),
+            )
+            return
+
+        if card_dict is None:
+            await hub.publish(
+                user_id,
+                _public_event(
+                    event_id=event_id,
+                    user_id=user_id,
+                    status="not_in_collection",
+                    physical_language=resolved_language,
+                    direction=direction,
+                    image_preview_data_url=preview,
+                    ocr=ocr_payload,
+                    tcgdex_card_id=tcgdex_card_id,
+                    error="Cette carte n'est pas dans votre collection.",
+                ),
+            )
+            return
+
+        await hub.publish(
+            user_id,
+            _public_event(
+                event_id=event_id,
+                user_id=user_id,
+                status="removed",
+                physical_language=resolved_language,
+                direction=direction,
+                image_preview_data_url=preview,
+                ocr=ocr_payload,
+                tcgdex_card_id=tcgdex_card_id,
+                collection_card=card_dict,
+                deleted=deleted,
+                remaining_quantity=remaining,
+            ),
+        )
+        return
+
+    # --- 3b. Intake mode: fetch full metadata + insert into ``collection_cards``.
     raw_name_en = ocr_payload.get("pokemon_name_english")
     ocr_name_en = raw_name_en if isinstance(raw_name_en, str) else None
     try:
@@ -299,10 +450,11 @@ async def _process_scan(
                 user_id=user_id,
                 status="failed",
                 physical_language=resolved_language,
+                direction=direction,
                 image_preview_data_url=preview,
                 ocr=ocr_payload,
                 tcgdex_card_id=tcgdex_card_id,
-                error=f"Méta-données TCGdex indisponibles : {exc}",
+                error=_short_error(exc, "Méta-données TCGdex indisponibles"),
             ),
         )
         return
@@ -321,10 +473,11 @@ async def _process_scan(
                 user_id=user_id,
                 status="failed",
                 physical_language=resolved_language,
+                direction=direction,
                 image_preview_data_url=preview,
                 ocr=ocr_payload,
                 tcgdex_card_id=tcgdex_card_id,
-                error=f"Insertion impossible : {exc}",
+                error=_short_error(exc, "Insertion impossible"),
             ),
         )
         return
@@ -336,6 +489,7 @@ async def _process_scan(
             user_id=user_id,
             status="added",
             physical_language=resolved_language,
+            direction=direction,
             image_preview_data_url=preview,
             ocr=ocr_payload,
             tcgdex_card_id=tcgdex_card_id,
@@ -345,7 +499,72 @@ async def _process_scan(
     )
 
 
-async def _run_scan_pipeline(
+async def _publish_dropped(
+    *,
+    event_id: str,
+    user_id: int,
+    physical_language: str,
+    direction: ScanDirection,
+    reason: str,
+    message: str,
+) -> None:
+    """Transient feedback for a frame the gate rejected (never stored in history)."""
+    hub = get_scan_stream_hub()
+    await hub.publish(
+        user_id,
+        _public_event(
+            event_id=event_id,
+            user_id=user_id,
+            status="dropped",
+            physical_language=physical_language,
+            direction=direction,
+            drop_reason=reason,
+            error=message,
+        ),
+        transient=True,
+    )
+
+
+async def _consume_user_queue(user_id: int) -> None:
+    """Drain the user's scan FIFO one card at a time, then retire itself."""
+    me = asyncio.current_task()
+    queue = _user_queues.get(user_id)
+    if queue is None:
+        if _user_consumers.get(user_id) is me:
+            _user_consumers.pop(user_id, None)
+        return
+    try:
+        while True:
+            try:
+                job = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            try:
+                await _process_scan(**job)
+            except Exception:
+                logger.exception("scan-stream: pipeline crashed event=%s", job.get("event_id"))
+    finally:
+        if _user_consumers.get(user_id) is me:
+            _user_consumers.pop(user_id, None)
+        if queue.empty():
+            _user_queues.pop(user_id, None)
+        else:
+            # A job slipped in between our last poll and this cleanup.
+            _ensure_consumer(user_id)
+
+
+def _ensure_consumer(user_id: int) -> None:
+    """Start the per-user queue consumer when none is running."""
+    task = _user_consumers.get(user_id)
+    if task is not None and not task.done():
+        return
+    task = asyncio.create_task(_consume_user_queue(user_id))
+    _user_consumers[user_id] = task
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _admit_scan(
     *,
     event_id: str,
     user_id: int,
@@ -353,26 +572,35 @@ async def _run_scan_pipeline(
     filename: str,
     mime: str,
     physical_language: str,
+    direction: ScanDirection,
     user_hint: str | None,
 ) -> None:
     """
-    Pre-Groq gate. A streaming camera sends many frames; we only let one
+    Pre-Groq admission. A streaming camera sends many frames; we only let one
     through per real card:
 
-    * **in-flight guard** — a scan is already running for this user → drop.
-    * **debounce** — last accepted frame < ``_MIN_OCR_INTERVAL_SEC`` ago → drop.
-    * **card pre-detection** — empty / blurry / not-a-card → drop.
+    * **debounce** — last accepted frame < ``_MIN_OCR_INTERVAL_SEC`` ago;
+    * **card pre-detection** — empty / blurry / not-a-card;
+    * **bounded FIFO** — accepted frames queue up (max ``_MAX_QUEUED_PER_USER``)
+      behind the slow OCR pipeline instead of being thrown away.
 
-    Rejections are silent (no websocket event), so the live feed only shows
-    real cards — like the existing phone card-scanner apps. No Groq call is
-    made unless a frame clears every check, which is what stops the 429s.
+    Every rejection publishes a transient ``dropped`` event so the phone can
+    tell the user *why* nothing happened (the historical silent drops were the
+    single biggest "it's broken" report). Accepted frames publish ``queued``
+    immediately, before OCR even starts.
     """
     now = time.time()
-    if user_id in _inflight:
-        logger.debug("scan-stream: drop (in-flight) user=%s", user_id)
-        return
+    _prune_last_accept(now)
     if now - _last_accept.get(user_id, 0.0) < _MIN_OCR_INTERVAL_SEC:
         logger.debug("scan-stream: drop (debounce) user=%s", user_id)
+        await _publish_dropped(
+            event_id=event_id,
+            user_id=user_id,
+            physical_language=physical_language,
+            direction=direction,
+            reason="debounce",
+            message="Photo trop rapprochée de la précédente — ignorée.",
+        )
         return
 
     loop = asyncio.get_running_loop()
@@ -386,22 +614,55 @@ async def _run_scan_pipeline(
             gate.focus,
             gate.fill,
         )
-        return
-
-    _inflight.add(user_id)
-    _last_accept[user_id] = now
-    try:
-        await _process_scan(
+        await _publish_dropped(
             event_id=event_id,
             user_id=user_id,
-            image_bytes=image_bytes,
-            filename=filename,
-            mime=mime,
             physical_language=physical_language,
-            user_hint=user_hint,
+            direction=direction,
+            reason=str(gate.reason or "not_a_card"),
+            message="Aucune carte nette détectée sur la photo — réessayez.",
         )
-    finally:
-        _inflight.discard(user_id)
+        return
+
+    queue = _user_queues.setdefault(user_id, asyncio.Queue(maxsize=_MAX_QUEUED_PER_USER))
+    job: dict[str, Any] = {
+        "event_id": event_id,
+        "user_id": user_id,
+        "image_bytes": image_bytes,
+        "filename": filename,
+        "mime": mime,
+        "physical_language": physical_language,
+        "direction": direction,
+        "user_hint": user_hint,
+    }
+    try:
+        queue.put_nowait(job)
+    except asyncio.QueueFull:
+        logger.debug("scan-stream: drop (queue_full) user=%s", user_id)
+        await _publish_dropped(
+            event_id=event_id,
+            user_id=user_id,
+            physical_language=physical_language,
+            direction=direction,
+            reason="queue_full",
+            message="File de scan pleine — laissez les cartes en cours se terminer.",
+        )
+        return
+
+    _last_accept[user_id] = now
+    hub = get_scan_stream_hub()
+    await hub.publish(
+        user_id,
+        _public_event(
+            event_id=event_id,
+            user_id=user_id,
+            status="queued",
+            physical_language=physical_language,
+            direction=direction,
+            image_preview_data_url=_short_preview_data_url(image_bytes, mime),
+        ),
+    )
+    _ensure_consumer(user_id)
 
 
 def submit_scan(
@@ -411,6 +672,7 @@ def submit_scan(
     filename: str,
     mime: str,
     physical_language: str,
+    direction: ScanDirection = "in",
     user_hint: str | None,
 ) -> str:
     """
@@ -419,15 +681,18 @@ def submit_scan(
     just ignore it — they're delivered in upload order anyway).
     """
     event_id = secrets.token_urlsafe(10)
-    asyncio.create_task(
-        _run_scan_pipeline(
+    task = asyncio.create_task(
+        _admit_scan(
             event_id=event_id,
             user_id=user_id,
             image_bytes=image_bytes,
             filename=filename,
             mime=mime,
             physical_language=physical_language,
+            direction=direction,
             user_hint=user_hint,
         )
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return event_id

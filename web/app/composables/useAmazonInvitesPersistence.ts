@@ -2,9 +2,12 @@
  * Amazon Invites page UI preferences (localStorage, client only).
  */
 
-import type { AmazonStatusFilter } from '~/types/amazonInvites'
+import type { AmazonInvite, AmazonStatusFilter } from '~/types/amazonInvites'
 
 const KEY = 'goupix_amazon_invites_prefs'
+
+/** Maximum number of invite rows kept in the localStorage cache. */
+const CACHED_INVITES_LIMIT = 300
 
 export interface AmazonInvitesUiPrefs {
   /** Local filter on the list already loaded */
@@ -16,6 +19,24 @@ export interface AmazonInvitesUiPrefs {
   maxPages: number
   /** Filter rows by invitation status */
   statusFilter?: AmazonStatusFilter
+  /** Last fetched invite rows, shown immediately when reopening the page. */
+  cachedInvites?: AmazonInvite[]
+  /** ISO timestamp of the last successful fetch. */
+  cachedRefreshedAt?: string | null
+}
+
+/**
+ * Narrow an unknown value to a plausible {@link AmazonInvite} row.
+ *
+ * @param v - Raw value from storage.
+ * @returns Whether `v` carries the minimal invite fields.
+ */
+function isPlausibleInvite(v: unknown): v is AmazonInvite {
+  if (!v || typeof v !== 'object') {
+    return false
+  }
+  const r = v as Record<string, unknown>
+  return typeof r.id === 'string' && typeof r.title === 'string' && typeof r.status === 'string'
 }
 
 /**
@@ -54,6 +75,12 @@ export function loadAmazonInvitesPrefs(): Partial<AmazonInvitesUiPrefs> | null {
     ) {
       out.statusFilter = p.statusFilter
     }
+    if (Array.isArray(p.cachedInvites)) {
+      out.cachedInvites = p.cachedInvites.filter(isPlausibleInvite).slice(0, CACHED_INVITES_LIMIT)
+    }
+    if (typeof p.cachedRefreshedAt === 'string') {
+      out.cachedRefreshedAt = p.cachedRefreshedAt
+    }
     return Object.keys(out).length ? out : null
   } catch {
     return null
@@ -73,7 +100,10 @@ export function saveAmazonInvitesPrefs(prefs: Partial<AmazonInvitesUiPrefs>): vo
   try {
     const prevRaw = localStorage.getItem(KEY)
     const prev = prevRaw ? (JSON.parse(prevRaw) as Record<string, unknown>) : {}
-    const next = { ...prev, ...prefs } as Record<string, unknown>
+    const capped: Partial<AmazonInvitesUiPrefs> = prefs.cachedInvites
+      ? { ...prefs, cachedInvites: prefs.cachedInvites.slice(0, CACHED_INVITES_LIMIT) }
+      : prefs
+    const next = { ...prev, ...capped } as Record<string, unknown>
     localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
     /* storage quota / private mode */

@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="articles-sold">
     <template #header>
-      <UDashboardNavbar title="Articles vendus">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
         </template>
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
@@ -12,20 +18,19 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8">
-        <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div class="space-y-1">
-              <p class="text-highlighted text-sm font-medium">Historique des ventes</p>
-              <p class="text-muted text-xs">
-                Ventes enregistrées sur Vinted et eBay dans GoupixDex, triées de la plus récente à la plus ancienne.
-              </p>
-            </div>
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Mes articles"
+          description="Ventes enregistrées sur Vinted et eBay, de la plus récente à la plus ancienne."
+        />
+
+        <GoupixDexPageTabs :items="ARTICLES_PAGE_TABS">
+          <template #trailing>
             <div class="flex flex-wrap gap-2">
               <UButton
                 v-for="opt in channelOptions"
                 :key="opt.value ?? 'all'"
-                size="sm"
+                size="xs"
                 :color="channelFilter === opt.value ? 'primary' : 'neutral'"
                 :variant="channelFilter === opt.value ? 'solid' : 'subtle'"
                 @click="channelFilter = opt.value"
@@ -33,15 +38,15 @@
                 {{ opt.label }}
               </UButton>
             </div>
-          </div>
-        </UCard>
+          </template>
+        </GoupixDexPageTabs>
 
         <div v-if="loading && !payload" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
         </div>
 
         <template v-else-if="payload">
-          <UPageGrid class="gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <GoupixDexStatsCard
               title="Ventes"
               :value="String(payload.count)"
@@ -65,7 +70,7 @@
               description="Vinted / eBay"
               icon="i-lucide-pie-chart"
             />
-          </UPageGrid>
+          </div>
 
           <GoupixDexDashboardSalesTable
             :sales="payload.sales"
@@ -88,7 +93,7 @@ import { apiErrorMessage } from '~/composables/useApiError'
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
-  'Articles vendus',
+  'Mes articles — Vendus',
   'Historique de vos ventes Vinted et eBay enregistrées dans GoupixDex : prix, marge et canal de vente.',
 )
 

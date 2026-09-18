@@ -25,7 +25,8 @@
     "lint:ts": "vue-tsc --noEmit",
     "lint": "npm run lint:prettier && npm run lint:eslint && npm run lint:ts",
     "lint:fix": "npm run lint:prettier:fix && npm run lint:eslint:fix",
-    "typecheck": "nuxt typecheck"
+    "typecheck": "nuxt typecheck",
+    "dev:lan": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 nuxt dev --port 1420 --host 0.0.0.0 --https --https.cert .certs/dev.crt --https.key .certs/dev.key"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.101",
@@ -50,6 +51,7 @@
     "nuxt": "^4.4.2",
     "scule": "^1.3.0",
     "tailwindcss": "^4.2.2",
+    "uqr": "^0.1.3",
     "vue": "^3.5.32",
     "zod": "^4.3.6"
   },

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import logging
 import os
+import threading
+import time
 from typing import Any, cast
 from urllib.parse import quote, urlencode
 
@@ -17,12 +21,79 @@ from app_types.pokewallet import (
     PokeWalletSearchResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_BASE_URL = "https://api.pokewallet.io"
 ENV_API_KEY = "POKE_WALLET_API_KEY"
 DEFAULT_USER_AGENT = "GoupixDex/1.0 (+https://goupixdex.dibodev.fr)"
 SEARCH_LIMIT_MAX = 100
 SEARCH_LIMIT_MIN = 1
 SEARCH_PAGE_MIN = 1
+
+#: The API key runs on the free plan (100 req/hour, 1000 req/day — see the
+#: ``X-RateLimit-*`` response headers). A cash-register scan session fires 1–4
+#: searches per card, so the same lookups repeat a lot: cache every successful
+#: response for a while (Cardmarket reference prices only move daily).
+_CACHE_TTL_SEC = 30 * 60.0
+_CACHE_MAX_ENTRIES = 512
+
+#: Transient statuses worth retrying (rate limit + upstream hiccups).
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+_RETRY_DELAYS_SEC = (2.0, 5.0)
+
+#: Log a warning when the remaining quota gets this low.
+_LOW_QUOTA_HOUR_WARN = 10
+_LOW_QUOTA_DAY_WARN = 50
+
+
+class _ResponseCache:
+    """Thread-safe TTL cache of parsed response bodies, keyed by request path."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str) -> Any | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            ts, value = entry
+            if time.time() - ts > _CACHE_TTL_SEC:
+                self._entries.pop(key, None)
+                return None
+        # Deep copy: callers may enrich/mutate the payload in place.
+        return copy.deepcopy(value)
+
+    def store(self, key: str, value: Any) -> None:
+        with self._lock:
+            if len(self._entries) >= _CACHE_MAX_ENTRIES:
+                # Drop the oldest half — simple and rare enough at this size.
+                oldest = sorted(self._entries.items(), key=lambda kv: kv[1][0])
+                for stale_key, _ in oldest[: _CACHE_MAX_ENTRIES // 2]:
+                    self._entries.pop(stale_key, None)
+            self._entries[key] = (time.time(), copy.deepcopy(value))
+
+
+_RESPONSE_CACHE = _ResponseCache()
+
+
+def _warn_when_quota_low(response: httpx.Response) -> None:
+    """Surface the free-plan quota in the logs before lookups start failing."""
+    try:
+        remaining_hour = int(response.headers.get("X-RateLimit-Remaining-Hour", ""))
+    except ValueError:
+        remaining_hour = -1
+    try:
+        remaining_day = int(response.headers.get("X-RateLimit-Remaining-Day", ""))
+    except ValueError:
+        remaining_day = -1
+    if 0 <= remaining_hour <= _LOW_QUOTA_HOUR_WARN or 0 <= remaining_day <= _LOW_QUOTA_DAY_WARN:
+        logger.warning(
+            "PokeWallet quota low: %s left this hour, %s left today (free plan).",
+            remaining_hour if remaining_hour >= 0 else "?",
+            remaining_day if remaining_day >= 0 else "?",
+        )
 
 
 class PokeWalletClientService:
@@ -168,6 +239,10 @@ class PokeWalletClientService:
 
     def _fetch_response_body(self, path: str) -> Any:
         normalized_path = path if path.startswith("/") else f"/{path}"
+        cached = _RESPONSE_CACHE.get(normalized_path)
+        if cached is not None:
+            return cached
+
         url = f"{self._base_url}{normalized_path}"
         headers: dict[str, str] = {
             "Accept": "application/json",
@@ -177,15 +252,55 @@ class PokeWalletClientService:
             headers["X-Proxy-Secret"] = self._proxy_secret
         else:
             headers["X-API-Key"] = self._api_key
-        response = httpx.get(url, headers=headers, timeout=60.0)
+
+        # One attempt + up to len(_RETRY_DELAYS_SEC) retries on 429 / 5xx.
+        # This runs in worker threads (executor), so time.sleep is fine.
+        response: httpx.Response | None = None
+        last_exc: httpx.HTTPError | None = None
+        for attempt in range(len(_RETRY_DELAYS_SEC) + 1):
+            if attempt > 0:
+                delay = _RETRY_DELAYS_SEC[attempt - 1]
+                logger.warning(
+                    "PokeWallet retry %s/%s in %.0fs (path=%s, reason=%s)",
+                    attempt,
+                    len(_RETRY_DELAYS_SEC),
+                    delay,
+                    normalized_path.split("?", 1)[0],
+                    response.status_code if response is not None else type(last_exc).__name__,
+                )
+                time.sleep(delay)
+            try:
+                response = httpx.get(url, headers=headers, timeout=60.0)
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                response = None
+                continue
+            if response.status_code not in _RETRYABLE_STATUS:
+                break
+
+        if response is None:
+            msg = f"PokeWallet request failed after retries: {last_exc}"
+            raise RuntimeError(msg)
+
+        _warn_when_quota_low(response)
         body_text = response.text
         if not response.is_success:
+            if response.status_code == 429:
+                limit_hour = response.headers.get("X-RateLimit-Limit-Hour", "?")
+                msg = (
+                    f"PokeWallet rate limit reached ({limit_hour} req/h, free plan) — "
+                    "retried without success, try again in a few minutes."
+                )
+                raise RuntimeError(msg)
             msg = (
                 f"PokeWallet request failed ({response.status_code} {response.reason_phrase}): "
                 f"{body_text}"
             )
             raise RuntimeError(msg)
-        return self._parse_json_body(body_text)
+
+        parsed = self._parse_json_body(body_text)
+        _RESPONSE_CACHE.store(normalized_path, parsed)
+        return parsed
 
     @staticmethod
     def _parse_json_body(body_text: str) -> Any:

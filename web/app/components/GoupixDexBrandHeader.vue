@@ -9,7 +9,9 @@
     >
       <img :src="logoUrl" alt="GoupixDex" class="size-8 max-h-8 max-w-8 object-contain" width="32" height="32" />
     </span>
-    <span v-if="!isCollapsed" class="text-highlighted min-w-0 truncate font-semibold">GoupixDex</span>
+    <span v-if="!isCollapsed" class="text-highlighted font-display min-w-0 truncate text-lg font-semibold">
+      GoupixDex
+    </span>
   </NuxtLink>
 </template>
 

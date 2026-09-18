@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="shipping-labels">
     <template #header>
-      <UDashboardNavbar title="Étiquettes d'envoi">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
         </template>
         <template #right>
           <div class="flex items-center gap-2">
@@ -20,7 +26,11 @@
     </template>
 
     <template #body>
-      <div class="mx-auto w-full max-w-[1400px] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div class="mx-auto w-full max-w-[1400px] space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Étiquettes d'envoi"
+          description="Générez un PDF d'étiquettes Avery L7173 pour vos commandes eBay : destinataire, expéditeur et timbre."
+        />
         <UCard :ui="{ body: 'p-4 sm:p-5' }">
           <template #header>
             <div class="flex flex-col gap-1">

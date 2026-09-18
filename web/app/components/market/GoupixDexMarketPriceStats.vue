@@ -34,7 +34,7 @@
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <UCard v-for="card in cards" :key="card.label" :ui="{ body: 'p-4 sm:p-5' }" class="ring-default/60 ring-1">
+      <UCard v-for="card in cards" :key="card.label" :ui="{ body: 'p-4 sm:p-5' }" class="ring-default ring-1">
         <div class="flex items-center gap-3">
           <div class="bg-elevated/80 flex size-10 shrink-0 items-center justify-center rounded-lg">
             <UIcon :name="card.icon" :class="['size-5', card.accent]" />

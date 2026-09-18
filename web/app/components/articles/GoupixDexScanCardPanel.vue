@@ -1,5 +1,5 @@
 <template>
-  <UCard class="ring-default/60 shadow-sm ring-1">
+  <UCard class="ring-default ring-1">
     <template #header>
       <div>
         <p class="text-highlighted font-medium">

@@ -1,9 +1,15 @@
 <template>
   <UDashboardPanel id="users">
     <template #header>
-      <UDashboardNavbar title="Utilisateurs">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Administration
+          </span>
         </template>
         <template #right>
           <UButton color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :loading="loading" @click="load" />
@@ -12,51 +18,17 @@
     </template>
 
     <template #body>
-      <div class="space-y-4 p-4 sm:p-6">
-        <UPageGrid class="gap-4 lg:grid-cols-3 lg:gap-px">
-          <UPageCard
-            icon="i-lucide-clock"
-            title="Demandes en attente"
-            variant="subtle"
-            :ui="{
-              leading: 'p-2.5 rounded-full bg-warning/10 ring ring-inset ring-warning/25 flex-col',
-              title: 'font-normal text-muted text-xs uppercase',
-            }"
-            class="first:rounded-l-lg last:rounded-r-lg lg:rounded-none"
-          >
-            <p class="text-highlighted text-2xl font-semibold">
-              {{ counts.pending }}
-            </p>
-          </UPageCard>
-          <UPageCard
-            icon="i-lucide-check-circle-2"
-            title="Utilisateurs approuvés"
-            variant="subtle"
-            :ui="{
-              leading: 'p-2.5 rounded-full bg-success/10 ring ring-inset ring-success/25 flex-col',
-              title: 'font-normal text-muted text-xs uppercase',
-            }"
-            class="first:rounded-l-lg last:rounded-r-lg lg:rounded-none"
-          >
-            <p class="text-highlighted text-2xl font-semibold">
-              {{ counts.approved }}
-            </p>
-          </UPageCard>
-          <UPageCard
-            icon="i-lucide-shield-off"
-            title="Bannis"
-            variant="subtle"
-            :ui="{
-              leading: 'p-2.5 rounded-full bg-error/10 ring ring-inset ring-error/25 flex-col',
-              title: 'font-normal text-muted text-xs uppercase',
-            }"
-            class="first:rounded-l-lg last:rounded-r-lg lg:rounded-none"
-          >
-            <p class="text-highlighted text-2xl font-semibold">
-              {{ counts.banned }}
-            </p>
-          </UPageCard>
-        </UPageGrid>
+      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Utilisateurs"
+          description="Approuvez, refusez ou bannissez les demandes d'accès, et générez les liens de mot de passe."
+        />
+
+        <div class="grid gap-4 sm:grid-cols-3">
+          <GoupixDexStatsCard title="Demandes en attente" :value="counts.pending" icon="i-lucide-clock" />
+          <GoupixDexStatsCard title="Utilisateurs approuvés" :value="counts.approved" icon="i-lucide-check-circle-2" />
+          <GoupixDexStatsCard title="Bannis" :value="counts.banned" icon="i-lucide-shield-off" />
+        </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2">
           <UInput
@@ -122,8 +94,8 @@ useGoupixPageSeo(
 
 const UButton = resolveComponent('UButton')
 const UDropdownMenu = resolveComponent('UDropdownMenu')
-const UserAvatar = resolveComponent('UserAvatar')
-const UserStatusBadge = resolveComponent('UserStatusBadge')
+const UserAvatar = resolveComponent('GoupixDexUserAvatar')
+const UserStatusBadge = resolveComponent('GoupixDexUserStatusBadge')
 const UBadge = resolveComponent('UBadge')
 
 const toast = useToast()

@@ -60,19 +60,33 @@ def _strip_set_code_prefix_from_expansion_name(set_name: str, set_code: str | No
 #: containing any of these is unambiguously a Japanese print.
 _CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]")
 
+#: International (EN/FR) set codes are pure letters (``MEW``, ``OBF``, ``PAF``…);
+#: Japanese codes always carry digits (``SV2a``, ``S12a``, ``SM8b``…). A pure
+#: letters code therefore rules out a Japanese print even when the vision model
+#: "helpfully" returns the Japanese species name for an English card.
+_INTERNATIONAL_SET_CODE_RE = re.compile(r"^[A-Za-z]{2,5}$")
+
 
 def detect_physical_language_from_ocr(ocr: dict[str, Any]) -> str:
     """
     Infer the card's physical language (``fr`` | ``en`` | ``ja``) from OCR.
 
     No explicit language code comes back from the vision model, but the printed
-    name is decisive: a CJK script means a Japanese print; otherwise we match
-    the printed name against the resolved FR / EN dex names. Defaults to ``fr``
+    name is decisive: a CJK script means a Japanese print — unless the set code
+    is an international abbreviation, in which case the CJK name is a model
+    hallucination (seen on EN prints of iconic Pokémon). Otherwise we match the
+    printed name against the resolved FR / EN dex names. Defaults to ``fr``
     (the dominant case here, and FR's locale fallback chain covers EN anyway).
     """
     printed = (ocr.get("pokemon_name") or "").strip()
-    if printed and _CJK_RE.search(printed):
+    set_code = (ocr.get("set_code") or "").strip()
+    printed_is_cjk = bool(printed and _CJK_RE.search(printed))
+    if printed_is_cjk and not _INTERNATIONAL_SET_CODE_RE.fullmatch(set_code):
         return "ja"
+    if printed_is_cjk:
+        # International print with a hallucinated CJK name: the printed-name
+        # comparisons below are meaningless, fall through with it blanked.
+        printed = ""
     fr = (ocr.get("pokemon_name_french") or "").strip()
     en = (ocr.get("pokemon_name_english") or "").strip()
     if printed and en and printed.casefold() == en.casefold() and (

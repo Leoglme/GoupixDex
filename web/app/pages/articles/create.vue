@@ -1,46 +1,38 @@
 <template>
   <UDashboardPanel id="article-create">
     <template #header>
-      <UDashboardNavbar title="Nouvel article">
+      <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
+        </template>
         <template #right>
-          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mon stock </UButton>
+          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mes articles </UButton>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="w-full space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8">
-        <!-- Bandeau contexte -->
-        <div
-          class="border-default from-primary/10 via-elevated/60 to-primary/5 relative overflow-hidden rounded-2xl border bg-gradient-to-br px-5 py-5 sm:px-7 sm:py-7"
+      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+        <GoupixDexPageHeader
+          title="Nouvel article"
+          description="Importez une photo, laissez GoupixDex lire le set, le numéro et les prix de référence, puis ajustez la fiche avant publication."
         >
-          <div class="bg-primary/10 pointer-events-none absolute -top-16 -right-16 size-48 rounded-full blur-3xl" />
-          <div class="bg-primary/5 pointer-events-none absolute -bottom-24 -left-10 size-44 rounded-full blur-3xl" />
-          <div class="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div class="max-w-2xl space-y-2">
-              <p class="text-primary text-xs font-medium tracking-wide uppercase">Création d'article</p>
-              <h1 class="text-highlighted text-xl font-semibold tracking-tight sm:text-2xl">
-                Scanner une carte et préparer sa fiche de vente
-              </h1>
-              <p class="text-muted text-sm leading-relaxed sm:text-base">
-                Importez une photo, laissez GoupixDex lire le set, le numéro et les prix de référence, puis ajustez le
-                titre, la description et les options Vinted avant publication.
-              </p>
-            </div>
-            <div class="flex shrink-0 flex-row gap-2 lg:flex-col lg:items-end">
-              <UButton to="/articles/batch-create" size="sm" color="neutral" variant="soft" icon="i-lucide-layers">
-                Création groupée
-              </UButton>
-            </div>
-          </div>
-        </div>
+          <template #actions>
+            <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
+              Création groupée
+            </UButton>
+          </template>
+        </GoupixDexPageHeader>
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.1fr)] lg:items-start">
           <!-- Bloc formulaire principal (gauche) -->
-          <UCard class="ring-default/60 order-2 shadow-sm ring-1 lg:order-1">
+          <UCard class="ring-default order-2 ring-1 lg:order-1">
             <template #header>
               <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <p class="text-highlighted font-medium">Détails de l'article</p>

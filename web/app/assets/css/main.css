@@ -2,7 +2,9 @@
 @import '@nuxt/ui';
 
 @theme static {
-  --font-sans: 'Public Sans', sans-serif;
+  --font-sans: 'Nunito Sans', sans-serif;
+  --font-display: 'Fredoka', 'Nunito Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 
   /* GoupixDex brand — primary #e86112, accent #fdb140 */
   --color-primary-50: #fff4ec;
@@ -22,8 +24,101 @@
   --color-secondary-600: #d98716;
 }
 
+/*
+ * GoupixDex design tokens — warm cream (light) / warm charcoal (dark).
+ * Every surface, text, and border color in the app derives from these variables,
+ * so both themes stay coherent from a single definition.
+ */
+:root {
+  --app-bg: #f7f2ea;
+  --app-surface: #fdfaf4;
+  --app-surface-2: #efe8dc;
+  --app-ink: #221a13;
+  --app-ink-soft: #6f6355;
+  --app-faint: #b3a693;
+  --app-line: #e4dbcb;
+  --app-line-soft: #ece5d7;
+  --app-accent: #e86112;
+  --app-accent-ink: #b04a08;
+  --app-accent-soft: rgba(232, 97, 18, 0.12);
+  --app-green: #2f7d4e;
+  --app-green-soft: rgba(47, 125, 78, 0.12);
+  --app-red: #bf4d33;
+  --app-red-soft: rgba(191, 77, 51, 0.12);
+  --app-blue: #4a6b8f;
+  --app-blue-soft: rgba(95, 127, 158, 0.16);
+  --app-violet: #7a63ad;
+  --app-violet-soft: rgba(141, 123, 184, 0.16);
+  --app-overlay: rgba(34, 26, 19, 0.45);
+  --app-shadow-soft: 0 10px 30px -18px rgba(34, 26, 19, 0.35);
+  --app-shadow-lift: 0 24px 56px rgba(34, 26, 19, 0.18), 0 2px 8px rgba(34, 26, 19, 0.08);
+}
+
+.dark {
+  --app-bg: #131316;
+  --app-surface: #1a1a1f;
+  --app-surface-2: #24242b;
+  --app-ink: #f2efe9;
+  --app-ink-soft: #a3a09a;
+  --app-faint: #5c5952;
+  --app-line: #2b2b33;
+  --app-line-soft: #232329;
+  --app-accent: #ff8a3d;
+  --app-accent-ink: #ffa86b;
+  --app-accent-soft: rgba(255, 138, 61, 0.16);
+  --app-green: #55a878;
+  --app-green-soft: rgba(85, 168, 120, 0.15);
+  --app-red: #d76a55;
+  --app-red-soft: rgba(215, 106, 85, 0.15);
+  --app-blue: #85a8c8;
+  --app-blue-soft: rgba(133, 168, 200, 0.15);
+  --app-violet: #a894d6;
+  --app-violet-soft: rgba(168, 148, 214, 0.15);
+  --app-overlay: rgba(0, 0, 0, 0.65);
+  --app-shadow-soft: 0 10px 30px -18px rgba(0, 0, 0, 0.65);
+  --app-shadow-lift: 0 24px 56px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/*
+ * Remap Nuxt UI semantic tokens onto the GoupixDex tokens so every built-in
+ * component (bg-default, text-muted, border-default…) follows both themes.
+ * Declared for both :root and html.dark because Nuxt UI redefines its tokens
+ * under `.dark`, which would otherwise outrank a single :root declaration.
+ */
+:root,
+html.dark {
+  --ui-bg: var(--app-surface);
+  --ui-bg-muted: var(--app-surface-2);
+  --ui-bg-elevated: var(--app-surface-2);
+  --ui-bg-accented: var(--app-surface-2);
+  --ui-bg-inverted: var(--app-ink);
+  --ui-text-dimmed: var(--app-faint);
+  --ui-text-muted: var(--app-ink-soft);
+  --ui-text-toned: var(--app-ink-soft);
+  --ui-text: var(--app-ink);
+  --ui-text-highlighted: var(--app-ink);
+  --ui-text-inverted: var(--app-bg);
+  --ui-border: var(--app-line);
+  --ui-border-muted: var(--app-line-soft);
+  --ui-border-accented: var(--app-line);
+  --ui-border-inverted: var(--app-ink);
+  --ui-success: var(--app-green);
+  --ui-error: var(--app-red);
+  --ui-info: var(--app-blue);
+}
+
 /* Pointer cursor on clickable controls (complements UButton via app.config) */
 @layer base {
+  :root {
+    /* Slimmer dashboard top bar (Nuxt UI default: 4rem) */
+    --ui-header-height: 3rem;
+  }
+
+  body {
+    background-color: var(--app-bg);
+    color: var(--app-ink);
+  }
+
   button:enabled:not([aria-disabled='true']) {
     cursor: pointer;
   }
@@ -37,6 +132,121 @@
   input[type='password']::-ms-reveal,
   input[type='password']::-ms-clear {
     display: none;
+  }
+}
+
+/* GoupixDex UI primitives — the six classes that carry the whole look */
+@layer components {
+  /* Flat card: border only, no shadow */
+  .app-card {
+    @apply rounded-xl border;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+  }
+
+  /* Mono uppercase micro-label — table headers, eyebrows, form labels, section titles */
+  .app-label {
+    @apply text-[0.66rem] font-medium tracking-[0.12em] uppercase;
+    font-family: var(--font-mono);
+    color: var(--app-ink-soft);
+  }
+
+  /* Page title — Fredoka gives the playful Pokémon warmth */
+  .app-page-title {
+    @apply text-lg font-semibold tracking-[-0.01em] text-balance sm:text-xl;
+    font-family: var(--font-display);
+    color: var(--app-ink);
+  }
+
+  /* Status pill */
+  .app-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+    background-color: var(--app-surface-2);
+    color: var(--app-ink-soft);
+  }
+
+  .app-badge--success {
+    background-color: var(--app-green-soft);
+    color: var(--app-green);
+  }
+
+  .app-badge--danger {
+    background-color: var(--app-red-soft);
+    color: var(--app-red);
+  }
+
+  .app-badge--progress {
+    background-color: var(--app-accent-soft);
+    color: var(--app-accent-ink);
+  }
+
+  .app-badge--info {
+    background-color: var(--app-blue-soft);
+    color: var(--app-blue);
+  }
+
+  .app-badge--engaged {
+    background-color: var(--app-violet-soft);
+    color: var(--app-violet);
+  }
+
+  .app-badge--strong {
+    background-color: var(--app-ink);
+    color: var(--app-bg);
+  }
+
+  /* Soft-tinted square icon tile (page headers, drawers, quick actions) */
+  .app-icon-tile {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border;
+    border-color: var(--app-line);
+    background-color: var(--app-surface-2);
+  }
+
+  /* Command palette fade (GoupixDexCommandPalette) */
+  .palette-fade-enter-active,
+  .palette-fade-leave-active {
+    transition: opacity 0.15s ease;
+  }
+
+  .palette-fade-enter-from,
+  .palette-fade-leave-to {
+    opacity: 0;
+  }
+
+  /* Editorial eyebrow of the marketing landing — mono caps preceded by an orange dash */
+  .landing-eyebrow {
+    @apply inline-flex items-center gap-3 text-xs font-medium tracking-[0.18em] uppercase;
+    font-family: var(--font-mono);
+    color: var(--app-ink-soft);
+  }
+
+  .landing-eyebrow::before {
+    content: '';
+    width: 2rem;
+    height: 2px;
+    background-color: var(--app-accent);
+  }
+
+  /* Staggered editorial entrance on landing load */
+  .landing-rise {
+    opacity: 0;
+    transform: translateY(22px);
+    animation: landing-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  @keyframes landing-rise {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-rise {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
   }
 }
 

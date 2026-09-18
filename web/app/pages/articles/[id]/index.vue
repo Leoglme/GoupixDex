@@ -42,11 +42,7 @@
             </div>
           </div>
 
-          <UCard
-            v-if="showMarketplaceActions"
-            class="ring-default/60 shadow-sm ring-1"
-            :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
-          >
+          <UCard v-if="showMarketplaceActions" class="ring-default ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
             <div class="space-y-1">
               <p class="text-highlighted font-medium">Annonces en ligne</p>
               <p class="text-muted text-sm">
@@ -103,25 +99,25 @@
           </UCard>
 
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4' }">
               <p class="text-muted text-xs font-medium uppercase">Prix d'achat</p>
               <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                 {{ eur.format(article.purchase_price) }}
               </p>
             </UCard>
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4' }">
               <p class="text-muted text-xs font-medium uppercase">Prix de vente</p>
               <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                 {{ article.sell_price != null ? eur.format(article.sell_price) : '—' }}
               </p>
             </UCard>
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4' }">
               <p class="text-muted text-xs font-medium uppercase">Code set</p>
               <p class="text-highlighted mt-1 text-lg font-semibold">
                 {{ article.set_code || '—' }}
               </p>
             </UCard>
-            <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-4' }">
+            <UCard class="ring-default ring-1" :ui="{ body: 'p-4' }">
               <p class="text-muted text-xs font-medium uppercase">N° carte</p>
               <p class="text-highlighted mt-1 text-lg font-semibold">
                 {{ article.card_number || '—' }}
@@ -129,7 +125,7 @@
             </UCard>
           </div>
 
-          <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
+          <UCard class="ring-default ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
             <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
               <div class="min-w-0 flex-1 space-y-1">
                 <div class="flex flex-wrap items-center gap-2">
@@ -188,25 +184,25 @@
                 showSuggestedPrice && pricing ? 'lg:grid-cols-3 xl:grid-cols-5' : 'lg:grid-cols-2 xl:grid-cols-4',
               ]"
             >
-              <UCard class="bg-elevated/40 ring-default/60 min-w-0 ring-1" :ui="{ body: 'p-4' }">
+              <UCard class="bg-elevated/40 ring-default min-w-0 ring-1" :ui="{ body: 'p-4' }">
                 <p class="text-muted text-xs font-medium uppercase">Cardmarket</p>
                 <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                   {{ cardmarketDisplay }}
                 </p>
               </UCard>
-              <UCard class="bg-elevated/40 ring-default/60 min-w-0 ring-1" :ui="{ body: 'p-4' }">
+              <UCard class="bg-elevated/40 ring-default min-w-0 ring-1" :ui="{ body: 'p-4' }">
                 <p class="text-muted text-xs font-medium uppercase">TCGPlayer</p>
                 <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                   {{ tcgplayerDisplay }}
                 </p>
               </UCard>
-              <UCard class="bg-elevated/40 ring-default/60 min-w-0 ring-1" :ui="{ body: 'p-4' }">
+              <UCard class="bg-elevated/40 ring-default min-w-0 ring-1" :ui="{ body: 'p-4' }">
                 <p class="text-muted text-xs font-medium uppercase">eBay · prix min</p>
                 <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                   {{ ebayMinDisplay }}
                 </p>
               </UCard>
-              <UCard class="bg-elevated/40 ring-default/60 min-w-0 ring-1" :ui="{ body: 'p-4' }">
+              <UCard class="bg-elevated/40 ring-default min-w-0 ring-1" :ui="{ body: 'p-4' }">
                 <p class="text-muted text-xs font-medium uppercase">eBay · moyenne</p>
                 <p class="text-highlighted mt-1 text-xl font-semibold tabular-nums">
                   {{ ebayAvgDisplay }}
@@ -297,7 +293,7 @@
                 </div>
               </UCard>
 
-              <UCard class="ring-default/60 shadow-sm ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
+              <UCard class="ring-default ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
                 <p class="text-highlighted font-medium">Description</p>
                 <p class="text-muted text-sm leading-relaxed whitespace-pre-wrap">
                   {{ article.description }}
