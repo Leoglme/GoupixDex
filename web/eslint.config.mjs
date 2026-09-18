@@ -9,7 +9,7 @@ import withNuxt from './.nuxt/eslint.config.mjs'
 export default withNuxt(
   {
     name: 'goupixdex/ignores',
-    ignores: ['dist', '.output', 'node_modules', '.nuxt', 'src-tauri/target', 'coverage', '*.min.js'],
+    ignores: ['dist', '.output', 'node_modules', '.nuxt', 'src-tauri/target', 'coverage', '*.min.js', 'public'],
   },
   eslintPluginJSDoc.configs['flat/recommended'],
   {
