@@ -481,6 +481,34 @@ export function useScanStream() {
   }
 
   /**
+   * Commit a card identified on-device by the visual match index — no photo,
+   * no OCR: the server adds/removes it right away and emits the usual
+   * `queued` → `added` / `removed` events over the WebSocket.
+   *
+   * @param tcgdexCardId - Canonical TCGdex card id (e.g. `sv2a-173`).
+   * @param language - Physical language stored in the collection (`fr` | `en` | `ja`).
+   * @param direction - `in` (add, default) or `out` (checkout / decrement).
+   * @returns {Promise<UploadResponse>} `{ event_id, status: 'queued' }`.
+   */
+  async function commitMatchedScan(
+    tcgdexCardId: string,
+    language: string,
+    direction: ScanDirection = 'in',
+  ): Promise<UploadResponse> {
+    const { data } = await $api.post<UploadResponse>(
+      '/scan-stream/match',
+      { tcgdex_card_id: tcgdexCardId, language, direction },
+      { timeout: 15_000 },
+    )
+    if (pollingActive || connectionMode.value !== 'websocket') {
+      window.setTimeout(() => {
+        void refreshRecent(50)
+      }, 400)
+    }
+    return data
+  }
+
+  /**
    * Remove one event from the server backlog and the local list.
    *
    * @param eventId - Scan event id returned by upload / WebSocket.
@@ -516,6 +544,7 @@ export function useScanStream() {
     disconnect,
     refreshRecent,
     uploadPhoto,
+    commitMatchedScan,
     dismissEvent,
     clearProblemEvents,
   }

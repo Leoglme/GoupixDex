@@ -166,6 +166,20 @@
                 Sortie
               </button>
             </div>
+            <div class="border-default flex overflow-hidden rounded-full border">
+              <button
+                v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
+                :key="option.value"
+                type="button"
+                class="cursor-pointer px-3 py-1.5 text-xs font-semibold transition-colors"
+                :class="
+                  scanCardLanguage === option.value ? 'bg-primary text-inverted' : 'text-muted hover:text-highlighted'
+                "
+                @click="setScanCardLanguage(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <p class="text-muted text-xs">
               {{
                 scanDirection === 'in'
@@ -502,7 +516,19 @@
                   />
                   <span class="w-10 text-right text-xs text-white/80 tabular-nums">{{ zoomPercentLabel }}</span>
                 </div>
-                <div class="mb-2 flex justify-center">
+                <div class="mb-2 flex flex-wrap items-center justify-center gap-2">
+                  <div class="flex overflow-hidden rounded-full border border-white/20 bg-black/40">
+                    <button
+                      v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      class="cursor-pointer px-3 py-2 text-xs font-semibold transition-colors"
+                      :class="scanCardLanguage === option.value ? 'bg-primary text-white' : 'text-white/70'"
+                      @click="setScanCardLanguage(option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
                   <div class="flex overflow-hidden rounded-full border border-white/20 bg-black/40">
                     <button
                       type="button"
@@ -710,9 +736,10 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { renderSVG } from 'uqr'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
+import type { ScanCardLanguage } from '~/types/ScanMatch'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -759,6 +786,7 @@ const {
   disconnect,
   refreshRecent,
   uploadPhoto,
+  commitMatchedScan,
   dismissEvent,
   clearProblemEvents,
 } = useScanStream()
@@ -769,6 +797,45 @@ const dismissingId = ref<string | null>(null)
 // Physical language (fr / en / ja) is detected server-side from the OCR — no
 // manual picker, so Japanese and French cards can be chained without a stop.
 const SCAN_LANGUAGE = 'auto'
+
+// On-device identification: perceptual-hash index of every TCGdex card image.
+// A confident match commits instantly (no photo, no OCR); anything uncertain
+// falls back to the photo pipeline below.
+const scanMatch = useScanMatchIndex()
+
+const SCAN_CARD_LANGUAGE_STORAGE_KEY = 'goupixdex-scan-card-language'
+const SCAN_CARD_LANGUAGE_OPTIONS: { value: ScanCardLanguage; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'ja', label: 'JA' },
+  { value: 'en', label: 'EN' },
+  { value: 'fr', label: 'FR' },
+]
+
+/**
+ * Language of the cards in the current scan session. `auto` lets the match /
+ * OCR decide; picking one makes every EN/FR twin-print instant AND guarantees
+ * the stored language (he scans homogeneous stacks — one binder at a time).
+ */
+const scanCardLanguage: Ref<ScanCardLanguage> = ref('auto')
+
+/**
+ * Change la langue de session des cartes scannées (persistée par appareil).
+ * @param language - `auto`, `ja`, `en` ou `fr`.
+ */
+function setScanCardLanguage(language: ScanCardLanguage): void {
+  scanCardLanguage.value = language
+  unlockAudio()
+  try {
+    localStorage.setItem(SCAN_CARD_LANGUAGE_STORAGE_KEY, language)
+  } catch {
+    // Stockage privé / bloqué : préférence non persistée, sans gravité.
+  }
+}
+
+/** Langue envoyée aux uploads photo : le sélecteur de session, sinon détection OCR. */
+const uploadLanguage: ComputedRef<string> = computed(() =>
+  scanCardLanguage.value === 'auto' ? SCAN_LANGUAGE : scanCardLanguage.value,
+)
 
 // "Cash register" mode: auto-capture a card the instant it is held steady.
 const autoScan = ref(true)
@@ -1357,7 +1424,7 @@ async function captureFromWebcam(): Promise<void> {
   const file = new File([blob], `webcam-${Date.now()}.jpg`, { type: 'image/jpeg' })
   uploading.value = true
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
+    await uploadPhoto(file, uploadLanguage.value, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
   } catch (err) {
     toast.add({
       title: 'Envoi impossible',
@@ -1610,7 +1677,7 @@ async function onFileChosen(e: Event): Promise<void> {
   }
   uploading.value = true
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE, undefined, undefined, scanDirection.value)
+    await uploadPhoto(file, uploadLanguage.value, undefined, undefined, scanDirection.value)
   } catch (err) {
     toast.add({
       title: 'Envoi impossible',
@@ -1777,12 +1844,32 @@ function onVisibilityChange(): void {
   }
 }
 
+/** Name shown right after an on-device identification (cleared automatically). */
+const instantMatchLabel: Ref<string | null> = ref(null)
+let instantMatchLabelTimer: ReturnType<typeof setTimeout> | null = null
+
 /**
- * Upload the deskewed card the detector produced. The success chime is
- * triggered later, when the `added` event arrives and the info pop-up appears
- * — that's the moment the user actually wants to hear confirmation.
+ * Affiche « Reconnue : X » dans la pastille de statut pendant 2,5 s.
+ * @param name - Nom de la carte identifiée sur l'appareil.
  */
-async function onDetectorCapture(file: File): Promise<void> {
+function flashInstantMatch(name: string): void {
+  instantMatchLabel.value = name
+  if (instantMatchLabelTimer !== null) {
+    clearTimeout(instantMatchLabelTimer)
+  }
+  instantMatchLabelTimer = setTimeout((): void => {
+    instantMatchLabel.value = null
+  }, 2500)
+}
+
+/**
+ * Commit the card the detector produced. A confident on-device match (index
+ * loaded, distance + margin OK) skips OCR entirely: the card id goes straight
+ * to `/scan-stream/match` and the verdict lands in ~1 s. Anything uncertain
+ * uploads the photo to the server pipeline, exactly as before. The success
+ * chime is triggered later, when the outcome event arrives.
+ */
+async function onDetectorCapture(file: File, matches: number[]): Promise<void> {
   uploading.value = true
   blurryCaptureHint.value = false
   // A new card is being processed — drop the previous overlay right away so
@@ -1791,8 +1878,15 @@ async function onDetectorCapture(file: File): Promise<void> {
   if (latestOutcome.value) {
     dismissedOutcomeId.value = latestOutcome.value.event_id
   }
+  const decision = scanMatch.decide(matches, scanCardLanguage.value)
   try {
-    await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
+    if (decision) {
+      flashInstantMatch(decision.name)
+      await commitMatchedScan(decision.tcgdexCardId, decision.language, scanDirection.value)
+    } else {
+      const language = uploadLanguage.value
+      await uploadPhoto(file, language, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
+    }
   } catch (err) {
     toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
   } finally {
@@ -1810,6 +1904,7 @@ const {
   quad: cardQuad,
   ready: detectorReady,
   loadError: detectorError,
+  setMatchIndex,
 } = useCardAutoScan({
   video: videoEl,
   enabled: autoScanEnabled,
@@ -1820,6 +1915,17 @@ const {
     vibrate(30)
   },
 })
+
+// Hand the visual-match index to the detection worker as soon as both exist.
+watch(
+  scanMatch.indexBuffer,
+  (buf): void => {
+    if (buf) {
+      setMatchIndex(buf)
+    }
+  },
+  { immediate: true },
+)
 
 // The hint only makes sense while a capture is being retried — clear it as
 // soon as the scanner goes back to watching / waiting.
@@ -1974,6 +2080,9 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   if (!detectorReady.value) {
     return { label: 'Chargement du moteur de scan…', color: 'primary' }
   }
+  if (instantMatchLabel.value) {
+    return { label: `Reconnue : ${instantMatchLabel.value}`, color: 'success' }
+  }
   if (uploading.value) {
     return { label: 'Envoi…', color: 'primary' }
   }
@@ -2010,10 +2119,19 @@ onMounted(async () => {
   nowTicker = setInterval((): void => {
     nowEpochSec.value = Math.floor(Date.now() / 1000)
   }, 10_000)
+  try {
+    const stored = localStorage.getItem(SCAN_CARD_LANGUAGE_STORAGE_KEY)
+    if (stored === 'ja' || stored === 'en' || stored === 'fr') {
+      scanCardLanguage.value = stored
+    }
+  } catch {
+    // Stockage privé / bloqué : on reste sur « auto ».
+  }
   await refreshRecent()
   await connect()
   // Desktop is a monitor screen (QR + live feed) — no camera to open there.
   if (!isDesktopApp.value && liveCameraSupported.value) {
+    void scanMatch.load()
     await startWebcam()
   }
 })
@@ -2023,6 +2141,10 @@ onBeforeUnmount(() => {
   if (nowTicker !== null) {
     clearInterval(nowTicker)
     nowTicker = null
+  }
+  if (instantMatchLabelTimer !== null) {
+    clearTimeout(instantMatchLabelTimer)
+    instantMatchLabelTimer = null
   }
   stopWebcam()
   disconnect()

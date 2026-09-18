@@ -24,8 +24,12 @@ export interface UseCardAutoScanOptions {
   enabled: Ref<boolean> | ComputedRef<boolean>
   /** `true` while an upload is in flight; never capture then. */
   busy: Ref<boolean>
-  /** Called once per card with the deskewed, cropped card JPEG. */
-  onCapture: (file: File) => void | Promise<void>
+  /**
+   * Called once per card with the deskewed, cropped card JPEG and the raw
+   * visual-match candidates (flat `[indexEntry, distance]` pairs from the
+   * worker, best first — empty when no index is loaded).
+   */
+  onCapture: (file: File, matches: number[]) => void | Promise<void>
   /** Called when a burst came out motion-blurred and is being retried — UI hint. */
   onBlurryRetry?: () => void
 }
@@ -88,6 +92,7 @@ interface BurstShot {
   w: number
   h: number
   sharpness: number
+  matches: number[]
 }
 
 /**
@@ -109,6 +114,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   const quad: Ref<CardQuad | null> = ref(null)
   const ready: Ref<boolean> = ref(false)
   const loadError: Ref<string | null> = ref(null)
+  /** `true` once the worker holds the visual-match index (instant identification). */
+  const matchIndexReady: Ref<boolean> = ref(false)
+  let pendingIndexBuffer: ArrayBuffer | null = null
 
   let worker: Worker | null = null
   let timer: ReturnType<typeof setInterval> | null = null
@@ -390,7 +398,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
           return
         }
         const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
-        void Promise.resolve(onCapture(file)).finally(finishCooldown)
+        void Promise.resolve(onCapture(file, best.matches)).finally(finishCooldown)
       },
       'image/jpeg',
       0.92,
@@ -518,15 +526,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
+      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number; matches?: number[] }
       | { t: 'warp_failed'; m: string }
+      | { t: 'index_ready'; count: number }
     if (d.t === 'ready') {
       ready.value = true
       loadError.value = null
+      if (pendingIndexBuffer) {
+        worker?.postMessage({ t: 'index', buf: pendingIndexBuffer })
+      }
       if (enabled.value) {
         phase.value = 'watching'
         startPump()
       }
+      return
+    }
+    if (d.t === 'index_ready') {
+      matchIndexReady.value = d.count > 0
       return
     }
     if (d.t === 'error') {
@@ -561,7 +577,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       if (!capturing) {
         return
       }
-      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness })
+      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness, matches: d.matches ?? [] })
       if (burstShots.length + burstMisses < BURST_COUNT) {
         burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
       } else {
@@ -642,6 +658,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     phase.value = 'idle'
   }
 
+  /**
+   * Hand the prebuilt visual-match index to the worker (posted immediately
+   * when the worker is up, or kept until its `ready` message otherwise).
+   * @param buf - Raw `index-v{N}.bin` payload (`GPXI` header + packed hashes).
+   */
+  function setMatchIndex(buf: ArrayBuffer): void {
+    pendingIndexBuffer = buf
+    if (worker && ready.value) {
+      worker.postMessage({ t: 'index', buf })
+    }
+  }
+
   /** Tear everything down (page unmount only). */
   function stopAll(): void {
     resetTransientState()
@@ -654,6 +682,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     captureCanvas = null
     captureCtx = null
     ready.value = false
+    matchIndexReady.value = false
     phase.value = 'idle'
   }
 
@@ -671,5 +700,5 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   onBeforeUnmount(stopAll)
 
-  return { phase, quad, ready, loadError }
+  return { phase, quad, ready, loadError, matchIndexReady, setMatchIndex }
 }

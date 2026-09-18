@@ -12,3 +12,4 @@ integrations
 # Local Cursor / agent guidelines — not versioned
 CLAUDE.md
 .claude
+api/scripts/scan-index-work.json

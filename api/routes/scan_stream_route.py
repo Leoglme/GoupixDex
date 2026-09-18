@@ -14,6 +14,7 @@ real time.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -28,13 +29,14 @@ from fastapi import (
     WebSocket,
     status,
 )
+from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from core.database import SessionLocal
 from core.deps import get_current_user, get_current_user_from_token_str
 from models.user import User
 from services.scan_stream_hub import get_scan_stream_hub
-from services.scan_stream_service import submit_scan
+from services.scan_stream_service import submit_matched_scan, submit_scan
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,50 @@ async def upload_scan_photo(
         user_hint=user_hint,
     )
 
+    return {
+        "event_id": event_id,
+        "status": "queued",
+        "physical_language": physical_language,
+        "direction": scan_direction,
+    }
+
+
+_TCGDEX_CARD_ID_RE = re.compile(r"^[A-Za-z0-9.]+-[A-Za-z0-9.]+$")
+
+
+class MatchedScanPayload(BaseModel):
+    """Card identified on the phone by the visual match index (no photo)."""
+
+    tcgdex_card_id: str
+    language: str = "en"
+    direction: str = "in"
+
+
+@router.post("/scan-stream/match", status_code=status.HTTP_202_ACCEPTED)
+async def commit_matched_scan(
+    user: Annotated[User, Depends(get_current_user)],
+    payload: MatchedScanPayload,
+) -> dict[str, Any]:
+    """
+    Commit a card the phone identified **on-device** (perceptual-hash match
+    against the TCGdex index). Skips OCR entirely: the card is added to
+    (``in``) or removed from (``out``) the collection right away, and the same
+    WebSocket events as the photo pipeline are emitted.
+    """
+    card_id = payload.tcgdex_card_id.strip()
+    if not card_id or len(card_id) > 64 or not _TCGDEX_CARD_ID_RE.fullmatch(card_id):
+        raise HTTPException(status_code=400, detail="Identifiant de carte invalide.")
+    physical_language = _clean_language(payload.language)
+    if physical_language == "auto":
+        physical_language = "en"
+    scan_direction = _clean_direction(payload.direction)
+
+    event_id = submit_matched_scan(
+        user_id=user.id,
+        tcgdex_card_id=card_id,
+        physical_language=physical_language,
+        direction=scan_direction,  # type: ignore[arg-type]
+    )
     return {
         "event_id": event_id,
         "status": "queued",

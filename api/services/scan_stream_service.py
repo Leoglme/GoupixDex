@@ -683,6 +683,180 @@ async def _admit_scan(
     _ensure_consumer(user_id)
 
 
+#: Debounce for on-device match commits — the phone re-arm gate already spaces
+#: real cards out; this only guards against a double POST for the same card.
+_MATCH_DEBOUNCE_SEC = 1.2
+_last_match_accept: dict[tuple[int, str, str], float] = {}
+
+
+async def _process_matched_scan(
+    *,
+    event_id: str,
+    user_id: int,
+    tcgdex_card_id: str,
+    physical_language: str,
+    direction: ScanDirection,
+) -> None:
+    """
+    Commit a card identified **on the phone** by the visual match index: no
+    photo, no OCR, no TCGdex resolution — straight to the collection, with the
+    same ``queued`` → ``added`` / ``removed`` events the OCR pipeline emits so
+    every listening client renders it identically (just seconds earlier).
+    """
+    hub = get_scan_stream_hub()
+    loop = asyncio.get_running_loop()
+
+    now = time.time()
+    key = (user_id, tcgdex_card_id.lower(), direction)
+    if now - _last_match_accept.get(key, 0.0) < _MATCH_DEBOUNCE_SEC:
+        await _publish_dropped(
+            event_id=event_id,
+            user_id=user_id,
+            physical_language=physical_language,
+            direction=direction,
+            reason="debounce",
+            message="Scan identique trop rapproché — ignoré.",
+        )
+        return
+    _last_match_accept[key] = now
+    if len(_last_match_accept) > 512:
+        cutoff = now - 60.0
+        for stale_key in [k for k, ts in _last_match_accept.items() if ts < cutoff]:
+            _last_match_accept.pop(stale_key, None)
+
+    await hub.publish(
+        user_id,
+        _public_event(
+            event_id=event_id,
+            user_id=user_id,
+            status="queued",
+            physical_language=physical_language,
+            direction=direction,
+            tcgdex_card_id=tcgdex_card_id,
+        ),
+    )
+
+    if direction == "out":
+        try:
+            card_dict, deleted, remaining = await loop.run_in_executor(
+                None,
+                lambda: _decrement_or_delete(user_id, tcgdex_card_id, physical_language),
+            )
+        except Exception as exc:
+            logger.exception("scan-match DB decrement failed event=%s", event_id)
+            await hub.publish(
+                user_id,
+                _public_event(
+                    event_id=event_id,
+                    user_id=user_id,
+                    status="failed",
+                    physical_language=physical_language,
+                    direction=direction,
+                    tcgdex_card_id=tcgdex_card_id,
+                    error=_short_error(exc, "Sortie impossible"),
+                ),
+            )
+            return
+        if card_dict is None:
+            await hub.publish(
+                user_id,
+                _public_event(
+                    event_id=event_id,
+                    user_id=user_id,
+                    status="not_in_collection",
+                    physical_language=physical_language,
+                    direction=direction,
+                    tcgdex_card_id=tcgdex_card_id,
+                    error="Cette carte n'est pas dans votre collection.",
+                ),
+            )
+            return
+        await hub.publish(
+            user_id,
+            _public_event(
+                event_id=event_id,
+                user_id=user_id,
+                status="removed",
+                physical_language=physical_language,
+                direction=direction,
+                tcgdex_card_id=tcgdex_card_id,
+                collection_card=card_dict,
+                deleted=deleted,
+                remaining_quantity=remaining,
+            ),
+        )
+        return
+
+    try:
+        meta = await loop.run_in_executor(
+            None,
+            lambda: fetch_card_for_collection(
+                tcgdex_card_id=tcgdex_card_id,
+                physical_language=physical_language,
+                fallback_name_en=None,
+            ),
+        )
+        row, created = await loop.run_in_executor(
+            None,
+            lambda: _add_or_increment(user_id, meta, notes=None),
+        )
+    except Exception as exc:
+        logger.warning("scan-match commit failed event=%s card=%s: %s", event_id, tcgdex_card_id, exc)
+        await hub.publish(
+            user_id,
+            _public_event(
+                event_id=event_id,
+                user_id=user_id,
+                status="failed",
+                physical_language=physical_language,
+                direction=direction,
+                tcgdex_card_id=tcgdex_card_id,
+                error=_short_error(exc, "Ajout impossible"),
+            ),
+        )
+        return
+
+    await hub.publish(
+        user_id,
+        _public_event(
+            event_id=event_id,
+            user_id=user_id,
+            status="added",
+            physical_language=physical_language,
+            direction=direction,
+            tcgdex_card_id=tcgdex_card_id,
+            collection_card=collection_card_service.collection_card_to_dict(row),
+            created=created,
+        ),
+    )
+
+
+def submit_matched_scan(
+    *,
+    user_id: int,
+    tcgdex_card_id: str,
+    physical_language: str,
+    direction: ScanDirection = "in",
+) -> str:
+    """
+    Enqueue the commit of a card identified on-device (visual match). Returns
+    the ``event_id`` the WebSocket events will carry.
+    """
+    event_id = secrets.token_urlsafe(10)
+    task = asyncio.create_task(
+        _process_matched_scan(
+            event_id=event_id,
+            user_id=user_id,
+            tcgdex_card_id=tcgdex_card_id,
+            physical_language=physical_language,
+            direction=direction,
+        )
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return event_id
+
+
 def submit_scan(
     *,
     user_id: int,

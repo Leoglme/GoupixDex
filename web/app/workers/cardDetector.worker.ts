@@ -389,6 +389,174 @@ function warp(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: n
   }
 }
 
+// ---------------------------------------------------------------------------
+// On-device card identification: 1024-bit perceptual hash matched against the
+// prebuilt TCGdex index (`/scan-index/index-v1.bin`). The hash spec is
+// bit-identical with `api/scripts/build_scan_match_index.py` — grayscale is
+// PIL's fixed-point ITU-R 601-2 luma, resizes are area-average (PIL BOX),
+// bands share the same fractional boxes. Drift here = every scan misses.
+// ---------------------------------------------------------------------------
+
+const HASH_BYTES = 128
+const HASH_GLOBAL_BYTES = 64
+/** Weighted distance = 10×(global bits) + 6×(text-band bits) — integers only. */
+const W_GLOBAL = 10
+const W_TEXT = 6
+/** Query is re-hashed at these inset fractions (tolerates a warp that grabbed background). */
+const QUERY_INSETS = [0, 0.015, 0.03]
+const TOP_MATCHES = 8
+const NAME_BOX = [0.05, 0.025, 0.72, 0.1]
+const ATTACK_BOX = [0.08, 0.55, 0.92, 0.88]
+
+let matchIndex: Uint8Array | null = null
+let matchCount = 0
+
+const POPCOUNT = new Uint8Array(256)
+for (let i = 0; i < 256; i += 1) {
+  POPCOUNT[i] = (i & 1) + POPCOUNT[i >> 1]
+}
+
+/** PIL `convert('L')` parity: fixed-point rounded ITU-R 601-2 luma. */
+function lumaPlane(rgba: Uint8ClampedArray, w: number, h: number) {
+  const out = new Uint8Array(w * h)
+  for (let i = 0, p = 0; i < out.length; i += 1, p += 4) {
+    out[i] = (rgba[p] * 19595 + rgba[p + 1] * 38470 + rgba[p + 2] * 7471 + 0x8000) >> 16
+  }
+  return { data: out, w, h }
+}
+
+type GrayPlane = { data: Uint8Array; w: number; h: number }
+
+/** Area-average downscale (PIL BOX parity, fractional coverage included). */
+function boxResize(src: GrayPlane, dw: number, dh: number): GrayPlane {
+  const out = new Uint8Array(dw * dh)
+  const xr = src.w / dw
+  const yr = src.h / dh
+  for (let dy = 0; dy < dh; dy += 1) {
+    const y0 = dy * yr
+    const y1 = y0 + yr
+    const iy0 = Math.floor(y0)
+    const iy1 = Math.min(src.h, Math.ceil(y1))
+    for (let dx = 0; dx < dw; dx += 1) {
+      const x0 = dx * xr
+      const x1 = x0 + xr
+      const ix0 = Math.floor(x0)
+      const ix1 = Math.min(src.w, Math.ceil(x1))
+      let acc = 0
+      let area = 0
+      for (let y = iy0; y < iy1; y += 1) {
+        const wy = Math.min(y + 1, y1) - Math.max(y, y0)
+        const row = y * src.w
+        for (let x = ix0; x < ix1; x += 1) {
+          const wx = Math.min(x + 1, x1) - Math.max(x, x0)
+          acc += src.data[row + x] * wx * wy
+          area += wx * wy
+        }
+      }
+      out[dy * dw + dx] = Math.round(acc / area)
+    }
+  }
+  return { data: out, w: dw, h: dh }
+}
+
+function cropGray(src: GrayPlane, fx0: number, fy0: number, fx1: number, fy1: number): GrayPlane {
+  const x0 = Math.floor(src.w * fx0)
+  const y0 = Math.floor(src.h * fy0)
+  const x1 = Math.floor(src.w * fx1)
+  const y1 = Math.floor(src.h * fy1)
+  const w = Math.max(1, x1 - x0)
+  const h = Math.max(1, y1 - y0)
+  const out = new Uint8Array(w * h)
+  for (let y = 0; y < h; y += 1) {
+    out.set(src.data.subarray((y0 + y) * src.w + x0, (y0 + y) * src.w + x0 + w), y * w)
+  }
+  return { data: out, w, h }
+}
+
+/** Row dHash: resize to (w+1, h), bit = px[r][c] > px[r][c+1]. */
+function dhashRows(src: GrayPlane, w: number, h: number, bits: number[]): void {
+  const r = boxResize(src, w + 1, h)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      bits.push(r.data[y * (w + 1) + x] > r.data[y * (w + 1) + x + 1] ? 1 : 0)
+    }
+  }
+}
+
+/** Column dHash: resize to (w, h+1), bit = px[r][c] > px[r+1][c]. */
+function dhashCols(src: GrayPlane, w: number, h: number, bits: number[]): void {
+  const r = boxResize(src, w, h + 1)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      bits.push(r.data[y * w + x] > r.data[(y + 1) * w + x] ? 1 : 0)
+    }
+  }
+}
+
+/** 1024-bit card hash (512 global + 512 text bands), packed MSB-first. */
+function cardHashBytes(gray: GrayPlane): Uint8Array {
+  const bits: number[] = []
+  dhashRows(gray, 16, 16, bits)
+  dhashCols(gray, 16, 16, bits)
+  dhashRows(cropGray(gray, NAME_BOX[0], NAME_BOX[1], NAME_BOX[2], NAME_BOX[3]), 32, 8, bits)
+  dhashRows(cropGray(gray, ATTACK_BOX[0], ATTACK_BOX[1], ATTACK_BOX[2], ATTACK_BOX[3]), 32, 8, bits)
+  const out = new Uint8Array(bits.length >> 3)
+  for (let i = 0; i < bits.length; i += 1) {
+    if (bits[i]) {
+      out[i >> 3] |= 0x80 >> (i & 7)
+    }
+  }
+  return out
+}
+
+/**
+ * Weighted Hamming distances of the query hashes against every index entry;
+ * returns the TOP_MATCHES best as flat [entryIndex, distance] pairs. The main
+ * thread applies the confidence policy (it owns the metadata).
+ */
+function matchAgainstIndex(queryHashes: Uint8Array[]): number[] {
+  if (!matchIndex || !matchCount) {
+    return []
+  }
+  const top: { i: number; d: number }[] = []
+  for (let i = 0; i < matchCount; i += 1) {
+    const base = i * HASH_BYTES
+    let best = Infinity
+    for (const q of queryHashes) {
+      let dg = 0
+      for (let b = 0; b < HASH_GLOBAL_BYTES; b += 1) {
+        dg += POPCOUNT[q[b] ^ matchIndex[base + b]]
+      }
+      let dt = 0
+      for (let b = HASH_GLOBAL_BYTES; b < HASH_BYTES; b += 1) {
+        dt += POPCOUNT[q[b] ^ matchIndex[base + b]]
+      }
+      const d = W_GLOBAL * dg + W_TEXT * dt
+      if (d < best) {
+        best = d
+      }
+    }
+    if (top.length < TOP_MATCHES || best < top[top.length - 1].d) {
+      top.push({ i, d: best })
+      top.sort((a, b) => a.d - b.d)
+      if (top.length > TOP_MATCHES) {
+        top.pop()
+      }
+    }
+  }
+  return top.flatMap((m) => [m.i, m.d])
+}
+
+/** Hash the warped card at several insets and rank it against the index. */
+function matchWarpedCard(rgbaBuf: ArrayBuffer, w: number, h: number): number[] {
+  const gray = lumaPlane(new Uint8ClampedArray(rgbaBuf), w, h)
+  const queries: Uint8Array[] = []
+  for (const f of QUERY_INSETS) {
+    queries.push(cardHashBytes(f === 0 ? gray : cropGray(gray, f, f, 1 - f, 1 - f)))
+  }
+  return matchAgainstIndex(queries)
+}
+
 self.onmessage = (e: MessageEvent): void => {
   const d = e.data
   if (d.t === 'init') {
@@ -418,6 +586,25 @@ self.onmessage = (e: MessageEvent): void => {
     ;(self as any).postMessage(corners ? { t: 'quad', corners } : { t: 'nq' })
     return
   }
+  if (d.t === 'index') {
+    // Prebuilt scan-match index: 'GPXI' + u32 version + u32 count + count×128B.
+    try {
+      const view = new DataView(d.buf as ArrayBuffer)
+      const magicOk =
+        view.getUint8(0) === 0x47 && view.getUint8(1) === 0x50 && view.getUint8(2) === 0x58 && view.getUint8(3) === 0x49
+      const count = view.getUint32(8, true)
+      if (magicOk && count > 0 && (d.buf as ArrayBuffer).byteLength >= 12 + count * HASH_BYTES) {
+        matchIndex = new Uint8Array(d.buf as ArrayBuffer, 12, count * HASH_BYTES)
+        matchCount = count
+        ;(self as any).postMessage({ t: 'index_ready', count })
+      } else {
+        ;(self as any).postMessage({ t: 'index_ready', count: 0 })
+      }
+    } catch {
+      ;(self as any).postMessage({ t: 'index_ready', count: 0 })
+    }
+    return
+  }
   if (d.t === 'warp') {
     if (!cv) {
       ;(self as any).postMessage({ t: 'warp_failed', m: 'Moteur non initialisé' })
@@ -425,7 +612,13 @@ self.onmessage = (e: MessageEvent): void => {
     }
     try {
       const { out, sharpness } = warp(d.buf, d.w, d.h, d.corners)
-      ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness }, [out])
+      let matches: number[] = []
+      try {
+        matches = matchWarpedCard(out, WARP_W, WARP_H)
+      } catch {
+        matches = []
+      }
+      ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness, matches }, [out])
     } catch {
       // Non-fatal: the main thread skips this shot and keeps scanning.
       ;(self as any).postMessage({ t: 'warp_failed', m: 'Découpe carte impossible' })
