@@ -41,8 +41,8 @@ export interface UseCardAutoScanOptions {
   onBlurryRetry?: () => void
 }
 
-/** ~10 fps cadence. The worker decides if it can keep up via the in-flight gate. */
-const FRAME_MS = 100
+/** ~12 fps cadence. The worker decides if it can keep up via the in-flight gate. */
+const FRAME_MS = 80
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
 /**
@@ -54,12 +54,15 @@ const CAPTURE_EDGE = 1920
 /** Floor between two captures (safety net on top of the re-arm gate). */
 const MIN_COOLDOWN_MS = 450
 /**
- * Empty detection ticks (~100 ms each) required after a capture before the
- * next card can fire. This is the "cash register" rhythm: pass a card, it
- * beeps, pull it out, pass the next one. Without this gate a card left in
- * frame was re-captured every 600 ms and flooded the server with duplicates.
+ * Empty detection ticks required after a capture before the next card can
+ * fire. Two frames (~160 ms) was far too short: a flickering contour made
+ * the scanner re-arm while the same card was still in frame → spam.
  */
-const CLEAR_TICKS_TO_REARM = 2
+const CLEAR_TICKS_TO_REARM = 10
+/** Minimum quiet time after a commit before re-arming (ms). */
+const MIN_REARM_MS = 900
+/** Fraction of the frame height covered by the on-screen guide silhouette. */
+const GUIDE_HEIGHT_FRAC = 0.62
 /** How many shots we take in a burst — we keep the sharpest for OCR. */
 const BURST_COUNT = 3
 /** Gap between burst shots — wide enough for hand movement to expose new info. */
@@ -80,10 +83,10 @@ const MIN_SHARPNESS = 3.0
 const MAX_BLUR_RETRIES = 2
 /**
  * Live identification attempts that must MISS before the photo-OCR fallback
- * fires. At ~4 attempts/s this gives the on-device index ≈ 0.8 s to recognise
- * the card; unmatched cards (sets without TCGdex images) then go to OCR.
+ * fires. At ~5 attempts/s this gives the on-device index ≈ 0.5 s; unmatched
+ * cards (sets without TCGdex images, e.g. JA s8b) then go to OCR.
  */
-const LIVE_MATCH_MISSES_BEFORE_PHOTO = 3
+const LIVE_MATCH_MISSES_BEFORE_PHOTO = 2
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
@@ -204,6 +207,41 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     ctx.drawImage(el, 0, 0, w, h)
     return { buf: ctx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
+  }
+
+  /**
+   * Fixed guide rectangle in video-intrinsic px — same geometry as the on-screen
+   * silhouette and the worker's central crop. Used for OCR capture when contour
+   * detection fails (wood table, sleeve glare…).
+   */
+  function guideCorners(vw: number, vh: number): Pt[] {
+    const gh = vh * GUIDE_HEIGHT_FRAC
+    const gw = Math.min(vw * 0.92, (gh * 63) / 88)
+    const x = (vw - gw) / 2
+    const y = (vh - gh) / 2
+    return [
+      { x, y },
+      { x: x + gw, y },
+      { x: x + gw, y: y + gh },
+      { x, y: y + gh },
+    ]
+  }
+
+  /**
+   * True when the scanner may fire a photo-OCR burst.
+   * @param requireLiveMisses - When true (guide-only path), live hash misses are mandatory even without an index.
+   */
+  function shouldTriggerPhotoFallback(requireLiveMisses: boolean = false): boolean {
+    if (capturing || !armed || busy.value) {
+      return false
+    }
+    if (Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
+      return false
+    }
+    if (requireLiveMisses || matchIndexReady.value) {
+      return liveMatchMisses >= LIVE_MATCH_MISSES_BEFORE_PHOTO
+    }
+    return true
   }
 
   /**
@@ -434,24 +472,36 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
 
-    // No card this tick — this is what re-arms the scanner after a capture.
+    // No card this tick — re-arm only after sustained absence + minimum quiet time.
     if (!corners) {
       pendingCorners = null
       missTicks += 1
       if (!armed) {
-        clearTicks += 1
-        if (clearTicks >= CLEAR_TICKS_TO_REARM) {
-          armed = true
-          if (!capturing) {
-            phase.value = 'watching'
+        if (Date.now() - lastCaptureAt >= MIN_REARM_MS) {
+          clearTicks += 1
+          if (clearTicks >= CLEAR_TICKS_TO_REARM) {
+            armed = true
+            liveMatchMisses = 0
+            if (!capturing) {
+              phase.value = 'watching'
+            }
           }
+        }
+      } else if (shouldTriggerPhotoFallback(true)) {
+        // Contour failed but the guide crop had live misses → OCR on the guide zone.
+        const el = video.value
+        if (el?.videoWidth) {
+          beginBurst(guideCorners(el.videoWidth, el.videoHeight))
+          return
         }
       }
       if (missTicks >= MISS_LINGER_TICKS) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
-        liveMatchMisses = 0
+        if (armed) {
+          liveMatchMisses = 0
+        }
         if (phase.value !== 'idle' && !capturing && armed) {
           phase.value = 'watching'
         }
@@ -494,18 +544,14 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
-    if (busy.value || Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
+    if (!shouldTriggerPhotoFallback()) {
       return
     }
 
-    // With the index live, give the on-frame identification ~0.8 s to DING
-    // before falling back to the photo-OCR burst (sets without images, weird
-    // lighting…). Without an index, the burst is the only path — fire it.
-    if (matchIndexReady.value && liveMatchMisses < LIVE_MATCH_MISSES_BEFORE_PHOTO) {
-      return
-    }
-
-    beginBurst(corners)
+    // Prefer the fixed guide crop for OCR — contour quads jitter on wood / sleeves.
+    const el = video.value
+    const burstCorners = el?.videoWidth && matchIndexReady.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
+    beginBurst(burstCorners)
   }
 
   /**

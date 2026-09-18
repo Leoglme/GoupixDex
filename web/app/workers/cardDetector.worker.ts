@@ -578,14 +578,11 @@ function matchWarpedCard(rgbaBuf: ArrayBuffer, w: number, h: number): number[] {
 /** Output size of the lightweight identification warp (63:88 card ratio). */
 const ID_WARP_W = 315
 const ID_WARP_H = 440
-/** Floor between two identification attempts (quad path). */
-const ID_MATCH_MIN_INTERVAL_MS = 220
-/** Floor between two central-crop attempts (no quad — user aims with the guide). */
-const ID_CENTRAL_MIN_INTERVAL_MS = 550
+/** Floor between two guide-crop identification attempts (~5/s). */
+const ID_CENTRAL_MIN_INTERVAL_MS = 180
 /** Central guide crop: fraction of the frame height the card silhouette covers. */
 const ID_CENTRAL_HEIGHT_FRAC = 0.62
 
-let lastIdMatchAt = 0
 let lastIdCentralAt = 0
 
 /** Deskew the detection frame at low resolution and rank it against the index. */
@@ -636,15 +633,12 @@ self.onmessage = (e: MessageEvent): void => {
     } catch {
       found = null
     }
-    // Continuous identification: rank this very frame against the index
-    // (throttled) so a known card can commit instantly, before any burst.
+    // Continuous identification on the fixed guide crop — contour quads jitter
+    // on wood / sleeves; the on-screen silhouette is the source of truth.
     let matches: number[] | undefined
     const now = Date.now()
     try {
-      if (matchIndex && found && now - lastIdMatchAt >= ID_MATCH_MIN_INTERVAL_MS) {
-        lastIdMatchAt = now
-        matches = idMatchFromQuad(d.buf, d.w, d.h, found.frame)
-      } else if (matchIndex && !found && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
+      if (matchIndex && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
         lastIdCentralAt = now
         matches = idMatchCentralCrop(d.buf, d.w, d.h)
       }

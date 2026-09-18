@@ -53,6 +53,7 @@ def get_price_api() -> CardmarketPriceApi:
             cache_dir = Path(settings.cardmarket_cache_dir)
             if not cache_dir.is_absolute():
                 cache_dir = Path(__file__).resolve().parent.parent / cache_dir
+            cache_dir.mkdir(parents=True, exist_ok=True)
             _price_api = CardmarketPriceApi(cache_dir)
         return _price_api
 

@@ -282,17 +282,17 @@
 
               <div
                 v-if="webcamReady && autoScan"
-                class="bg-elevated/90 border-default/60 absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm"
+                class="bg-elevated/90 border-default/60 absolute bottom-3 left-1/2 flex w-[min(92vw,22rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border px-4 py-2 text-center text-xs font-medium shadow-sm backdrop-blur-sm"
               >
                 <span
-                  class="size-2 shrink-0 rounded-full"
+                  class="size-2.5 shrink-0 rounded-full"
                   :class="{
-                    'bg-primary animate-pulse': autoScanStatus.color === 'primary',
-                    'bg-success': autoScanStatus.color === 'success',
-                    'bg-muted': autoScanStatus.color === 'neutral',
+                    'bg-primary animate-pulse': displayScanStatus.color === 'primary',
+                    'bg-success': displayScanStatus.color === 'success',
+                    'bg-muted': displayScanStatus.color === 'neutral',
                   }"
                 />
-                <span class="text-highlighted">{{ autoScanStatus.label }}</span>
+                <span class="text-highlighted leading-snug">{{ displayScanStatus.label }}</span>
               </div>
 
               <button
@@ -312,8 +312,8 @@
             </div>
             <p class="text-muted text-[11px]">
               <template v-if="autoScan">
-                Présentez chaque carte dans le cadre&nbsp;: dès qu'elle est tracée, elle est capturée toute seule, puis
-                retirez-la pour enchaîner. Molette pour zoomer.
+                Centrez chaque carte dans le cadre orange&nbsp;: identification instantanée si connue, sinon OCR
+                automatique. Retirez-la pour enchaîner. Molette pour zoomer.
               </template>
               <template v-else>Molette sur l’aperçu pour zoomer. {{ zoomHint }}</template>
             </p>
@@ -382,32 +382,18 @@
                   :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
                   preserveAspectRatio="xMidYMid slice"
                 >
+                  <!-- Cadre guide fixe (comme les apps pro) — la reconnaissance
+                       lit toujours cette zone, pas un contour instable. -->
                   <rect
-                    v-if="cardOverlay"
-                    :x="cardOverlay.cx - cardOverlay.w / 2"
-                    :y="cardOverlay.cy - cardOverlay.h / 2"
-                    :width="cardOverlay.w"
-                    :height="cardOverlay.h"
-                    :rx="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
-                    :ry="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
-                    :transform="`rotate(${cardOverlay.angleDeg} ${cardOverlay.cx} ${cardOverlay.cy})`"
-                    fill="rgba(249,115,22,0.08)"
-                    stroke="#f97316"
-                    stroke-width="4"
-                    stroke-linejoin="round"
-                  />
-                  <!-- Zone-guide : la reconnaissance lit aussi cette zone quand
-                       aucun contour n'est verrouillé — viser dedans suffit. -->
-                  <rect
-                    v-else-if="cameraGuideRect"
+                    v-if="cameraGuideRect"
                     :x="cameraGuideRect.x"
                     :y="cameraGuideRect.y"
                     :width="cameraGuideRect.w"
                     :height="cameraGuideRect.h"
                     :rx="cameraGuideRect.w * 0.05"
                     :ry="cameraGuideRect.w * 0.05"
-                    fill="none"
-                    stroke="rgba(255,255,255,0.55)"
+                    :fill="autoScanPhase === 'cooldown' ? 'rgba(16,185,129,0.12)' : 'rgba(249,115,22,0.06)'"
+                    :stroke="autoScanPhase === 'cooldown' ? '#34d399' : '#f97316'"
                     stroke-width="3"
                     stroke-dasharray="18 14"
                     stroke-linejoin="round"
@@ -423,17 +409,17 @@
 
                 <div
                   v-if="webcamReady && autoScan"
-                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(92vw,22rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-4 py-2 text-center text-sm font-medium text-white shadow-lg backdrop-blur-md"
+                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(94vw,24rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-5 py-2.5 text-center text-sm leading-snug font-medium text-white shadow-lg backdrop-blur-md"
                 >
                   <span
                     class="size-2.5 shrink-0 rounded-full"
                     :class="{
-                      'bg-primary animate-pulse': autoScanStatus.color === 'primary',
-                      'bg-emerald-400': autoScanStatus.color === 'success',
-                      'bg-white/50': autoScanStatus.color === 'neutral',
+                      'bg-primary animate-pulse': displayScanStatus.color === 'primary',
+                      'bg-emerald-400': displayScanStatus.color === 'success',
+                      'bg-white/50': displayScanStatus.color === 'neutral',
                     }"
                   />
-                  {{ autoScanStatus.label }}
+                  {{ displayScanStatus.label }}
                 </div>
 
                 <Transition name="fade">
@@ -1992,7 +1978,6 @@ const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value &
 const blurryCaptureHint: Ref<boolean> = ref(false)
 const {
   phase: autoScanPhase,
-  quad: cardQuad,
   ready: detectorReady,
   loadError: detectorError,
   setMatchIndex,
@@ -2025,34 +2010,6 @@ watch(autoScanPhase, (p): void => {
   if (p !== 'captured') {
     blurryCaptureHint.value = false
   }
-})
-
-/**
- * The detector forces the quad to the card aspect ratio, so the 4 points form
- * a true rotated rectangle. Decompose them into {center, w, h, angle} so we
- * can draw a rounded `<rect>` — matches the competitor's clean look.
- */
-const cardOverlay = computed<{
-  cx: number
-  cy: number
-  w: number
-  h: number
-  angleDeg: number
-} | null>(() => {
-  const q = cardQuad.value
-  if (!q) {
-    return null
-  }
-  const cx = (q[0].x + q[1].x + q[2].x + q[3].x) / 4
-  const cy = (q[0].y + q[1].y + q[2].y + q[3].y) / 4
-  const topDx = q[1].x - q[0].x
-  const topDy = q[1].y - q[0].y
-  const botDx = q[2].x - q[3].x
-  const botDy = q[2].y - q[3].y
-  const w = (Math.hypot(topDx, topDy) + Math.hypot(botDx, botDy)) / 2
-  const h = (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y)) / 2
-  const angleDeg = (Math.atan2((topDy + botDy) / 2, (topDx + botDx) / 2) * 180) / Math.PI
-  return { cx, cy, w, h, angleDeg }
 })
 
 /**
@@ -2210,24 +2167,52 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
     return { label: `Reconnue : ${instantMatchLabel.value}`, color: 'success' }
   }
   if (uploading.value) {
-    return { label: 'Envoi…', color: 'primary' }
+    return { label: 'Envoi en cours…', color: 'primary' }
   }
   if (blurryCaptureHint.value) {
     return { label: 'Photo floue — tenez la carte stable', color: 'primary' }
   }
   switch (autoScanPhase.value) {
     case 'watching':
-      return { label: 'Placez ou passez une carte', color: 'neutral' }
-    case 'settling':
-      return { label: 'Lecture en cours…', color: 'primary' }
+      return { label: 'Centrez la carte dans le cadre', color: 'neutral' }
     case 'captured':
-      return { label: 'Carte capturée', color: 'success' }
+      return { label: 'Identification en cours…', color: 'primary' }
     case 'cooldown':
       return { label: 'Retirez la carte pour la suivante', color: 'success' }
     default:
       return { label: 'Caméra en pause', color: 'neutral' }
   }
 })
+
+/** Pastille affichée — debounce les micro-changements de phase (anti-spam). */
+const displayScanStatus = ref(autoScanStatus.value)
+let scanStatusDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  autoScanStatus,
+  (next): void => {
+    const instant =
+      next.color === 'success' ||
+      next.label.startsWith('Reconnue') ||
+      next.label.startsWith('Moteur') ||
+      next.label.startsWith('Chargement')
+    if (instant) {
+      if (scanStatusDebounceTimer !== null) {
+        clearTimeout(scanStatusDebounceTimer)
+        scanStatusDebounceTimer = null
+      }
+      displayScanStatus.value = next
+      return
+    }
+    if (scanStatusDebounceTimer !== null) {
+      clearTimeout(scanStatusDebounceTimer)
+    }
+    scanStatusDebounceTimer = setTimeout((): void => {
+      displayScanStatus.value = next
+      scanStatusDebounceTimer = null
+    }, 450)
+  },
+  { immediate: true },
+)
 
 // Sound / auto-scan toggles happen inside a tap: unlock audio right there so
 // the confirmation beep is audible on iOS (context stays suspended otherwise).

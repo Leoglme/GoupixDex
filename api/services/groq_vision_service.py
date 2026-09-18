@@ -37,7 +37,16 @@ VISION_JPEG_QUALITY = 78
 _MAX_429_RETRIES = 4
 _RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)\s*s", re.IGNORECASE)
 _GROQ_HTTP_LOCK = threading.Lock()
+_groq_http_client: httpx.Client | None = None
 logger = logging.getLogger(__name__)
+
+
+def _get_groq_http_client() -> httpx.Client:
+    """Process-wide HTTP client — avoids reloading the SSL bundle on every OCR call."""
+    global _groq_http_client
+    if _groq_http_client is None:
+        _groq_http_client = httpx.Client(timeout=120.0)
+    return _groq_http_client
 
 RESIZE_LONG_EDGE_PX: tuple[int, ...] = (2048, 1600, 1280, 1024, 800, 640)
 JPEG_QUALITY_STEPS: tuple[int, ...] = (88, 78, 68, 58, 48)
@@ -446,7 +455,7 @@ class GroqVisionService:
         with _GROQ_HTTP_LOCK:
             response: httpx.Response | None = None
             for attempt in range(_MAX_429_RETRIES + 1):
-                response = httpx.post(url, headers=headers, json=body, timeout=120.0)
+                response = _get_groq_http_client().post(url, headers=headers, json=body)
                 if response.status_code != 429:
                     break
                 if attempt >= _MAX_429_RETRIES:
