@@ -30,6 +30,13 @@ export interface UseCardAutoScanOptions {
    * worker, best first — empty when no index is loaded).
    */
   onCapture: (file: File, matches: number[]) => void | Promise<void>
+  /**
+   * Live identification: candidates computed on a detection frame (quad or
+   * central guide crop), before any capture. Return `true` when the card was
+   * committed — the scanner then enters its "remove the card" cooldown; on
+   * `false` the miss counts toward the photo-OCR fallback.
+   */
+  onLiveMatches?: (matches: number[]) => boolean
   /** Called when a burst came out motion-blurred and is being retried — UI hint. */
   onBlurryRetry?: () => void
 }
@@ -71,6 +78,12 @@ const BURST_WATCHDOG_MS = BURST_COUNT * BURST_INTERVAL_MS + 2500
 const MIN_SHARPNESS = 3.0
 /** Blurry-burst retries while the card stays in frame (adds ~0.5 s each). */
 const MAX_BLUR_RETRIES = 2
+/**
+ * Live identification attempts that must MISS before the photo-OCR fallback
+ * fires. At ~4 attempts/s this gives the on-device index ≈ 0.8 s to recognise
+ * the card; unmatched cards (sets without TCGdex images) then go to OCR.
+ */
+const LIVE_MATCH_MISSES_BEFORE_PHOTO = 3
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
@@ -108,7 +121,7 @@ interface BurstShot {
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
  */
 export function useCardAutoScan(opts: UseCardAutoScanOptions) {
-  const { video, enabled, busy, onCapture, onBlurryRetry } = opts
+  const { video, enabled, busy, onCapture, onLiveMatches, onBlurryRetry } = opts
 
   const phase: Ref<AutoScanPhase> = ref('idle')
   const quad: Ref<CardQuad | null> = ref(null)
@@ -146,6 +159,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let burstTimer: ReturnType<typeof setTimeout> | null = null
   let burstWatchdog: ReturnType<typeof setTimeout> | null = null
   let blurRetries = 0
+  let liveMatchMisses = 0
 
   /**
    * Draw the current video frame into the right scratch canvas and return its
@@ -437,6 +451,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
+        liveMatchMisses = 0
         if (phase.value !== 'idle' && !capturing && armed) {
           phase.value = 'watching'
         }
@@ -483,6 +498,13 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
 
+    // With the index live, give the on-frame identification ~0.8 s to DING
+    // before falling back to the photo-OCR burst (sets without images, weird
+    // lighting…). Without an index, the burst is the only path — fire it.
+    if (matchIndexReady.value && liveMatchMisses < LIVE_MATCH_MISSES_BEFORE_PHOTO) {
+      return
+    }
+
     beginBurst(corners)
   }
 
@@ -524,8 +546,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const d = e.data as
       | { t: 'ready' }
       | { t: 'error'; m: string }
-      | { t: 'quad'; corners: Pt[] }
-      | { t: 'nq' }
+      | { t: 'quad'; corners: Pt[]; matches?: number[] }
+      | { t: 'nq'; matches?: number[] }
       | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number; matches?: number[] }
       | { t: 'warp_failed'; m: string }
       | { t: 'index_ready'; count: number }
@@ -558,11 +580,13 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     if (d.t === 'quad') {
       detectInFlight = false
+      handleLiveMatches(d.matches)
       onDetection(d.corners)
       return
     }
     if (d.t === 'nq') {
       detectInFlight = false
+      handleLiveMatches(d.matches)
       onDetection(null)
       return
     }
@@ -583,6 +607,28 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       } else {
         finaliseBurst()
       }
+    }
+  }
+
+  /**
+   * Forward live identification candidates to the page. A committed card
+   * flips the scanner straight into the "remove the card" cooldown; a miss
+   * counts toward the photo-OCR fallback trigger.
+   * @param matches - Flat `[indexEntry, distance]` pairs from the worker, or `undefined`.
+   */
+  function handleLiveMatches(matches: number[] | undefined): void {
+    if (!matches || !onLiveMatches || !armed || capturing || busy.value || !enabled.value) {
+      return
+    }
+    if (onLiveMatches(matches)) {
+      capturing = false
+      armed = false
+      clearTicks = 0
+      liveMatchMisses = 0
+      lastCaptureAt = Date.now()
+      phase.value = 'cooldown'
+    } else {
+      liveMatchMisses += 1
     }
   }
 
@@ -645,6 +691,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstShots = []
     burstMisses = 0
     blurRetries = 0
+    liveMatchMisses = 0
     quad.value = null
     phase.value = ready.value ? 'idle' : phase.value
   }

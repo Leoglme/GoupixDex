@@ -314,7 +314,13 @@ async def _process_scan(
                 ),
             )
         except Exception as exc:
-            logger.warning("scan-stream OCR failed for event=%s: %s", event_id, exc)
+            logger.exception("scan-stream OCR failed for event=%s", event_id)
+            # Self-diagnosing error line: the exception class (and the missing
+            # path for FileNotFoundError) shows up straight in the phone UI.
+            detail = _short_error(exc, f"OCR indisponible ({type(exc).__name__})")
+            missing_file = getattr(exc, "filename", None)
+            if missing_file:
+                detail = f"{detail} — fichier : {missing_file}"
             await hub.publish(
                 user_id,
                 _public_event(
@@ -324,7 +330,7 @@ async def _process_scan(
                     physical_language=physical_language,
                     direction=direction,
                     image_preview_data_url=preview,
-                    error=_short_error(exc, "OCR indisponible"),
+                    error=detail,
                 ),
             )
             return

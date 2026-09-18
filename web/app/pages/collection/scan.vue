@@ -376,13 +376,14 @@
                   :style="webcamPreviewStyle"
                 />
                 <svg
-                  v-if="cardOverlay && videoIntrinsicW && videoIntrinsicH"
+                  v-if="webcamReady && autoScan && videoIntrinsicW && videoIntrinsicH"
                   class="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-150 ease-out"
                   :style="webcamPreviewStyle"
                   :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
                   preserveAspectRatio="xMidYMid slice"
                 >
                   <rect
+                    v-if="cardOverlay"
                     :x="cardOverlay.cx - cardOverlay.w / 2"
                     :y="cardOverlay.cy - cardOverlay.h / 2"
                     :width="cardOverlay.w"
@@ -390,9 +391,25 @@
                     :rx="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
                     :ry="Math.min(cardOverlay.w, cardOverlay.h) * 0.045"
                     :transform="`rotate(${cardOverlay.angleDeg} ${cardOverlay.cx} ${cardOverlay.cy})`"
-                    fill="rgba(249,115,22,0.10)"
+                    fill="rgba(249,115,22,0.08)"
                     stroke="#f97316"
-                    stroke-width="6"
+                    stroke-width="4"
+                    stroke-linejoin="round"
+                  />
+                  <!-- Zone-guide : la reconnaissance lit aussi cette zone quand
+                       aucun contour n'est verrouillé — viser dedans suffit. -->
+                  <rect
+                    v-else-if="cameraGuideRect"
+                    :x="cameraGuideRect.x"
+                    :y="cameraGuideRect.y"
+                    :width="cameraGuideRect.w"
+                    :height="cameraGuideRect.h"
+                    :rx="cameraGuideRect.w * 0.05"
+                    :ry="cameraGuideRect.w * 0.05"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.55)"
+                    stroke-width="3"
+                    stroke-dasharray="18 14"
                     stroke-linejoin="round"
                   />
                 </svg>
@@ -406,7 +423,7 @@
 
                 <div
                   v-if="webcamReady && autoScan"
-                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/55 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md"
+                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(92vw,22rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-4 py-2 text-center text-sm font-medium text-white shadow-lg backdrop-blur-md"
                 >
                   <span
                     class="size-2.5 shrink-0 rounded-full"
@@ -1884,6 +1901,58 @@ function flashInstantMatch(name: string): void {
   }, 2500)
 }
 
+/** Dernier commit instantané — anti-doublon tant que la même carte reste devant la caméra. */
+let lastInstantCommit: { cardId: string; direction: ScanDirection; at: number } | null = null
+const INSTANT_COMMIT_DEBOUNCE_MS = 3000
+
+/**
+ * Identification continue : décision sur les candidats calculés à CHAQUE
+ * frame de détection (quad ou zone-guide). Un verdict sûr committe la carte
+ * immédiatement — bip + flash + POST en arrière-plan — sans photo ni OCR.
+ * @param matches - Paires plates `[entrée, distance]` du worker, triées.
+ * @returns `true` si la carte est commitée (le scanner passe en « retirez la carte »).
+ */
+function onLiveMatchCandidates(matches: number[]): boolean {
+  const decision = scanMatch.decide(matches, scanCardLanguage.value)
+  if (!decision) {
+    return false
+  }
+  const now = Date.now()
+  if (
+    lastInstantCommit &&
+    lastInstantCommit.cardId === decision.tcgdexCardId &&
+    lastInstantCommit.direction === scanDirection.value &&
+    now - lastInstantCommit.at < INSTANT_COMMIT_DEBOUNCE_MS
+  ) {
+    return true
+  }
+  lastInstantCommit = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
+  flashInstantMatch(decision.name)
+  if (scanDirection.value === 'out') {
+    playRemoveBeep()
+    vibrate([40, 60, 40])
+    triggerFlash('removed')
+  } else {
+    playBeep()
+    vibrate(60)
+    triggerFlash('success')
+  }
+  if (latestOutcome.value) {
+    dismissedOutcomeId.value = latestOutcome.value.event_id
+  }
+  void commitMatchedScan(decision.tcgdexCardId, decision.language, scanDirection.value)
+    .then((r): void => {
+      // Le bip a déjà retenti à l'identification — l'événement WS ne rejoue rien.
+      notifiedOutcomeIds.add(r.event_id)
+    })
+    .catch((err: unknown): void => {
+      playErrorBeep()
+      triggerFlash('error')
+      toast.add({ title: 'Ajout impossible', description: apiErrorMessage(err), color: 'error' })
+    })
+  return true
+}
+
 /**
  * Commit the card the detector produced. A confident on-device match (index
  * loaded, distance + margin OK) skips OCR entirely: the card id goes straight
@@ -1932,6 +2001,7 @@ const {
   enabled: autoScanEnabled,
   busy: uploading,
   onCapture: onDetectorCapture,
+  onLiveMatches: onLiveMatchCandidates,
   onBlurryRetry: (): void => {
     blurryCaptureHint.value = true
     vibrate(30)
@@ -1986,12 +2056,30 @@ const cardOverlay = computed<{
 })
 
 /**
+ * Zone-guide affichée quand aucun contour n'est verrouillé — mêmes fractions
+ * que le crop central du worker (62 % de la hauteur, ratio carte 63:88), en
+ * coordonnées intrinsèques pour suivre exactement le zoom de la vidéo.
+ */
+const cameraGuideRect = computed<{ x: number; y: number; w: number; h: number } | null>(() => {
+  const w = videoIntrinsicW.value
+  const h = videoIntrinsicH.value
+  if (!w || !h) {
+    return null
+  }
+  const gh = h * 0.62
+  const gw = Math.min(w * 0.92, (gh * 63) / 88)
+  return { x: (w - gw) / 2, y: (h - gh) / 2, w: gw, h: gh }
+})
+
+/**
  * Most recent settled scan (success OR failure), for the bottom info overlay.
  * Failures are included on purpose: on the fullscreen camera the feed is
  * hidden, so without this the user scans into a black hole and only discovers
- * the « À vérifier » pile after closing the camera.
+ * the « À vérifier » pile after closing the camera. Failures auto-hide after
+ * a few seconds so a stale error never squats the camera view.
  */
 const dismissedOutcomeId = ref<string | null>(null)
+let outcomeAutoHideTimer: ReturnType<typeof setTimeout> | null = null
 const latestOutcome = computed(() => {
   const ev = displayedEvents.value.find(
     (e) =>
@@ -2004,6 +2092,22 @@ const latestOutcome = computed(() => {
     return null
   }
   return ev
+})
+
+watch(latestOutcome, (ev): void => {
+  if (outcomeAutoHideTimer !== null) {
+    clearTimeout(outcomeAutoHideTimer)
+    outcomeAutoHideTimer = null
+  }
+  if (!ev || ev.status === 'added' || ev.status === 'removed') {
+    return
+  }
+  const eventId = ev.event_id
+  outcomeAutoHideTimer = setTimeout((): void => {
+    if (latestOutcome.value?.event_id === eventId) {
+      dismissedOutcomeId.value = eventId
+    }
+  }, 6000)
 })
 
 /** One-line outcome text under the overlay card name. */
@@ -2167,6 +2271,10 @@ onBeforeUnmount(() => {
   if (instantMatchLabelTimer !== null) {
     clearTimeout(instantMatchLabelTimer)
     instantMatchLabelTimer = null
+  }
+  if (outcomeAutoHideTimer !== null) {
+    clearTimeout(outcomeAutoHideTimer)
+    outcomeAutoHideTimer = null
   }
   stopWebcam()
   disconnect()

@@ -242,51 +242,57 @@ class GroqVisionService:
         first: PokeWalletCard | None = None
         hint = self._normalize_user_hint(opts.get("user_hint"))
 
-        if set_code:
-            for lookup_number in lookup_numbers:
-                by_set = wallet.search_by_set_code_and_number(
-                    set_code,
-                    lookup_number,
-                    {"limit": 8, "page": 1},
-                )
-                results = by_set.get("results", [])
-                if results:
-                    first = self._pick_best_wallet_result(results, collector, hint)
-                    break
+        # Fail-open: a PokéWallet outage (network, proxy, SSL…) must degrade to
+        # "no enrichment", never sink the whole OCR result with it.
+        try:
+            if set_code:
+                for lookup_number in lookup_numbers:
+                    by_set = wallet.search_by_set_code_and_number(
+                        set_code,
+                        lookup_number,
+                        {"limit": 8, "page": 1},
+                    )
+                    results = by_set.get("results", [])
+                    if results:
+                        first = self._pick_best_wallet_result(results, collector, hint)
+                        break
 
-        english_hint_raw = (collector.get("pokemon_name_english") or "").strip()
-        english_hint = english_hint_raw or None
-        if first is None and english_hint:
-            for lookup_number in lookup_numbers:
-                by_name = wallet.search(f"{english_hint} {lookup_number}", {"limit": 15, "page": 1})
-                results = by_name.get("results", [])
-                if results:
-                    first = self._pick_best_wallet_result(results, collector, hint)
-                    break
+            english_hint_raw = (collector.get("pokemon_name_english") or "").strip()
+            english_hint = english_hint_raw or None
+            if first is None and english_hint:
+                for lookup_number in lookup_numbers:
+                    by_name = wallet.search(f"{english_hint} {lookup_number}", {"limit": 15, "page": 1})
+                    results = by_name.get("results", [])
+                    if results:
+                        first = self._pick_best_wallet_result(results, collector, hint)
+                        break
 
-        printed_raw = (collector.get("pokemon_name") or "").strip()
-        printed_name = printed_raw or None
-        printed_differs = (
-            printed_name is not None
-            and english_hint is not None
-            and printed_name != english_hint
-        )
-        printed_usable = printed_name is not None and english_hint is None
-        if first is None and printed_name and (printed_differs or printed_usable):
-            for lookup_number in lookup_numbers:
-                by_printed = wallet.search(f"{printed_name} {lookup_number}", {"limit": 15, "page": 1})
-                results = by_printed.get("results", [])
-                if results:
-                    first = self._pick_best_wallet_result(results, collector, hint)
-                    break
+            printed_raw = (collector.get("pokemon_name") or "").strip()
+            printed_name = printed_raw or None
+            printed_differs = (
+                printed_name is not None
+                and english_hint is not None
+                and printed_name != english_hint
+            )
+            printed_usable = printed_name is not None and english_hint is None
+            if first is None and printed_name and (printed_differs or printed_usable):
+                for lookup_number in lookup_numbers:
+                    by_printed = wallet.search(f"{printed_name} {lookup_number}", {"limit": 15, "page": 1})
+                    results = by_printed.get("results", [])
+                    if results:
+                        first = self._pick_best_wallet_result(results, collector, hint)
+                        break
 
-        if first is None:
-            for lookup_number in lookup_numbers:
-                by_num = wallet.search(lookup_number, {"limit": 25, "page": 1})
-                results = by_num.get("results", [])
-                if results:
-                    first = self._pick_best_wallet_result(results, collector, hint)
-                    break
+            if first is None:
+                for lookup_number in lookup_numbers:
+                    by_num = wallet.search(lookup_number, {"limit": 25, "page": 1})
+                    results = by_num.get("results", [])
+                    if results:
+                        first = self._pick_best_wallet_result(results, collector, hint)
+                        break
+        except Exception:
+            logger.exception("PokeWallet enrichment failed (fail-open, OCR result kept)")
+            return collector
 
         if first is None:
             return collector
@@ -368,7 +374,12 @@ class GroqVisionService:
         english_raw = (collector.get("pokemon_name_english") or "").strip()
         if not english_raw:
             return collector
-        loc = fetch_species_locale_names(english_raw)
+        # Fail-open: PokéAPI down must not sink the OCR result.
+        try:
+            loc = fetch_species_locale_names(english_raw)
+        except Exception:
+            logger.exception("PokeAPI species enrichment failed (fail-open, OCR result kept)")
+            return collector
         if loc.french is None and loc.japanese is None:
             return collector
         out = dict(collector)

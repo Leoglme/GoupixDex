@@ -256,7 +256,11 @@ function waitForCv(resolve: () => void, reject: (m: string) => void): void {
   tick()
 }
 
-/** Detect the best card quad with multi-candidate scoring. */
+/**
+ * Detect the best card quad with multi-candidate scoring. Returns both the
+ * video-intrinsic corners (for the overlay) and the detection-frame corners
+ * (for the on-frame identification warp), or null.
+ */
 function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) {
   const img = new ImageData(new Uint8ClampedArray(buf), w, h)
   const src = cv.matFromImageData(img)
@@ -267,7 +271,7 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   const contours = new cv.MatVector()
   const hierarchy = new cv.Mat()
   const cands: { cnt: any; area: number }[] = []
-  let chosen: { x: number; y: number }[] | null = null
+  let chosen: { video: { x: number; y: number }[]; frame: { x: number; y: number }[] } | null = null
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
@@ -326,7 +330,7 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
     if (bestPts && bestScore >= MIN_SCORE) {
       const fx = vw / w
       const fy = vh / h
-      chosen = bestPts.map((p) => ({ x: p.x * fx, y: p.y * fy }))
+      chosen = { video: bestPts.map((p) => ({ x: p.x * fx, y: p.y * fy })), frame: bestPts }
     }
   } catch {
     chosen = null
@@ -350,8 +354,16 @@ function detect(buf: ArrayBuffer, w: number, h: number, vw: number, vh: number) 
   return chosen
 }
 
-/** Perspective-deskew the card and measure focus sharpness. */
-function warp(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: number }[]) {
+/** Perspective-deskew the card; sharpness (variance of Laplacian) is optional. */
+function warp(
+  buf: ArrayBuffer,
+  w: number,
+  h: number,
+  corners: { x: number; y: number }[],
+  outW: number = WARP_W,
+  outH: number = WARP_H,
+  measureSharpness: boolean = true,
+) {
   const img = new ImageData(new Uint8ClampedArray(buf), w, h)
   const src = cv.matFromImageData(img)
   const dst = new cv.Mat()
@@ -361,24 +373,26 @@ function warp(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: n
     cv.CV_32FC2,
     corners.flatMap((p) => [p.x, p.y]),
   )
-  const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, WARP_W, 0, WARP_W, WARP_H, 0, WARP_H])
+  const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, outW, 0, outW, outH, 0, outH])
   let sharpness = 0
   try {
     const M = cv.getPerspectiveTransform(srcTri, dstTri)
-    cv.warpPerspective(src, dst, M, new cv.Size(WARP_W, WARP_H), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar())
+    cv.warpPerspective(src, dst, M, new cv.Size(outW, outH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar())
     M.delete()
 
-    const gray = new cv.Mat()
-    const lap = new cv.Mat()
-    const absLap = new cv.Mat()
-    cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY)
-    cv.Laplacian(gray, lap, cv.CV_64F)
-    cv.convertScaleAbs(lap, absLap)
-    const m = cv.mean(absLap)
-    sharpness = Array.isArray(m) ? m[0] : m
-    gray.delete()
-    lap.delete()
-    absLap.delete()
+    if (measureSharpness) {
+      const gray = new cv.Mat()
+      const lap = new cv.Mat()
+      const absLap = new cv.Mat()
+      cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY)
+      cv.Laplacian(gray, lap, cv.CV_64F)
+      cv.convertScaleAbs(lap, absLap)
+      const m = cv.mean(absLap)
+      sharpness = Array.isArray(m) ? m[0] : m
+      gray.delete()
+      lap.delete()
+      absLap.delete()
+    }
 
     return { out: new Uint8ClampedArray(dst.data).buffer, sharpness }
   } finally {
@@ -557,6 +571,45 @@ function matchWarpedCard(rgbaBuf: ArrayBuffer, w: number, h: number): number[] {
   return matchAgainstIndex(queries)
 }
 
+// --- Continuous identification: every detection frame gets a shot at the
+// index, so a confident card DINGS instantly without waiting for the burst
+// pipeline. Runs on the 640 px detection frame (plenty for 17×16 hashes).
+
+/** Output size of the lightweight identification warp (63:88 card ratio). */
+const ID_WARP_W = 315
+const ID_WARP_H = 440
+/** Floor between two identification attempts (quad path). */
+const ID_MATCH_MIN_INTERVAL_MS = 220
+/** Floor between two central-crop attempts (no quad — user aims with the guide). */
+const ID_CENTRAL_MIN_INTERVAL_MS = 550
+/** Central guide crop: fraction of the frame height the card silhouette covers. */
+const ID_CENTRAL_HEIGHT_FRAC = 0.62
+
+let lastIdMatchAt = 0
+let lastIdCentralAt = 0
+
+/** Deskew the detection frame at low resolution and rank it against the index. */
+function idMatchFromQuad(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: number }[]): number[] {
+  const { out } = warp(buf, w, h, corners, ID_WARP_W, ID_WARP_H, false)
+  return matchWarpedCard(out, ID_WARP_W, ID_WARP_H)
+}
+
+/**
+ * No quad detected: try the card-ratio crop at the frame center (the on-screen
+ * guide). Covers tilted / low-contrast cards the contour detector misses.
+ */
+function idMatchCentralCrop(buf: ArrayBuffer, w: number, h: number): number[] {
+  const gray = lumaPlane(new Uint8ClampedArray(buf), w, h)
+  const cropH = Math.round(h * ID_CENTRAL_HEIGHT_FRAC)
+  const cropW = Math.min(w, Math.round((cropH * 63) / 88))
+  const x0 = (w - cropW) / 2 / w
+  const y0 = (h - cropH) / 2 / h
+  const central = cropGray(gray, x0, y0, 1 - x0, 1 - y0)
+  const queries = [cardHashBytes(central)]
+  queries.push(cardHashBytes(cropGray(central, 0.03, 0.03, 0.97, 0.97)))
+  return matchAgainstIndex(queries)
+}
+
 self.onmessage = (e: MessageEvent): void => {
   const d = e.data
   if (d.t === 'init') {
@@ -577,13 +630,28 @@ self.onmessage = (e: MessageEvent): void => {
       ;(self as any).postMessage({ t: 'nq' })
       return
     }
-    let corners = null
+    let found = null
     try {
-      corners = detect(d.buf, d.w, d.h, d.vw, d.vh)
+      found = detect(d.buf, d.w, d.h, d.vw, d.vh)
     } catch {
-      corners = null
+      found = null
     }
-    ;(self as any).postMessage(corners ? { t: 'quad', corners } : { t: 'nq' })
+    // Continuous identification: rank this very frame against the index
+    // (throttled) so a known card can commit instantly, before any burst.
+    let matches: number[] | undefined
+    const now = Date.now()
+    try {
+      if (matchIndex && found && now - lastIdMatchAt >= ID_MATCH_MIN_INTERVAL_MS) {
+        lastIdMatchAt = now
+        matches = idMatchFromQuad(d.buf, d.w, d.h, found.frame)
+      } else if (matchIndex && !found && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
+        lastIdCentralAt = now
+        matches = idMatchCentralCrop(d.buf, d.w, d.h)
+      }
+    } catch {
+      matches = undefined
+    }
+    ;(self as any).postMessage(found ? { t: 'quad', corners: found.video, matches } : { t: 'nq', matches })
     return
   }
   if (d.t === 'index') {
