@@ -271,12 +271,50 @@ def _block_rank(set_id: str) -> int:
 def _set_official_count(client: TcgdexClientService, locale: str, set_id: str) -> int | None:
     """Official card count of a set (the ``/165`` denominator printed on cards)."""
     detail = _set_detail_cached(client, locale, set_id)
+    return _official_count_from_detail(detail)
+
+
+def _official_count_from_detail(detail: dict[str, Any]) -> int | None:
     card_count = detail.get("cardCount")
     if isinstance(card_count, dict):
         official = card_count.get("official")
         if isinstance(official, int) and official > 0:
             return official
     return None
+
+
+def _find_card_in_set_detail(
+    detail: dict[str, Any],
+    raw_local: str,
+    target_local_int: int | None,
+) -> dict[str, Any] | None:
+    """
+    Match the OCR collector number against the set detail's ``cards`` array.
+
+    The set detail is a single (cached) request that already lists every card
+    with its ``localId`` — matching in memory replaces the old per-variant
+    ``GET /cards/{id}`` probe loop (up to ~20 requests per scan on a miss).
+    Exact localId match wins; otherwise fall back to numeric equality so
+    ``25`` ↔ ``025`` and prefixed forms (``TG02``) still land.
+    """
+    cards = detail.get("cards")
+    if not isinstance(cards, list) or not cards:
+        return None
+    raw_norm = (raw_local or "").strip().upper()
+    numeric_hit: dict[str, Any] | None = None
+    for c in cards:
+        if not isinstance(c, dict):
+            continue
+        local = str(c.get("localId") or "").strip()
+        if not local:
+            continue
+        if local.upper() == raw_norm:
+            return c
+        if numeric_hit is None and target_local_int is not None:
+            digits = _digits_only(local)
+            if digits.isdigit() and int(digits) == target_local_int and not re.match(r"^[A-Za-z]", local):
+                numeric_hit = c
+    return numeric_hit
 
 
 def _denominator_matches_set(
@@ -396,19 +434,41 @@ def resolve_tcgdex_card_id_from_ocr(
     denom_digits = _digits_only((ocr_card_number_denominator or "").strip())
     target_denominator = int(denom_digits) if denom_digits.isdigit() and int(denom_digits) > 0 else None
 
-    # --- Strategy 1: OCR set code looks like a real TCGdex id → direct probe.
+    # --- Strategy 1: OCR set code looks like a real TCGdex id → match the
+    # collector number against the set's own card list (one cached request),
+    # instead of probing every ``{set}-{variant}`` id individually (~20 GETs).
     if set_code_raw and _looks_like_tcgdex_set_id(set_code_raw):
         candidate_set_id = set_code_raw.lower()
         locales = [loc for loc in _candidate_locales(physical_language) if loc in SUPPORTED_LOCALES]
-        denominator_ok = True
-        if target_denominator is not None:
-            denominator_ok = _denominator_matches_set(cl, locales, candidate_set_id, target_denominator) is not False
-        if denominator_ok:
-            for candidate_local in _build_local_id_candidates(raw_local):
-                cid = f"{candidate_set_id}-{candidate_local}"
-                for locale in locales:
-                    if _card_exists(cl, locale, cid):
-                        return cid
+        fetched_any_detail = False
+        for locale in locales:
+            detail = _set_detail_cached(cl, locale, candidate_set_id)
+            if not detail:
+                continue
+            fetched_any_detail = True
+            official = _official_count_from_detail(detail)
+            if target_denominator is not None and official is not None and official != target_denominator:
+                # Printed ``/NNN`` contradicts this set — the OCR misread the
+                # set code (SV4A vs SV2a). Fall through to the name search.
+                break
+            hit = _find_card_in_set_detail(detail, raw_local, target_local_int)
+            if hit is not None:
+                cid = str(hit.get("id") or "").strip()
+                if cid:
+                    _CACHE.remember_card_hit(locale, cid, True)
+                    return cid
+        if not fetched_any_detail:
+            # Set detail unreachable (network hiccup / odd set id): legacy
+            # per-candidate probing, kept as a safety net only.
+            denominator_ok = True
+            if target_denominator is not None:
+                denominator_ok = _denominator_matches_set(cl, locales, candidate_set_id, target_denominator) is not False
+            if denominator_ok:
+                for candidate_local in _build_local_id_candidates(raw_local):
+                    cid = f"{candidate_set_id}-{candidate_local}"
+                    for locale in locales:
+                        if _card_exists(cl, locale, cid):
+                            return cid
 
     # --- Strategy 2: search by Pokémon name + match localId.
     name_candidates: list[str] = []
@@ -441,11 +501,9 @@ def resolve_tcgdex_card_id_from_ocr(
             if not cid or cid in seen_ids:
                 continue
             seen_ids.add(cid)
-            # Final safety net: the id must resolve somewhere (any locale), so
-            # downstream metadata fetch can't dead-end. Japan-only cards pass
-            # here via ``ja`` even though EN/FR 404.
-            if not _card_exists_any_locale(cl, cid):
-                continue
+            # The candidate came from a TCGdex search in this locale, so the id
+            # is real by construction — no extra existence probe needed.
+            _CACHE.remember_card_hit(locale, cid, True)
             normalised = f"{_set_id_from_card_id(cid)}-{normalize_card_number_for_pokewallet(_digits_only(str(best.get('localId') or '')) or raw_local)}"
             if normalised != cid and _card_exists_any_locale(cl, normalised):
                 return normalised

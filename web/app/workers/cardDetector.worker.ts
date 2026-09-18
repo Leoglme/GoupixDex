@@ -29,8 +29,8 @@
  */
 
 const MIN_AREA_RATIO = 0.06 // card must cover ≥6% of the frame
-const MAX_FILL = 0.9 // "cash register" mode: a close-up card is the normal case
-const BORDER_MARGIN = 0.015 // a real card never touches all four edges
+const MAX_FILL = 0.85 // "cash register" mode: a close-up card is the normal case
+const BORDER_MARGIN = 0.03 // corner closer than 3% to an edge counts as touching it
 const AR_MIN = 1.05 // card ≈ 88/63 ≈ 1.40; perspective can compress the ratio a lot
 const AR_MAX = 1.95 // reject overly elongated shapes
 const CARD_AR = 1.397 // 88/63 — Pokémon card ratio
@@ -97,9 +97,15 @@ function rrCorners(rr: any): { x: number; y: number }[] {
   ].map(([x, y]) => ({ x: rr.center.x + x * cos - y * sin, y: rr.center.y + x * sin + y * cos }))
 }
 
-/** True when the quad spans the WHOLE frame — that's not a card, that's noise. */
+/**
+ * True when the quad spans the frame — that's the table / a lap / the scene
+ * boundary, never a card. Three touched borders already means the shape runs
+ * off-screen (a real card at cash-register distance keeps at least two edges
+ * fully visible), so ≥3 is rejected, not just all four.
+ */
 function spansFullFrame(pts: { x: number; y: number }[], w: number, h: number): boolean {
   const m = BORDER_MARGIN
+  let touched = 0
   let touchL = false
   let touchR = false
   let touchT = false
@@ -110,7 +116,8 @@ function spansFullFrame(pts: { x: number; y: number }[], w: number, h: number): 
     if (p.y < h * m) touchT = true
     if (p.y > h * (1 - m)) touchB = true
   }
-  return touchL && touchR && touchT && touchB
+  touched = Number(touchL) + Number(touchR) + Number(touchT) + Number(touchB)
+  return touched >= 3
 }
 
 /** True median of an 8-bit single-channel Mat (sampled — plenty at 640 px). */
@@ -205,11 +212,24 @@ function scoreCandidate(cnt: any, w: number, h: number) {
 function waitForCv(resolve: () => void, reject: (m: string) => void): void {
   const g = self as any
   let tries = 0
+  // The polling tick, the `.then` unwrap and `onRuntimeInitialized` can all
+  // fire — settle exactly once so the main thread never sees two `ready`s.
+  let settled = false
+  const settle = (): void => {
+    if (settled) {
+      return
+    }
+    settled = true
+    cv = g.cv
+    resolve()
+  }
   const tick = (): void => {
+    if (settled) {
+      return
+    }
     tries += 1
     if (g.cv && typeof g.cv.Mat === 'function') {
-      cv = g.cv
-      resolve()
+      settle()
       return
     }
     if (g.cv && typeof g.cv.then === 'function' && tries === 1) {
@@ -223,11 +243,11 @@ function waitForCv(resolve: () => void, reject: (m: string) => void): void {
     }
     if (g.cv) {
       g.cv.onRuntimeInitialized = (): void => {
-        cv = g.cv
-        resolve()
+        settle()
       }
     }
     if (tries >= 600) {
+      settled = true
       reject('OpenCV: délai d’initialisation dépassé')
       return
     }

@@ -261,6 +261,15 @@ async def _process_scan(
     hub = get_scan_stream_hub()
     preview = _short_preview_data_url(image_bytes, mime)
     loop = asyncio.get_running_loop()
+    stage_started_at = time.monotonic()
+    stage_timings_ms: dict[str, int] = {}
+
+    def _mark_stage(stage: str) -> None:
+        """Record elapsed ms since the previous stage boundary (log-only telemetry)."""
+        nonlocal stage_started_at
+        now = time.monotonic()
+        stage_timings_ms[stage] = int((now - stage_started_at) * 1000)
+        stage_started_at = now
 
     # --- 1. OCR (Groq vision). Sync function in a thread to avoid blocking.
     async with _groq_sem:
@@ -310,6 +319,7 @@ async def _process_scan(
             )
             return
 
+    _mark_stage("ocr")
     ocr_payload = dict(ocr_result)
 
     # Auto-detect from OCR unless the caller pinned an explicit locale. From
@@ -348,6 +358,14 @@ async def _process_scan(
     except Exception as exc:
         logger.warning("scan-stream TCGdex lookup failed for event=%s: %s", event_id, exc)
         tcgdex_card_id = None
+    _mark_stage("resolve")
+    logger.info(
+        "scan-stream timings event=%s ocr=%sms resolve=%sms card=%s",
+        event_id,
+        stage_timings_ms.get("ocr"),
+        stage_timings_ms.get("resolve"),
+        tcgdex_card_id or "none",
+    )
 
     if not tcgdex_card_id:
         await hub.publish(

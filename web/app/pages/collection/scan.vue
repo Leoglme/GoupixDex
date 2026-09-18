@@ -407,45 +407,54 @@
 
                 <Transition name="fade">
                   <div
-                    v-if="latestAdded?.collection_card"
+                    v-if="latestOutcome"
                     class="absolute right-3 bottom-3 left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
                   >
                     <div class="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-white/10">
                       <img
-                        v-if="latestAdded.collection_card.image_url"
-                        :src="latestAdded.collection_card.image_url"
-                        :alt="latestAdded.collection_card.display_name"
+                        v-if="thumbUrl(latestOutcome)"
+                        :src="thumbUrl(latestOutcome) ?? undefined"
+                        :alt="cardTitle(latestOutcome)"
                         class="h-full w-full object-cover"
                         referrerpolicy="no-referrer"
                         decoding="async"
                       />
+                      <div v-else class="flex h-full items-center justify-center">
+                        <UIcon name="i-lucide-image" class="size-5 text-white/40" />
+                      </div>
                     </div>
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-semibold">
-                        {{ latestAdded.collection_card.display_name }}
+                        {{ cardTitle(latestOutcome) }}
                       </p>
                       <p class="truncate text-xs text-white/70">
-                        {{ latestAdded.collection_card.set_name || latestAdded.collection_card.tcgdex_set_id }} · #{{
-                          latestAdded.collection_card.card_number
-                        }}
+                        {{ subtitle(latestOutcome) }}
                       </p>
-                      <p
-                        class="mt-0.5 text-xs"
-                        :class="latestAdded.status === 'removed' ? 'text-orange-300' : 'text-emerald-400'"
-                      >
-                        {{ outcomeLine(latestAdded) }}
+                      <p class="mt-0.5 text-xs" :class="outcomeLineClass(latestOutcome)">
+                        {{ outcomeLine(latestOutcome) }}
                       </p>
                     </div>
                     <div class="flex shrink-0 flex-col gap-1">
                       <UButton
+                        v-if="latestOutcome.collection_card"
                         size="xs"
                         color="neutral"
                         variant="solid"
                         icon="i-lucide-external-link"
                         class="bg-white/15"
-                        :to="`/collection/${latestAdded.collection_card.id}`"
+                        :to="`/collection/${latestOutcome.collection_card.id}`"
                       >
                         Ouvrir
+                      </UButton>
+                      <UButton
+                        v-else-if="latestOutcome.status === 'needs_review'"
+                        size="xs"
+                        color="primary"
+                        variant="solid"
+                        icon="i-lucide-plus"
+                        to="/collection/add"
+                      >
+                        Ajouter
                       </UButton>
                       <UButton
                         size="xs"
@@ -454,7 +463,7 @@
                         icon="i-lucide-x"
                         class="text-white"
                         aria-label="Masquer"
-                        @click.prevent="dismissedAddedId = latestAdded?.event_id ?? null"
+                        @click.prevent="dismissedOutcomeId = latestOutcome?.event_id ?? null"
                       />
                     </div>
                   </div>
@@ -648,6 +657,9 @@
               </div>
               <p class="text-muted truncate text-xs">{{ subtitle(ev) }}</p>
               <p v-if="ev.error" class="text-warning text-xs">{{ ev.error }}</p>
+              <p v-else-if="isStalledInFlight(ev)" class="text-warning text-xs">
+                Sans réponse du serveur — repassez la carte.
+              </p>
             </div>
 
             <div class="flex shrink-0 flex-col items-end gap-1">
@@ -672,7 +684,10 @@
                 Ajouter
               </UButton>
               <UIcon
-                v-else-if="ev.status === 'queued' || ev.status === 'ocr_running' || ev.status === 'ocr_done'"
+                v-else-if="
+                  (ev.status === 'queued' || ev.status === 'ocr_running' || ev.status === 'ocr_done') &&
+                  !isStalledInFlight(ev)
+                "
                 name="i-lucide-loader-circle"
                 class="text-primary size-4 animate-spin"
               />
@@ -695,6 +710,7 @@
 </template>
 
 <script setup lang="ts">
+import type { Ref } from 'vue'
 import { renderSVG } from 'uqr'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
 
@@ -1485,6 +1501,27 @@ function statusBadgeColor(s: ScanEventStatus): 'primary' | 'success' | 'warning'
   }
 }
 
+/** Ticking clock (epoch s, 10 s resolution) driving the stalled-scan warnings. */
+const nowEpochSec: Ref<number> = ref(Math.floor(Date.now() / 1000))
+let nowTicker: ReturnType<typeof setInterval> | null = null
+
+/** In-flight scans without any server update for this long are considered lost. */
+const STALLED_AFTER_SEC = 90
+
+/**
+ * `true` when a scan is stuck in the pipeline (server restarted mid-queue,
+ * worker died…). The spinner would otherwise spin forever with no way for the
+ * user to know the card needs re-scanning.
+ * @param ev - Scan event from the live feed.
+ * @returns Whether the event is in-flight and past the staleness threshold.
+ */
+function isStalledInFlight(ev: ScanEvent): boolean {
+  if (ev.status !== 'queued' && ev.status !== 'ocr_running' && ev.status !== 'ocr_done') {
+    return false
+  }
+  return typeof ev.ts === 'number' && nowEpochSec.value - ev.ts > STALLED_AFTER_SEC
+}
+
 function canDismissScan(_s: ScanEventStatus): boolean {
   // Any scan can be removed from the feed, including ones still in
   // "OCR…" / "Identification…" — they just vanish from the list.
@@ -1747,11 +1784,12 @@ function onVisibilityChange(): void {
  */
 async function onDetectorCapture(file: File): Promise<void> {
   uploading.value = true
+  blurryCaptureHint.value = false
   // A new card is being processed — drop the previous overlay right away so
-  // the user sees we've moved on. The new card's overlay will appear when the
-  // `added` event lands and the `latestAdded` watcher plays the chime.
-  if (latestAdded.value) {
-    dismissedAddedId.value = latestAdded.value.event_id
+  // the user sees we've moved on. The new card's overlay will appear when its
+  // outcome event lands and the outcome watcher plays the chime.
+  if (latestOutcome.value) {
+    dismissedOutcomeId.value = latestOutcome.value.event_id
   }
   try {
     await uploadPhoto(file, SCAN_LANGUAGE, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
@@ -1765,6 +1803,8 @@ async function onDetectorCapture(file: File): Promise<void> {
 // Cash-register auto-capture: OpenCV tracks the card outline; once it is held
 // steady the deskewed crop is shot once, then re-arms when the card leaves.
 const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value && autoScan.value)
+/** `true` while the detector is retrying a motion-blurred burst — status hint. */
+const blurryCaptureHint: Ref<boolean> = ref(false)
 const {
   phase: autoScanPhase,
   quad: cardQuad,
@@ -1775,6 +1815,18 @@ const {
   enabled: autoScanEnabled,
   busy: uploading,
   onCapture: onDetectorCapture,
+  onBlurryRetry: (): void => {
+    blurryCaptureHint.value = true
+    vibrate(30)
+  },
+})
+
+// The hint only makes sense while a capture is being retried — clear it as
+// soon as the scanner goes back to watching / waiting.
+watch(autoScanPhase, (p): void => {
+  if (p !== 'captured') {
+    blurryCaptureHint.value = false
+  }
 })
 
 /**
@@ -1805,11 +1857,22 @@ const cardOverlay = computed<{
   return { cx, cy, w, h, angleDeg }
 })
 
-/** Most recent settled card (added or removed), for the bottom info overlay. */
-const dismissedAddedId = ref<string | null>(null)
-const latestAdded = computed(() => {
-  const ev = displayedEvents.value.find((e) => (e.status === 'added' || e.status === 'removed') && e.collection_card)
-  if (!ev || ev.event_id === dismissedAddedId.value) {
+/**
+ * Most recent settled scan (success OR failure), for the bottom info overlay.
+ * Failures are included on purpose: on the fullscreen camera the feed is
+ * hidden, so without this the user scans into a black hole and only discovers
+ * the « À vérifier » pile after closing the camera.
+ */
+const dismissedOutcomeId = ref<string | null>(null)
+const latestOutcome = computed(() => {
+  const ev = displayedEvents.value.find(
+    (e) =>
+      ((e.status === 'added' || e.status === 'removed') && e.collection_card) ||
+      e.status === 'needs_review' ||
+      e.status === 'not_in_collection' ||
+      e.status === 'failed',
+  )
+  if (!ev || ev.event_id === dismissedOutcomeId.value) {
     return null
   }
   return ev
@@ -1823,7 +1886,27 @@ function outcomeLine(ev: ScanEvent): string {
     }
     return `Retirée de ma collection (reste ×${ev.remaining_quantity ?? '?'})`
   }
+  if (ev.status === 'needs_review') {
+    return 'Non identifiée — repassez la carte bien à plat, ou finissez-la depuis le catalogue'
+  }
+  if (ev.status === 'not_in_collection') {
+    return 'Absente de la collection — rien à retirer'
+  }
+  if (ev.status === 'failed') {
+    return ev.error ?? 'Échec du scan — repassez la carte'
+  }
   return `Ajoutée à ma collection${ev.created === false && ev.collection_card ? ` (×${ev.collection_card.quantity})` : ''}`
+}
+
+/** Text color of {@link outcomeLine} on the fullscreen overlay (white card on black). */
+function outcomeLineClass(ev: ScanEvent): string {
+  if (ev.status === 'removed') {
+    return 'text-orange-300'
+  }
+  if (ev.status === 'added') {
+    return 'text-emerald-400'
+  }
+  return 'text-amber-300'
 }
 
 // Sound + vibration + flash the moment each scan settles — the whole point of
@@ -1894,6 +1977,9 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   if (uploading.value) {
     return { label: 'Envoi…', color: 'primary' }
   }
+  if (blurryCaptureHint.value) {
+    return { label: 'Photo floue — tenez la carte stable', color: 'primary' }
+  }
   switch (autoScanPhase.value) {
     case 'watching':
       return { label: 'Placez ou passez une carte', color: 'neutral' }
@@ -1921,6 +2007,9 @@ watch(soundOn, (on: boolean): void => {
 
 onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
+  nowTicker = setInterval((): void => {
+    nowEpochSec.value = Math.floor(Date.now() / 1000)
+  }, 10_000)
   await refreshRecent()
   await connect()
   // Desktop is a monitor screen (QR + live feed) — no camera to open there.
@@ -1931,6 +2020,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  if (nowTicker !== null) {
+    clearInterval(nowTicker)
+    nowTicker = null
+  }
   stopWebcam()
   disconnect()
   if (flashTimer !== null) {

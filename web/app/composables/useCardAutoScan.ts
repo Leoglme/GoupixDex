@@ -26,6 +26,8 @@ export interface UseCardAutoScanOptions {
   busy: Ref<boolean>
   /** Called once per card with the deskewed, cropped card JPEG. */
   onCapture: (file: File) => void | Promise<void>
+  /** Called when a burst came out motion-blurred and is being retried — UI hint. */
+  onBlurryRetry?: () => void
 }
 
 /** ~10 fps cadence. The worker decides if it can keep up via the in-flight gate. */
@@ -39,20 +41,32 @@ const PROC_EDGE = 640
  */
 const CAPTURE_EDGE = 1920
 /** Floor between two captures (safety net on top of the re-arm gate). */
-const MIN_COOLDOWN_MS = 600
+const MIN_COOLDOWN_MS = 450
 /**
  * Empty detection ticks (~100 ms each) required after a capture before the
  * next card can fire. This is the "cash register" rhythm: pass a card, it
  * beeps, pull it out, pass the next one. Without this gate a card left in
  * frame was re-captured every 600 ms and flooded the server with duplicates.
  */
-const CLEAR_TICKS_TO_REARM = 3
+const CLEAR_TICKS_TO_REARM = 2
 /** How many shots we take in a burst — we keep the sharpest for OCR. */
 const BURST_COUNT = 3
 /** Gap between burst shots — wide enough for hand movement to expose new info. */
-const BURST_INTERVAL_MS = 220
+const BURST_INTERVAL_MS = 160
 /** Hard cap on a burst's lifetime; a stuck worker must never freeze the scanner. */
 const BURST_WATCHDOG_MS = BURST_COUNT * BURST_INTERVAL_MS + 2500
+/**
+ * Variance-of-Laplacian floor under which the whole burst counts as
+ * motion-blurred. A blurred capture is what turned every scan into
+ * « À vérifier »: Groq misreads the set code / collector number on soft
+ * pixels. Below this floor the burst is retried on fresh frames instead of
+ * uploading garbage. Calibrated on warped 630×880 crops of real card scans:
+ * crisp shots land 13-23, a ~1.5 px motion blur ~7, a ~2 px blur ~4 (OCR
+ * starts failing) and a ~3 px blur ~2.7 (unreadable).
+ */
+const MIN_SHARPNESS = 3.0
+/** Blurry-burst retries while the card stays in frame (adds ~0.5 s each). */
+const MAX_BLUR_RETRIES = 2
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
@@ -89,7 +103,7 @@ interface BurstShot {
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
  */
 export function useCardAutoScan(opts: UseCardAutoScanOptions) {
-  const { video, enabled, busy, onCapture } = opts
+  const { video, enabled, busy, onCapture, onBlurryRetry } = opts
 
   const phase: Ref<AutoScanPhase> = ref('idle')
   const quad: Ref<CardQuad | null> = ref(null)
@@ -123,6 +137,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let burstMisses = 0
   let burstTimer: ReturnType<typeof setTimeout> | null = null
   let burstWatchdog: ReturnType<typeof setTimeout> | null = null
+  let blurRetries = 0
 
   /**
    * Draw the current video frame into the right scratch canvas and return its
@@ -264,6 +279,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstCorners = corners
     burstShots = []
     burstMisses = 0
+    blurRetries = 0
     capturing = true
     phase.value = 'captured'
     if (burstWatchdog !== null) {
@@ -338,6 +354,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     burstShots.sort((a, b) => b.sharpness - a.sharpness)
     const best = burstShots[0]!
+
+    // Motion-blur gate: a soft capture is what turns every scan into
+    // « À vérifier » server-side. While the card is still tracked, retry the
+    // whole burst on fresh frames instead of uploading it. After the retries
+    // the best shot is sent anyway — the server gate + OCR enhancer get their
+    // chance, and the user never sees a silent no-op for a card that beeped.
+    if (best.sharpness < MIN_SHARPNESS && blurRetries < MAX_BLUR_RETRIES && lastCorners) {
+      blurRetries += 1
+      burstShots = []
+      burstMisses = 0
+      burstCorners = lastCorners
+      onBlurryRetry?.()
+      burstWatchdog = setTimeout(finaliseBurst, BURST_WATCHDOG_MS)
+      burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
+      return
+    }
+
     burstShots = []
     burstCorners = null
 
@@ -595,6 +628,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     burstCorners = null
     burstShots = []
     burstMisses = 0
+    blurRetries = 0
     quad.value = null
     phase.value = ready.value ? 'idle' : phase.value
   }
