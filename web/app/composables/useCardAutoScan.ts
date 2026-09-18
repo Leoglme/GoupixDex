@@ -487,13 +487,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
             }
           }
         }
-      } else if (shouldTriggerPhotoFallback(true)) {
+      } else if (shouldTriggerPhotoFallback(true) && el.videoWidth) {
         // Contour failed but the guide crop had live misses → OCR on the guide zone.
-        const el = video.value
-        if (el?.videoWidth) {
-          beginBurst(guideCorners(el.videoWidth, el.videoHeight))
-          return
-        }
+        beginBurst(guideCorners(el.videoWidth, el.videoHeight))
+        return
       }
       if (missTicks >= MISS_LINGER_TICKS) {
         lastCorners = null
@@ -549,8 +546,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
 
     // Prefer the fixed guide crop for OCR — contour quads jitter on wood / sleeves.
-    const el = video.value
-    const burstCorners = el?.videoWidth && matchIndexReady.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
+    const burstCorners = el.videoWidth && matchIndexReady.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
     beginBurst(burstCorners)
   }
 
