@@ -10,11 +10,13 @@ on:
     branches: [main]
     paths:
       - 'api/**'
+      - 'cardmarket-api/**'
       - '.github/workflows/deploy-api.yml'
   pull_request:
     branches: [main]
     paths:
       - 'api/**'
+      - 'cardmarket-api/**'
   workflow_dispatch:
 
 concurrency:
@@ -32,6 +34,7 @@ jobs:
         with:
           sparse-checkout: |
             api
+            cardmarket-api
           sparse-checkout-cone-mode: true
 
       - name: Setup Python
@@ -40,22 +43,25 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps & import check
+        # pip runs from api/ so the local dependency `-e ../cardmarket-api` resolves.
         run: |
           python -m pip install --upgrade pip
-          pip install -r api/requirements.txt
-          cd api && PYTHONPATH=. python -c "import main; print('import ok')"
+          cd api
+          pip install -r requirements.txt
+          PYTHONPATH=. python -c "import main; print('import ok')"
 
   deploy:
     name: Deploy API
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (api only)
+      - name: Checkout (api + cardmarket-api)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           sparse-checkout: |
             api
+            cardmarket-api
           sparse-checkout-cone-mode: true
 
       - name: Write api/.env for upload
@@ -116,7 +122,7 @@ jobs:
           } > "$f"
 
       - name: Pack api tree
-        run: tar -czf api-bundle.tar.gz api
+        run: tar -czf api-bundle.tar.gz api cardmarket-api
 
       - name: Upload to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -148,11 +154,11 @@ jobs:
             SVC="${API_SYSTEMD_SERVICE:-goupixdex-api.service}"
             PORT="${API_PORT:-8000}"
             mkdir -p "$TARGET"
-            rm -rf "$TARGET/api"
+            rm -rf "$TARGET/api" "$TARGET/cardmarket-api"
             tar -xzf "$TARGET/api-bundle.tar.gz" -C "$TARGET"
             rm -f "$TARGET/api-bundle.tar.gz"
             APP_ROOT="$TARGET/api"
-            sudo chown -R "$USER:$USER" "$APP_ROOT" || true
+            sudo chown -R "$USER:$USER" "$APP_ROOT" "$TARGET/cardmarket-api" || true
             sudo apt-get update -y
             sudo apt-get install -y python3-venv python3-pip chromium fonts-liberation xvfb xauth
             if [ ! -x "$APP_ROOT/.venv/bin/python" ]; then
@@ -160,7 +166,8 @@ jobs:
             fi
             . "$APP_ROOT/.venv/bin/activate"
             python -m pip install --upgrade pip wheel
-            pip install -r "$APP_ROOT/requirements.txt" --no-cache-dir
+            # pip runs from api/ so the local dependency `-e ../cardmarket-api` resolves.
+            (cd "$APP_ROOT" && pip install -r requirements.txt --no-cache-dir)
             deactivate
             # SQL migrations (files not already recorded in schema_migrations)
             "$APP_ROOT/.venv/bin/python" "$APP_ROOT/migrations/run_migrations.py"

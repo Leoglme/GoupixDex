@@ -1,0 +1,12 @@
+# Build context for api/Dockerfile is the repo root — keep it lean.
+.git
+.github
+.claude
+web
+api/.venv
+api/var
+api/uploads
+api/__pycache__
+**/__pycache__
+**/*.pyc
+**/*.egg-info

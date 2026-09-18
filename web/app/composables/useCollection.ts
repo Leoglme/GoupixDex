@@ -21,6 +21,9 @@ export interface CollectionCard {
   quantity: number
   notes: string | null
   article_id: number | null
+  cardmarket_id_product: number | null
+  market_price_eur: number | null
+  market_price_updated_at: string | null
   created_at: string
   updated_at: string
 }
@@ -31,6 +34,8 @@ export interface CollectionStats {
   unique_sets: number
   languages: Record<string, number>
   with_article: number
+  estimated_value_eur: number
+  priced_cards: number
 }
 
 export interface CollectionListResponse {

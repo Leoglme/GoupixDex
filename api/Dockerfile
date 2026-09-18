@@ -11,13 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV VINTED_CHROME_EXECUTABLE=/usr/bin/chromium
 
+# Build context = repo root (see docker-compose.yml): the sibling cardmarket-api
+# package must land next to /app so `-e ../cardmarket-api` in requirements resolves.
 WORKDIR /app
 
-COPY requirements.txt .
+COPY cardmarket-api /cardmarket-api
+COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && python -c "from supabase import create_client"
 
-COPY . .
+COPY api/ .
 
 EXPOSE 8000
 

@@ -1,11 +1,13 @@
-"""PokéWallet pricing lookup (auth) with user margin for suggested price."""
+"""Pricing lookup (local Cardmarket first, PokéWallet fallback) + market refresh."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+
+from cardmarket_api import CardmarketDataUnavailableError
 
 from config import get_settings
 from core.database import get_db
@@ -13,6 +15,8 @@ from core.deps import get_current_user
 from models.margin_settings import MarginSettings
 from models.user import User
 from services import pricing_service
+from services.cardmarket_local_price_service import get_price_api
+from services.market_price_refresh_service import refresh_market_prices
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
 
@@ -72,5 +76,31 @@ def lookup_prices(
         "suggested_price_eur": suggested,
         "margin_percent_used": margin,
         "set_name": set_name,
+        "source": pricing.get("source"),
         "error": pricing.get("error"),
     }
+
+
+@router.get("/market-status")
+def market_status(
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Health of the local Cardmarket price guide (age, size, snapshot date)."""
+    api = get_price_api()
+    age = api.guide_age_hours()
+    return {
+        "guide_row_count": api.row_count,
+        "guide_created_at": api.guide_created_at,
+        "guide_age_hours": round(age, 2) if age is not None else None,
+    }
+
+
+@router.post("/market-refresh")
+def market_refresh(
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Manual trigger of the nightly job: guide download + collection revaluation."""
+    try:
+        return refresh_market_prices()
+    except CardmarketDataUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

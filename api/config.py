@@ -81,6 +81,12 @@ class AppSettings(BaseSettings):
     ebay_use_sandbox: bool = True
     #: Optional HTTP(S) proxy for fetching eBay « vendus » HTML (datacenter IPs are often blocked).
     ebay_sold_scrape_proxy: str | None = None
+    #: Disk cache for the Cardmarket price guide (relative paths resolve against ``api/``).
+    cardmarket_cache_dir: str = "var/cardmarket"
+    #: Local hour (Europe/Paris) of the nightly price-guide refresh + collection revaluation.
+    cardmarket_refresh_hour_local: int = Field(default=4, ge=0, le=23)
+    #: Set ``false`` to disable the in-process nightly refresh loop (e.g. one-shot scripts).
+    cardmarket_nightly_refresh_enabled: bool = True
     #: Min seconds between two « sold-scrape » calls **per user** (limits burst traffic to eBay).
     ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
 

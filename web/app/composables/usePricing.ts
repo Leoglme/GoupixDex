@@ -1,3 +1,6 @@
+/** Origine du prix retourné par l'API : guide Cardmarket local, ou PokéWallet en secours. */
+export type PricingLookupSource = 'cardmarket_local' | 'pokewallet'
+
 export interface PricingLookup {
   cardmarket_eur: number | null
   tcgplayer_usd: number | null
@@ -7,11 +10,12 @@ export interface PricingLookup {
   suggested_price_eur: number | null
   margin_percent_used: number
   set_name: string | null
+  source: PricingLookupSource | null
   error: string | null
 }
 
 /**
- * Card pricing lookup (`GET /pricing/lookup`) — PokéWallet (Cardmarket / TCGPlayer) + marge pour prix suggéré.
+ * Card pricing lookup (`GET /pricing/lookup`) — guide Cardmarket local d'abord, PokéWallet en secours + marge pour prix suggéré.
  *
  * @returns {object} Objet contenant la fonction `lookup` pour charger les prix catalogue.
  */

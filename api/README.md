@@ -1,6 +1,6 @@
 # GoupixDex — API (Python)
 
-Backend for **GoupixDex**: Pokémon TCG scanning, pricing (PokéWallet), inventory articles, JWT auth, public **access requests + admin moderation**, **Vinted** publishing & wardrobe sync (nodriver, single or batch), and **eBay France** listing (per-user OAuth + Inventory API — see [`EBAY.md`](EBAY.md)).
+Backend for **GoupixDex**: Pokémon TCG scanning, pricing (local Cardmarket price guide via the sibling [`cardmarket-api`](../cardmarket-api) package, PokéWallet fallback), inventory articles, JWT auth, public **access requests + admin moderation**, **Vinted** publishing & wardrobe sync (nodriver, single or batch), and **eBay France** listing (per-user OAuth + Inventory API — see [`EBAY.md`](EBAY.md)).
 
 ## Stack
 
@@ -38,12 +38,14 @@ api/
     articles.py                 # CRUD + /vinted-batch + /ebay-batch + SSE streams
     settings_route.py           # /settings (margin %, vinted_enabled, ebay_enabled, …)
     ebay_route.py               # /ebay/oauth/* + /ebay/onboarding/setup + /ebay/status
-    pricing_route.py            # PokéWallet preview / suggestions
+    pricing_route.py            # Price lookup (local Cardmarket first) + market refresh/status
     stats_route.py              # /stats/dashboard (CA, marges, split Vinted/eBay)
     scan.py                     # /scan-card (multipart, OCR + pricing preview, no DB)
   services/
     ocr_service.py              # Groq vision wrapper
-    pricing_service.py          # PokéWallet + EUR/USD average
+    pricing_service.py          # Local Cardmarket tier + PokéWallet fallback, EUR/USD average
+    cardmarket_local_price_service.py   # Price-guide singleton + TCGdex idProduct harvesting
+    market_price_refresh_service.py     # Nightly guide refresh + collection revaluation
     scan_service.py             # Title/description templates
     article_service.py
     auth_service.py
@@ -241,6 +243,9 @@ It exposes job-style endpoints used by the Nuxt frontend (`useWardrobeLocalSync`
 | POST | `/ebay/policies/fulfillment/ensure` | Create/update “GoupixDex — Shipping” fulfillment policy |
 | GET | `/ebay/status` \| `/ebay/seller-setup` | Connection state and metadata |
 | GET | `/stats/dashboard` | KPIs, revenue timeline, channel split |
+| GET | `/pricing/lookup` | Reference prices (local Cardmarket guide first, PokéWallet fallback) |
+| GET | `/pricing/market-status` | Age / size / snapshot date of the local Cardmarket price guide |
+| POST | `/pricing/market-refresh` | Manual guide download + full collection revaluation (also nightly at 4 AM Paris) |
 
 **Vinted credentials:** on `POST /articles`, publication uses the authenticated user's `vinted_email` and **encrypted** `vinted_password` (Fernet, key derived from `JWT_SECRET`). Legacy rows still holding a bcrypt hash cannot be decrypted — re-save the Vinted password from **Settings → Marketplace** (`VintedAccountCard`), the seeder, or `PUT /users/me/vinted`. As a last-resort fallback, set `VINTED_EMAIL_OR_USERNAME` / `VINTED_PASSWORD` in the environment.
 

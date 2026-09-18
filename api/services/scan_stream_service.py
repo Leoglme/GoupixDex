@@ -161,6 +161,11 @@ def _add_or_increment(
             existing.quantity = int(existing.quantity) + 1
             if notes:
                 existing.notes = notes.strip() or existing.notes
+            collection_card_service.apply_market_price(
+                existing,
+                cardmarket_id_product=meta.get("cardmarket_id_product"),
+                market_price_eur=meta.get("market_price_eur"),
+            )
             db.commit()
             db.refresh(existing)
             return existing, False
@@ -181,6 +186,11 @@ def _add_or_increment(
             image_url=meta["image_url"],
             quantity=1,
             notes=(notes.strip() if notes else None),
+        )
+        collection_card_service.apply_market_price(
+            row,
+            cardmarket_id_product=meta.get("cardmarket_id_product"),
+            market_price_eur=meta.get("market_price_eur"),
         )
         db.add(row)
         db.commit()

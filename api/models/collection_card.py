@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -43,6 +44,15 @@ class CollectionCard(Base):
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer(), default=1, server_default="1")
     notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
+
+    #: Cardmarket product id (harvested from TCGdex ``pricing.cardmarket.idProduct``).
+    cardmarket_id_product: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    #: Reference market price in EUR (Cardmarket sales-based, never the ``low`` column).
+    market_price_eur: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    market_price_updated_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     article_id: Mapped[int | None] = mapped_column(
         ForeignKey("articles.id", ondelete="SET NULL"),

@@ -21,7 +21,9 @@ services:
       retries: 10
 
   api:
-    build: .
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
     image: goupixdex-api:latest
     container_name: goupixdex-api
     restart: unless-stopped

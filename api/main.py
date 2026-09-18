@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 
 try:
     from dotenv import load_dotenv
@@ -44,10 +47,33 @@ logger = logging.getLogger("goupixdex")
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Background jobs: Cardmarket price guide bootstrap + nightly refresh loop."""
+    from services.market_price_refresh_service import (
+        bootstrap_market_prices_async,
+        nightly_refresh_loop_async,
+    )
+
+    background_tasks: list[asyncio.Task[None]] = []
+    if settings.cardmarket_nightly_refresh_enabled:
+        background_tasks.append(asyncio.create_task(bootstrap_market_prices_async()))
+        background_tasks.append(asyncio.create_task(nightly_refresh_loop_async()))
+    try:
+        yield
+    finally:
+        for task in background_tasks:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
 app = FastAPI(
     title="GoupixDex API",
     description="Pokémon TCG reselling backend for GoupixDex.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 

@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, cast
 
 from app_types.tcgdex import TcgdexSetDetail
+from services.cardmarket_local_price_service import (
+    extract_cardmarket_block,
+    resolve_market_price_eur,
+)
 from services.species_locale_names_service import fetch_species_locale_names
 from services.tcgdex_client_service import (
     SUPPORTED_LOCALES,
@@ -153,6 +157,12 @@ def fetch_card_for_collection(
     set_name = _set_name_from_card(primary) or _strip(set_detail.get("name"))
     display_name = _latin_display_name(name_en, name_fr, name_ja)
 
+    # Cardmarket mapping + market price come for free in the payloads we already
+    # fetched: TCGdex embeds ``pricing.cardmarket.idProduct`` on every mapped card.
+    cardmarket_block = extract_cardmarket_block(list(cards_by_locale.values()))
+    cardmarket_id_product = cardmarket_block.get("idProduct") if cardmarket_block else None
+    market_price_eur = resolve_market_price_eur(cardmarket_id_product, cardmarket_block)
+
     return {
         "tcgdex_card_id": cid,
         "tcgdex_set_id": set_id,
@@ -167,4 +177,6 @@ def fetch_card_for_collection(
         "language": lang,
         "image_url": image_url,
         "set_logo_url": _set_logo_from_card(primary),
+        "cardmarket_id_product": cardmarket_id_product,
+        "market_price_eur": market_price_eur,
     }

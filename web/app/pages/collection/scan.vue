@@ -440,6 +440,9 @@
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-semibold">
                         {{ cardTitle(latestOutcome) }}
+                        <span v-if="marketPriceLabel(latestOutcome)" class="ml-1 text-emerald-300 tabular-nums">
+                          {{ marketPriceLabel(latestOutcome) }}
+                        </span>
                       </p>
                       <p class="truncate text-xs text-white/70">
                         {{ subtitle(latestOutcome) }}
@@ -680,6 +683,9 @@
                 <UBadge :color="statusBadgeColor(ev.status)" variant="subtle" size="sm">
                   {{ statusLabel(ev.status) }}
                 </UBadge>
+                <span v-if="marketPriceLabel(ev)" class="text-highlighted shrink-0 text-xs font-semibold tabular-nums">
+                  {{ marketPriceLabel(ev) }}
+                </span>
               </div>
               <p class="text-muted truncate text-xs">{{ subtitle(ev) }}</p>
               <p v-if="ev.error" class="text-warning text-xs">{{ ev.error }}</p>
@@ -1482,6 +1488,22 @@ const counters = computed(() => {
   }
   return { total: displayedEvents.value.length, added, removed, needs_review, in_flight }
 })
+
+const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+/**
+ * Prix marché Cardmarket de la carte d'un événement de scan, formaté en EUR.
+ * @param ev - Événement de scan (le prix vient de `collection_card.market_price_eur`).
+ * @returns {string | null} Prix formaté, ou `null` quand la carte n'est pas cotée.
+ */
+function marketPriceLabel(ev: ScanEvent): string | null {
+  const price = ev.collection_card?.market_price_eur
+  return price != null ? eur.format(price) : null
+}
 
 function thumbUrl(ev: ScanEvent): string | null {
   return ev.collection_card?.image_url ?? ev.image_preview_data_url ?? null

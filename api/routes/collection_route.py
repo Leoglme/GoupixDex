@@ -92,6 +92,11 @@ def add_to_collection(
         existing.quantity = int(existing.quantity) + int(body.quantity)
         if body.notes:
             existing.notes = body.notes.strip() or existing.notes
+        collection_card_service.apply_market_price(
+            existing,
+            cardmarket_id_product=meta["cardmarket_id_product"],
+            market_price_eur=meta["market_price_eur"],
+        )
         db.commit()
         db.refresh(existing)
         return {"created": False, "card": collection_card_service.collection_card_to_dict(existing)}
@@ -112,6 +117,11 @@ def add_to_collection(
         image_url=meta["image_url"],
         quantity=int(body.quantity),
         notes=(body.notes.strip() if body.notes else None),
+    )
+    collection_card_service.apply_market_price(
+        row,
+        cardmarket_id_product=meta["cardmarket_id_product"],
+        market_price_eur=meta["market_price_eur"],
     )
     db.add(row)
     db.commit()

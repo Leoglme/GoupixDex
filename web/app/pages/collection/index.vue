@@ -33,7 +33,13 @@
           </template>
         </GoupixDexPageHeader>
 
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <GoupixDexStatsCard
+            title="Valeur estimée"
+            :value="estimatedValueLabel"
+            :description="`Prix marché Cardmarket · ${stats.priced_cards} carte(s) cotée(s)`"
+            icon="i-lucide-euro"
+          />
           <GoupixDexStatsCard
             title="Cartes uniques"
             :value="stats.unique_cards"
@@ -152,6 +158,12 @@
                   ×{{ card.quantity }}
                 </span>
                 <span
+                  v-if="card.market_price_eur != null"
+                  class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                >
+                  {{ eur.format(card.market_price_eur) }}
+                </span>
+                <span
                   v-if="card.article_id"
                   class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full p-1 backdrop-blur-sm"
                   title="Article créé"
@@ -175,6 +187,7 @@
                 <th class="text-muted px-3 py-2.5 text-left font-medium">Extension</th>
                 <th class="text-muted px-3 py-2.5 text-left font-medium">Langue</th>
                 <th class="text-muted px-3 py-2.5 text-right font-medium">Qté</th>
+                <th class="text-muted px-3 py-2.5 text-right font-medium">Prix marché</th>
                 <th class="text-muted px-3 py-2.5 text-left font-medium">Statut</th>
                 <th class="w-12 last:rounded-tr-lg" />
               </tr>
@@ -211,6 +224,12 @@
                   </UBadge>
                 </td>
                 <td class="px-3 py-2.5 text-right tabular-nums">×{{ row.quantity }}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums">
+                  <span v-if="row.market_price_eur != null" class="text-highlighted font-medium">
+                    {{ eur.format(row.market_price_eur) }}
+                  </span>
+                  <span v-else class="text-muted text-xs">—</span>
+                </td>
                 <td class="px-3 py-2.5">
                   <UBadge v-if="row.article_id" color="success" variant="subtle" size="sm" icon="i-lucide-tag">
                     Article #{{ row.article_id }}
@@ -277,9 +296,19 @@ const stats = computed<CollectionStats>(() => {
       unique_sets: 0,
       languages: {},
       with_article: 0,
+      estimated_value_eur: 0,
+      priced_cards: 0,
     }
   )
 })
+
+const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+const estimatedValueLabel = computed<string>(() => eur.format(stats.value.estimated_value_eur))
 
 const filteredItems = computed<CollectionCard[]>(() => {
   const items = payload.value?.items ?? []

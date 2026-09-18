@@ -7,6 +7,8 @@ Pure DB layer — HTTP / TCGdex fetches live in
 
 from __future__ import annotations
 
+import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import or_
@@ -83,9 +85,34 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "quantity": int(card.quantity),
         "notes": card.notes,
         "article_id": card.article_id,
+        "cardmarket_id_product": card.cardmarket_id_product,
+        "market_price_eur": float(card.market_price_eur) if card.market_price_eur is not None else None,
+        "market_price_updated_at": (
+            card.market_price_updated_at.isoformat() if card.market_price_updated_at is not None else None
+        ),
         "created_at": card.created_at.isoformat(),
         "updated_at": card.updated_at.isoformat(),
     }
+
+
+def apply_market_price(
+    card: CollectionCard,
+    *,
+    cardmarket_id_product: int | None,
+    market_price_eur: float | None,
+) -> None:
+    """
+    Write the harvested Cardmarket mapping / price onto a row (no commit).
+
+    The ``idProduct`` is stable so it is only ever filled, never cleared; the
+    price is refreshed whenever a new value is available and left untouched
+    otherwise (a transient TCGdex miss must not erase a known price).
+    """
+    if cardmarket_id_product is not None:
+        card.cardmarket_id_product = cardmarket_id_product
+    if market_price_eur is not None:
+        card.market_price_eur = Decimal(str(round(market_price_eur, 2)))
+        card.market_price_updated_at = dt.datetime.now(dt.UTC)
 
 
 def find_existing_for_user(
@@ -149,11 +176,15 @@ def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
             "unique_sets": 0,
             "languages": {},
             "with_article": 0,
+            "estimated_value_eur": 0.0,
+            "priced_cards": 0,
         }
     languages: dict[str, int] = {}
     sets: set[str] = set()
     total_quantity = 0
     with_article = 0
+    estimated_value = Decimal("0")
+    priced_cards = 0
     for r in rows:
         languages[r.language] = languages.get(r.language, 0) + int(r.quantity)
         if r.tcgdex_set_id:
@@ -161,10 +192,15 @@ def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
         total_quantity += int(r.quantity)
         if r.article_id is not None:
             with_article += 1
+        if r.market_price_eur is not None:
+            estimated_value += Decimal(r.market_price_eur) * int(r.quantity)
+            priced_cards += 1
     return {
         "unique_cards": len(rows),
         "total_quantity": total_quantity,
         "unique_sets": len(sets),
         "languages": languages,
         "with_article": with_article,
+        "estimated_value_eur": float(estimated_value),
+        "priced_cards": priced_cards,
     }

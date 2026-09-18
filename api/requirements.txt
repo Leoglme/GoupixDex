@@ -37,3 +37,8 @@ pymupdf>=1.24.0
 
 # Cardmarket order PDF text extraction
 pypdf>=5.0.0
+
+# Local Cardmarket pricing (public daily data files) — sibling package in the monorepo
+-e ../cardmarket-api
+# IANA timezone database for zoneinfo on Windows (nightly refresh schedule in Europe/Paris)
+tzdata>=2024.1
