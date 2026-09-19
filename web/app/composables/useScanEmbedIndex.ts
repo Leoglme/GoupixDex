@@ -64,7 +64,7 @@ function startWorkerOnce(): Promise<void> {
         t: 'init',
         ortUrl: ORT_UMD_URL,
         wasmBase: ORT_WASM_BASE,
-        s0ModelUrl: '/scan-model/mobileclip-s0-vision.onnx',
+        s0ModelUrl: '/scan-model/mobileclip-s0-vision-fp16.onnx',
         s0BinUrl: '/scan-index/embed-v3.bin',
         s0JsonUrl: '/scan-index/embed-v3.json',
         mnetModelUrl: '/scan-model/mobilenet-embed-int8.onnx',

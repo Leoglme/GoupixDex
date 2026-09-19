@@ -253,4 +253,16 @@ function navMenuUi(collapsed: boolean): { root: string; list: string; item: stri
     link: collapsed ? 'justify-center' : 'gap-2.5 rounded-lg py-1.5',
   }
 }
+
+// Précharge le moteur de scan (worker + modèles + index, ~50 MB une seule
+// fois puis cache navigateur) dès l'ouverture de l'app : à l'arrivée sur la
+// caméra il est déjà prêt — ressenti instantané, comme une app native qui
+// embarque son modèle à l'installation.
+const scanEmbed = useScanEmbedIndex()
+
+onMounted((): void => {
+  setTimeout((): void => {
+    void scanEmbed.load()
+  }, 1500)
+})
 </script>

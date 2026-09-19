@@ -14,7 +14,8 @@ Outputs (``web/public/scan-index/``):
   carte : dim×int8 + f32 scale (dot(int8,int8)·sa·sb ≈ cosinus) ;
 - ``embed-v3.json`` — ``{version, dim, cards: [[id, locale, name, setId, localId], …]}``.
 
-Le MODÈLE (``web/public/scan-model/mobileclip-s0-vision.onnx``) doit être le
+Le MODÈLE (``web/public/scan-model/mobileclip-s0-vision-fp16.onnx``, fp16 :
+moitié du poids, cos fp32↔fp16 ≥ 0.9999) doit être le
 fichier exact que le navigateur exécute — les deux côtés embarquent avec les
 mêmes poids sinon l'espace dérive. Préprocessing : 256×256 BILINEAR, pixels
 bruts [0,1] SANS normalisation ImageNet (config CLIPFeatureExtractor de
@@ -53,7 +54,7 @@ RETRIES = 3
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORK_EMB = SCRIPT_DIR / "scan-embed-work-v3.npy"
 WORK_KEYS = SCRIPT_DIR / "scan-embed-work-v3.keys.json"
-MODEL_PATH = SCRIPT_DIR.parent.parent / "web" / "public" / "scan-model" / "mobileclip-s0-vision.onnx"
+MODEL_PATH = SCRIPT_DIR.parent.parent / "web" / "public" / "scan-model" / "mobileclip-s0-vision-fp16.onnx"
 OUT_DIR = SCRIPT_DIR.parent.parent / "web" / "public" / "scan-index"
 
 _print_lock = threading.Lock()
