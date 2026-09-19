@@ -46,6 +46,15 @@ export interface TcgdexSeriesWithSets extends TcgdexSeriesDetail {
 export interface CatalogBrowseResponse {
   locale: string
   series: TcgdexSeriesWithSets[]
+  version?: number
+  generated_at?: string
+}
+
+/** ``web/public/catalog-index/manifest.json`` */
+export interface CatalogBrowseManifest {
+  version: number
+  generated_at: string
+  locales: Record<CatalogLocale, string>
 }
 
 export interface CatalogSearchCardHit {
@@ -126,16 +135,32 @@ export interface CatalogCardPreviewResponse {
 export function useCardCatalog() {
   const { $api } = useNuxtApp()
 
+  let browseManifestPromise: Promise<CatalogBrowseManifest> | null = null
+
   /**
-   * GET `/catalog/series` — liste des séries TCGdex.
-   *
-   * @param params - Locale et filtre nom optionnel.
-   * @returns {Promise<CatalogSeriesListResponse>} Séries paginées côté API.
+   * @returns Cached manifest pointing at per-locale browse JSON files.
    */
+  function loadBrowseManifest(): Promise<CatalogBrowseManifest> {
+    if (!browseManifestPromise) {
+      browseManifestPromise = $fetch<CatalogBrowseManifest>('/catalog-index/manifest.json')
+    }
+    return browseManifestPromise
+  }
+
   /**
-   * GET `/catalog/browse` — toutes les séries avec leurs extensions (navigateur classeur).
+   * Static browse tree (``web/public/catalog-index/``) — instant load, refreshed daily by CI.
    */
   async function browseCatalog(locale: CatalogLocale) {
+    const manifest = await loadBrowseManifest()
+    const file = manifest.locales[locale]
+    if (!file) {
+      throw new Error(`Catalogue browse index missing locale ${locale}`)
+    }
+    return await $fetch<CatalogBrowseResponse>(`/catalog-index/${file}`)
+  }
+
+  /** Authenticated API fallback (legacy / debugging). */
+  async function browseCatalogFromApi(locale: CatalogLocale) {
     const { data } = await $api.get<CatalogBrowseResponse>('/catalog/browse', {
       params: { locale },
     })
@@ -234,5 +259,14 @@ export function useCardCatalog() {
     return data
   }
 
-  return { browseCatalog, searchCatalogCards, listSeries, getSeries, listSets, getSet, previewCard }
+  return {
+    browseCatalog,
+    browseCatalogFromApi,
+    searchCatalogCards,
+    listSeries,
+    getSeries,
+    listSets,
+    getSet,
+    previewCard,
+  }
 }
