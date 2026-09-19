@@ -404,207 +404,114 @@ function warp(
 }
 
 // ---------------------------------------------------------------------------
-// On-device card identification: 1024-bit perceptual hash matched against the
-// prebuilt TCGdex index (`/scan-index/index-v1.bin`). The hash spec is
-// bit-identical with `api/scripts/build_scan_match_index.py` — grayscale is
-// PIL's fixed-point ITU-R 601-2 luma, resizes are area-average (PIL BOX),
-// bands share the same fractional boxes. Drift here = every scan misses.
+// Identification crops. The worker does NOT identify cards itself any more:
+// it produces deskewed 224×224 RGBA crops (tracked quad, else sweeping search
+// windows) and posts them to the main thread, which runs the MobileNet
+// embedding + cosine matching (see useScanEmbedIndex). Contours die on
+// fingers over the card edges, so the windows sweep scale and position.
 // ---------------------------------------------------------------------------
 
-const HASH_BYTES = 128
-const HASH_GLOBAL_BYTES = 64
-/** Weighted distance = 10×(global bits) + 6×(text-band bits) — integers only. */
-const W_GLOBAL = 10
-const W_TEXT = 6
-/** Query is re-hashed at these inset fractions (tolerates a warp that grabbed background). */
-const QUERY_INSETS = [0, 0.015, 0.03]
-const TOP_MATCHES = 8
-const NAME_BOX = [0.05, 0.025, 0.72, 0.1]
-const ATTACK_BOX = [0.08, 0.55, 0.92, 0.88]
+const ID_CROP_EDGE = 224
+/** Floor between two crop shipments (~3/s) — inference is main-thread work. */
+const ID_CROP_MIN_INTERVAL_MS = 300
+/** A quad is only worth identifying when it plausibly frames a close card. */
+const ID_QUAD_MIN_HEIGHT_FRAC = 0.4
+const ID_QUAD_AR_MIN = 1.1
+const ID_QUAD_AR_MAX = 1.9
 
-let matchIndex: Uint8Array | null = null
-let matchCount = 0
+const ID_WINDOWS: { hFrac: number; dx: number; dy: number }[] = [
+  { hFrac: 0.62, dx: 0, dy: 0 },
+  { hFrac: 0.5, dx: 0, dy: 0 },
+  { hFrac: 0.74, dx: 0, dy: 0 },
+  { hFrac: 0.62, dx: -0.08, dy: 0 },
+  { hFrac: 0.62, dx: 0.08, dy: 0 },
+  { hFrac: 0.62, dx: 0, dy: -0.06 },
+  { hFrac: 0.62, dx: 0, dy: 0.06 },
+]
+let idWindowCursor = 0
+let lastIdCropAt = 0
+/** Alternate quad/window attempts — a bogus tracked quad must never starve the sweep. */
+let idAttemptParity = 0
 
-const POPCOUNT = new Uint8Array(256)
-for (let i = 0; i < 256; i += 1) {
-  POPCOUNT[i] = (i & 1) + POPCOUNT[i >> 1]
+/** Card-ratio rect of one search window, in frame pixels. */
+function idWindowRect(win: { hFrac: number; dx: number; dy: number }, w: number, h: number) {
+  const rh = Math.round(h * win.hFrac)
+  const rw = Math.min(w, Math.round((rh * 63) / 88))
+  const x = Math.round((w - rw) / 2 + win.dx * w)
+  const y = Math.round((h - rh) / 2 + win.dy * h)
+  return { x: Math.max(0, Math.min(w - rw, x)), y: Math.max(0, Math.min(h - rh, y)), w: rw, h: rh }
 }
 
-/** PIL `convert('L')` parity: fixed-point rounded ITU-R 601-2 luma. */
-function lumaPlane(rgba: Uint8ClampedArray, w: number, h: number) {
-  const out = new Uint8Array(w * h)
-  for (let i = 0, p = 0; i < out.length; i += 1, p += 4) {
-    out[i] = (rgba[p] * 19595 + rgba[p + 1] * 38470 + rgba[p + 2] * 7471 + 0x8000) >> 16
+/** True when the tracked quad plausibly frames a close, portrait card. */
+function quadWorthIdentifying(quad: { x: number; y: number }[], h: number): boolean {
+  const wEdge =
+    (Math.hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y) +
+      Math.hypot(quad[2].x - quad[3].x, quad[2].y - quad[3].y)) /
+    2
+  const hEdge =
+    (Math.hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y) +
+      Math.hypot(quad[2].x - quad[1].x, quad[2].y - quad[1].y)) /
+    2
+  if (hEdge < h * ID_QUAD_MIN_HEIGHT_FRAC) {
+    return false
   }
-  return { data: out, w, h }
+  const ar = hEdge / Math.max(1, wEdge)
+  return ar >= ID_QUAD_AR_MIN && ar <= ID_QUAD_AR_MAX
 }
 
-type GrayPlane = { data: Uint8Array; w: number; h: number }
-
-/** Area-average downscale (PIL BOX parity, fractional coverage included). */
-function boxResize(src: GrayPlane, dw: number, dh: number): GrayPlane {
-  const out = new Uint8Array(dw * dh)
-  const xr = src.w / dw
-  const yr = src.h / dh
-  for (let dy = 0; dy < dh; dy += 1) {
-    const y0 = dy * yr
-    const y1 = y0 + yr
-    const iy0 = Math.floor(y0)
-    const iy1 = Math.min(src.h, Math.ceil(y1))
-    for (let dx = 0; dx < dw; dx += 1) {
-      const x0 = dx * xr
-      const x1 = x0 + xr
-      const ix0 = Math.floor(x0)
-      const ix1 = Math.min(src.w, Math.ceil(x1))
-      let acc = 0
-      let area = 0
-      for (let y = iy0; y < iy1; y += 1) {
-        const wy = Math.min(y + 1, y1) - Math.max(y, y0)
-        const row = y * src.w
-        for (let x = ix0; x < ix1; x += 1) {
-          const wx = Math.min(x + 1, x1) - Math.max(x, x0)
-          acc += src.data[row + x] * wx * wy
-          area += wx * wy
-        }
-      }
-      out[dy * dw + dx] = Math.round(acc / area)
-    }
-  }
-  return { data: out, w: dw, h: dh }
-}
-
-function cropGray(src: GrayPlane, fx0: number, fy0: number, fx1: number, fy1: number): GrayPlane {
-  const x0 = Math.floor(src.w * fx0)
-  const y0 = Math.floor(src.h * fy0)
-  const x1 = Math.floor(src.w * fx1)
-  const y1 = Math.floor(src.h * fy1)
-  const w = Math.max(1, x1 - x0)
-  const h = Math.max(1, y1 - y0)
-  const out = new Uint8Array(w * h)
-  for (let y = 0; y < h; y += 1) {
-    out.set(src.data.subarray((y0 + y) * src.w + x0, (y0 + y) * src.w + x0 + w), y * w)
-  }
-  return { data: out, w, h }
-}
-
-/** Row dHash: resize to (w+1, h), bit = px[r][c] > px[r][c+1]. */
-function dhashRows(src: GrayPlane, w: number, h: number, bits: number[]): void {
-  const r = boxResize(src, w + 1, h)
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      bits.push(r.data[y * (w + 1) + x] > r.data[y * (w + 1) + x + 1] ? 1 : 0)
-    }
-  }
-}
-
-/** Column dHash: resize to (w, h+1), bit = px[r][c] > px[r+1][c]. */
-function dhashCols(src: GrayPlane, w: number, h: number, bits: number[]): void {
-  const r = boxResize(src, w, h + 1)
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      bits.push(r.data[y * w + x] > r.data[(y + 1) * w + x] ? 1 : 0)
-    }
-  }
-}
-
-/** 1024-bit card hash (512 global + 512 text bands), packed MSB-first. */
-function cardHashBytes(gray: GrayPlane): Uint8Array {
-  const bits: number[] = []
-  dhashRows(gray, 16, 16, bits)
-  dhashCols(gray, 16, 16, bits)
-  dhashRows(cropGray(gray, NAME_BOX[0], NAME_BOX[1], NAME_BOX[2], NAME_BOX[3]), 32, 8, bits)
-  dhashRows(cropGray(gray, ATTACK_BOX[0], ATTACK_BOX[1], ATTACK_BOX[2], ATTACK_BOX[3]), 32, 8, bits)
-  const out = new Uint8Array(bits.length >> 3)
-  for (let i = 0; i < bits.length; i += 1) {
-    if (bits[i]) {
-      out[i >> 3] |= 0x80 >> (i & 7)
-    }
-  }
-  return out
+/** Rect corners helper. */
+function rectCorners(rect: { x: number; y: number; w: number; h: number }): { x: number; y: number }[] {
+  return [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+  ]
 }
 
 /**
- * Weighted Hamming distances of the query hashes against every index entry;
- * returns the TOP_MATCHES best as flat [entryIndex, distance] pairs. The main
- * thread applies the confidence policy (it owns the metadata).
+ * Produce identification crops (RGBA 224×224, same square distortion as the
+ * index builder) and post them to the main thread. Attempts ALTERNATE between
+ * the tracked quad (when it plausibly frames a card) and the sweeping search
+ * windows; window attempts ship 3 offset variants so a slight misalignment
+ * still lands. The decision comes back asynchronously as a `lock` message +
+ * cooldown — never through this reply channel.
  */
-function matchAgainstIndex(queryHashes: Uint8Array[]): number[] {
-  if (!matchIndex || !matchCount) {
-    return []
+function shipIdentificationCrop(
+  buf: ArrayBuffer,
+  w: number,
+  h: number,
+  vw: number,
+  vh: number,
+  frameQuad: { x: number; y: number }[] | null,
+): void {
+  idAttemptParity += 1
+  const useQuad = frameQuad !== null && idAttemptParity % 2 === 0 && quadWorthIdentifying(frameQuad, h)
+  if (useQuad) {
+    const { out } = warp(buf, w, h, frameQuad!, ID_CROP_EDGE, ID_CROP_EDGE, false)
+    ;(self as any).postMessage({ t: 'idcrop', bufs: [out] }, [out])
+    return
   }
-  const top: { i: number; d: number }[] = []
-  for (let i = 0; i < matchCount; i += 1) {
-    const base = i * HASH_BYTES
-    let best = Infinity
-    for (const q of queryHashes) {
-      let dg = 0
-      for (let b = 0; b < HASH_GLOBAL_BYTES; b += 1) {
-        dg += POPCOUNT[q[b] ^ matchIndex[base + b]]
-      }
-      let dt = 0
-      for (let b = HASH_GLOBAL_BYTES; b < HASH_BYTES; b += 1) {
-        dt += POPCOUNT[q[b] ^ matchIndex[base + b]]
-      }
-      const d = W_GLOBAL * dg + W_TEXT * dt
-      if (d < best) {
-        best = d
-      }
-    }
-    if (top.length < TOP_MATCHES || best < top[top.length - 1].d) {
-      top.push({ i, d: best })
-      top.sort((a, b) => a.d - b.d)
-      if (top.length > TOP_MATCHES) {
-        top.pop()
-      }
-    }
+  const rect = idWindowRect(ID_WINDOWS[idWindowCursor % ID_WINDOWS.length], w, h)
+  idWindowCursor += 1
+  const inset = Math.round(rect.w * 0.06)
+  const dx = Math.round(rect.w * 0.07)
+  const variants = [
+    rect,
+    { x: rect.x + inset, y: rect.y + inset, w: rect.w - 2 * inset, h: rect.h - 2 * inset },
+    { x: rect.x, y: Math.min(h - rect.h, rect.y + Math.round(rect.h * 0.06)), w: rect.w, h: rect.h },
+    { x: Math.max(0, rect.x - dx), y: rect.y, w: rect.w, h: rect.h },
+    { x: Math.min(w - rect.w, rect.x + dx), y: rect.y, w: rect.w, h: rect.h },
+  ]
+  const bufs: ArrayBuffer[] = []
+  for (const v of variants) {
+    const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
+    bufs.push(out)
   }
-  return top.flatMap((m) => [m.i, m.d])
-}
-
-/** Hash the warped card at several insets and rank it against the index. */
-function matchWarpedCard(rgbaBuf: ArrayBuffer, w: number, h: number): number[] {
-  const gray = lumaPlane(new Uint8ClampedArray(rgbaBuf), w, h)
-  const queries: Uint8Array[] = []
-  for (const f of QUERY_INSETS) {
-    queries.push(cardHashBytes(f === 0 ? gray : cropGray(gray, f, f, 1 - f, 1 - f)))
-  }
-  return matchAgainstIndex(queries)
-}
-
-// --- Continuous identification: every detection frame gets a shot at the
-// index, so a confident card DINGS instantly without waiting for the burst
-// pipeline. Runs on the 640 px detection frame (plenty for 17×16 hashes).
-
-/** Output size of the lightweight identification warp (63:88 card ratio). */
-const ID_WARP_W = 315
-const ID_WARP_H = 440
-/** Floor between two guide-crop identification attempts (~5/s). */
-const ID_CENTRAL_MIN_INTERVAL_MS = 180
-/** Central guide crop: fraction of the frame height the card silhouette covers. */
-const ID_CENTRAL_HEIGHT_FRAC = 0.62
-
-let lastIdCentralAt = 0
-
-/** Deskew the detection frame at low resolution and rank it against the index. */
-function idMatchFromQuad(buf: ArrayBuffer, w: number, h: number, corners: { x: number; y: number }[]): number[] {
-  const { out } = warp(buf, w, h, corners, ID_WARP_W, ID_WARP_H, false)
-  return matchWarpedCard(out, ID_WARP_W, ID_WARP_H)
-}
-
-/**
- * No quad detected: try the card-ratio crop at the frame center (the on-screen
- * guide). Covers tilted / low-contrast cards the contour detector misses.
- */
-function idMatchCentralCrop(buf: ArrayBuffer, w: number, h: number): number[] {
-  const gray = lumaPlane(new Uint8ClampedArray(buf), w, h)
-  const cropH = Math.round(h * ID_CENTRAL_HEIGHT_FRAC)
-  const cropW = Math.min(w, Math.round((cropH * 63) / 88))
-  const x0 = (w - cropW) / 2 / w
-  const y0 = (h - cropH) / 2 / h
-  const central = cropGray(gray, x0, y0, 1 - x0, 1 - y0)
-  const queries = [cardHashBytes(central)]
-  queries.push(cardHashBytes(cropGray(central, 0.03, 0.03, 0.97, 0.97)))
-  return matchAgainstIndex(queries)
+  const fx = vw / w
+  const fy = vh / h
+  const win = { x: rect.x * fx, y: rect.y * fy, w: rect.w * fx, h: rect.h * fy }
+  ;(self as any).postMessage({ t: 'idcrop', bufs, win }, bufs)
 }
 
 // ---------------------------------------------------------------------------
@@ -634,6 +541,8 @@ let trackQuad: { x: number; y: number }[] | null = null
 let trackFrames = 0
 let trackW = 0
 let trackH = 0
+/** Rect (video coords) the main thread asked to start tracking on (identified window). */
+let pendingLockRect: { x: number; y: number; w: number; h: number } | null = null
 
 function resetTrack(): void {
   try {
@@ -857,7 +766,32 @@ self.onmessage = (e: MessageEvent): void => {
 
     let frameQuad: { x: number; y: number }[] | null = null
     let tracking = false
-    if (gray && trackQuad && trackGray && trackPts && trackW === d.w && trackH === d.h) {
+    // A confident window match locks tracking onto that zone: the frame gets
+    // glued to a hand-held card whose contours are unusable (fingers).
+    if (gray && pendingLockRect) {
+      const sx = d.w / d.vw
+      const sy = d.h / d.vh
+      const r = pendingLockRect
+      pendingLockRect = null
+      const lockQuad = [
+        { x: r.x * sx, y: r.y * sy },
+        { x: (r.x + r.w) * sx, y: r.y * sy },
+        { x: (r.x + r.w) * sx, y: (r.y + r.h) * sy },
+        { x: r.x * sx, y: (r.y + r.h) * sy },
+      ]
+      const seeds = seedTrackPoints(gray, lockQuad)
+      if (seeds) {
+        resetTrack()
+        trackPts = seeds
+        trackQuad = lockQuad
+        trackW = d.w
+        trackH = d.h
+        trackFrames = 0
+        frameQuad = lockQuad
+        tracking = true
+      }
+    }
+    if (!tracking && gray && trackQuad && trackGray && trackPts && trackW === d.w && trackH === d.h) {
       frameQuad = stepTrack(gray)
       tracking = frameQuad !== null
       trackFrames += 1
@@ -927,48 +861,37 @@ self.onmessage = (e: MessageEvent): void => {
       } catch {}
     }
 
-    // Continuous identification: the tracked quad is the best crop; the fixed
-    // guide zone covers cards the detector never locks onto. `d.im` lets the
-    // main thread pause it (cooldown after a commit) so the ~100-300 ms match
-    // never freezes the 20 fps tracking while the frame just needs to follow.
-    let matches: number[] | undefined
-    const now = Date.now()
+    // Continuous identification: ship one deskewed 224×224 crop to the main
+    // thread (tracked quad first, else the sweeping windows). `d.im` lets the
+    // main thread pause it (cooldown after a commit) so nothing competes with
+    // the 20 fps tracking while the frame just needs to follow.
     try {
-      if (d.im && matchIndex && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
-        lastIdCentralAt = now
-        matches = frameQuad ? idMatchFromQuad(d.buf, d.w, d.h, frameQuad) : idMatchCentralCrop(d.buf, d.w, d.h)
+      if (d.im && Date.now() - lastIdCropAt >= ID_CROP_MIN_INTERVAL_MS) {
+        lastIdCropAt = Date.now()
+        shipIdentificationCrop(d.buf, d.w, d.h, d.vw, d.vh, frameQuad)
       }
     } catch {
-      matches = undefined
+      /* identification crop is best-effort — tracking must go on */
     }
 
     if (frameQuad) {
       const fx = d.vw / d.w
       const fy = d.vh / d.h
       const corners = frameQuad.map((p) => ({ x: p.x * fx, y: p.y * fy }))
-      ;(self as any).postMessage({ t: 'quad', corners, matches })
+      ;(self as any).postMessage({ t: 'quad', corners })
     } else {
-      ;(self as any).postMessage({ t: 'nq', matches })
+      ;(self as any).postMessage({ t: 'nq' })
     }
     return
   }
-  if (d.t === 'index') {
-    // Prebuilt scan-match index: 'GPXI' + u32 version + u32 count + count×128B.
-    try {
-      const view = new DataView(d.buf as ArrayBuffer)
-      const magicOk =
-        view.getUint8(0) === 0x47 && view.getUint8(1) === 0x50 && view.getUint8(2) === 0x58 && view.getUint8(3) === 0x49
-      const count = view.getUint32(8, true)
-      if (magicOk && count > 0 && (d.buf as ArrayBuffer).byteLength >= 12 + count * HASH_BYTES) {
-        matchIndex = new Uint8Array(d.buf as ArrayBuffer, 12, count * HASH_BYTES)
-        matchCount = count
-        ;(self as any).postMessage({ t: 'index_ready', count })
-      } else {
-        ;(self as any).postMessage({ t: 'index_ready', count: 0 })
-      }
-    } catch {
-      ;(self as any).postMessage({ t: 'index_ready', count: 0 })
-    }
+  if (d.t === 'lock') {
+    pendingLockRect = d.rect ?? null
+    return
+  }
+  if (d.t === 'droptrack') {
+    // The main thread saw several identification misses on this quad — it is
+    // probably framing furniture, not a card. Free the sweep and re-acquire.
+    resetTrack()
     return
   }
   if (d.t === 'warp') {
@@ -978,13 +901,7 @@ self.onmessage = (e: MessageEvent): void => {
     }
     try {
       const { out, sharpness } = warp(d.buf, d.w, d.h, d.corners)
-      let matches: number[] = []
-      try {
-        matches = matchWarpedCard(out, WARP_W, WARP_H)
-      } catch {
-        matches = []
-      }
-      ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness, matches }, [out])
+      ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness }, [out])
     } catch {
       // Non-fatal: the main thread skips this shot and keeps scanning.
       ;(self as any).postMessage({ t: 'warp_failed', m: 'Découpe carte impossible' })

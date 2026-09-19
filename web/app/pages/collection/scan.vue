@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-3 py-4 sm:space-y-5 sm:px-5 sm:py-5">
+      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-5 sm:px-5 sm:py-5">
         <GoupixDexPageHeader
           title="Scanner mes cartes"
           description="Photographiez vos cartes à la chaîne : langue reconnue automatiquement, capture en mode caisse (HTTPS) et arrivée en temps réel dans la collection."
@@ -103,21 +103,10 @@
                     Arrêter
                   </UButton>
                 </template>
-                <UButton
-                  size="md"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-image-up"
-                  :disabled="uploading"
-                  @click.prevent="openNativeCamera"
-                >
-                  Importer
-                </UButton>
               </template>
 
-              <!-- Caméra live indisponible (HTTP / iOS) : on propose quand même
-                   le scan auto (explique comment l'activer) + le déclenchement
-                   natif qui marche en HTTP. -->
+              <!-- Caméra live indisponible (HTTP / iOS) : proposer quand même
+                   l'activation du scan auto. -->
               <template v-else>
                 <UButton
                   size="xl"
@@ -131,53 +120,29 @@
                 >
                   Activer le scan auto
                 </UButton>
-                <UButton
-                  size="md"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-image-up"
-                  :disabled="uploading"
-                  @click.prevent="openNativeCamera"
-                >
-                  Importer
-                </UButton>
               </template>
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="border-default flex overflow-hidden rounded-full border">
+          <div class="space-y-2">
+            <div class="border-default grid w-full grid-cols-2 overflow-hidden rounded-xl border">
               <button
                 type="button"
-                class="flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold transition-colors"
+                class="flex cursor-pointer items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors"
                 :class="scanDirection === 'in' ? 'bg-success text-inverted' : 'text-muted hover:text-highlighted'"
                 @click="setScanDirection('in')"
               >
-                <UIcon name="i-lucide-plus" class="size-3.5" />
+                <UIcon name="i-lucide-plus" class="size-4" />
                 Entrée
               </button>
               <button
                 type="button"
-                class="flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold transition-colors"
+                class="flex cursor-pointer items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors"
                 :class="scanDirection === 'out' ? 'bg-error text-inverted' : 'text-muted hover:text-highlighted'"
                 @click="setScanDirection('out')"
               >
-                <UIcon name="i-lucide-minus" class="size-3.5" />
+                <UIcon name="i-lucide-minus" class="size-4" />
                 Sortie
-              </button>
-            </div>
-            <div class="border-default flex overflow-hidden rounded-full border">
-              <button
-                v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
-                :key="option.value"
-                type="button"
-                class="cursor-pointer px-3 py-1.5 text-xs font-semibold transition-colors"
-                :class="
-                  scanCardLanguage === option.value ? 'bg-primary text-inverted' : 'text-muted hover:text-highlighted'
-                "
-                @click="setScanCardLanguage(option.value)"
-              >
-                {{ option.label }}
               </button>
             </div>
             <p class="text-muted text-xs">
@@ -198,15 +163,6 @@
             :close="true"
             description="Le scan auto (caméra en direct) n'est pas disponible en développement : le navigateur réserve la caméra continue à un contexte sécurisé (HTTPS). Ce sera actif en production. En attendant, « Importer » ouvre l'appareil photo (capture manuelle)."
             @update:open="showAutoScanHelp = false"
-          />
-
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            class="hidden"
-            @change="onFileChosen"
           />
 
           <!-- Aperçu caméra inline (desktop). -->
@@ -230,54 +186,11 @@
               Résolution&nbsp;: <span class="text-highlighted font-medium">{{ webcamResolutionLabel }}</span>
             </p>
 
-            <div
-              class="border-default bg-elevated/40 relative aspect-video w-full overflow-hidden rounded-xl border"
-              @wheel.prevent="onWebcamWheel"
-            >
-              <video
-                ref="videoElInline"
-                autoplay
-                playsinline
-                muted
-                class="block h-full w-full bg-black object-cover transition-transform duration-150 ease-out"
-                :style="webcamPreviewStyle"
-              />
+            <div class="border-default bg-elevated/40 relative aspect-video w-full overflow-hidden rounded-xl border">
+              <video ref="videoElInline" autoplay playsinline muted class="block h-full w-full bg-black object-cover" />
               <div v-if="!webcamReady" class="text-muted absolute inset-0 flex items-center justify-center text-xs">
                 <UIcon name="i-lucide-loader-circle" class="text-primary mr-2 size-4 animate-spin" />
                 Initialisation de la webcam…
-              </div>
-
-              <div
-                v-if="webcamReady"
-                class="bg-elevated/90 border-default/60 absolute top-2 right-2 left-2 flex items-center gap-2 rounded-lg border px-2 py-1.5 shadow-sm backdrop-blur-sm sm:left-auto sm:max-w-xs"
-              >
-                <UButton
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-minus"
-                  :disabled="zoomLevel <= ZOOM_MIN"
-                  aria-label="Dézoomer"
-                  @click.prevent="adjustZoom(-0.25)"
-                />
-                <USlider
-                  :model-value="zoomLevel"
-                  :min="ZOOM_MIN"
-                  :max="ZOOM_MAX"
-                  :step="0.05"
-                  class="min-w-0 flex-1"
-                  @update:model-value="onZoomSliderChange"
-                />
-                <UButton
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-plus"
-                  :disabled="zoomLevel >= ZOOM_MAX"
-                  aria-label="Zoomer"
-                  @click.prevent="adjustZoom(0.25)"
-                />
-                <span class="text-muted w-10 shrink-0 text-right text-xs tabular-nums">{{ zoomPercentLabel }}</span>
               </div>
 
               <div
@@ -311,11 +224,8 @@
               </button>
             </div>
             <p class="text-muted text-[11px]">
-              <template v-if="autoScan">
-                Centrez chaque carte dans le cadre orange&nbsp;: identification instantanée si connue, sinon OCR
-                automatique. Retirez-la pour enchaîner. Molette pour zoomer.
-              </template>
-              <template v-else>Molette sur l’aperçu pour zoomer. {{ zoomHint }}</template>
+              Centrez chaque carte dans le cadre&nbsp;: identification instantanée si connue, sinon OCR automatique.
+              Retirez-la pour enchaîner.
             </p>
           </div>
 
@@ -334,51 +244,45 @@
                 >
                   Fermer
                 </UButton>
-                <div class="flex items-center gap-2">
-                  <UButton
-                    size="sm"
-                    color="neutral"
-                    variant="solid"
-                    :icon="soundOn ? 'i-lucide-volume-2' : 'i-lucide-volume-x'"
-                    class="bg-black/40 text-white backdrop-blur-sm"
-                    :aria-label="soundOn ? 'Couper le son' : 'Activer le son'"
-                    @click.prevent="soundOn = !soundOn"
-                  />
-                  <UButton
-                    v-if="torchSupported"
-                    size="sm"
-                    :color="torchOn ? 'warning' : 'neutral'"
-                    variant="solid"
-                    :icon="torchOn ? 'i-lucide-zap' : 'i-lucide-zap-off'"
-                    class="backdrop-blur-sm"
-                    :class="torchOn ? '' : 'bg-black/40 text-white'"
-                    :aria-label="torchOn ? 'Éteindre le flash' : 'Allumer le flash'"
-                    @click.prevent="toggleTorch"
-                  />
-                  <UBadge
-                    :color="connectionColor"
-                    variant="solid"
-                    size="sm"
-                    class="bg-black/40 text-white backdrop-blur-sm"
-                  >
-                    {{ connectionLabel }}
-                  </UBadge>
-                </div>
+                <UButton
+                  v-if="torchSupported"
+                  size="sm"
+                  :color="torchOn ? 'warning' : 'neutral'"
+                  variant="solid"
+                  :icon="torchOn ? 'i-lucide-zap' : 'i-lucide-zap-off'"
+                  class="backdrop-blur-sm"
+                  :class="torchOn ? '' : 'bg-black/40 text-white'"
+                  :aria-label="torchOn ? 'Éteindre le flash' : 'Allumer le flash'"
+                  @click.prevent="toggleTorch"
+                />
               </div>
 
-              <div class="relative min-h-0 flex-1" @wheel.prevent="onWebcamWheel">
+              <div class="relative min-h-0 flex-1">
                 <video
                   ref="videoElFullscreen"
                   autoplay
                   playsinline
                   muted
-                  class="absolute inset-0 h-full w-full object-cover transition-transform duration-150 ease-out"
-                  :style="webcamPreviewStyle"
+                  class="absolute inset-0 h-full w-full object-cover"
                 />
+                <!-- Langue de session en survol (verticale, milieu-droite). -->
+                <div
+                  class="absolute top-1/2 right-2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-full border border-white/20 bg-black/50 backdrop-blur-md"
+                >
+                  <button
+                    v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="cursor-pointer px-3 py-2.5 text-xs font-bold transition-colors"
+                    :class="scanCardLanguage === option.value ? 'bg-primary text-white' : 'text-white/75'"
+                    @click="setScanCardLanguage(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
                 <svg
                   v-if="webcamReady && autoScan && videoIntrinsicW && videoIntrinsicH"
-                  class="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-150 ease-out"
-                  :style="webcamPreviewStyle"
+                  class="pointer-events-none absolute inset-0 h-full w-full"
                   :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
                   preserveAspectRatio="xMidYMid slice"
                 >
@@ -419,7 +323,7 @@
 
                 <div
                   v-if="webcamReady && autoScan"
-                  class="absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(94vw,24rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-5 py-2.5 text-center text-sm leading-snug font-medium text-white shadow-lg backdrop-blur-md"
+                  class="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(94vw,24rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-5 py-2.5 text-center text-sm leading-snug font-medium text-white shadow-lg backdrop-blur-md"
                 >
                   <span
                     class="size-2.5 shrink-0 rounded-full"
@@ -435,7 +339,7 @@
                 <Transition name="fade">
                   <div
                     v-if="latestOutcome"
-                    class="absolute right-3 bottom-3 left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
+                    class="absolute right-3 bottom-[max(4.75rem,env(safe-area-inset-bottom))] left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
                   >
                     <div class="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-white/10">
                       <img
@@ -499,88 +403,6 @@
                   </div>
                 </Transition>
               </div>
-
-              <div
-                class="border-t border-white/10 bg-black/80 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
-              >
-                <div v-if="webcamReady" class="mb-2 flex items-center gap-2">
-                  <UButton
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-minus"
-                    class="text-white"
-                    :disabled="zoomLevel <= ZOOM_MIN"
-                    @click.prevent="adjustZoom(-0.25)"
-                  />
-                  <USlider
-                    :model-value="zoomLevel"
-                    :min="ZOOM_MIN"
-                    :max="ZOOM_MAX"
-                    :step="0.05"
-                    class="min-w-0 flex-1"
-                    @update:model-value="onZoomSliderChange"
-                  />
-                  <UButton
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-plus"
-                    class="text-white"
-                    :disabled="zoomLevel >= ZOOM_MAX"
-                    @click.prevent="adjustZoom(0.25)"
-                  />
-                  <span class="w-10 text-right text-xs text-white/80 tabular-nums">{{ zoomPercentLabel }}</span>
-                </div>
-                <div class="mb-2 flex flex-wrap items-center justify-center gap-2">
-                  <div class="flex overflow-hidden rounded-full border border-white/20 bg-black/40">
-                    <button
-                      v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
-                      :key="option.value"
-                      type="button"
-                      class="cursor-pointer px-3 py-2 text-xs font-semibold transition-colors"
-                      :class="scanCardLanguage === option.value ? 'bg-primary text-white' : 'text-white/70'"
-                      @click="setScanCardLanguage(option.value)"
-                    >
-                      {{ option.label }}
-                    </button>
-                  </div>
-                  <div class="flex overflow-hidden rounded-full border border-white/20 bg-black/40">
-                    <button
-                      type="button"
-                      class="flex cursor-pointer items-center gap-1.5 px-5 py-2 text-sm font-semibold transition-colors"
-                      :class="scanDirection === 'in' ? 'bg-emerald-500 text-white' : 'text-white/70'"
-                      @click="setScanDirection('in')"
-                    >
-                      <UIcon name="i-lucide-plus" class="size-4" />
-                      Entrée
-                    </button>
-                    <button
-                      type="button"
-                      class="flex cursor-pointer items-center gap-1.5 px-5 py-2 text-sm font-semibold transition-colors"
-                      :class="scanDirection === 'out' ? 'bg-red-500 text-white' : 'text-white/70'"
-                      @click="setScanDirection('out')"
-                    >
-                      <UIcon name="i-lucide-minus" class="size-4" />
-                      Sortie
-                    </button>
-                  </div>
-                </div>
-                <div class="flex items-center justify-between gap-2">
-                  <USwitch v-model="autoScan" label="Scan auto" />
-                  <UButton
-                    v-if="!autoScan"
-                    size="md"
-                    color="primary"
-                    icon="i-lucide-camera"
-                    :loading="uploading"
-                    :disabled="!webcamReady"
-                    @click.prevent="captureFromWebcam"
-                  >
-                    Capturer
-                  </UButton>
-                </div>
-              </div>
             </div>
           </Teleport>
 
@@ -599,8 +421,8 @@
           />
 
           <p class="text-muted text-xs">
-            Astuce&nbsp;: la langue de la carte (français, japonais…) est reconnue automatiquement. Si la caméra n'est
-            pas disponible, utilisez <span class="font-medium">Importer une photo</span> en repli.
+            Astuce&nbsp;: choisissez la langue du lot depuis la caméra (sélecteur à droite) — « Auto » reconnaît la
+            carte et sa langue tout seul.
           </p>
         </UCard>
 
@@ -820,7 +642,7 @@ const SCAN_LANGUAGE = 'auto'
 // On-device identification: perceptual-hash index of every TCGdex card image.
 // A confident match commits instantly (no photo, no OCR); anything uncertain
 // falls back to the photo pipeline below.
-const scanMatch = useScanMatchIndex()
+const scanEmbed = useScanEmbedIndex()
 
 const SCAN_CARD_LANGUAGE_STORAGE_KEY = 'goupixdex-scan-card-language'
 const SCAN_CARD_LANGUAGE_OPTIONS: { value: ScanCardLanguage; label: string }[] = [
@@ -886,7 +708,6 @@ const flashOverlayClass = computed<string>(() => {
   return 'bg-red-600/40'
 })
 
-const fileInput = ref<HTMLInputElement | null>(null)
 /**
  * The inline (desktop) and fullscreen (phone) previews are two distinct
  * `<video>` elements. They used to share one `ref`, and whichever unmounted
@@ -901,8 +722,6 @@ const videoEl = computed<HTMLVideoElement | null>(() =>
 const uploading = ref(false)
 const toast = useToast()
 
-const ZOOM_MIN = 1
-const ZOOM_MAX = 4
 const WEBCAM_UPLOAD_COMPRESS = { maxEdge: 2560, quality: 0.9 } as const
 
 /**
@@ -934,12 +753,6 @@ interface VideoDeviceOption {
   label: string
 }
 
-interface HardwareZoomCaps {
-  min: number
-  max: number
-  step: number
-}
-
 const webcamActive = ref(false)
 const webcamStarting = ref(false)
 const webcamReady = ref(false)
@@ -955,31 +768,9 @@ const soundOn = ref(true)
 const webcamResolutionLabel = ref<string | null>(null)
 const videoDevices = ref<VideoDeviceOption[]>([])
 const selectedCameraId = ref<string | undefined>(undefined)
-const zoomLevel = ref(1)
-/** Software zoom applied on top of hardware when the slider exceeds the optical range. */
-const softwareZoomFactor = ref(1)
 
 let webcamStream: MediaStream | null = null
 let videoTrack: MediaStreamTrack | null = null
-let hardwareZoomCaps: HardwareZoomCaps | null = null
-
-const zoomPercentLabel = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
-
-const zoomHint = computed(() => {
-  if (hardwareZoomCaps && hardwareZoomCaps.max > hardwareZoomCaps.min) {
-    return 'Zoom optique de la webcam utilisé quand disponible.'
-  }
-  return 'Zoom numérique appliqué à la capture.'
-})
-
-const webcamPreviewStyle = computed(() => ({
-  transform: `scale(${softwareZoomFactor.value})`,
-  transformOrigin: 'center center',
-}))
-
-function clampZoom(value: number): number {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(value.toFixed(2))))
-}
 
 /** Labels that usually mean front / selfie camera — never pick these for card scan. */
 const FRONT_CAMERA_LABEL = /\b(front|user|selfie|self|facetime|face|frontal|avant|truedepth|inward)\b/i
@@ -1027,11 +818,12 @@ function pickRearCameraId(devices: VideoDeviceOption[]): string | undefined {
 }
 
 function buildVideoConstraints(): MediaTrackConstraints {
-  // 1920 is plenty: the OCR crop is 630×880. Asking for 4K used to make every
-  // capture-frame grab allocate ~33 MB and freeze mid-range phones.
+  // Ask for the sensor's best (the preview must look like the native camera
+  // app); the browser negotiates down on lesser devices. Processing stays
+  // cheap regardless: detection reads 640 px and OCR captures cap at 1920.
   const hd: MediaTrackConstraints = {
-    width: { min: 1280, ideal: 1920 },
-    height: { min: 720, ideal: 1080 },
+    width: { min: 1280, ideal: 3840 },
+    height: { min: 720, ideal: 2160 },
     frameRate: { ideal: 30 },
   }
   if (selectedCameraId.value) {
@@ -1068,27 +860,14 @@ function updateResolutionLabel(track: MediaStreamTrack): void {
   webcamResolutionLabel.value = w && h ? `${w}×${h}` : null
 }
 
-function readHardwareZoomCaps(track: MediaStreamTrack): void {
-  const caps = track.getCapabilities?.()
-  if (caps?.zoom && typeof caps.zoom.min === 'number' && typeof caps.zoom.max === 'number') {
-    hardwareZoomCaps = {
-      min: caps.zoom.min,
-      max: caps.zoom.max,
-      step: caps.zoom.step ?? 0.1,
-    }
-  } else {
-    hardwareZoomCaps = null
-  }
-}
-
 async function openVideoStream(): Promise<MediaStream> {
   const attempts: MediaTrackConstraints[] = []
 
   if (selectedCameraId.value) {
     attempts.push({
       deviceId: { exact: selectedCameraId.value },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      width: { ideal: 3840 },
+      height: { ideal: 2160 },
       frameRate: { ideal: 30 },
     })
   }
@@ -1149,54 +928,6 @@ async function openVideoStream(): Promise<MediaStream> {
   throw lastErr instanceof Error ? lastErr : new Error('Impossible d’ouvrir la caméra arrière')
 }
 
-async function applyZoomToTrack(level: number): Promise<void> {
-  const clamped = clampZoom(level)
-  zoomLevel.value = clamped
-
-  let hardwareMagnification = 1
-  if (hardwareZoomCaps && videoTrack && hardwareZoomCaps.max > hardwareZoomCaps.min) {
-    const t = (clamped - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)
-    const target = hardwareZoomCaps.min + t * (hardwareZoomCaps.max - hardwareZoomCaps.min)
-    try {
-      // Android Chrome expects `advanced` for zoom (like the torch); keep the
-      // plain form as a fallback for engines that only accept the direct key.
-      await videoTrack.applyConstraints({
-        advanced: [{ zoom: target } as unknown as MediaTrackConstraintSet],
-      })
-      hardwareMagnification = target / hardwareZoomCaps.min
-    } catch {
-      try {
-        await videoTrack.applyConstraints({ zoom: target } as MediaTrackConstraintSet)
-        hardwareMagnification = target / hardwareZoomCaps.min
-      } catch {
-        hardwareMagnification = 1
-      }
-    }
-  }
-
-  softwareZoomFactor.value = Math.max(1, clamped / hardwareMagnification)
-}
-
-function adjustZoom(delta: number): void {
-  void applyZoomToTrack(zoomLevel.value + delta)
-}
-
-function onZoomSliderChange(value: number | number[] | undefined): void {
-  const raw = Array.isArray(value) ? value[0] : value
-  if (raw === undefined) {
-    return
-  }
-  void applyZoomToTrack(raw)
-}
-
-function onWebcamWheel(e: WheelEvent): void {
-  if (!webcamReady.value) {
-    return
-  }
-  const delta = e.deltaY < 0 ? 0.1 : -0.1
-  void applyZoomToTrack(zoomLevel.value + delta)
-}
-
 /** Detect torch capability on the active rear track (Chrome/Android, some iOS). */
 function readTorchCap(track: MediaStreamTrack): void {
   try {
@@ -1227,7 +958,6 @@ async function toggleTorch(): Promise<void> {
 async function attachStreamToPreview(stream: MediaStream): Promise<void> {
   videoTrack = stream.getVideoTracks()[0] ?? null
   if (videoTrack) {
-    readHardwareZoomCaps(videoTrack)
     readTorchCap(videoTrack)
     updateResolutionLabel(videoTrack)
     // Camera stolen by a call / another app / revoked permission: recover
@@ -1237,11 +967,6 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
 
   webcamStream = stream
   webcamActive.value = true
-  // Default to a moderate zoom so the card "fills" the frame on opening —
-  // wide-angle phone cameras render the card very small at 1×. The user can
-  // dezoom with the slider; hardware zoom is preferred when available.
-  zoomLevel.value = 1.5
-  softwareZoomFactor.value = 1
   await nextTick()
 
   if (!videoEl.value) {
@@ -1255,7 +980,6 @@ async function attachStreamToPreview(stream: MediaStream): Promise<void> {
     if (videoTrack) {
       updateResolutionLabel(videoTrack)
     }
-    applyZoomToTrack(zoomLevel.value)
     acquireWakeLock()
   }
   videoEl.value.onloadedmetadata = onVideoReady
@@ -1391,7 +1115,6 @@ function stopWebcam(): void {
     videoTrack.onended = null
   }
   videoTrack = null
-  hardwareZoomCaps = null
   torchSupported.value = false
   torchOn.value = false
   if (videoEl.value) {
@@ -1403,8 +1126,6 @@ function stopWebcam(): void {
   webcamActive.value = false
   webcamReady.value = false
   webcamResolutionLabel.value = null
-  zoomLevel.value = 1
-  softwareZoomFactor.value = 1
   releaseWakeLock()
 }
 
@@ -1419,20 +1140,14 @@ async function captureFromWebcam(): Promise<void> {
     return
   }
 
-  const z = softwareZoomFactor.value
-  const cropW = fullW / z
-  const cropH = fullH / z
-  const sx = (fullW - cropW) / 2
-  const sy = (fullH - cropH) / 2
-
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(cropW)
-  canvas.height = Math.round(cropH)
+  canvas.width = fullW
+  canvas.height = fullH
   const ctx = canvas.getContext('2d')
   if (!ctx) {
     return
   }
-  ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height)
+  ctx.drawImage(video, 0, 0, fullW, fullH)
 
   const blob = await new Promise<Blob | null>((resolve) => {
     canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95)
@@ -1677,14 +1392,6 @@ function rowAccentClass(s: ScanEventStatus): string {
   return ''
 }
 
-function openNativeCamera(): void {
-  if (!fileInput.value) {
-    return
-  }
-  fileInput.value.value = ''
-  fileInput.value.click()
-}
-
 // The flag workaround only makes sense in local dev (HTTP). In prod the site
 // is HTTPS so the live camera just works — never surface this there.
 const isDev = import.meta.dev
@@ -1702,27 +1409,6 @@ function onActivateAutoScan(): void {
     return
   }
   showAutoScanHelp.value = isDev
-}
-
-async function onFileChosen(e: Event): Promise<void> {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) {
-    return
-  }
-  uploading.value = true
-  try {
-    await uploadPhoto(file, uploadLanguage.value, undefined, undefined, scanDirection.value)
-  } catch (err) {
-    toast.add({
-      title: 'Envoi impossible',
-      description: apiErrorMessage(err),
-      color: 'error',
-    })
-  } finally {
-    uploading.value = false
-    input.value = ''
-  }
 }
 
 // Audio feedback. The context must be created + resumed inside a user gesture
@@ -1932,17 +1618,43 @@ function flashInstantMatch(name: string): void {
 let lastInstantCommit: { cardId: string; direction: ScanDirection; at: number } | null = null
 const INSTANT_COMMIT_DEBOUNCE_MS = 3000
 
+/** Une inférence à la fois — un crop arrivé pendant l'inférence est ignoré. */
+let identifyInFlight = false
+
 /**
- * Identification continue : décision sur les candidats calculés à CHAQUE
- * frame de détection (quad ou zone-guide). Un verdict sûr committe la carte
- * immédiatement — bip + flash + POST en arrière-plan — sans photo ni OCR.
- * @param matches - Paires plates `[entrée, distance]` du worker, triées.
- * @returns `true` si la carte est commitée (le scanner passe en « retirez la carte »).
+ * Identification d'un crop carte produit par le worker (quad suivi ou fenêtre
+ * de recherche) : embedding MobileNet + cosinus sur l'index. Un verdict sûr
+ * committe la carte — bip + flash + POST en arrière-plan — et verrouille le
+ * cadre suiveur sur la zone identifiée.
+ * @param bufs - Crops RGBA 224×224 de la tentative (transférés par le worker).
+ * @param matchWindow - Fenêtre gagnante (coords vidéo) quand aucun contour n'était accroché.
+ * @param matchWindow.x - Bord gauche de la fenêtre.
+ * @param matchWindow.y - Bord haut de la fenêtre.
+ * @param matchWindow.w - Largeur de la fenêtre.
+ * @param matchWindow.h - Hauteur de la fenêtre.
  */
-function onLiveMatchCandidates(matches: number[]): boolean {
-  const decision = scanMatch.decide(matches, scanCardLanguage.value)
+async function onIdentifyCrop(
+  bufs: ArrayBuffer[],
+  matchWindow?: { x: number; y: number; w: number; h: number },
+): Promise<void> {
+  if (identifyInFlight || !scanEmbed.ready.value) {
+    return
+  }
+  identifyInFlight = true
+  let decision: Awaited<ReturnType<typeof scanEmbed.identify>> = null
+  try {
+    decision = await scanEmbed.identify(
+      bufs.map((b) => new Uint8ClampedArray(b)),
+      scanCardLanguage.value,
+    )
+  } catch {
+    decision = null
+  } finally {
+    identifyInFlight = false
+  }
   if (!decision) {
-    return false
+    reportIdentifyOutcome(false)
+    return
   }
   const now = Date.now()
   if (
@@ -1951,9 +1663,14 @@ function onLiveMatchCandidates(matches: number[]): boolean {
     lastInstantCommit.direction === scanDirection.value &&
     now - lastInstantCommit.at < INSTANT_COMMIT_DEBOUNCE_MS
   ) {
-    return true
+    reportIdentifyOutcome(true)
+    return
   }
   lastInstantCommit = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
+  if (matchWindow) {
+    lockTrackingRect(matchWindow)
+  }
+  reportIdentifyOutcome(true)
   flashInstantMatch(decision.name)
   if (scanDirection.value === 'out') {
     playRemoveBeep()
@@ -1977,7 +1694,6 @@ function onLiveMatchCandidates(matches: number[]): boolean {
       triggerFlash('error')
       toast.add({ title: 'Ajout impossible', description: apiErrorMessage(err), color: 'error' })
     })
-  return true
 }
 
 /**
@@ -1987,7 +1703,7 @@ function onLiveMatchCandidates(matches: number[]): boolean {
  * uploads the photo to the server pipeline, exactly as before. The success
  * chime is triggered later, when the outcome event arrives.
  */
-async function onDetectorCapture(file: File, matches: number[]): Promise<void> {
+async function onDetectorCapture(file: File): Promise<void> {
   uploading.value = true
   blurryCaptureHint.value = false
   // A new card is being processed — drop the previous overlay right away so
@@ -1996,15 +1712,8 @@ async function onDetectorCapture(file: File, matches: number[]): Promise<void> {
   if (latestOutcome.value) {
     dismissedOutcomeId.value = latestOutcome.value.event_id
   }
-  const decision = scanMatch.decide(matches, scanCardLanguage.value)
   try {
-    if (decision) {
-      flashInstantMatch(decision.name)
-      await commitMatchedScan(decision.tcgdexCardId, decision.language, scanDirection.value)
-    } else {
-      const language = uploadLanguage.value
-      await uploadPhoto(file, language, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
-    }
+    await uploadPhoto(file, uploadLanguage.value, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
   } catch (err) {
     toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
   } finally {
@@ -2022,29 +1731,22 @@ const {
   quad: cardQuad,
   ready: detectorReady,
   loadError: detectorError,
-  setMatchIndex,
+  lockTrackingRect,
+  reportIdentifyOutcome,
 } = useCardAutoScan({
   video: videoEl,
   enabled: autoScanEnabled,
   busy: uploading,
+  identifyActive: computed(() => scanEmbed.ready.value),
   onCapture: onDetectorCapture,
-  onLiveMatches: onLiveMatchCandidates,
+  onIdentifyCrop: (bufs, win): void => {
+    void onIdentifyCrop(bufs, win)
+  },
   onBlurryRetry: (): void => {
     blurryCaptureHint.value = true
     vibrate(30)
   },
 })
-
-// Hand the visual-match index to the detection worker as soon as both exist.
-watch(
-  scanMatch.indexBuffer,
-  (buf): void => {
-    if (buf) {
-      setMatchIndex(buf)
-    }
-  },
-  { immediate: true },
-)
 
 // The hint only makes sense while a capture is being retried — clear it as
 // soon as the scanner goes back to watching / waiting.
@@ -2057,7 +1759,7 @@ watch(autoScanPhase, (p): void => {
 /**
  * Zone-guide affichée quand aucun contour n'est verrouillé — mêmes fractions
  * que le crop central du worker (62 % de la hauteur, ratio carte 63:88), en
- * coordonnées intrinsèques pour suivre exactement le zoom de la vidéo.
+ * coordonnées intrinsèques vidéo.
  */
 /** Points SVG du quad suiveur (coordonnées intrinsèques vidéo), ou null. */
 const cardQuadPoints = computed<string | null>(() => {
@@ -2293,7 +1995,7 @@ onMounted(async () => {
   await connect()
   // Desktop is a monitor screen (QR + live feed) — no camera to open there.
   if (!isDesktopApp.value && liveCameraSupported.value) {
-    void scanMatch.load()
+    void scanEmbed.load()
     await startWebcam()
   }
 })

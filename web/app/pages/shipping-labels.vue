@@ -26,7 +26,7 @@
     </template>
 
     <template #body>
-      <div class="mx-auto w-full max-w-[1400px] space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <div class="mx-auto w-full max-w-[1400px] space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
         <GoupixDexPageHeader
           title="Étiquettes d'envoi"
           description="Générez un PDF d'étiquettes Avery L7173 pour vos commandes eBay : destinataire, expéditeur et timbre."

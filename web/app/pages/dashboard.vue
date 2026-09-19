@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <div class="space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
         <GoupixDexPageHeader
           title="Tableau de bord"
           description="Vue d'ensemble de votre activité : ventes, marges et stock."

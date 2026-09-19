@@ -15,7 +15,7 @@
     </template>
 
     <template #body>
-      <div class="space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <div class="space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
         <GoupixDexPageHeader
           title="Paniers Cardmarket"
           description="Collez vos liens de singles, GoupixDex classe les vendeurs par couverture et surcoût pour limiter les frais de port."

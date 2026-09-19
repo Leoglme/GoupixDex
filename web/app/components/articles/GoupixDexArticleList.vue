@@ -303,118 +303,97 @@
       </table>
     </div>
 
-    <div class="space-y-3 lg:hidden">
+    <div class="space-y-2 lg:hidden">
       <div v-for="row in cachedRows" v-show="idToPage.get(row.id) === page" :key="row.id" class="w-full">
-        <UCard class="border-default/80 bg-elevated/70 w-full border" :ui="{ body: 'p-3 space-y-3' }">
-          <div class="flex items-start gap-3">
-            <div class="shrink-0 pt-1">
-              <UCheckbox
-                :model-value="isSelected(row.id)"
-                :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
-                @update:model-value="(v) => toggleId(row.id, v)"
+        <UCard class="border-default/80 bg-elevated/70 w-full overflow-hidden border" :ui="{ body: 'p-0 sm:p-0' }">
+          <div class="flex items-stretch">
+            <!-- Visuel de la carte : pleine hauteur de la ligne, ratio carte. -->
+            <NuxtLink
+              :to="`/articles/${row.id}`"
+              class="bg-elevated ring-default/60 relative w-24 shrink-0 self-stretch overflow-hidden ring-1"
+              :aria-label="row.pokemon_name || row.title"
+            >
+              <img
+                v-if="row.images?.length"
+                :src="row.images[0]!.image_url"
+                :alt="row.title"
+                loading="lazy"
+                decoding="async"
+                fetchpriority="low"
+                class="absolute inset-0 h-full w-full object-cover"
               />
-            </div>
-            <div class="min-w-0 flex-1 space-y-2">
-              <div class="flex gap-3">
-                <div
-                  v-if="row.images?.length"
-                  class="bg-elevated ring-default w-20 shrink-0 overflow-hidden rounded-lg ring"
-                >
-                  <img
-                    :src="row.images[0]!.image_url"
-                    :alt="row.title"
-                    width="80"
-                    height="80"
-                    loading="lazy"
-                    decoding="async"
-                    fetchpriority="low"
-                    class="h-20 w-full object-cover"
-                  />
-                </div>
-                <div class="min-w-0 flex-1 space-y-1">
+              <div v-else class="text-muted absolute inset-0 flex items-center justify-center text-sm font-semibold">
+                {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
+              </div>
+            </NuxtLink>
+
+            <div class="min-w-0 flex-1 space-y-2 p-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
                   <NuxtLink
                     :to="`/articles/${row.id}`"
-                    class="text-primary block truncate font-medium underline-offset-2 hover:underline"
+                    class="text-highlighted block truncate text-sm font-semibold underline-offset-2 hover:underline"
                   >
                     {{ row.pokemon_name || row.title }}
                   </NuxtLink>
                   <p class="text-muted truncate text-xs">{{ row.set_code || '—' }} · {{ row.card_number || '—' }}</p>
-                  <div class="flex flex-wrap gap-1.5 text-[11px]">
-                    <UBadge v-if="!row.is_sold" color="error" variant="subtle">
-                      {{ soldStatusLabel(row) }}
-                    </UBadge>
-                    <span
-                      v-else-if="soldStatusBrandStyle(row)"
-                      class="inline-flex rounded-md px-1.5 py-0.5 font-semibold ring-1 ring-black/10"
-                      :style="soldStatusBrandStyle(row)!"
-                    >
-                      {{ soldStatusLabel(row) }}
-                    </span>
-                    <UBadge v-else color="success" variant="subtle">
-                      {{ soldStatusLabel(row) }}
-                    </UBadge>
-                    <UBadge :color="(row.published_on_vinted ?? false) ? 'success' : 'neutral'" variant="subtle">
-                      {{ (row.published_on_vinted ?? false) ? 'Vinted oui' : 'Vinted' }}
-                    </UBadge>
-                    <UBadge
-                      v-if="showEbayColumn"
-                      :color="(row.published_on_ebay ?? false) ? 'success' : 'neutral'"
-                      variant="subtle"
-                    >
-                      eBay {{ (row.published_on_ebay ?? false) ? 'oui' : 'non' }}
-                    </UBadge>
-                    <span class="text-muted"> Achat {{ eur.format(row.purchase_price) }} </span>
-                    <span class="text-muted">
-                      Prix affiché {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
-                    </span>
-                    <span v-if="row.is_sold" class="text-muted">
-                      Réalisé {{ realizedSalePrice(row) != null ? eur.format(realizedSalePrice(row)!) : '—' }}
-                    </span>
-                  </div>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <UCheckbox
+                    :model-value="isSelected(row.id)"
+                    :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
+                    @update:model-value="(v) => toggleId(row.id, v)"
+                  />
+                  <UDropdownMenu :items="buildRowMenu(row)">
+                    <UButton color="neutral" variant="ghost" icon="i-lucide-more-vertical" size="sm" square />
+                  </UDropdownMenu>
                 </div>
               </div>
-              <div class="flex flex-wrap justify-end gap-2">
-                <UButton size="sm" variant="outline" @click="emit('edit', row.id)"> Modifier </UButton>
-                <UButton
-                  size="sm"
-                  variant="outline"
-                  icon="i-lucide-store"
-                  :disabled="!isDesktopApp || row.is_sold || !row.images?.length"
-                  @click="emit('publish-vinted', row)"
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                <UBadge v-if="!row.is_sold" color="error" variant="subtle" size="sm">
+                  {{ soldStatusLabel(row) }}
+                </UBadge>
+                <span
+                  v-else-if="soldStatusBrandStyle(row)"
+                  class="inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-black/10"
+                  :style="soldStatusBrandStyle(row)!"
                 >
+                  {{ soldStatusLabel(row) }}
+                </span>
+                <UBadge v-else color="success" variant="subtle" size="sm">
+                  {{ soldStatusLabel(row) }}
+                </UBadge>
+                <UBadge v-if="row.published_on_vinted ?? false" color="success" variant="subtle" size="sm">
                   Vinted
-                </UButton>
-                <UButton
-                  v-if="ebayPublishAvailable"
+                </UBadge>
+                <UBadge
+                  v-if="showEbayColumn && (row.published_on_ebay ?? false)"
+                  color="success"
+                  variant="subtle"
                   size="sm"
-                  variant="outline"
-                  icon="i-lucide-shopping-bag"
-                  :disabled="ebayRowDisabled(row)"
-                  @click="emit('publish-ebay', row)"
                 >
                   eBay
-                </UButton>
-                <UButton
-                  v-if="row.is_sold && row.sale_source === 'vinted' && row.cross_ebay_removal_failed"
-                  size="sm"
-                  variant="outline"
-                  icon="i-lucide-refresh-ccw"
-                  @click="emit('retry-cross-ebay', row.id)"
-                >
-                  Réessayer eBay
-                </UButton>
-                <UButton
-                  v-if="row.pending_vinted_unlist && (row.cross_vinted_removal_failed || isDesktopApp)"
-                  size="sm"
-                  variant="outline"
-                  icon="i-lucide-refresh-ccw"
-                  :disabled="!isDesktopApp"
-                  @click="emit('retry-cross-vinted', row.id)"
-                >
-                  Réessayer Vinted
-                </UButton>
-                <UButton size="sm" :disabled="row.is_sold" @click="emit('sold', row)"> Vendu </UButton>
-                <UButton size="sm" color="error" variant="soft" @click="emit('delete', row.id)"> Supprimer </UButton>
+                </UBadge>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <p class="text-muted text-[10px] uppercase">Achat</p>
+                  <p class="text-highlighted font-medium tabular-nums">{{ eur.format(row.purchase_price) }}</p>
+                </div>
+                <div>
+                  <p class="text-muted text-[10px] uppercase">Affiché</p>
+                  <p class="text-highlighted font-medium tabular-nums">
+                    {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-muted text-[10px] uppercase">Réalisé</p>
+                  <p class="text-highlighted font-medium tabular-nums">
+                    {{ realizedSalePrice(row) != null ? eur.format(realizedSalePrice(row)!) : '—' }}
+                  </p>
+                </div>
               </div>
             </div>
           </div>

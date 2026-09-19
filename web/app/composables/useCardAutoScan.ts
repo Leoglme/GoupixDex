@@ -24,19 +24,16 @@ export interface UseCardAutoScanOptions {
   enabled: Ref<boolean> | ComputedRef<boolean>
   /** `true` while an upload is in flight; never capture then. */
   busy: Ref<boolean>
+  /** Called once per card with the deskewed, cropped card JPEG (photo-OCR fallback). */
+  onCapture: (file: File) => void | Promise<void>
+  /** `true` when the main-thread identifier (embedding index) is ready. */
+  identifyActive: Ref<boolean> | ComputedRef<boolean>
   /**
-   * Called once per card with the deskewed, cropped card JPEG and the raw
-   * visual-match candidates (flat `[indexEntry, distance]` pairs from the
-   * worker, best first — empty when no index is loaded).
+   * Live identification crops: deskewed 224×224 RGBA candidates (tracked
+   * quad, or search-window variants whose zone is given in video coords).
+   * The page runs the embedding + decision, then calls `reportIdentifyOutcome`.
    */
-  onCapture: (file: File, matches: number[]) => void | Promise<void>
-  /**
-   * Live identification: candidates computed on a detection frame (quad or
-   * central guide crop), before any capture. Return `true` when the card was
-   * committed — the scanner then enters its "remove the card" cooldown; on
-   * `false` the miss counts toward the photo-OCR fallback.
-   */
-  onLiveMatches?: (matches: number[]) => boolean
+  onIdentifyCrop?: (bufs: ArrayBuffer[], window?: { x: number; y: number; w: number; h: number }) => void
   /** Called when a burst came out motion-blurred and is being retried — UI hint. */
   onBlurryRetry?: () => void
 }
@@ -97,17 +94,11 @@ const SCENE_CHANGE_FRAC = 0.22
 const VOTE_DRIFT_FRAC = 0.12
 /** Empty detections we wait through before the overlay disappears (≈ 400 ms). */
 const MISS_LINGER_TICKS = 4
-/**
- * Pokémon card ratio — we force the *displayed* rect to this so the overlay
- * always reads as a card even when the underlying detection has slight noise.
- */
-
 interface BurstShot {
   buf: ArrayBuffer
   w: number
   h: number
   sharpness: number
-  matches: number[]
 }
 
 /**
@@ -123,15 +114,12 @@ interface BurstShot {
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
  */
 export function useCardAutoScan(opts: UseCardAutoScanOptions) {
-  const { video, enabled, busy, onCapture, onLiveMatches, onBlurryRetry } = opts
+  const { video, enabled, busy, identifyActive, onCapture, onIdentifyCrop, onBlurryRetry } = opts
 
   const phase: Ref<AutoScanPhase> = ref('idle')
   const quad: Ref<CardQuad | null> = ref(null)
   const ready: Ref<boolean> = ref(false)
   const loadError: Ref<string | null> = ref(null)
-  /** `true` once the worker holds the visual-match index (instant identification). */
-  const matchIndexReady: Ref<boolean> = ref(false)
-  let pendingIndexBuffer: ArrayBuffer | null = null
 
   let worker: Worker | null = null
   let timer: ReturnType<typeof setInterval> | null = null
@@ -212,6 +200,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    * Fixed guide rectangle in video-intrinsic px — same geometry as the on-screen
    * silhouette and the worker's central crop. Used for OCR capture when contour
    * detection fails (wood table, sleeve glare…).
+   * @param vw - Largeur intrinsèque vidéo (px).
+   * @param vh - Hauteur intrinsèque vidéo (px).
+   * @returns {Pt[]} Les 4 coins du rectangle guide.
    */
   function guideCorners(vw: number, vh: number): Pt[] {
     const gh = vh * GUIDE_HEIGHT_FRAC
@@ -228,7 +219,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   /**
    * True when the scanner may fire a photo-OCR burst.
-   * @param requireLiveMisses - When true (guide-only path), live hash misses are mandatory even without an index.
+   * @param requireLiveMisses - When true (guide-only path), identify misses are mandatory even without an index.
+   * @returns {boolean} Autorisation de déclencher la rafale photo.
    */
   function shouldTriggerPhotoFallback(requireLiveMisses: boolean = false): boolean {
     if (capturing || !armed || busy.value) {
@@ -237,7 +229,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     if (Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
       return false
     }
-    if (requireLiveMisses || matchIndexReady.value) {
+    if (requireLiveMisses || identifyActive.value) {
       return liveMatchMisses >= LIVE_MATCH_MISSES_BEFORE_PHOTO
     }
     return true
@@ -409,7 +401,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
           return
         }
         const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
-        void Promise.resolve(onCapture(file, best.matches)).finally(finishCooldown)
+        void Promise.resolve(onCapture(file)).finally(finishCooldown)
       },
       'image/jpeg',
       0.92,
@@ -505,7 +497,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
 
     // Prefer the fixed guide crop for OCR — contour quads jitter on wood / sleeves.
-    const burstCorners = el.videoWidth && matchIndexReady.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
+    const burstCorners = el.videoWidth && identifyActive.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
     beginBurst(burstCorners)
   }
 
@@ -538,7 +530,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     detectSentAt = Date.now()
     // `im` gates the in-worker identification: pointless during cooldown (the
     // card is already committed) — tracking alone keeps the overlay glued.
-    const identify = armed && !capturing && !busy.value && matchIndexReady.value
+    const identify = armed && !capturing && !busy.value && identifyActive.value
     worker.postMessage(
       { t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight, im: identify },
       [f.buf],
@@ -553,25 +545,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const d = e.data as
       | { t: 'ready' }
       | { t: 'error'; m: string }
-      | { t: 'quad'; corners: Pt[]; matches?: number[] }
-      | { t: 'nq'; matches?: number[] }
-      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number; matches?: number[] }
+      | { t: 'quad'; corners: Pt[] }
+      | { t: 'nq' }
+      | { t: 'idcrop'; bufs: ArrayBuffer[]; win?: { x: number; y: number; w: number; h: number } }
+      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
       | { t: 'warp_failed'; m: string }
-      | { t: 'index_ready'; count: number }
     if (d.t === 'ready') {
       ready.value = true
       loadError.value = null
-      if (pendingIndexBuffer) {
-        worker?.postMessage({ t: 'index', buf: pendingIndexBuffer })
-      }
       if (enabled.value) {
         phase.value = 'watching'
         startPump()
       }
-      return
-    }
-    if (d.t === 'index_ready') {
-      matchIndexReady.value = d.count > 0
       return
     }
     if (d.t === 'error') {
@@ -587,14 +572,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     if (d.t === 'quad') {
       detectInFlight = false
-      handleLiveMatches(d.matches)
       onDetection(d.corners)
       return
     }
     if (d.t === 'nq') {
       detectInFlight = false
-      handleLiveMatches(d.matches)
       onDetection(null)
+      return
+    }
+    if (d.t === 'idcrop') {
+      if (onIdentifyCrop && armed && !capturing && !busy.value && enabled.value) {
+        onIdentifyCrop(d.bufs, d.win)
+      }
       return
     }
     if (d.t === 'warp_failed') {
@@ -608,7 +597,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       if (!capturing) {
         return
       }
-      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness, matches: d.matches ?? [] })
+      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness })
       if (burstShots.length + burstMisses < BURST_COUNT) {
         burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
       } else {
@@ -618,16 +607,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Forward live identification candidates to the page. A committed card
-   * flips the scanner straight into the "remove the card" cooldown; a miss
-   * counts toward the photo-OCR fallback trigger.
-   * @param matches - Flat `[indexEntry, distance]` pairs from the worker, or `undefined`.
+   * Verdict de l'identification asynchrone du main-thread (embedding).
+   * @param committed - `true` : carte commitée → cooldown « retirez la carte » ;
+   *   `false` : raté comptabilisé vers le fallback photo-OCR.
    */
-  function handleLiveMatches(matches: number[] | undefined): void {
-    if (!matches || !onLiveMatches || !armed || capturing || busy.value || !enabled.value) {
-      return
-    }
-    if (onLiveMatches(matches)) {
+  function reportIdentifyOutcome(committed: boolean): void {
+    if (committed) {
       capturing = false
       armed = false
       clearTicks = 0
@@ -636,6 +621,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       phase.value = 'cooldown'
     } else {
       liveMatchMisses += 1
+      // Several misses while a quad is being tracked ⇒ that quad probably
+      // frames furniture: drop it so the search windows take over.
+      if (liveMatchMisses >= 4 && lastCorners) {
+        worker?.postMessage({ t: 'droptrack' })
+        liveMatchMisses = 0
+      }
     }
   }
 
@@ -713,15 +704,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Hand the prebuilt visual-match index to the worker (posted immediately
-   * when the worker is up, or kept until its `ready` message otherwise).
-   * @param buf - Raw `index-v{N}.bin` payload (`GPXI` header + packed hashes).
+   * Start point-tracking on an identified zone (video coords) — the overlay
+   * frame then glues to the card even though its outline was never detected.
+   * @param rect - Winning search window, as given to `onLiveMatches`.
    */
-  function setMatchIndex(buf: ArrayBuffer): void {
-    pendingIndexBuffer = buf
-    if (worker && ready.value) {
-      worker.postMessage({ t: 'index', buf })
-    }
+  function lockTrackingRect(rect: { x: number; y: number; w: number; h: number }): void {
+    worker?.postMessage({ t: 'lock', rect })
   }
 
   /** Tear everything down (page unmount only). */
@@ -736,7 +724,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     captureCanvas = null
     captureCtx = null
     ready.value = false
-    matchIndexReady.value = false
     phase.value = 'idle'
   }
 
@@ -754,5 +741,5 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   onBeforeUnmount(stopAll)
 
-  return { phase, quad, ready, loadError, matchIndexReady, setMatchIndex }
+  return { phase, quad, ready, loadError, lockTrackingRect, reportIdentifyOutcome }
 }

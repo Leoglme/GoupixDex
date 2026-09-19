@@ -199,7 +199,7 @@ function navLink(
 
 const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavGroup[] => {
   const sellingItems: NavigationMenuItem[] = [
-    navLink('Mes articles', 'i-lucide-package', '/articles/stock', ['/articles']),
+    navLink('Mes articles', 'i-lucide-package', '/articles', ['/articles']),
     navLink('Marché eBay', 'i-lucide-trending-up', '/market', ['/market', '/top-ventes-ebay']),
     navLink("Étiquettes d'envoi", 'i-lucide-mailbox', '/shipping-labels', ['/shipping-labels']),
   ]

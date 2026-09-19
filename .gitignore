@@ -13,3 +13,5 @@ integrations
 CLAUDE.md
 .claude
 api/scripts/scan-index-work.json
+api/scripts/scan-embed-work.npy
+api/scripts/scan-embed-work.keys.json

@@ -12,7 +12,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
         <div v-if="loading" class="flex items-center justify-center py-20">
           <UIcon name="i-lucide-loader-2" class="text-primary size-10 animate-spin" />
         </div>

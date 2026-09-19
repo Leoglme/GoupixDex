@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-3 py-3 sm:px-4 sm:py-4">
+      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
         <GoupixDexPageHeader
           title="Marché eBay"
           description="Estimez une carte ou un produit scellé : annonces actives et prix min / médian / moyen / max sur eBay France."
