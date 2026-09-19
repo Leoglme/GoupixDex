@@ -41,8 +41,8 @@ export interface UseCardAutoScanOptions {
   onBlurryRetry?: () => void
 }
 
-/** ~12 fps cadence. The worker decides if it can keep up via the in-flight gate. */
-const FRAME_MS = 80
+/** ~20 fps cadence — point tracking costs 3-6 ms/frame, so the overlay can glue. */
+const FRAME_MS = 50
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
 /**
@@ -101,7 +101,6 @@ const MISS_LINGER_TICKS = 4
  * Pokémon card ratio — we force the *displayed* rect to this so the overlay
  * always reads as a card even when the underlying detection has slight noise.
  */
-const CARD_AR = 1.397
 
 interface BurstShot {
   buf: ArrayBuffer
@@ -279,46 +278,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       x: prev[i]!.x * (1 - t) + next[i]!.x * t,
       y: prev[i]!.y * (1 - t) + next[i]!.y * t,
     })) as Pt[]
-  }
-
-  /**
-   * Force the displayed rectangle to the Pokémon card aspect ratio (88/63),
-   * keeping the detected center + rotation. Detections under perspective are
-   * always trapezoids with small noise; rendering a forced-ratio rotated
-   * rectangle reads as "the card" instead of "some quad".
-   *
-   * @param q - Smoothed corners (any quadrilateral) in video-intrinsic px.
-   * @returns Card-AR rectangle corners at the same center, rotation and scale.
-   */
-  function forceCardShape(q: Pt[]): Pt[] {
-    const cx = (q[0]!.x + q[1]!.x + q[2]!.x + q[3]!.x) / 4
-    const cy = (q[0]!.y + q[1]!.y + q[2]!.y + q[3]!.y) / 4
-    const topDx = q[1]!.x - q[0]!.x
-    const topDy = q[1]!.y - q[0]!.y
-    const botDx = q[2]!.x - q[3]!.x
-    const botDy = q[2]!.y - q[3]!.y
-    const avgW = (Math.hypot(topDx, topDy) + Math.hypot(botDx, botDy)) / 2
-    const avgH =
-      (Math.hypot(q[3]!.x - q[0]!.x, q[3]!.y - q[0]!.y) + Math.hypot(q[2]!.x - q[1]!.x, q[2]!.y - q[1]!.y)) / 2
-    let w: number
-    let h: number
-    if (avgH >= avgW) {
-      w = avgW
-      h = avgW * CARD_AR
-    } else {
-      h = avgH
-      w = avgH * CARD_AR
-    }
-    const angle = Math.atan2((topDy + botDy) / 2, (topDx + botDx) / 2)
-    const cos = Math.cos(angle)
-    const sin = Math.sin(angle)
-    const dx = w / 2
-    const dy = h / 2
-    const rot = (px: number, py: number): Pt => ({
-      x: cx + px * cos - py * sin,
-      y: cy + px * sin + py * cos,
-    })
-    return [rot(-dx, -dy), rot(dx, -dy), rot(dx, dy), rot(-dx, dy)]
   }
 
   /**
@@ -522,11 +481,11 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const confirmed = averageQuad(pendingCorners, corners)
     pendingCorners = corners
 
-    // Smooth toward the confirmed quad, then force a card-AR rectangle on top
-    // — the displayed rectangle reads as "the card" instead of "some shape".
+    // Smooth toward the confirmed quad and display it AS IS — the perspective
+    // trapezoid hugging the card edges (the worker's point tracking keeps it
+    // steady), not a forced upright rectangle.
     displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
-    const shaped = forceCardShape(displayedCorners)
-    quad.value = [shaped[0]!, shaped[1]!, shaped[2]!, shaped[3]!]
+    quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
 
     lastCorners = corners
 
@@ -577,7 +536,13 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     detectInFlight = true
     detectSentAt = Date.now()
-    worker.postMessage({ t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight }, [f.buf])
+    // `im` gates the in-worker identification: pointless during cooldown (the
+    // card is already committed) — tracking alone keeps the overlay glued.
+    const identify = armed && !capturing && !busy.value && matchIndexReady.value
+    worker.postMessage(
+      { t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight, im: identify },
+      [f.buf],
+    )
   }
 
   /**

@@ -382,10 +382,20 @@
                   :viewBox="`0 0 ${videoIntrinsicW} ${videoIntrinsicH}`"
                   preserveAspectRatio="xMidYMid slice"
                 >
-                  <!-- Cadre guide fixe (comme les apps pro) — la reconnaissance
-                       lit toujours cette zone, pas un contour instable. -->
+                  <!-- Cadre suiveur : le quad perspective collé à la carte par
+                       le tracking de points du worker (façon Pikacheck). -->
+                  <polygon
+                    v-if="cardQuadPoints"
+                    :points="cardQuadPoints"
+                    :fill="autoScanPhase === 'cooldown' ? 'rgba(16,185,129,0.10)' : 'rgba(249,115,22,0.10)'"
+                    :stroke="autoScanPhase === 'cooldown' ? '#34d399' : '#f97316'"
+                    stroke-width="16"
+                    stroke-linejoin="round"
+                  />
+                  <!-- Cadre guide fixe en attente : la reconnaissance lit aussi
+                       cette zone quand aucune carte n'est accrochée. -->
                   <rect
-                    v-if="cameraGuideRect"
+                    v-else-if="cameraGuideRect"
                     :x="cameraGuideRect.x"
                     :y="cameraGuideRect.y"
                     :width="cameraGuideRect.w"
@@ -1773,9 +1783,40 @@ function playTone(from: number, to: number, volume: number): void {
   }
 }
 
-/** Rising "ding" — card added. */
+/**
+ * Une note de carillon (attaque douce, décroissance rapide).
+ * @param freq - Fréquence (Hz).
+ * @param delaySec - Décalage de départ (s).
+ * @param volume - Gain de crête.
+ */
+function playChimeNote(freq: number, delaySec: number, volume: number): void {
+  if (!soundOn.value || !audioCtx) {
+    return
+  }
+  try {
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+    }
+    const start = audioCtx.currentTime + delaySec
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(freq, start)
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3)
+    osc.connect(gain).connect(audioCtx.destination)
+    osc.start(start)
+    osc.stop(start + 0.32)
+  } catch {
+    /* audio is best-effort */
+  }
+}
+
+/** Carillon deux notes montantes (do–sol) — carte identifiée / ajoutée. */
 function playBeep(): void {
-  playTone(880, 1320, 0.25)
+  playChimeNote(1046.5, 0, 0.22)
+  playChimeNote(1568, 0.09, 0.26)
 }
 
 /** Falling "dong" — card removed (checkout). */
@@ -1978,6 +2019,7 @@ const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value &
 const blurryCaptureHint: Ref<boolean> = ref(false)
 const {
   phase: autoScanPhase,
+  quad: cardQuad,
   ready: detectorReady,
   loadError: detectorError,
   setMatchIndex,
@@ -2017,6 +2059,15 @@ watch(autoScanPhase, (p): void => {
  * que le crop central du worker (62 % de la hauteur, ratio carte 63:88), en
  * coordonnées intrinsèques pour suivre exactement le zoom de la vidéo.
  */
+/** Points SVG du quad suiveur (coordonnées intrinsèques vidéo), ou null. */
+const cardQuadPoints = computed<string | null>(() => {
+  const q = cardQuad.value
+  if (!q) {
+    return null
+  }
+  return q.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(' ')
+})
+
 const cameraGuideRect = computed<{ x: number; y: number; w: number; h: number } | null>(() => {
   const w = videoIntrinsicW.value
   const h = videoIntrinsicH.value

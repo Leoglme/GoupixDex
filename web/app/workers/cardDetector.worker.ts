@@ -607,6 +607,223 @@ function idMatchCentralCrop(buf: ArrayBuffer, w: number, h: number): number[] {
   return matchAgainstIndex(queries)
 }
 
+// ---------------------------------------------------------------------------
+// Point tracking (optical flow). Contour detection only ACQUIRES the card;
+// from then on ~60 texture points inside the quad are followed frame-to-frame
+// (Lucas-Kanade) and a similarity transform moves the quad with them. This is
+// what glues the overlay to a moving, shaking, even blurry card — contours
+// alone flicker on wood grain and sleeve glare. Detection re-runs periodically
+// to re-align (drift) or re-acquire (new card).
+// ---------------------------------------------------------------------------
+
+/** Surviving LK points below this ⇒ the track is lost. */
+const TRACK_MIN_POINTS = 12
+/** Re-seed fresh feature points when the pool shrinks under this. */
+const TRACK_RESEED_POINTS = 25
+/** Re-seed cadence (frames) even when the pool is healthy. */
+const TRACK_RESEED_EVERY = 10
+/** Contour re-detection cadence (frames) while tracking — re-aligns drift. */
+const TRACK_REDETECT_EVERY = 8
+/** Per-frame scale outside this range ⇒ bogus transform, drop the track. */
+const TRACK_SCALE_STEP_MIN = 0.75
+const TRACK_SCALE_STEP_MAX = 1.35
+
+let trackGray: any = null
+let trackPts: any = null
+let trackQuad: { x: number; y: number }[] | null = null
+let trackFrames = 0
+let trackW = 0
+let trackH = 0
+
+function resetTrack(): void {
+  try {
+    trackGray?.delete()
+  } catch {}
+  try {
+    trackPts?.delete()
+  } catch {}
+  trackGray = null
+  trackPts = null
+  trackQuad = null
+  trackFrames = 0
+}
+
+/** Feature points inside the (slightly shrunk) quad, as a CV_32FC2 Mat — or null. */
+function seedTrackPoints(gray: any, quadPts: { x: number; y: number }[]): any {
+  const cx = (quadPts[0].x + quadPts[1].x + quadPts[2].x + quadPts[3].x) / 4
+  const cy = (quadPts[0].y + quadPts[1].y + quadPts[2].y + quadPts[3].y) / 4
+  const flat: number[] = []
+  for (const p of quadPts) {
+    flat.push(Math.round(cx + (p.x - cx) * 0.88), Math.round(cy + (p.y - cy) * 0.88))
+  }
+  const mask = cv.Mat.zeros(gray.rows, gray.cols, cv.CV_8UC1)
+  const poly = cv.matFromArray(4, 1, cv.CV_32SC2, flat)
+  const polys = new cv.MatVector()
+  polys.push_back(poly)
+  const corners = new cv.Mat()
+  try {
+    cv.fillPoly(mask, polys, new cv.Scalar(255))
+    cv.goodFeaturesToTrack(gray, corners, 60, 0.01, 7, mask, 7)
+  } catch {
+    corners.delete()
+    mask.delete()
+    poly.delete()
+    polys.delete()
+    return null
+  }
+  mask.delete()
+  poly.delete()
+  polys.delete()
+  if (corners.rows < TRACK_MIN_POINTS) {
+    corners.delete()
+    return null
+  }
+  return corners
+}
+
+/**
+ * Closed-form 2D similarity (scale+rotation+translation) mapping `from` onto
+ * `to`, with one median-based outlier rejection pass. Returns the 4 transform
+ * coefficients or null when the fit is unusable.
+ */
+function fitSimilarity(
+  from: { x: number; y: number }[],
+  to: { x: number; y: number }[],
+): { a: number; b: number; tx: number; ty: number; meanResidual: number; inlierRatio: number } | null {
+  const solve = (idx: number[]) => {
+    let pcx = 0
+    let pcy = 0
+    let qcx = 0
+    let qcy = 0
+    for (const i of idx) {
+      pcx += from[i].x
+      pcy += from[i].y
+      qcx += to[i].x
+      qcy += to[i].y
+    }
+    const n = idx.length
+    pcx /= n
+    pcy /= n
+    qcx /= n
+    qcy /= n
+    let sa = 0
+    let sb = 0
+    let sd = 0
+    for (const i of idx) {
+      const px = from[i].x - pcx
+      const py = from[i].y - pcy
+      const qx = to[i].x - qcx
+      const qy = to[i].y - qcy
+      sa += px * qx + py * qy
+      sb += px * qy - py * qx
+      sd += px * px + py * py
+    }
+    if (sd < 1e-6) {
+      return null
+    }
+    const a = sa / sd
+    const b = sb / sd
+    return { a, b, tx: qcx - (a * pcx - b * pcy), ty: qcy - (b * pcx + a * pcy) }
+  }
+  const all = from.map((_, i) => i)
+  const first = solve(all)
+  if (!first) {
+    return null
+  }
+  const residuals = all.map((i) => {
+    const x = first.a * from[i].x - first.b * from[i].y + first.tx
+    const y = first.b * from[i].x + first.a * from[i].y + first.ty
+    return Math.hypot(x - to[i].x, y - to[i].y)
+  })
+  const sorted = [...residuals].sort((p, q) => p - q)
+  const cutoff = Math.max(1.5, sorted[sorted.length >> 1] * 2.5)
+  const inliers = all.filter((i) => residuals[i] <= cutoff)
+  const finish = (fit: { a: number; b: number; tx: number; ty: number }, idx: number[]) => {
+    let acc = 0
+    for (const i of idx) {
+      const x = fit.a * from[i].x - fit.b * from[i].y + fit.tx
+      const y = fit.b * from[i].x + fit.a * from[i].y + fit.ty
+      acc += Math.hypot(x - to[i].x, y - to[i].y)
+    }
+    return { ...fit, meanResidual: acc / idx.length, inlierRatio: inliers.length / all.length }
+  }
+  if (inliers.length < 8) {
+    return inliers.length >= TRACK_MIN_POINTS ? finish(first, all) : null
+  }
+  const refined = solve(inliers)
+  return finish(refined ?? first, inliers)
+}
+
+/**
+ * One optical-flow step: follow the seeded points into `gray` and move the
+ * quad with the fitted similarity. Updates the track state; returns the new
+ * quad (frame coords) or null when the track is lost.
+ */
+function stepTrack(gray: any): { x: number; y: number }[] | null {
+  const next = new cv.Mat()
+  const status = new cv.Mat()
+  const err = new cv.Mat()
+  try {
+    cv.calcOpticalFlowPyrLK(trackGray, gray, trackPts, next, status, err)
+    const prevData = trackPts.data32F
+    const nextData = next.data32F
+    const from: { x: number; y: number }[] = []
+    const to: { x: number; y: number }[] = []
+    for (let i = 0; i < status.rows; i += 1) {
+      if (status.data[i] === 1) {
+        from.push({ x: prevData[i * 2], y: prevData[i * 2 + 1] })
+        to.push({ x: nextData[i * 2], y: nextData[i * 2 + 1] })
+      }
+    }
+    if (from.length < TRACK_MIN_POINTS || !trackQuad) {
+      return null
+    }
+    const fit = fitSimilarity(from, to)
+    if (!fit) {
+      return null
+    }
+    // A swapped/occluded card yields incoherent LK correspondences: high
+    // residuals or a majority of outliers ⇒ drop the track and re-detect
+    // right away instead of dragging a ghost frame around.
+    if (fit.meanResidual > 2.5 || fit.inlierRatio < 0.55) {
+      return null
+    }
+    const scale = Math.hypot(fit.a, fit.b)
+    if (scale < TRACK_SCALE_STEP_MIN || scale > TRACK_SCALE_STEP_MAX) {
+      return null
+    }
+    const moved = trackQuad.map((p) => ({
+      x: fit.a * p.x - fit.b * p.y + fit.tx,
+      y: fit.b * p.x + fit.a * p.y + fit.ty,
+    }))
+    if (hasDegenerateCorners(moved)) {
+      return null
+    }
+    const area = polyArea(moved)
+    const frameArea = gray.cols * gray.rows
+    if (area < frameArea * MIN_AREA_RATIO * 0.5 || area > frameArea * 0.95) {
+      return null
+    }
+    // Survivor points become the next frame's seeds.
+    const survivors = cv.matFromArray(
+      to.length,
+      1,
+      cv.CV_32FC2,
+      to.flatMap((p) => [p.x, p.y]),
+    )
+    trackPts.delete()
+    trackPts = survivors
+    trackQuad = moved
+    return moved
+  } catch {
+    return null
+  } finally {
+    next.delete()
+    status.delete()
+    err.delete()
+  }
+}
+
 self.onmessage = (e: MessageEvent): void => {
   const d = e.data
   if (d.t === 'init') {
@@ -627,25 +844,112 @@ self.onmessage = (e: MessageEvent): void => {
       ;(self as any).postMessage({ t: 'nq' })
       return
     }
-    let found = null
+    // Shared grayscale for both the optical-flow step and point seeding.
+    let gray: any = null
     try {
-      found = detect(d.buf, d.w, d.h, d.vw, d.vh)
+      const src = cv.matFromImageData(new ImageData(new Uint8ClampedArray(d.buf), d.w, d.h))
+      gray = new cv.Mat()
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+      src.delete()
     } catch {
-      found = null
+      gray = null
     }
-    // Continuous identification on the fixed guide crop — contour quads jitter
-    // on wood / sleeves; the on-screen silhouette is the source of truth.
+
+    let frameQuad: { x: number; y: number }[] | null = null
+    let tracking = false
+    if (gray && trackQuad && trackGray && trackPts && trackW === d.w && trackH === d.h) {
+      frameQuad = stepTrack(gray)
+      tracking = frameQuad !== null
+      trackFrames += 1
+    }
+
+    // Acquire (no track) or re-align (periodic) via contour detection.
+    if (!tracking || trackFrames % TRACK_REDETECT_EVERY === 0) {
+      let found = null
+      try {
+        found = detect(d.buf, d.w, d.h, d.vw, d.vh)
+      } catch {
+        found = null
+      }
+      if (found && gray) {
+        const longEdge = Math.max(d.w, d.h)
+        const dcx = (found.frame[0].x + found.frame[1].x + found.frame[2].x + found.frame[3].x) / 4
+        const dcy = (found.frame[0].y + found.frame[1].y + found.frame[2].y + found.frame[3].y) / 4
+        const tcx = frameQuad ? (frameQuad[0].x + frameQuad[1].x + frameQuad[2].x + frameQuad[3].x) / 4 : dcx
+        const tcy = frameQuad ? (frameQuad[0].y + frameQuad[1].y + frameQuad[2].y + frameQuad[3].y) / 4 : dcy
+        // Adopt the detection when there is no live track, or when it re-finds
+        // the SAME card (close center) — never let a spurious far-away contour
+        // steal a healthy track.
+        if (!tracking || Math.hypot(dcx - tcx, dcy - tcy) < longEdge * 0.2) {
+          const seeds = seedTrackPoints(gray, found.frame)
+          if (seeds) {
+            try {
+              trackPts?.delete()
+            } catch {}
+            trackPts = seeds
+            trackQuad = found.frame
+            trackW = d.w
+            trackH = d.h
+            if (!tracking) {
+              trackFrames = 0
+            }
+            frameQuad = found.frame
+            tracking = true
+          } else if (!tracking) {
+            frameQuad = found.frame
+          }
+        }
+      }
+    } else if (tracking && gray && (trackFrames % TRACK_RESEED_EVERY === 0 || trackPts.rows < TRACK_RESEED_POINTS)) {
+      const seeds = seedTrackPoints(gray, frameQuad!)
+      if (seeds) {
+        try {
+          trackPts?.delete()
+        } catch {}
+        trackPts = seeds
+      }
+    }
+
+    // Roll the grayscale forward for the next optical-flow step.
+    if (gray && tracking) {
+      try {
+        trackGray?.delete()
+      } catch {}
+      trackGray = gray
+      trackW = d.w
+      trackH = d.h
+    } else {
+      if (!tracking) {
+        resetTrack()
+      }
+      try {
+        gray?.delete()
+      } catch {}
+    }
+
+    // Continuous identification: the tracked quad is the best crop; the fixed
+    // guide zone covers cards the detector never locks onto. `d.im` lets the
+    // main thread pause it (cooldown after a commit) so the ~100-300 ms match
+    // never freezes the 20 fps tracking while the frame just needs to follow.
     let matches: number[] | undefined
     const now = Date.now()
     try {
-      if (matchIndex && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
+      if (d.im && matchIndex && now - lastIdCentralAt >= ID_CENTRAL_MIN_INTERVAL_MS) {
         lastIdCentralAt = now
-        matches = idMatchCentralCrop(d.buf, d.w, d.h)
+        matches = frameQuad ? idMatchFromQuad(d.buf, d.w, d.h, frameQuad) : idMatchCentralCrop(d.buf, d.w, d.h)
       }
     } catch {
       matches = undefined
     }
-    ;(self as any).postMessage(found ? { t: 'quad', corners: found.video, matches } : { t: 'nq', matches })
+
+    if (frameQuad) {
+      const fx = d.vw / d.w
+      const fy = d.vh / d.h
+      const corners = frameQuad.map((p) => ({ x: p.x * fx, y: p.y * fy }))
+      ;(self as any).postMessage({ t: 'quad', corners, matches })
+    } else {
+      ;(self as any).postMessage({ t: 'nq', matches })
+    }
     return
   }
   if (d.t === 'index') {
