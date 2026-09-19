@@ -51,8 +51,16 @@ const MIN_REARM_MS = 900
 const COOLDOWN_MAX_MS = 2500
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
-/** Lerp weight (new vs previous) : élevé = le cadre suit la main sans traîner. */
-const SMOOTH_LERP = 0.75
+/**
+ * Lissage ADAPTATIF du cadre. Sous le deadband (carte immobile : ce que le
+ * worker renvoie n'est que du bruit de prédiction image-à-image), on FIGE le
+ * cadre — c'est ce qui tue le « le rectangle bouge / change de taille alors
+ * que la carte ne bouge pas ». Au-delà, le poids du lerp monte avec le
+ * déplacement réel, pour suivre la main sans traîner ni jitter.
+ */
+const SMOOTH_DEADBAND_FRAC = 0.008
+const SMOOTH_LERP_MIN = 0.22
+const SMOOTH_LERP_MAX = 0.85
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
 const SCENE_CHANGE_FRAC = 0.22
 /** Empty detections we wait through before the overlay disappears (≈ 400 ms). */
@@ -155,10 +163,18 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     if (!prev) {
       return next
     }
-    if (cornerDrift(prev, next) > longEdge * SCENE_CHANGE_FRAC) {
+    const drift = cornerDrift(prev, next)
+    if (drift > longEdge * SCENE_CHANGE_FRAC) {
       return next
     }
-    const t = SMOOTH_LERP
+    // Carte immobile : on fige le cadre au lieu de suivre le bruit de prédiction.
+    if (drift < longEdge * SMOOTH_DEADBAND_FRAC) {
+      return prev
+    }
+    // Poids proportionnel au déplacement réel (doux près de l'arrêt, vif en mouvement).
+    const span = longEdge * (SCENE_CHANGE_FRAC - SMOOTH_DEADBAND_FRAC)
+    const ramp = Math.min(1, (drift - longEdge * SMOOTH_DEADBAND_FRAC) / span)
+    const t = SMOOTH_LERP_MIN + (SMOOTH_LERP_MAX - SMOOTH_LERP_MIN) * ramp
     return [0, 1, 2, 3].map((i) => ({
       x: prev[i]!.x * (1 - t) + next[i]!.x * t,
       y: prev[i]!.y * (1 - t) + next[i]!.y * t,

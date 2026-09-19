@@ -23,9 +23,11 @@ const CROP_EDGE = 256
  * détectée. L'espace d'embedding est très sensible au cadrage (~4 % d'écart
  * coûtent ~0.1 de cosinus) et son optimum mesuré est un crop INTÉRIEUR de la
  * carte (~0.55-0.65 de sa hauteur) : la batterie balaie ce voisinage, ancrée
- * sur la carte réelle — l'identifieur garde le meilleur crop.
+ * sur la carte réelle — l'identifieur garde le meilleur crop. Réduit à DEUX
+ * échelles (le cadre letterbox est précis) : moitié moins d'inférences par
+ * tentative, donc identification bien plus rapide sur téléphone.
  */
-const ID_CROP_SCALES = [0.76, 0.6, 0.48]
+const ID_CROP_SCALES = [0.6, 0.48]
 /** Jitter de position alterné d'une tentative à l'autre (fraction du bbox). */
 const ID_CROP_JITTER = [
   { dx: 0, dy: 0 },
