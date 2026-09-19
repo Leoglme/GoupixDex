@@ -20,6 +20,16 @@ export type ScanMatchDecision = {
 /** Physical-card language of the current scan session (`auto` = resolve per card). */
 export type ScanCardLanguage = 'auto' | 'ja' | 'en' | 'fr'
 
+/** Résultat du matcher pHash (empreinte artwork) : décision SÛRE ou refus. */
+export type ScanPhashResult = {
+  /** `match` = carte confiante (plancher + marge vs autre artwork) ; `none` = refus. */
+  status: 'match' | 'none'
+  /** Carte reconnue prête à committer, ou `null` si refus. */
+  decision: ScanMatchDecision | null
+  /** Distance de Hamming normalisée du meilleur alignement (0 = identique). */
+  score: number
+}
+
 /** Résultat brut d'une tentative d'identification (décision + meilleur hit). */
 export type ScanIdentifyResult = {
   /** Identification SÛRE (politique passée : plancher + marge), ou `null`. */

@@ -28,6 +28,9 @@ const CROP_EDGE = 256
  * tentative, donc identification bien plus rapide sur téléphone.
  */
 const ID_CROP_SCALES = [0.6, 0.48]
+/** Carte REDRESSÉE (warp perspective du quad) envoyée au matcher pHash — aspect 63:88. */
+const PHASH_CARD_W = 180
+const PHASH_CARD_H = 252
 /** Jitter de position alterné d'une tentative à l'autre (fraction du bbox). */
 const ID_CROP_JITTER = [
   { dx: 0, dy: 0 },
@@ -93,7 +96,10 @@ function quadLooksLikeCard(c) {
     }
   }
   area = Math.abs(area) / 2
-  if (area < 0.03 || area > 1.05) {
+  // Plafond d'aire : une carte tenue occupe une fraction de l'image ; un quad
+  // qui remplit l'écran = le détecteur a accroché le décor (écran d'ordi, mur)
+  // quand la carte est loin/absente — on le refuse (retour terrain de Léo).
+  if (area < 0.03 || area > 0.5) {
     return false
   }
   const wEdge = (Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) + Math.hypot(q[2].x - q[3].x, q[2].y - q[3].y)) / 2
@@ -120,6 +126,45 @@ function cropRgba(rgba, w, h, rx, ry, rw, rh, dst) {
       const p01 = p00 + w * 4
       const p11 = p01 + 4
       const o = (y * dst + x) * 4
+      for (let c = 0; c < 3; c += 1) {
+        const top = rgba[p00 + c] * (1 - fx) + rgba[p10 + c] * fx
+        const bot = rgba[p01 + c] * (1 - fx) + rgba[p11 + c] * fx
+        out[o + c] = top * (1 - fy) + bot * fy
+      }
+      out[o + 3] = 255
+    }
+  }
+  return out
+}
+
+/**
+ * Redresse le quad (TL,TR,BR,BL, coords frame) en un rectangle dstW×dstH par
+ * interpolation bilinéaire de quad — la carte devient droite et pleine cadre,
+ * entrée idéale de la pHash (qui suppose un cadrage exact).
+ */
+function warpQuadToRect(rgba, w, h, quad, dstW, dstH) {
+  const out = new Uint8ClampedArray(dstW * dstH * 4)
+  const tl = quad[0]
+  const tr = quad[1]
+  const br = quad[2]
+  const bl = quad[3]
+  for (let y = 0; y < dstH; y += 1) {
+    const t = (y + 0.5) / dstH
+    for (let x = 0; x < dstW; x += 1) {
+      const s = (x + 0.5) / dstW
+      const sx = tl.x * (1 - s) * (1 - t) + tr.x * s * (1 - t) + br.x * s * t + bl.x * (1 - s) * t
+      const sy = tl.y * (1 - s) * (1 - t) + tr.y * s * (1 - t) + br.y * s * t + bl.y * (1 - s) * t
+      const cx = Math.max(0, Math.min(w - 1.001, sx))
+      const cy = Math.max(0, Math.min(h - 1.001, sy))
+      const x0 = cx | 0
+      const y0 = cy | 0
+      const fx = cx - x0
+      const fy = cy - y0
+      const p00 = (y0 * w + x0) * 4
+      const p10 = p00 + 4
+      const p01 = p00 + w * 4
+      const p11 = p01 + 4
+      const o = (y * dstW + x) * 4
       for (let c = 0; c < 3; c += 1) {
         const top = rgba[p00 + c] * (1 - fx) + rgba[p10 + c] * fx
         const bot = rgba[p01 + c] * (1 - fx) + rgba[p11 + c] * fx
@@ -284,6 +329,9 @@ async function detect(d) {
         idJitterCursor += 1
         const out = bufs.map((b) => b.buf)
         self.postMessage({ t: 'idcrop', bufs: out }, out)
+        // Carte redressée pleine pour le matcher pHash (chemin rapide parallèle).
+        const card = warpQuadToRect(rgba, d.w, d.h, frameQuad, PHASH_CARD_W, PHASH_CARD_H)
+        self.postMessage({ t: 'cardcrop', buf: card.buffer, w: PHASH_CARD_W, h: PHASH_CARD_H }, [card.buffer])
       }
     } catch {
       /* crop best-effort — la détection continue */

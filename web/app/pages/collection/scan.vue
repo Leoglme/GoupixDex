@@ -643,6 +643,7 @@ const SCAN_LANGUAGE = 'auto'
 // A confident match commits instantly (no photo, no OCR); anything uncertain
 // falls back to the photo pipeline below.
 const scanEmbed = useScanEmbedIndex()
+const scanPhash = useScanPhash()
 
 const SCAN_CARD_LANGUAGE_STORAGE_KEY = 'goupixdex-scan-card-language'
 const SCAN_CARD_LANGUAGE_OPTIONS: { value: ScanCardLanguage; label: string }[] = [
@@ -1620,6 +1621,8 @@ const INSTANT_COMMIT_DEBOUNCE_MS = 3000
 
 /** Une inférence à la fois — un crop arrivé pendant l'inférence est ignoré. */
 let identifyInFlight = false
+/** Idem pour le matcher pHash (worker séparé, tourne en parallèle de l'embedding). */
+let phashInFlight = false
 
 /** En cooldown : similarité à partir de laquelle « la carte commitée est encore là ». */
 const STILL_SAME_CARD_MIN_SIM = 0.5
@@ -1733,6 +1736,16 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     reportIdentifyOutcome(false)
     return
   }
+  commitScanDecision(decision)
+}
+
+/**
+ * Committe une carte identifiée (pHash OU embedding) : bip + flash + vibration,
+ * POST en arrière-plan, et anti-doublon glissant (revoir la carte repousse la
+ * fenêtre de re-commit au lieu d'ajouter deux fois).
+ * @param decision - Carte reconnue prête à ajouter.
+ */
+function commitScanDecision(decision: ScanMatchDecision): void {
   candidateScores.clear()
   const now = Date.now()
   if (
@@ -1741,7 +1754,6 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     lastInstantCommit.direction === scanDirection.value &&
     now - lastInstantCommit.at < INSTANT_COMMIT_DEBOUNCE_MS
   ) {
-    // Anti-doublon glissant : revoir la carte repousse la fenêtre de re-commit.
     lastInstantCommit.at = now
     cooldownIdentifyMisses = 0
     reportIdentifyOutcome(true)
@@ -1774,8 +1786,36 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     })
 }
 
-// Scan sans contact : le worker vision suit la carte, le worker d'embedding
-// l'identifie — aucun envoi de photo automatique, tout se joue sur l'appareil.
+/**
+ * Chemin RAPIDE pHash : matche la carte redressée par empreinte artwork (94k
+ * cartes, sets JA récents inclus). Un `match` sûr committe INSTANTANÉMENT
+ * (court-circuite l'embedding) ; sinon on ne fait rien — l'embedding continue.
+ * @param buf - RGBA de la carte redressée (transféré au worker).
+ * @param w - Largeur du crop.
+ * @param h - Hauteur du crop.
+ */
+async function onPhashCrop(buf: ArrayBuffer, w: number, h: number): Promise<void> {
+  if (phashInFlight || !scanPhash.ready.value) {
+    return
+  }
+  phashInFlight = true
+  let result: Awaited<ReturnType<typeof scanPhash.match>> = { status: 'none', decision: null, score: 1 }
+  try {
+    result = await scanPhash.match(buf, w, h, scanCardLanguage.value)
+  } catch {
+    result = { status: 'none', decision: null, score: 1 }
+  } finally {
+    phashInFlight = false
+  }
+  if (autoScanPhase.value === 'cooldown' || result.status !== 'match' || !result.decision) {
+    return
+  }
+  commitScanDecision(result.decision)
+}
+
+// Scan sans contact : le worker vision suit la carte, DEUX matchers l'identifient
+// en parallèle — pHash (rapide, empreinte artwork) et embedding (robuste aux
+// holos sombres) — aucun envoi de photo automatique, tout se joue sur l'appareil.
 const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value && autoScan.value)
 const {
   phase: autoScanPhase,
@@ -1790,6 +1830,9 @@ const {
   identifyActive: computed(() => scanEmbed.ready.value),
   onIdentifyCrop: (bufs): void => {
     void onIdentifyCrop(bufs)
+  },
+  onPhashCrop: (buf, w, h): void => {
+    void onPhashCrop(buf, w, h)
   },
 })
 
@@ -2028,6 +2071,7 @@ onMounted(async () => {
   // Desktop is a monitor screen (QR + live feed) — no camera to open there.
   if (!isDesktopApp.value && liveCameraSupported.value) {
     void scanEmbed.load()
+    void scanPhash.load()
     await startWebcam()
   }
 })

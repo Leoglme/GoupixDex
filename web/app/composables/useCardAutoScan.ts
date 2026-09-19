@@ -29,6 +29,11 @@ export interface UseCardAutoScanOptions {
    * The page runs the embedding + decision, then calls `reportIdentifyOutcome`.
    */
   onIdentifyCrop?: (bufs: ArrayBuffer[]) => void
+  /**
+   * Carte REDRESSÉE pleine (RGBA `w`×`h`) pour le matcher pHash — chemin rapide
+   * complémentaire de l'embedding (empreinte artwork, reconnaissance instantanée).
+   */
+  onPhashCrop?: (buf: ArrayBuffer, w: number, h: number) => void
 }
 
 /** ~30 fps : le détecteur (1 M params, ~2-10 ms) laisse le cadre coller en temps réel. */
@@ -79,7 +84,7 @@ const MISS_LINGER_TICKS = 4
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
  */
 export function useCardAutoScan(opts: UseCardAutoScanOptions) {
-  const { video, enabled, busy, identifyActive, onIdentifyCrop } = opts
+  const { video, enabled, busy, identifyActive, onIdentifyCrop, onPhashCrop } = opts
 
   const phase: Ref<AutoScanPhase> = ref('idle')
   const quad: Ref<CardQuad | null> = ref(null)
@@ -285,6 +290,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
       | { t: 'idcrop'; bufs: ArrayBuffer[] }
+      | { t: 'cardcrop'; buf: ArrayBuffer; w: number; h: number }
     if (d.t === 'ready') {
       ready.value = true
       loadError.value = null
@@ -315,6 +321,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     if (d.t === 'idcrop') {
       if (onIdentifyCrop && !busy.value && enabled.value) {
         onIdentifyCrop(d.bufs)
+      }
+      return
+    }
+    if (d.t === 'cardcrop') {
+      if (onPhashCrop && !busy.value && enabled.value) {
+        onPhashCrop(d.buf, d.w, d.h)
       }
     }
   }
