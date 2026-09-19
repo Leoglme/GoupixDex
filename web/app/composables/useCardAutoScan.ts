@@ -33,7 +33,7 @@ export interface UseCardAutoScanOptions {
    * quad, or search-window variants whose zone is given in video coords).
    * The page runs the embedding + decision, then calls `reportIdentifyOutcome`.
    */
-  onIdentifyCrop?: (bufs: ArrayBuffer[], window?: { x: number; y: number; w: number; h: number }) => void
+  onIdentifyCrop?: (bufs: ArrayBuffer[], windows?: { x: number; y: number; w: number; h: number }[]) => void
   /** Called when a burst came out motion-blurred and is being retried — UI hint. */
   onBlurryRetry?: () => void
 }
@@ -58,6 +58,12 @@ const MIN_COOLDOWN_MS = 450
 const CLEAR_TICKS_TO_REARM = 10
 /** Minimum quiet time after a commit before re-arming (ms). */
 const MIN_REARM_MS = 900
+
+/**
+ * Durée maximale du cooldown : un suivi devenu obsolète (cadre resté collé au
+ * décor) empêcherait sinon le réarmement — jamais 10 ticks sans quad.
+ */
+const COOLDOWN_MAX_MS = 2500
 /** Fraction of the frame height covered by the on-screen guide silhouette. */
 const GUIDE_HEIGHT_FRAC = 0.62
 /** How many shots we take in a burst — we keep the sharpest for OCR. */
@@ -423,6 +429,14 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
 
+    // Réarmement garanti : quad présent ou non, le cooldown a une durée max.
+    if (!armed && !capturing && Date.now() - lastCaptureAt >= COOLDOWN_MAX_MS) {
+      armed = true
+      clearTicks = 0
+      liveMatchMisses = 0
+      phase.value = 'watching'
+    }
+
     // No card this tick — re-arm only after sustained absence + minimum quiet time.
     if (!corners) {
       pendingCorners = null
@@ -530,7 +544,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     detectSentAt = Date.now()
     // `im` gates the in-worker identification: pointless during cooldown (the
     // card is already committed) — tracking alone keeps the overlay glued.
-    const identify = armed && !capturing && !busy.value && identifyActive.value
+    // Identification continue même en cooldown : elle sert alors au RECALAGE
+    // du cadre sur la carte commitée (la page filtre selon la phase).
+    const identify = !capturing && !busy.value && identifyActive.value
     worker.postMessage(
       { t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight, im: identify },
       [f.buf],
@@ -547,7 +563,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'idcrop'; bufs: ArrayBuffer[]; win?: { x: number; y: number; w: number; h: number } }
+      | { t: 'idcrop'; bufs: ArrayBuffer[]; wins?: { x: number; y: number; w: number; h: number }[] }
       | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
       | { t: 'warp_failed'; m: string }
     if (d.t === 'ready') {
@@ -581,8 +597,8 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
     if (d.t === 'idcrop') {
-      if (onIdentifyCrop && armed && !capturing && !busy.value && enabled.value) {
-        onIdentifyCrop(d.bufs, d.win)
+      if (onIdentifyCrop && !capturing && !busy.value && enabled.value) {
+        onIdentifyCrop(d.bufs, d.wins)
       }
       return
     }
@@ -612,6 +628,11 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    *   `false` : raté comptabilisé vers le fallback photo-OCR.
    */
   function reportIdentifyOutcome(committed: boolean): void {
+    if (!armed) {
+      // Cooldown : les tentatives ne servent qu'au recalage du cadre — ni
+      // nouveau cooldown, ni compteur de fallback.
+      return
+    }
     if (committed) {
       capturing = false
       armed = false
@@ -704,12 +725,30 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
+   * Abandonne le suivi de points en cours (cadre collé au décor après le
+   * départ de la carte) — les fenêtres de recherche reprennent la main.
+   */
+  function dropTracking(): void {
+    worker?.postMessage({ t: 'droptrack' })
+  }
+
+  /**
    * Start point-tracking on an identified zone (video coords) — the overlay
    * frame then glues to the card even though its outline was never detected.
-   * @param rect - Winning search window, as given to `onLiveMatches`.
+   * @param rect - Winning search window, as given to `onIdentifyCrop`.
    */
   function lockTrackingRect(rect: { x: number; y: number; w: number; h: number }): void {
     worker?.postMessage({ t: 'lock', rect })
+  }
+
+  /**
+   * Concentre le balayage d'identification autour d'une zone prometteuse
+   * (offsets/échelles serrés pendant ~1,5 s) — fait grimper le score d'une
+   * carte approximativement cadrée.
+   * @param rect - Fenêtre du hit prometteur (coords vidéo).
+   */
+  function focusIdentification(rect: { x: number; y: number; w: number; h: number }): void {
+    worker?.postMessage({ t: 'focus', rect })
   }
 
   /** Tear everything down (page unmount only). */
@@ -741,5 +780,5 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   onBeforeUnmount(stopAll)
 
-  return { phase, quad, ready, loadError, lockTrackingRect, reportIdentifyOutcome }
+  return { phase, quad, ready, loadError, lockTrackingRect, focusIdentification, dropTracking, reportIdentifyOutcome }
 }

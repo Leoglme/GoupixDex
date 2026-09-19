@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { ScanCardLanguage, ScanMatchCard, ScanMatchDecision } from '~/types/ScanMatch'
+import type { ScanCardLanguage, ScanIdentifyResult, ScanMatchCard } from '~/types/ScanMatch'
 
 const INDEX_VERSION = 2
 const EMBED_DIM = 1280
@@ -16,7 +16,13 @@ const ORT_WASM_BASE = '/ort/'
  * une fois les faux quads filtrés par la forme.
  */
 const CONFIDENT_SIMILARITY_MIN = 0.6
-const MIN_MARGIN_TO_NEXT_CARD = 0.045
+const MIN_MARGIN_TO_NEXT_CARD = 0.055
+/**
+ * Au-dessus de ce plancher, commit SANS exiger de marge : deux artworks
+ * réellement différents ne cohabitent jamais à ce niveau — seul le jumeau
+ * JA/occidental du même dessin peut coller au top-1, et il porte le même choix.
+ */
+const HIGH_CONFIDENCE_SIMILARITY = 0.68
 
 /** Normalisation ImageNet — DOIT rester identique au builder Python. */
 const IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -195,20 +201,22 @@ export function useScanEmbedIndex() {
    * Identifie le meilleur des crops candidats d'une tentative (variantes de
    * cadrage du worker) contre tout l'index, et applique la politique de
    * confiance (plancher + marge face au premier print différent).
-   * @param crops - Crops RGBA 224×224 de la tentative (1 à 3).
+   * @param crops - Crops RGBA 224×224 de la tentative (1 à 6).
    * @param sessionLanguage - Langue de session (`auto` = locale du meilleur print).
-   * @returns {Promise<ScanMatchDecision | null>} Identification sûre, ou `null` → fallback OCR.
+   * @returns {Promise<ScanIdentifyResult>} Décision sûre éventuelle + meilleur hit brut
+   *   (sert à la recherche focalisée, au cadre précoce et au recalage en cooldown).
    */
-  async function identify(
-    crops: Uint8ClampedArray[],
-    sessionLanguage: ScanCardLanguage,
-  ): Promise<ScanMatchDecision | null> {
+  async function identify(crops: Uint8ClampedArray[], sessionLanguage: ScanCardLanguage): Promise<ScanIdentifyResult> {
+    const none: ScanIdentifyResult = { decision: null, topCardId: null, topSim: 0, topMargin: 0, bestCropIndex: 0 }
     const idx = data.value
     if (!idx || crops.length === 0) {
-      return null
+      return none
     }
     let best: { i: number; sim: number }[] = []
+    let bestCropIndex = 0
+    let cropIndex = -1
     for (const rgba of crops) {
+      cropIndex += 1
       const query = await embedCrop(rgba, idx)
       if (!query) {
         continue
@@ -232,19 +240,18 @@ export function useScanEmbedIndex() {
       }
       if (top.length && (best.length === 0 || top[0]!.sim > best[0]!.sim)) {
         best = top
+        bestCropIndex = cropIndex
       }
     }
     const bestHit = best[0]
-    if (!bestHit || bestHit.sim < CONFIDENT_SIMILARITY_MIN) {
-      return null
+    if (!bestHit) {
+      return none
     }
     const bestCard = idx.cards[bestHit.i]!
-    // Cluster = les locales du MÊME print (id partagé) ; marge exigée face au
-    // premier print différent.
+    // Cluster = les locales du MÊME print (id partagé) ; marge mesurée face au
+    // premier print différent (top-8 entièrement même print = domination totale).
     const next = best.find((t) => idx.cards[t.i]!.tcgdexCardId !== bestCard.tcgdexCardId)
-    if (next && bestHit.sim - next.sim < MIN_MARGIN_TO_NEXT_CARD) {
-      return null
-    }
+    const margin = bestHit.sim - (next ? next.sim : 0)
     let chosen = bestCard
     if (sessionLanguage !== 'auto') {
       const localeMatch = best
@@ -255,12 +262,25 @@ export function useScanEmbedIndex() {
         chosen = localeMatch
       }
     }
-    return {
+    const topCandidate = {
       tcgdexCardId: chosen.tcgdexCardId,
       language: sessionLanguage === 'auto' ? chosen.locale : sessionLanguage,
       name: chosen.name,
       setId: chosen.setId,
       localId: chosen.localId,
+    }
+    // Très haute similarité : seuls le vrai print et ses jumeaux d'artwork
+    // (numérotations JA/occidentale du même dessin) vivent là-haut — la marge
+    // face à un « print différent » ne discrimine alors plus rien d'utile.
+    const dominant = bestHit.sim >= HIGH_CONFIDENCE_SIMILARITY
+    const confident =
+      dominant || (bestHit.sim >= CONFIDENT_SIMILARITY_MIN && !(next && margin < MIN_MARGIN_TO_NEXT_CARD))
+    return {
+      decision: confident ? topCandidate : null,
+      topCardId: bestCard.tcgdexCardId,
+      topSim: bestHit.sim,
+      topMargin: margin,
+      bestCropIndex,
     }
   }
 

@@ -29,7 +29,7 @@
  */
 
 const MIN_AREA_RATIO = 0.06 // card must cover ≥6% of the frame
-const MAX_FILL = 0.85 // "cash register" mode: a close-up card is the normal case
+const MAX_FILL = 0.45 // above this the "quad" is the desk/screen, not a hand-held card
 const BORDER_MARGIN = 0.03 // corner closer than 3% to an edge counts as touching it
 const AR_MIN = 1.05 // card ≈ 88/63 ≈ 1.40; perspective can compress the ratio a lot
 const AR_MAX = 1.95 // reject overly elongated shapes
@@ -198,9 +198,9 @@ function scoreCandidate(cnt: any, w: number, h: number) {
   const arDelta = Math.abs(ar - CARD_AR)
   const arScore = Math.max(0, 1 - arDelta / 0.45)
 
-  // Plateau between 15% and 75% fill — both "card on the table" and
-  // "card filling the frame" are legitimate cash-register shots.
-  const fillScore = fill < 0.15 ? Math.max(0, fill / 0.15) : fill > 0.75 ? Math.max(0, 1 - (fill - 0.75) / 0.15) : 1
+  // Plateau between 15% and 35% fill — a hand-held card rarely covers more;
+  // bigger quads are almost always the desk or a screen behind the card.
+  const fillScore = fill < 0.15 ? Math.max(0, fill / 0.15) : fill > 0.35 ? Math.max(0, 1 - (fill - 0.35) / 0.1) : 1
 
   // Convexity boost
   const convexityScore = Math.min(1, convexity * 1.05)
@@ -420,18 +420,36 @@ const ID_QUAD_AR_MIN = 1.1
 const ID_QUAD_AR_MAX = 1.9
 
 const ID_WINDOWS: { hFrac: number; dx: number; dy: number }[] = [
-  { hFrac: 0.62, dx: 0, dy: 0 },
-  { hFrac: 0.5, dx: 0, dy: 0 },
-  { hFrac: 0.74, dx: 0, dy: 0 },
-  { hFrac: 0.62, dx: -0.08, dy: 0 },
-  { hFrac: 0.62, dx: 0.08, dy: 0 },
-  { hFrac: 0.62, dx: 0, dy: -0.06 },
-  { hFrac: 0.62, dx: 0, dy: 0.06 },
+  { hFrac: 0.66, dx: 0, dy: 0 },
+  { hFrac: 0.66, dx: -0.08, dy: 0 },
+  { hFrac: 0.66, dx: 0.08, dy: 0 },
+  { hFrac: 0.66, dx: 0, dy: -0.06 },
+  { hFrac: 0.66, dx: 0, dy: 0.06 },
 ]
 let idWindowCursor = 0
 let lastIdCropAt = 0
 /** Alternate quad/window attempts — a bogus tracked quad must never starve the sweep. */
 let idAttemptParity = 0
+/** Promising zone (video coords) the main thread asked to search around. */
+let focusRect: { x: number; y: number; w: number; h: number } | null = null
+let focusUntil = 0
+/** How long a focus request keeps steering the window sweep (ms). */
+const FOCUS_TTL_MS = 1500
+/**
+ * Batterie expédiée à chaque tentative focalisée : une ÉCHELLE de tailles et
+ * deux décalages, centrés sur la zone prometteuse. Le main thread renvoie la
+ * zone du crop GAGNANT comme nouveau focus, donc la recherche converge en
+ * taille ET en position (la similarité est très sensible à la géométrie :
+ * ~4 % d'écart de cadrage coûtent ~0.1 de cosinus).
+ */
+const FOCUS_BATTERY: { k: number; dx: number; dy: number }[] = [
+  { k: 1.15, dx: 0, dy: 0 },
+  { k: 1, dx: 0, dy: 0 },
+  { k: 0.85, dx: 0, dy: 0 },
+  { k: 0.72, dx: 0, dy: 0 },
+  { k: 0.85, dx: -0.05, dy: 0 },
+  { k: 0.85, dx: 0.05, dy: 0 },
+]
 
 /** Card-ratio rect of one search window, in frame pixels. */
 function idWindowRect(win: { hFrac: number; dx: number; dy: number }, w: number, h: number) {
@@ -473,9 +491,10 @@ function rectCorners(rect: { x: number; y: number; w: number; h: number }): { x:
  * Produce identification crops (RGBA 224×224, same square distortion as the
  * index builder) and post them to the main thread. Attempts ALTERNATE between
  * the tracked quad (when it plausibly frames a card) and the sweeping search
- * windows; window attempts ship 3 offset variants so a slight misalignment
- * still lands. The decision comes back asynchronously as a `lock` message +
- * cooldown — never through this reply channel.
+ * windows; window attempts ship a ladder of scales (focused ones, the
+ * FOCUS_BATTERY) so the right framing lands without the exact window turn.
+ * The decision comes back asynchronously as a `lock` message + cooldown —
+ * never through this reply channel.
  */
 function shipIdentificationCrop(
   buf: ArrayBuffer,
@@ -492,26 +511,61 @@ function shipIdentificationCrop(
     ;(self as any).postMessage({ t: 'idcrop', bufs: [out] }, [out])
     return
   }
-  const rect = idWindowRect(ID_WINDOWS[idWindowCursor % ID_WINDOWS.length], w, h)
-  idWindowCursor += 1
-  const inset = Math.round(rect.w * 0.06)
-  const dx = Math.round(rect.w * 0.07)
-  const variants = [
-    rect,
-    { x: rect.x + inset, y: rect.y + inset, w: rect.w - 2 * inset, h: rect.h - 2 * inset },
-    { x: rect.x, y: Math.min(h - rect.h, rect.y + Math.round(rect.h * 0.06)), w: rect.w, h: rect.h },
-    { x: Math.max(0, rect.x - dx), y: rect.y, w: rect.w, h: rect.h },
-    { x: Math.min(w - rect.w, rect.x + dx), y: rect.y, w: rect.w, h: rect.h },
-  ]
-  const bufs: ArrayBuffer[] = []
-  for (const v of variants) {
-    const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
-    bufs.push(out)
+  let rect: { x: number; y: number; w: number; h: number }
+  const focused = focusRect !== null && Date.now() < focusUntil
+  if (focused) {
+    const sx = w / vw
+    const sy = h / vh
+    rect = { x: focusRect!.x * sx, y: focusRect!.y * sy, w: focusRect!.w * sx, h: focusRect!.h * sy }
+  } else {
+    rect = idWindowRect(ID_WINDOWS[idWindowCursor % ID_WINDOWS.length], w, h)
+    idWindowCursor += 1
   }
+  const bufs: ArrayBuffer[] = []
+  const variantRects: { x: number; y: number; w: number; h: number }[] = []
+  if (focused) {
+    const cx = rect.x + rect.w / 2
+    const cy = rect.y + rect.h / 2
+    for (const b of FOCUS_BATTERY) {
+      const bw = Math.round(rect.w * b.k)
+      const bh = Math.round(rect.h * b.k)
+      const v = {
+        x: Math.max(0, Math.min(w - bw, Math.round(cx - bw / 2 + b.dx * rect.w))),
+        y: Math.max(0, Math.min(h - bh, Math.round(cy - bh / 2 + b.dy * rect.h))),
+        w: bw,
+        h: bh,
+      }
+      const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
+      bufs.push(out)
+      variantRects.push(v)
+    }
+  } else {
+    // Multi-échelles CENTRÉES par tentative : la taille apparente de la carte
+    // varie du simple au double selon la distance de la main — chaque tentative
+    // couvre tout ce spectre au lieu d'attendre le bon tour de la liste.
+    const scaled = (k: number, dyFrac: number) => {
+      const sw = Math.round(rect.w * k)
+      const sh = Math.round(rect.h * k)
+      return {
+        x: Math.max(0, Math.min(w - sw, rect.x + Math.round((rect.w - sw) / 2))),
+        y: Math.max(0, Math.min(h - sh, rect.y + Math.round((rect.h - sh) / 2 + dyFrac * rect.h))),
+        w: sw,
+        h: sh,
+      }
+    }
+    const variants = [scaled(1, 0), scaled(0.87, 0), scaled(0.76, 0), scaled(0.66, 0), scaled(0.57, 0)]
+    for (const v of variants) {
+      const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
+      bufs.push(out)
+      variantRects.push(v)
+    }
+  }
+  // Une zone PAR variante : le main thread verrouille/focalise la zone du
+  // crop GAGNANT, pas la fenêtre de base (souvent plus grande que la carte).
   const fx = vw / w
   const fy = vh / h
-  const win = { x: rect.x * fx, y: rect.y * fy, w: rect.w * fx, h: rect.h * fy }
-  ;(self as any).postMessage({ t: 'idcrop', bufs, win }, bufs)
+  const wins = variantRects.map((v) => ({ x: v.x * fx, y: v.y * fy, w: v.w * fx, h: v.h * fy }))
+  ;(self as any).postMessage({ t: 'idcrop', bufs, wins }, bufs)
 }
 
 // ---------------------------------------------------------------------------
@@ -773,11 +827,20 @@ self.onmessage = (e: MessageEvent): void => {
       const sy = d.h / d.vh
       const r = pendingLockRect
       pendingLockRect = null
+      // La zone reçue est le crop d'identification gagnant, qui mord LÉGÈREMENT
+      // dans la carte : gonfler de 8 % par côté pour que le cadre épouse les
+      // bords de la carte plutôt que son intérieur.
+      const gx = r.w * 0.08
+      const gy = r.h * 0.08
+      const lx = Math.max(0, (r.x - gx) * sx)
+      const ly = Math.max(0, (r.y - gy) * sy)
+      const lr = Math.min(d.w, (r.x + r.w + gx) * sx)
+      const lb = Math.min(d.h, (r.y + r.h + gy) * sy)
       const lockQuad = [
-        { x: r.x * sx, y: r.y * sy },
-        { x: (r.x + r.w) * sx, y: r.y * sy },
-        { x: (r.x + r.w) * sx, y: (r.y + r.h) * sy },
-        { x: r.x * sx, y: (r.y + r.h) * sy },
+        { x: lx, y: ly },
+        { x: lr, y: ly },
+        { x: lr, y: lb },
+        { x: lx, y: lb },
       ]
       const seeds = seedTrackPoints(gray, lockQuad)
       if (seeds) {
@@ -886,6 +949,11 @@ self.onmessage = (e: MessageEvent): void => {
   }
   if (d.t === 'lock') {
     pendingLockRect = d.rect ?? null
+    return
+  }
+  if (d.t === 'focus') {
+    focusRect = d.rect ?? null
+    focusUntil = Date.now() + FOCUS_TTL_MS
     return
   }
   if (d.t === 'droptrack') {

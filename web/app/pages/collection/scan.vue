@@ -1621,38 +1621,101 @@ const INSTANT_COMMIT_DEBOUNCE_MS = 3000
 /** Une inférence à la fois — un crop arrivé pendant l'inférence est ignoré. */
 let identifyInFlight = false
 
+/** Hit assez prometteur pour concentrer le balayage autour de sa fenêtre. */
+const FOCUS_MIN_SIM = 0.5
+/** Marge minimale pour focaliser — le bruit de décor culmine haut mais sans marge. */
+const FOCUS_MIN_MARGIN = 0.02
+/** Hit assez sûr pour accrocher le cadre suiveur AVANT le commit. */
+const EARLY_LOCK_MIN_SIM = 0.55
+/** Marge minimale pour l'accrochage précoce du cadre. */
+const EARLY_LOCK_MIN_MARGIN = 0.03
+/** À cette similarité, le cadre s'accroche même sans marge (jumeaux d'artwork). */
+const EARLY_LOCK_SURE_SIM = 0.6
+/** En cooldown : recale le cadre quand on revoit la carte commitée. */
+const RELOCK_MIN_SIM = 0.5
+/** Tentatives de cooldown sans revoir la carte commitée avant d'abandonner le suivi. */
+const COOLDOWN_MISSES_TO_DROP = 2
+/** Compteur de tentatives de cooldown consécutives sans la carte commitée. */
+let cooldownIdentifyMisses = 0
+
 /**
  * Identification d'un crop carte produit par le worker (quad suivi ou fenêtre
  * de recherche) : embedding MobileNet + cosinus sur l'index. Un verdict sûr
  * committe la carte — bip + flash + POST en arrière-plan — et verrouille le
  * cadre suiveur sur la zone identifiée.
  * @param bufs - Crops RGBA 224×224 de la tentative (transférés par le worker).
- * @param matchWindow - Fenêtre gagnante (coords vidéo) quand aucun contour n'était accroché.
- * @param matchWindow.x - Bord gauche de la fenêtre.
- * @param matchWindow.y - Bord haut de la fenêtre.
- * @param matchWindow.w - Largeur de la fenêtre.
- * @param matchWindow.h - Hauteur de la fenêtre.
+ * @param matchWindows - Zone de chaque variante (coords vidéo) quand la
+ *   tentative vient des fenêtres de recherche — la zone du crop GAGNANT est
+ *   celle qu'on verrouille/focalise.
  */
 async function onIdentifyCrop(
   bufs: ArrayBuffer[],
-  matchWindow?: { x: number; y: number; w: number; h: number },
+  matchWindows?: { x: number; y: number; w: number; h: number }[],
 ): Promise<void> {
   if (identifyInFlight || !scanEmbed.ready.value) {
     return
   }
   identifyInFlight = true
-  let decision: Awaited<ReturnType<typeof scanEmbed.identify>> = null
+  let result: Awaited<ReturnType<typeof scanEmbed.identify>> = {
+    decision: null,
+    topCardId: null,
+    topSim: 0,
+    topMargin: 0,
+    bestCropIndex: 0,
+  }
   try {
-    decision = await scanEmbed.identify(
+    result = await scanEmbed.identify(
       bufs.map((b) => new Uint8ClampedArray(b)),
       scanCardLanguage.value,
     )
   } catch {
-    decision = null
+    result = { decision: null, topCardId: null, topSim: 0, topMargin: 0, bestCropIndex: 0 }
   } finally {
     identifyInFlight = false
   }
+
+  const matchWindow = matchWindows ? matchWindows[Math.min(result.bestCropIndex, matchWindows.length - 1)] : undefined
+
+  // Cooldown : la carte est déjà commitée — ces tentatives servent à RECALER
+  // le cadre quand on la revoit, et à LÂCHER un suivi resté collé au décor.
+  if (autoScanPhase.value === 'cooldown' || autoScanPhase.value === 'captured') {
+    const committedCardSeen =
+      result.topCardId !== null &&
+      lastInstantCommit !== null &&
+      result.topCardId === lastInstantCommit.cardId &&
+      result.topSim >= RELOCK_MIN_SIM
+    if (committedCardSeen) {
+      cooldownIdentifyMisses = 0
+      if (lastInstantCommit) {
+        // Anti-doublon glissant : tant que la carte reste visible, pas de re-commit.
+        lastInstantCommit.at = Date.now()
+      }
+      if (matchWindow) {
+        lockTrackingRect(matchWindow)
+      }
+    } else {
+      cooldownIdentifyMisses += 1
+      if (cooldownIdentifyMisses === COOLDOWN_MISSES_TO_DROP) {
+        dropTracking()
+      }
+    }
+    return
+  }
+
+  const decision = result.decision
   if (!decision) {
+    // Pas encore sûr : accrocher le cadre dès qu'un hit est plausible, et
+    // concentrer le balayage autour de sa zone pour faire monter le score.
+    if (
+      matchWindow &&
+      ((result.topSim >= EARLY_LOCK_MIN_SIM && result.topMargin >= EARLY_LOCK_MIN_MARGIN) ||
+        result.topSim >= EARLY_LOCK_SURE_SIM)
+    ) {
+      lockTrackingRect(matchWindow)
+    }
+    if (matchWindow && result.topSim >= FOCUS_MIN_SIM && result.topMargin >= FOCUS_MIN_MARGIN) {
+      focusIdentification(matchWindow)
+    }
     reportIdentifyOutcome(false)
     return
   }
@@ -1663,10 +1726,14 @@ async function onIdentifyCrop(
     lastInstantCommit.direction === scanDirection.value &&
     now - lastInstantCommit.at < INSTANT_COMMIT_DEBOUNCE_MS
   ) {
+    // Anti-doublon glissant : revoir la carte repousse la fenêtre de re-commit.
+    lastInstantCommit.at = now
+    cooldownIdentifyMisses = 0
     reportIdentifyOutcome(true)
     return
   }
   lastInstantCommit = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
+  cooldownIdentifyMisses = 0
   if (matchWindow) {
     lockTrackingRect(matchWindow)
   }
@@ -1732,6 +1799,8 @@ const {
   ready: detectorReady,
   loadError: detectorError,
   lockTrackingRect,
+  focusIdentification,
+  dropTracking,
   reportIdentifyOutcome,
 } = useCardAutoScan({
   video: videoEl,
