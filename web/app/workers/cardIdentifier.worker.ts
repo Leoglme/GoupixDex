@@ -287,34 +287,44 @@ async function identify(bufs, sessionLanguage) {
   }
   let bestS0 = []
   let bestCropIndex = 0
-  let bestRgba = null
   let cropIndex = -1
-  // Passe S0 sur CHAQUE crop (léger) — retient le mieux cadré ; MobileNet (plus
-  // lourd, + downscale + PCA) ne tourne qu'UNE fois, sur ce crop gagnant.
+  const rgbas = []
+  // Passe S0 sur CHAQUE crop (léger) — retient le mieux cadré. On garde les
+  // crops pour un éventuel recours MobileNet (fallback JA seulement).
   for (const buf of bufs) {
     cropIndex += 1
     const rgba = new Uint8ClampedArray(buf)
     if (rgba.length !== S0_EDGE * S0_EDGE * 4) {
       continue
     }
+    rgbas.push(rgba)
     const qS0 = await embedS0(rgba)
     const topS0 = searchTop8(engine.s0Index, qS0)
     if (topS0.length && (bestS0.length === 0 || topS0[0].sim > bestS0[0].sim)) {
       bestS0 = topS0
       bestCropIndex = cropIndex
-      bestRgba = rgba
     }
   }
   const s0 = decideFromTop(engine.s0Index, bestS0, S0_MIN_SIM, S0_MIN_MARGIN, sessionLanguage)
   // Cluster JA indécidable : S0 voit une carte japonaise avec force mais ne
   // peut pas la départager (les AR japonaises partagent leur style de cadre,
   // et les prints JA récents manquent à l'index) — seul cas où v2 tranche.
+  // Le meilleur crop POUR S0 n'est pas le meilleur POUR v2 (le print occidental
+  // ne domine avec marge que sur certains cadrages) : on essaie v2 sur TOUS les
+  // crops et on garde son meilleur top-8. C'est ce qui débloque la Capidextre
+  // JA → me02-107, comme Pikacheck.
   const s0TopCard = bestS0[0] ? engine.s0Index.cards[bestS0[0].i] : null
   const jaClusterBlocked =
     s0.decision === null && s0TopCard !== null && s0TopCard.locale === 'ja' && s0.topSim >= S0_MIN_SIM
   let decision = s0.decision
-  if (!decision && jaClusterBlocked && bestRgba) {
-    const bestMnet = searchTop8(engine.mnetIndex, await embedMnet(downscaleRgba(bestRgba)))
+  if (!decision && jaClusterBlocked) {
+    let bestMnet = []
+    for (const rgba of rgbas) {
+      const topMnet = searchTop8(engine.mnetIndex, await embedMnet(downscaleRgba(rgba)))
+      if (topMnet.length && (bestMnet.length === 0 || topMnet[0].sim > bestMnet[0].sim)) {
+        bestMnet = topMnet
+      }
+    }
     const mnet = decideFromTop(engine.mnetIndex, bestMnet, MNET_MIN_SIM, MNET_MIN_MARGIN, sessionLanguage)
     decision = mnet.decision
   }

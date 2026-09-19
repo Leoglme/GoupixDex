@@ -42,6 +42,16 @@ const ID_CROP_JITTER = [
 const PRESENCE_MIN = 0.5
 /** Cadence max des crops d'identification (l'inférence aval est plus lourde). */
 const ID_CROP_MIN_INTERVAL_MS = 300
+/**
+ * Netteté minimale (variance de Laplacien du crop) pour lancer l'identification.
+ * Quand la carte bouge/tremble, les crops sont flous → embedding dégradé →
+ * l'ID échoue ou se trompe. On saute alors l'ID (le CADRE continue de suivre)
+ * et on attend une frame nette : c'est ce qui rend le scan robuste au mouvement.
+ * Calibré sur la vidéo réelle : cartes nettes ~300-400, très floues <150. Seuil
+ * bas (175) pour laisser passer les cartes en léger mouvement (l'utilisateur
+ * les présente rarement parfaitement immobiles).
+ */
+const ID_SHARPNESS_MIN = 175
 
 /** Normalisation ImageNet du détecteur — identique à l'entraînement. */
 const IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -118,6 +128,32 @@ function cropRgba(rgba, w, h, rx, ry, rw, rh, dst) {
   return out
 }
 
+/** Variance du Laplacien 4-voisins d'un crop RGBA (mesure de netteté). */
+function sharpness(rgba, dst) {
+  let sum = 0
+  let sumSq = 0
+  let n = 0
+  for (let y = 1; y < dst - 1; y += 1) {
+    for (let x = 1; x < dst - 1; x += 1) {
+      const i = (y * dst + x) * 4
+      const c = rgba[i] * 0.299 + rgba[i + 1] * 0.587 + rgba[i + 2] * 0.114
+      const up = rgba[i - dst * 4] * 0.299 + rgba[i - dst * 4 + 1] * 0.587 + rgba[i - dst * 4 + 2] * 0.114
+      const dn = rgba[i + dst * 4] * 0.299 + rgba[i + dst * 4 + 1] * 0.587 + rgba[i + dst * 4 + 2] * 0.114
+      const lf = rgba[i - 4] * 0.299 + rgba[i - 4 + 1] * 0.587 + rgba[i - 4 + 2] * 0.114
+      const rt = rgba[i + 4] * 0.299 + rgba[i + 4 + 1] * 0.587 + rgba[i + 4 + 2] * 0.114
+      const lap = up + dn + lf + rt - 4 * c
+      sum += lap
+      sumSq += lap * lap
+      n += 1
+    }
+  }
+  if (n === 0) {
+    return 0
+  }
+  const mean = sum / n
+  return sumSq / n - mean * mean
+}
+
 /** Réduit un buffer RGBA (w×h) vers dst×dst en bilinéaire. */
 function resizeRgba(rgba, w, h, dst) {
   const out = new Uint8ClampedArray(dst * dst * 4)
@@ -178,17 +214,23 @@ async function detect(d) {
     self.postMessage({ t: 'nq' })
     return
   }
-  // coins normalisés → coords frame, puis coords vidéo intrinsèques
+  // coins normalisés → coords frame (pour les crops), et coords vidéo pour le
+  // cadre affiché, LÉGÈREMENT resserré (le réseau a un petit biais externe :
+  // le cadre paraissait plus grand que la carte).
   const frameQuad = []
-  const videoQuad = []
   const fx = d.vw / d.w
   const fy = d.vh / d.h
+  let cx = 0
+  let cy = 0
   for (let i = 0; i < 4; i += 1) {
-    const qx = corners[i * 2] * d.w
-    const qy = corners[i * 2 + 1] * d.h
-    frameQuad.push({ x: qx, y: qy })
-    videoQuad.push({ x: qx * fx, y: qy * fy })
+    frameQuad.push({ x: corners[i * 2] * d.w, y: corners[i * 2 + 1] * d.h })
+    cx += corners[i * 2] * d.w
+    cy += corners[i * 2 + 1] * d.h
   }
+  cx /= 4
+  cy /= 4
+  const SHRINK = 0.95
+  const videoQuad = frameQuad.map((p) => ({ x: (cx + (p.x - cx) * SHRINK) * fx, y: (cy + (p.y - cy) * SHRINK) * fy }))
   self.postMessage({ t: 'quad', corners: videoQuad })
   if (d.im && Date.now() - lastIdCropAt >= ID_CROP_MIN_INTERVAL_MS) {
     lastIdCropAt = Date.now()
@@ -204,19 +246,26 @@ async function detect(d) {
         by1 = Math.max(by1, pt.y)
       }
       const j = ID_CROP_JITTER[idJitterCursor % ID_CROP_JITTER.length]
-      idJitterCursor += 1
       const bw = bx1 - bx0
       const bh = by1 - by0
       const cx = bx0 + bw / 2 + j.dx * bw
       const cy = by0 + bh / 2 + j.dy * bh
       const bufs = []
+      const midK = ID_CROP_SCALES[Math.floor(ID_CROP_SCALES.length / 2)]
       for (const k of ID_CROP_SCALES) {
         const sw = bw * k
         const sh = bh * k
         const crop = cropRgba(rgba, d.w, d.h, cx - sw / 2, cy - sh / 2, sw, sh, CROP_EDGE)
-        bufs.push(crop.buffer)
+        bufs.push({ buf: crop.buffer, isMid: k === midK })
       }
-      self.postMessage({ t: 'idcrop', bufs }, bufs)
+      // Gate de netteté : sauter l'ID sur une frame floue (mouvement/tremblement),
+      // le cadre continue de suivre. On mesure sur le crop central.
+      const mid = bufs.find((b) => b.isMid) || bufs[0]
+      if (sharpness(new Uint8ClampedArray(mid.buf), CROP_EDGE) >= ID_SHARPNESS_MIN) {
+        idJitterCursor += 1
+        const out = bufs.map((b) => b.buf)
+        self.postMessage({ t: 'idcrop', bufs: out }, out)
+      }
     } catch {
       /* crop best-effort — la détection continue */
     }

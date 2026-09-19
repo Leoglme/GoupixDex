@@ -31,8 +31,8 @@ export interface UseCardAutoScanOptions {
   onIdentifyCrop?: (bufs: ArrayBuffer[]) => void
 }
 
-/** ~20 fps cadence — point tracking costs 3-6 ms/frame, so the overlay can glue. */
-const FRAME_MS = 50
+/** ~30 fps : le détecteur (1 M params, ~2-10 ms) laisse le cadre coller en temps réel. */
+const FRAME_MS = 33
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
 /**
@@ -51,12 +51,10 @@ const MIN_REARM_MS = 900
 const COOLDOWN_MAX_MS = 2500
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
-/** Lerp weight (new vs previous) when tracking the displayed quad. */
-const SMOOTH_LERP = 0.5
+/** Lerp weight (new vs previous) : élevé = le cadre suit la main sans traîner. */
+const SMOOTH_LERP = 0.75
 /** Drift above this fraction of the long edge ⇒ new scene, snap instead of lerp. */
 const SCENE_CHANGE_FRAC = 0.22
-/** Two consecutive detections within this drift = confirmed (kills flicker). */
-const VOTE_DRIFT_FRAC = 0.12
 /** Empty detections we wait through before the overlay disappears (≈ 400 ms). */
 const MISS_LINGER_TICKS = 4
 
@@ -91,7 +89,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   let armed = true
   let clearTicks = 0
   let displayedCorners: Pt[] | null = null
-  let pendingCorners: Pt[] | null = null
   let missTicks = 0
   let lastCommitAt = 0
 
@@ -169,19 +166,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   }
 
   /**
-   * Average two equal-length quads corner-by-corner.
-   * @param a - First quad.
-   * @param b - Second quad.
-   * @returns A quad whose corners are the midpoints of `a` and `b`.
-   */
-  function averageQuad(a: Pt[], b: Pt[]): Pt[] {
-    return [0, 1, 2, 3].map((i) => ({
-      x: (a[i]!.x + b[i]!.x) / 2,
-      y: (a[i]!.y + b[i]!.y) / 2,
-    })) as Pt[]
-  }
-
-  /**
    * Apply voting + miss-linger + the capture / re-arm state machine to a fresh
    * detection. Voting (two consecutive consistent detections) and a short
    * linger on empty frames stop the overlay from flickering on every spurious
@@ -206,7 +190,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
     // No card this tick — re-arm only after sustained absence + minimum quiet time.
     if (!corners) {
-      pendingCorners = null
       missTicks += 1
       if (!armed && Date.now() - lastCommitAt >= MIN_REARM_MS) {
         clearTicks += 1
@@ -227,24 +210,11 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     missTicks = 0
     clearTicks = 0
 
-    // Voting: wait for two consecutive detections within VOTE_DRIFT_FRAC of
-    // each other before trusting the result. Hand-shake / texture flicker
-    // produces wildly varying quads and gets filtered here.
-    if (!pendingCorners) {
-      pendingCorners = corners
-      return
-    }
-    if (cornerDrift(corners, pendingCorners) > longEdge * VOTE_DRIFT_FRAC) {
-      pendingCorners = corners
-      return
-    }
-    const confirmed = averageQuad(pendingCorners, corners)
-    pendingCorners = corners
-
-    // Smooth toward the confirmed quad — le détecteur neuronal donne les
-    // coins de la CARTE (pas d'un rectangle du décor), le cadre s'affiche
-    // dès qu'elle est vue et la suit à la cadence des frames.
-    displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
+    // Pas de voting : le détecteur neuronal donne des coins stables frame-à-
+    // frame (là où les contours flickaient) — attendre 2 frames concordantes
+    // ne faisait qu'ajouter du retard. Lissage léger direct : tue le micro-
+    // jitter sans que le cadre traîne derrière la main.
+    displayedCorners = smoothCorners(displayedCorners, corners, longEdge)
     quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
 
     // Not re-armed yet: the previous card is still in frame. The UI shows
@@ -397,7 +367,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     armed = true
     clearTicks = 0
     displayedCorners = null
-    pendingCorners = null
     missTicks = 0
     quad.value = null
     phase.value = ready.value ? 'idle' : phase.value

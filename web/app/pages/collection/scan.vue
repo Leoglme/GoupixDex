@@ -1633,6 +1633,14 @@ const STILL_SAME_CARD_MIN_SIM = 0.5
  * seconde décision sur la MÊME carte clôt l'élection immédiatement.
  */
 const ELECTION_WINDOW_MS = 1200
+/**
+ * Commit IMMÉDIAT (sans attendre l'élection) quand la carte domine très
+ * nettement : le crop précis du détecteur élimine le bruit de décor qui
+ * rendait ça risqué, et un vrai print à ce niveau (Caninos terrain 0.77/m0.08)
+ * n'a aucun rival plausible — c'est ce qui donne le ressenti « instantané ».
+ */
+const FAST_COMMIT_MIN_SIM = 0.72
+const FAST_COMMIT_MIN_MARGIN = 0.06
 /** Candidat de l'élection en cours (fenêtre ancrée à la première décision). */
 let electedCommit: { decision: ScanMatchDecision; topSim: number; firstAt: number; decisionCount: number } | null = null
 
@@ -1698,8 +1706,11 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
       }
     }
   }
+  const fastCommit =
+    result.decision !== null && result.topSim >= FAST_COMMIT_MIN_SIM && result.topMargin >= FAST_COMMIT_MIN_MARGIN
   const electionSettled =
-    electedCommit !== null && (electedCommit.decisionCount >= 2 || nowMs - electedCommit.firstAt >= ELECTION_WINDOW_MS)
+    electedCommit !== null &&
+    (fastCommit || electedCommit.decisionCount >= 2 || nowMs - electedCommit.firstAt >= ELECTION_WINDOW_MS)
   const decision = electionSettled && electedCommit ? electedCommit.decision : null
   if (!decision) {
     reportIdentifyOutcome(false)
