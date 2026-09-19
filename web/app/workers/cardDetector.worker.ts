@@ -434,7 +434,7 @@ let idAttemptParity = 0
 let focusRect: { x: number; y: number; w: number; h: number } | null = null
 let focusUntil = 0
 /** How long a focus request keeps steering the window sweep (ms). */
-const FOCUS_TTL_MS = 1500
+const FOCUS_TTL_MS = 2000
 /**
  * Batterie expédiée à chaque tentative focalisée : une ÉCHELLE de tailles et
  * deux décalages, centrés sur la zone prometteuse. Le main thread renvoie la
@@ -505,7 +505,11 @@ function shipIdentificationCrop(
   frameQuad: { x: number; y: number }[] | null,
 ): void {
   idAttemptParity += 1
-  const useQuad = frameQuad !== null && idAttemptParity % 2 === 0 && quadWorthIdentifying(frameQuad, h)
+  // Pendant un focus actif, TOUTES les tentatives vont à la batterie focalisée :
+  // la convergence a besoin de chaque tour, et le quad fraîchement verrouillé
+  // produit des crops moins bons que la batterie (mesuré 0.47 vs 0.59).
+  const focusActive = focusRect !== null && Date.now() < focusUntil
+  const useQuad = !focusActive && frameQuad !== null && idAttemptParity % 2 === 0 && quadWorthIdentifying(frameQuad, h)
   if (useQuad) {
     const { out } = warp(buf, w, h, frameQuad!, ID_CROP_EDGE, ID_CROP_EDGE, false)
     ;(self as any).postMessage({ t: 'idcrop', bufs: [out] }, [out])
