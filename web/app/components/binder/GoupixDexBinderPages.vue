@@ -1,9 +1,14 @@
 <template>
-  <div ref="rootEl" class="outline-none" tabindex="0" @keydown="onKeyDown">
-    <div class="relative overflow-x-clip md:pr-12">
+  <div ref="rootEl" class="max-w-full min-w-0 overflow-x-hidden outline-none" tabindex="0" @keydown="onKeyDown">
+    <p v-if="!opened && !flipping && pageSize && !cleanView" class="text-muted mb-4 text-center text-sm">
+      Clique sur la couverture ou appuie sur
+      <kbd class="rounded border border-(--app-line) bg-(--app-surface-2) px-1.5 py-0.5 font-mono text-[10px]">→</kbd>
+      pour ouvrir
+    </p>
+    <div class="relative mx-auto w-full max-w-[1400px] min-w-0 overflow-x-hidden md:pr-12">
       <div
         ref="spreadEl"
-        class="flex items-stretch justify-center [perspective:2000px]"
+        class="flex max-w-full items-stretch justify-center [perspective:2000px]"
         :class="pageSize ? '' : 'invisible'"
         @pointerdown="opened ? onSpreadDown($event) : undefined"
         @pointerup="opened ? onSpreadUp($event) : undefined"
@@ -74,9 +79,9 @@
           </template>
 
           <template v-else-if="opened">
-            <template v-for="(pg, i) in visible" :key="String(pg)">
+            <template v-for="(pg, i) in visible" :key="`${String(pg)}-${i}`">
               <GoupixDexBinderSpine
-                v-if="perView === 2 && i === 1"
+                v-if="perView === 2 && pageRole(i) === 'right'"
                 :color-hex="colorHex"
                 :ring-pos="ringPos"
                 :ring-color="ringColor"
@@ -122,22 +127,29 @@
           </template>
 
           <template v-else>
-            <template v-if="perView === 2">
-              <div class="shrink-0" :style="{ width: `${pageSize.w}px` }" aria-hidden />
-              <div class="w-9 shrink-0" aria-hidden />
-            </template>
-            <div class="relative shrink-0 [perspective:2000px]" :style="pageStyle(pageSize)">
-              <button
-                type="button"
-                class="group absolute inset-0 [transform-style:preserve-3d]"
-                aria-label="Ouvrir le classeur"
-                title="Ouvrir le classeur"
-                @click="openTo(0)"
-              >
-                <div class="relative h-full w-full transition group-hover:brightness-110">
-                  <GoupixDexBinderCover v-bind="coverProps" fill />
+            <div class="flex w-full justify-center">
+              <div class="flex items-stretch">
+                <GoupixDexBinderSpine
+                  v-if="perView === 2"
+                  :color-hex="colorHex"
+                  :ring-pos="ringPos"
+                  :ring-color="ringColor"
+                  :texture-class="textureClass"
+                />
+                <div class="relative shrink-0 [perspective:2000px]" :style="pageStyle(pageSize)">
+                  <button
+                    type="button"
+                    class="group absolute inset-0 [transform-style:preserve-3d]"
+                    aria-label="Ouvrir le classeur"
+                    title="Ouvrir le classeur"
+                    @click="openTo(0)"
+                  >
+                    <div class="relative h-full w-full transition group-hover:brightness-110">
+                      <GoupixDexBinderCover v-bind="coverProps" fill />
+                    </div>
+                  </button>
                 </div>
-              </button>
+              </div>
             </div>
           </template>
         </template>
@@ -250,10 +262,7 @@
             color="neutral"
             variant="soft"
             block
-            @click="
-              detailOpen = false
-              openPicker(detail.position!)
-            "
+            @click="openPickerFromDetail"
           >
             Changer la carte de cette pochette
           </UButton>
@@ -272,6 +281,7 @@ import {
   HOVER_FLIP_MS,
   SWIPE_MIN,
   fitPage,
+  SPINE_W,
   filterPickerCandidates,
   useBinderPagesSpread,
   useBinderPagesState,
@@ -356,7 +366,7 @@ const pageSize = computed(() => {
   if (!frame.value) return null
   return fitPage(
     frame.value.vh - frame.value.top - (perView.value === 1 ? 96 : 24),
-    frame.value.width - (perView.value === 2 ? 36 : 0),
+    frame.value.width - (perView.value === 2 ? SPINE_W + 4 : 0),
     grid.value.cols,
     grid.value.rows,
     perView.value,
@@ -458,6 +468,15 @@ const pickerSets = computed(() =>
 const pickerResults = computed(() =>
   filterPickerCandidates(candidates.value, pockets.value, pickerQ.value, pickerSet.value),
 )
+
+function openPickerFromDetail(): void {
+  const position = detail.value?.position
+  if (position == null) {
+    return
+  }
+  detail.value = null
+  openPicker(position)
+}
 
 function openPicker(pocket: number) {
   picker.value = pocket

@@ -28,7 +28,13 @@
         <template v-else-if="setDetail">
           <div class="flex flex-wrap items-start gap-5">
             <div class="bg-primary/10 flex size-20 shrink-0 items-center justify-center rounded-2xl">
-              <GoupixDexCatalogSetLogo :logo="setDetail.logo" :symbol="setDetail.symbol" :name="setDisplayName" large />
+              <GoupixDexCatalogSetLogo
+                :logo="setDetail.logo"
+                :symbol="setDetail.symbol"
+                :cover="setDetail.cover"
+                :name="setDisplayName"
+                large
+              />
             </div>
             <div class="min-w-0 flex-1 space-y-1">
               <p class="text-muted text-xs tracking-wide uppercase">Extension</p>

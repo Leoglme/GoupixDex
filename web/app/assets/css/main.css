@@ -242,6 +242,14 @@ html.dark {
     opacity: 0.92;
   }
 
+  /* Scène du classeur 3D — fond sombre unifié (évite le « trou » gris à gauche) */
+  .binder-stage {
+    @apply w-full min-w-0 overflow-x-hidden rounded-xl border px-1 py-4 sm:px-3 sm:py-5;
+    border-color: var(--app-line);
+    background-color: #121214;
+    background-image: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(255, 255, 255, 0.04), transparent);
+  }
+
   /* Mono uppercase micro-label — table headers, eyebrows, form labels, section titles */
   .app-label {
     @apply text-[0.66rem] font-medium tracking-[0.12em] uppercase;

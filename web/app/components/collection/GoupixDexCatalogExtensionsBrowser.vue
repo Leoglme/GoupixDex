@@ -22,7 +22,7 @@
           class="border-default bg-elevated/40 group hover:border-primary/40 flex flex-col gap-3 rounded-xl border p-4 transition hover:shadow-md"
         >
           <div class="flex h-14 items-center justify-center">
-            <GoupixDexCatalogSetLogo :logo="set.logo" :symbol="set.symbol" :name="setLabel(set)" />
+            <GoupixDexCatalogSetLogo :logo="set.logo" :symbol="set.symbol" :cover="set.cover" :name="setLabel(set)" />
           </div>
           <div class="mt-auto min-w-0">
             <p class="text-highlighted group-hover:text-primary truncate text-sm leading-tight font-medium">

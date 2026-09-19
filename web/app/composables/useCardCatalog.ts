@@ -9,6 +9,8 @@ export interface TcgdexSetBrief {
   display_name?: string
   logo?: string
   symbol?: string
+  /** First-card preview when TCGdex omits a set logo (common for JA). */
+  cover?: string
   cardCount?: { total?: number; official?: number }
 }
 

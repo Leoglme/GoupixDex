@@ -1,15 +1,40 @@
 <template>
-  <UDashboardPanel id="binder-detail">
+  <UDashboardPanel
+    id="binder-detail"
+    :ui="{
+      body: viewMode === 'pages' && binder ? 'min-w-0 overflow-x-hidden p-0 sm:p-0' : 'min-w-0 overflow-x-hidden',
+    }"
+  >
     <template #header>
       <UDashboardNavbar>
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
         <template #title>
-          <span class="truncate font-medium">{{ binder?.name ?? 'Classeur' }}</span>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-book-open" class="h-3 w-3 text-(--app-accent)" />
+            Classeur
+          </span>
         </template>
         <template #right>
-          <UButton to="/classeurs" color="neutral" variant="ghost" icon="i-lucide-arrow-left"> Classeurs </UButton>
+          <UButton
+            to="/classeurs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-chevron-left"
+            class="hidden sm:inline-flex"
+          >
+            Classeurs
+          </UButton>
+          <UButton
+            to="/classeurs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-chevron-left"
+            square
+            class="sm:hidden"
+            aria-label="Retour aux classeurs"
+          />
         </template>
       </UDashboardNavbar>
     </template>
@@ -19,55 +44,80 @@
         <UIcon name="i-lucide-loader-2" class="size-10 animate-spin text-(--app-accent)" />
       </div>
 
-      <div v-else-if="binder" class="w-full space-y-4 px-2 py-2.5 sm:px-4 sm:py-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <GoupixDexPageHeader
-            :title="binder.name"
-            :description="`${binder.card_count} carte(s) · grille ${binder.page_grid}`"
-            class="min-w-0 flex-1"
-          />
-          <div class="flex flex-wrap items-center gap-2">
-            <UTabs v-model="viewMode" :items="viewTabs" size="sm" />
+      <div v-else-if="binder" class="flex min-h-0 min-w-0 flex-col overflow-x-hidden">
+        <div
+          class="border-default flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-4 sm:py-4"
+        >
+          <div class="min-w-0">
+            <h1 class="font-display truncate text-lg font-semibold tracking-tight sm:text-xl">{{ binder.name }}</h1>
+            <p class="text-muted mt-0.5 text-xs tabular-nums sm:text-sm">{{ binderMetaLine }}</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+            <UTabs
+              v-model="viewMode"
+              :items="viewTabItems"
+              size="sm"
+              color="primary"
+              variant="pill"
+              :content="false"
+              aria-label="Mode d'affichage"
+              class="shrink-0"
+              :ui="{ list: 'w-auto', trigger: 'px-3.5 py-1.5' }"
+            />
+
             <UButton
               v-if="viewMode === 'pages'"
-              color="neutral"
-              variant="soft"
               size="sm"
+              color="neutral"
+              variant="ghost"
               :icon="cleanView ? 'i-lucide-eye' : 'i-lucide-eye-off'"
+              square
+              :aria-label="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
+              :title="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
               @click="cleanView = !cleanView"
-            >
-              Vue propre
-            </UButton>
-            <UButton color="neutral" variant="soft" size="sm" icon="i-lucide-pencil" @click="renameOpen = true">
-              Renommer
-            </UButton>
-            <UButton color="error" variant="soft" size="sm" icon="i-lucide-trash-2" @click="confirmDelete">
-              Supprimer
-            </UButton>
+            />
+
+            <UDropdownMenu :items="actionMenuItems">
+              <UButton
+                size="sm"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-ellipsis"
+                square
+                aria-label="Actions"
+              />
+            </UDropdownMenu>
           </div>
         </div>
 
-        <GoupixDexBinderPages
-          v-if="viewMode === 'pages'"
-          :binder="binder"
-          href-base="/collection/"
-          :clean-view="cleanView"
-          @updated="onBinderUpdated"
-        />
+        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mb-3 sm:mx-4 sm:mb-4">
+          <GoupixDexBinderPages
+            :binder="binder"
+            href-base="/collection/"
+            :clean-view="cleanView"
+            @updated="onBinderUpdated"
+          />
+        </div>
 
-        <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          <NuxtLink
-            v-for="item in gridItems"
-            :key="item.id"
-            :to="`/collection/${item.collection_card_id}`"
-            class="block"
-          >
-            <div class="card-tile aspect-[63/88]">
-              <GoupixDexBinderCardImage :src="item.image_url" :alt="item.card_name" />
-              <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
-            </div>
-            <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
-          </NuxtLink>
+        <div v-else class="space-y-4 px-3 py-4 sm:px-4">
+          <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
+            Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
+          </p>
+          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <NuxtLink
+              v-for="item in gridItems"
+              :key="item.id"
+              :to="`/collection/${item.collection_card_id}`"
+              class="block"
+            >
+              <div class="card-tile aspect-[63/88]">
+                <GoupixDexBinderCardImage :src="item.image_url" :alt="item.card_name" />
+                <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
+              </div>
+              <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
+            </NuxtLink>
+          </div>
         </div>
       </div>
     </template>
@@ -96,6 +146,7 @@
 
 <script setup lang="ts">
 import type { BinderDetail } from '~/types/binders'
+import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -122,16 +173,47 @@ const viewMode = computed({
 })
 const cleanView = ref(false)
 
-const viewTabs = [
+const viewTabItems = [
   { label: 'Pages', value: 'pages' },
   { label: 'Grille', value: 'grille' },
 ]
 
 const gridItems = computed(() => [...(binder.value?.items ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)))
 
+const binderMetaLine = computed(() => {
+  if (!binder.value) {
+    return ''
+  }
+  const n = binder.value.card_count
+  const grid = binder.value.page_grid.replace('x', '×')
+  return `${n} carte${n > 1 ? 's' : ''} · feuille ${grid}`
+})
+
 const renameOpen = ref(false)
 const renameName = ref('')
 const renaming = ref(false)
+
+const actionMenuItems = computed((): DropdownMenuItem[][] => [
+  [
+    {
+      label: 'Renommer',
+      icon: 'i-lucide-pencil',
+      onSelect: () => {
+        renameOpen.value = true
+      },
+    },
+  ],
+  [
+    {
+      label: 'Supprimer le classeur',
+      icon: 'i-lucide-trash-2',
+      color: 'error' as const,
+      onSelect: () => {
+        void confirmDelete()
+      },
+    },
+  ],
+])
 
 async function load() {
   loading.value = true
