@@ -155,24 +155,36 @@ function sharpness(rgba, dst) {
   return sumSq / n - mean * mean
 }
 
-/** Réduit un buffer RGBA (w×h) vers dst×dst en bilinéaire. */
-function resizeRgba(rgba, w, h, dst) {
+/**
+ * Réduit un buffer RGBA (w×h) vers dst×dst en PRÉSERVANT l'aspect (letterbox,
+ * bandes grises sur le petit côté). Le réseau est entraîné sur des cartes à
+ * l'aspect naturel 63:88 ; étirer la frame portrait en carré l'écrasait
+ * (~0.79 au lieu de 1.4), le réseau prédisait alors un quad portrait gonflé en
+ * hauteur une fois remis à l'échelle (cadre bien plus grand que la carte).
+ */
+function letterboxRgba(rgba, w, h, dst, scale, padX, padY, pad) {
   const out = new Uint8ClampedArray(dst * dst * 4)
-  const rx = w / dst
-  const ry = h / dst
   for (let y = 0; y < dst; y += 1) {
-    const sy = Math.min(h - 1.001, y * ry)
-    const y0 = Math.floor(sy)
+    const sy = (y - padY) / scale
+    const inY = sy >= 0 && sy <= h - 1.001
+    const y0 = Math.max(0, Math.floor(sy))
     const fy = sy - y0
     for (let x = 0; x < dst; x += 1) {
-      const sx = Math.min(w - 1.001, x * rx)
+      const o = (y * dst + x) * 4
+      const sx = (x - padX) / scale
+      if (!inY || sx < 0 || sx > w - 1.001) {
+        out[o] = pad
+        out[o + 1] = pad
+        out[o + 2] = pad
+        out[o + 3] = 255
+        continue
+      }
       const x0 = Math.floor(sx)
       const fx = sx - x0
       const p00 = (y0 * w + x0) * 4
       const p10 = p00 + 4
       const p01 = p00 + w * 4
       const p11 = p01 + 4
-      const o = (y * dst + x) * 4
       for (let c = 0; c < 3; c += 1) {
         const top = rgba[p00 + c] * (1 - fx) + rgba[p10 + c] * fx
         const bot = rgba[p01 + c] * (1 - fx) + rgba[p11 + c] * fx
@@ -200,7 +212,10 @@ async function init(d) {
 /** Une frame : détection des coins, puis crop d'identification throttlé. */
 async function detect(d) {
   const rgba = new Uint8ClampedArray(d.buf)
-  const small = resizeRgba(rgba, d.w, d.h, NET_EDGE)
+  const scale = NET_EDGE / Math.max(d.w, d.h)
+  const padX = (NET_EDGE - d.w * scale) / 2
+  const padY = (NET_EDGE - d.h * scale) / 2
+  const small = letterboxRgba(rgba, d.w, d.h, NET_EDGE, scale, padX, padY, 114)
   const plane = NET_EDGE * NET_EDGE
   const input = new Float32Array(3 * plane)
   for (let i = 0, p = 0; i < plane; i += 1, p += 4) {
@@ -215,18 +230,19 @@ async function detect(d) {
     self.postMessage({ t: 'nq' })
     return
   }
-  // coins normalisés → coords frame (pour les crops), et coords vidéo pour le
-  // cadre affiché, LÉGÈREMENT resserré (le réseau a un petit biais externe :
-  // le cadre paraissait plus grand que la carte).
+  // coins normalisés (repère letterbox) vers coords frame, pour les crops et
+  // le cadre affiché, LÉGÈREMENT resserré (5 %) pour épouser au ras de la carte.
   const frameQuad = []
   const fx = d.vw / d.w
   const fy = d.vh / d.h
   let cx = 0
   let cy = 0
   for (let i = 0; i < 4; i += 1) {
-    frameQuad.push({ x: corners[i * 2] * d.w, y: corners[i * 2 + 1] * d.h })
-    cx += corners[i * 2] * d.w
-    cy += corners[i * 2 + 1] * d.h
+    const qx = (corners[i * 2] * NET_EDGE - padX) / scale
+    const qy = (corners[i * 2 + 1] * NET_EDGE - padY) / scale
+    frameQuad.push({ x: qx, y: qy })
+    cx += qx
+    cy += qy
   }
   cx /= 4
   cy /= 4
