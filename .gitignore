@@ -15,3 +15,5 @@ CLAUDE.md
 api/scripts/scan-index-work.json
 api/scripts/scan-embed-work.npy
 api/scripts/scan-embed-work.keys.json
+api/scripts/scan-embed-work-v3.npy
+api/scripts/scan-embed-work-v3.keys.json
