@@ -22,13 +22,13 @@ from typing import Any
 
 import httpx
 
+from services.catalog_set_logos import enrich_browse_series_tree, enrich_set_visuals_row
 from services.tcgdex_asset_url import (
     card_image_low_webp,
     enrich_series_brief_row,
     enrich_series_detail,
     enrich_set_brief_row,
     enrich_set_detail,
-    fill_missing_set_visuals,
 )
 from services.catalog_limitless_ja_service import (
     apply_limitless_labels_to_series_detail,
@@ -39,7 +39,7 @@ from services.catalog_limitless_ja_service import (
 from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService
 
 _CACHE_TTL_SEC = 600.0
-_CACHE_VERSION = "latin-labels-v6"
+_CACHE_VERSION = "latin-labels-v7"
 _CACHE_TTL_BROWSE_SEC = 3600.0
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
@@ -235,14 +235,7 @@ def _apply_en_visuals_to_ja_sets(detail: dict[str, Any], client: TcgdexClientSer
 
 
 def _fill_set_visuals_on_series(detail: dict[str, Any], locale: str) -> None:
-    series_id = detail.get("id")
-    serie_key = series_id if isinstance(series_id, str) else None
-    sets = detail.get("sets")
-    if not isinstance(sets, list):
-        return
-    for row in sets:
-        if isinstance(row, dict):
-            fill_missing_set_visuals(row, locale=locale, serie_id=serie_key)
+    enrich_browse_series_tree([detail], locale, verify_limitless=True)
 
 
 def _index_card_names_by_local_id(set_detail: dict[str, Any]) -> dict[str, str]:
@@ -426,7 +419,7 @@ def list_sets_for_ui(
     out: list[dict[str, Any]] = []
     for row in rows:
         enrich_set_brief_row(row)
-        fill_missing_set_visuals(row, locale=loc, serie_id=None)
+        enrich_set_visuals_row(row, locale=loc, serie_id=None, verify_limitless=True)
         _attach_display_name(row, en_name_lookup)
         out.append(row)
     _cache.set(cache_key, out)
@@ -574,6 +567,7 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
             serie["sets"] = typed
 
     details.sort(key=lambda s: (s.get("releaseDate") or ""), reverse=True)
+    enrich_browse_series_tree(details, loc, verify_limitless=True)
     _cache.set(cache_key, details, ttl_seconds=_CACHE_TTL_BROWSE_SEC)
     return details
 
@@ -737,7 +731,12 @@ def get_set_for_ui(locale: str, set_id: str) -> dict[str, Any]:
     enrich_set_detail(detail)
     serie_obj = detail.get("serie")
     serie_id = serie_obj.get("id") if isinstance(serie_obj, dict) else None
-    fill_missing_set_visuals(detail, locale=loc, serie_id=serie_id if isinstance(serie_id, str) else None)
+    enrich_set_visuals_row(
+        detail,
+        locale=loc,
+        serie_id=serie_id if isinstance(serie_id, str) else None,
+        verify_limitless=True,
+    )
     if loc == "ja":
         apply_limitless_labels_to_set_detail(detail)
     else:
