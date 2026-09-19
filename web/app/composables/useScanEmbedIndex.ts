@@ -7,7 +7,15 @@ const ORT_WASM_BASE = '/ort/'
 /** Réponse au-delà de ce délai = worker mort → la tentative est abandonnée. */
 const IDENTIFY_TIMEOUT_MS = 15000
 
-const EMPTY_RESULT: ScanIdentifyResult = { decision: null, topCardId: null, topSim: 0, topMargin: 0, bestCropIndex: 0 }
+const EMPTY_RESULT: ScanIdentifyResult = {
+  decision: null,
+  topCandidate: null,
+  topCandidateSim: 0,
+  topCardId: null,
+  topSim: 0,
+  topMargin: 0,
+  bestCropIndex: 0,
+}
 
 type IdentifierWorkerReply =
   | { t: 'ready' }

@@ -48,10 +48,11 @@ const ID_CROP_MIN_INTERVAL_MS = 300
  * l'ID échoue ou se trompe. On saute alors l'ID (le CADRE continue de suivre)
  * et on attend une frame nette : c'est ce qui rend le scan robuste au mouvement.
  * Calibré sur la vidéo réelle : cartes nettes ~300-400, très floues <150. Seuil
- * bas (175) pour laisser passer les cartes en léger mouvement (l'utilisateur
- * les présente rarement parfaitement immobiles).
+ * bas (130) : l'agrégation temporelle côté page gère déjà le bruit des
+ * frames moyennes (les faux ne s'accumulent pas) — le gate n'écarte que le
+ * flou franc où l'embedding est inexploitable.
  */
-const ID_SHARPNESS_MIN = 175
+const ID_SHARPNESS_MIN = 130
 
 /** Normalisation ImageNet du détecteur — identique à l'entraînement. */
 const IMAGENET_MEAN = [0.485, 0.456, 0.406]

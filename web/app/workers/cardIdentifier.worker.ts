@@ -45,7 +45,15 @@ const MNET_MIN_MARGIN = 0.055
 const IMAGENET_MEAN = [0.485, 0.456, 0.406]
 const IMAGENET_STD = [0.229, 0.224, 0.225]
 
-const NONE_RESULT = { decision: null, topCardId: null, topSim: 0, topMargin: 0, bestCropIndex: 0 }
+const NONE_RESULT = {
+  decision: null,
+  topCandidate: null,
+  topCandidateSim: 0,
+  topCardId: null,
+  topSim: 0,
+  topMargin: 0,
+  bestCropIndex: 0,
+}
 
 let engine = null
 
@@ -234,7 +242,7 @@ function searchTop8(index, q) {
 function decideFromTop(index, top, minSim, minMargin, sessionLanguage) {
   const bestHit = top[0]
   if (!bestHit) {
-    return { decision: null, topCardId: null, topSim: 0, topMargin: 0 }
+    return { decision: null, candidate: null, candidateSim: 0, topCardId: null, topSim: 0, topMargin: 0 }
   }
   const bestCard = index.cards[bestHit.i]
   const next = top.find((t) => index.cards[t.i].tcgdexCardId !== bestCard.tcgdexCardId)
@@ -259,16 +267,21 @@ function decideFromTop(index, top, minSim, minMargin, sessionLanguage) {
     sessionLanguage === 'ja' ||
     index.localeRows.has(bestCard.tcgdexCardId + '|' + sessionLanguage)
   const confident = localeOk && bestHit.sim >= minSim && !(next && margin < minMargin)
+  // Le candidat = le meilleur pari RÉSOLU, même sans marge, pourvu que la
+  // langue de session soit cohérente — c'est lui qu'on agrège dans le temps.
+  const candidate = localeOk
+    ? {
+        tcgdexCardId: chosen.tcgdexCardId,
+        language: sessionLanguage === 'auto' ? chosen.locale : sessionLanguage,
+        name: chosen.name,
+        setId: chosen.setId,
+        localId: chosen.localId,
+      }
+    : null
   return {
-    decision: confident
-      ? {
-          tcgdexCardId: chosen.tcgdexCardId,
-          language: sessionLanguage === 'auto' ? chosen.locale : sessionLanguage,
-          name: chosen.name,
-          setId: chosen.setId,
-          localId: chosen.localId,
-        }
-      : null,
+    decision: confident ? candidate : null,
+    candidate,
+    candidateSim: bestHit.sim,
     topCardId: bestCard.tcgdexCardId,
     topSim: bestHit.sim,
     topMargin: margin,
@@ -314,10 +327,13 @@ async function identify(bufs, sessionLanguage) {
   // crops et on garde son meilleur top-8. C'est ce qui débloque la Capidextre
   // JA → me02-107, comme Pikacheck.
   const s0TopCard = bestS0[0] ? engine.s0Index.cards[bestS0[0].i] : null
-  const jaClusterBlocked =
-    s0.decision === null && s0TopCard !== null && s0TopCard.locale === 'ja' && s0.topSim >= S0_MIN_SIM
+  const jaClusterBlocked = s0TopCard !== null && s0TopCard.locale === 'ja' && s0.topSim >= S0_MIN_SIM
   let decision = s0.decision
-  if (!decision && jaClusterBlocked) {
+  // Candidat par défaut = celui de S0 (top-1 résolu). En cluster JA, on le
+  // remplace par le print occidental v2 (S0 ne le voit jamais).
+  let candidate = s0.candidate
+  let candidateSim = s0.candidateSim
+  if (!s0.decision && jaClusterBlocked) {
     let bestMnet = []
     for (const rgba of rgbas) {
       const topMnet = searchTop8(engine.mnetIndex, await embedMnet(downscaleRgba(rgba)))
@@ -327,9 +343,15 @@ async function identify(bufs, sessionLanguage) {
     }
     const mnet = decideFromTop(engine.mnetIndex, bestMnet, MNET_MIN_SIM, MNET_MIN_MARGIN, sessionLanguage)
     decision = mnet.decision
+    if (mnet.candidate) {
+      candidate = mnet.candidate
+      candidateSim = mnet.candidateSim
+    }
   }
   return {
     decision,
+    topCandidate: candidate,
+    topCandidateSim: candidateSim,
     topCardId: s0.topCardId,
     topSim: s0.topSim,
     topMargin: s0.topMargin,

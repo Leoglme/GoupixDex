@@ -1625,24 +1625,29 @@ let identifyInFlight = false
 const STILL_SAME_CARD_MIN_SIM = 0.5
 
 /**
- * ÉLECTION avant ajout : la première décision ouvre une fenêtre pendant
- * laquelle une décision PLUS FORTE la remplace — pendant le mouvement
- * d'entrée de la carte, un voisin d'artwork peut gagner une ou deux
- * tentatives avec marge (Iono SV2D-091 à 0.71 sur des crops Capidextre) ;
- * une fois la carte posée, le vrai print domine nettement (0.78+). Une
- * seconde décision sur la MÊME carte clôt l'élection immédiatement.
+ * AGRÉGATION TEMPORELLE. Une carte AR holo sombre en mouvement donne un
+ * embedding qui saute d'une frame à l'autre : le vrai print n'est en tête que
+ * sporadiquement, entrecoupé de faux TOUS DIFFÉRENTS. Plutôt que d'exiger une
+ * frame parfaite (marge stricte), on ACCUMULE le meilleur pari de chaque
+ * tentative nette : la vraie carte revient et accumule un score cohérent, les
+ * faux (uniques) ne s'additionnent pas. On ajoute quand un candidat dépasse un
+ * score ET domine le suivant — c'est ce qui identifie une carte tenue en
+ * mouvement, et débloque la Capidextre JA→me02-107 via le pari v2.
  */
-const ELECTION_WINDOW_MS = 1200
+const AGG_MIN_SIM = 0.6
+const AGG_SCORE_BASE = 0.52
+const AGG_DECAY = 0.82
+const AGG_COMMIT_SCORE = 0.42
+const AGG_DOMINATION = 1.6
 /**
- * Commit IMMÉDIAT (sans attendre l'élection) quand la carte domine très
- * nettement : le crop précis du détecteur élimine le bruit de décor qui
- * rendait ça risqué, et un vrai print à ce niveau (Caninos terrain 0.77/m0.08)
- * n'a aucun rival plausible — c'est ce qui donne le ressenti « instantané ».
+ * Commit IMMÉDIAT (court-circuite l'agrégation) quand la carte domine très
+ * nettement sur une seule frame : un vrai print à ce niveau (Caninos terrain
+ * 0.77/m0.08) n'a aucun rival — c'est le ressenti « instantané ».
  */
 const FAST_COMMIT_MIN_SIM = 0.72
 const FAST_COMMIT_MIN_MARGIN = 0.06
-/** Candidat de l'élection en cours (fenêtre ancrée à la première décision). */
-let electedCommit: { decision: ScanMatchDecision; topSim: number; firstAt: number; decisionCount: number } | null = null
+/** Scores d'agrégation glissants par carte (décroissance à chaque tentative). */
+const candidateScores: Map<string, { decision: ScanMatchDecision; score: number }> = new Map()
 
 /**
  * Identification d'un crop carte produit par le worker (quad suivi ou fenêtre
@@ -1657,20 +1662,23 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     return
   }
   identifyInFlight = true
-  let result: Awaited<ReturnType<typeof scanEmbed.identify>> = {
+  const empty: Awaited<ReturnType<typeof scanEmbed.identify>> = {
     decision: null,
+    topCandidate: null,
+    topCandidateSim: 0,
     topCardId: null,
     topSim: 0,
     topMargin: 0,
     bestCropIndex: 0,
   }
+  let result = empty
   try {
     result = await scanEmbed.identify(
       bufs.map((b) => new Uint8ClampedArray(b)),
       scanCardLanguage.value,
     )
   } catch {
-    result = { decision: null, topCardId: null, topSim: 0, topMargin: 0, bestCropIndex: 0 }
+    result = empty
   } finally {
     identifyInFlight = false
   }
@@ -1689,34 +1697,43 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     return
   }
 
-  const nowMs = Date.now()
-  if (result.decision) {
-    if (!electedCommit) {
-      electedCommit = { decision: result.decision, topSim: result.topSim, firstAt: nowMs, decisionCount: 1 }
-    } else if (result.decision.tcgdexCardId === electedCommit.decision.tcgdexCardId) {
-      electedCommit.decisionCount += 1
-      electedCommit.topSim = Math.max(electedCommit.topSim, result.topSim)
-    } else if (result.topSim > electedCommit.topSim) {
-      // Challenger plus fort : il reprend la fenêtre déjà ouverte.
-      electedCommit = {
-        decision: result.decision,
-        topSim: result.topSim,
-        firstAt: electedCommit.firstAt,
-        decisionCount: 1,
-      }
-    }
-  }
+  // Chemin rapide : une frame très nette et dominante commit sans attendre.
   const fastCommit =
     result.decision !== null && result.topSim >= FAST_COMMIT_MIN_SIM && result.topMargin >= FAST_COMMIT_MIN_MARGIN
-  const electionSettled =
-    electedCommit !== null &&
-    (fastCommit || electedCommit.decisionCount >= 2 || nowMs - electedCommit.firstAt >= ELECTION_WINDOW_MS)
-  const decision = electionSettled && electedCommit ? electedCommit.decision : null
+
+  // Agrégation : décroître tous les scores, puis créditer le meilleur pari.
+  for (const [key, v] of candidateScores) {
+    v.score *= AGG_DECAY
+    if (v.score < 0.05) {
+      candidateScores.delete(key)
+    }
+  }
+  if (result.topCandidate && result.topCandidateSim >= AGG_MIN_SIM) {
+    const key = result.topCandidate.tcgdexCardId
+    const entry = candidateScores.get(key) ?? { decision: result.topCandidate, score: 0 }
+    entry.decision = result.topCandidate
+    entry.score += result.topCandidateSim - AGG_SCORE_BASE
+    candidateScores.set(key, entry)
+  }
+  let leader: { decision: ScanMatchDecision; score: number } | null = null
+  let runnerUp = 0
+  for (const v of candidateScores.values()) {
+    if (!leader || v.score > leader.score) {
+      runnerUp = leader ? leader.score : runnerUp
+      leader = v
+    } else if (v.score > runnerUp) {
+      runnerUp = v.score
+    }
+  }
+  const aggregated =
+    leader && leader.score >= AGG_COMMIT_SCORE && leader.score >= runnerUp * AGG_DOMINATION ? leader.decision : null
+
+  const decision = fastCommit ? result.decision : aggregated
   if (!decision) {
     reportIdentifyOutcome(false)
     return
   }
-  electedCommit = null
+  candidateScores.clear()
   const now = Date.now()
   if (
     lastInstantCommit &&
