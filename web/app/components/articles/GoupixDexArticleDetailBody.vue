@@ -100,7 +100,7 @@
             <div class="flex items-center gap-2">
               <p class="app-label">Référence marché</p>
               <UIcon
-                v-if="pricingLoading || ebayLoading"
+                v-if="showMarketReferenceSpinner"
                 name="i-lucide-loader-2"
                 class="size-4 shrink-0 animate-spin text-[var(--app-accent)]"
               />
@@ -145,10 +145,6 @@
 
         <p v-if="ebayQueryTooShort" class="text-xs text-[var(--app-ink-soft)]">
           Ajoutez un nom, un set ou un titre plus explicite pour estimer eBay.
-        </p>
-
-        <p v-if="tcgplayerUnavailableHint" class="text-[11px] leading-snug text-[var(--app-ink-soft)]">
-          {{ tcgplayerUnavailableHint }}
         </p>
 
         <div class="grid grid-cols-2 gap-2">
@@ -361,6 +357,17 @@ const showMarketplaceActions: ComputedRef<boolean> = computed(() =>
   Boolean(article.value?.published_on_ebay || article.value?.published_on_vinted),
 )
 
+/** Spinner only while eBay loads, or pricing lookup when Cardmarket is not cached on the article. */
+const showMarketReferenceSpinner: ComputedRef<boolean> = computed(() => {
+  if (ebayLoading.value) {
+    return true
+  }
+  if (pricingLoading.value && article.value?.market_cardmarket_eur == null) {
+    return true
+  }
+  return false
+})
+
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
   currency: 'EUR',
@@ -491,6 +498,9 @@ const cardmarketDisplay: ComputedRef<string> = computed(() => {
   if (!a?.set_code?.trim() || !a?.card_number?.trim()) {
     return '—'
   }
+  if (a.market_cardmarket_eur != null) {
+    return eur.format(a.market_cardmarket_eur)
+  }
   if (pricingLoading.value) {
     return '—'
   }
@@ -505,6 +515,9 @@ const tcgplayerDisplay: ComputedRef<string> = computed(() => {
   const a = article.value
   if (!a?.set_code?.trim() || !a?.card_number?.trim()) {
     return '—'
+  }
+  if (a.market_tcgplayer_eur != null) {
+    return eur.format(a.market_tcgplayer_eur)
   }
   if (pricingLoading.value) {
     return '—'
@@ -608,19 +621,25 @@ const ebayMarketSummaryLine: ComputedRef<string | null> = computed(() => {
   return null
 })
 
-const tcgplayerUnavailableHint: ComputedRef<string | null> = computed(() => {
-  const p = pricing.value
-  if (pricingLoading.value || !p || p.tcgplayer_eur != null) {
-    return null
+function seedPricingFromArticle(a: Article): void {
+  if (a.market_cardmarket_eur == null && a.market_tcgplayer_eur == null) {
+    return
   }
-  if (p.cardmarket_eur == null) {
-    return null
+  pricing.value = {
+    cardmarket_eur: a.market_cardmarket_eur ?? null,
+    tcgplayer_eur: a.market_tcgplayer_eur ?? null,
+    tcgplayer_usd: null,
+    average_price_eur: null,
+    suggested_price_eur: null,
+    margin_percent_used: pricing.value?.margin_percent_used ?? 20,
+    set_name: null,
+    source: 'cardmarket_local',
+    error: null,
   }
-  return 'TCGPlayer (marché US) : souvent absent sur TCGdex pour les cartes japonaises ; Cardmarket reste la référence EU.'
-})
+}
 
 /**
- * Load PokéWallet reference prices when set code and card number are set on the article.
+ * Load reference prices when set + number exist. Skips the Cardmarket spinner when cached on the article.
  * @param a - Loaded article row
  * @returns {Promise<void>} Nothing
  */
@@ -629,19 +648,29 @@ async function loadPricing(a: Article): Promise<void> {
     pricing.value = null
     return
   }
-  pricingLoading.value = true
+  const background = a.market_cardmarket_eur != null
+  if (!background) {
+    pricingLoading.value = true
+  }
   try {
-    pricing.value = await lookup(a.set_code.trim(), a.card_number.trim(), a.pokemon_name)
-  } catch (e) {
+    const p = await lookup(a.set_code.trim(), a.card_number.trim(), a.pokemon_name)
     pricing.value = {
-      cardmarket_eur: null,
-      tcgplayer_usd: null,
-      tcgplayer_eur: null,
-      average_price_eur: null,
-      suggested_price_eur: null,
-      margin_percent_used: 0,
-      set_name: null,
-      error: apiErrorMessage(e),
+      ...p,
+      cardmarket_eur: a.market_cardmarket_eur ?? p.cardmarket_eur,
+      tcgplayer_eur: a.market_tcgplayer_eur ?? p.tcgplayer_eur,
+    }
+  } catch (e) {
+    if (!background) {
+      pricing.value = {
+        cardmarket_eur: null,
+        tcgplayer_usd: null,
+        tcgplayer_eur: null,
+        average_price_eur: null,
+        suggested_price_eur: null,
+        margin_percent_used: 0,
+        set_name: null,
+        error: apiErrorMessage(e),
+      }
     }
   } finally {
     pricingLoading.value = false
@@ -780,6 +809,9 @@ async function load(): Promise<void> {
   ebayError.value = null
   try {
     article.value = await getArticle(id.value)
+    if (article.value) {
+      seedPricingFromArticle(article.value)
+    }
   } catch (e) {
     toast.add({ title: 'Article introuvable', description: apiErrorMessage(e), color: 'error' })
   } finally {
