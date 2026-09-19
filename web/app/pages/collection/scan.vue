@@ -1626,13 +1626,13 @@ const FOCUS_MIN_SIM = 0.5
 /** Marge minimale pour focaliser — le bruit de décor culmine haut mais sans marge. */
 const FOCUS_MIN_MARGIN = 0.02
 /** Hit assez sûr pour accrocher le cadre suiveur AVANT le commit. */
-const EARLY_LOCK_MIN_SIM = 0.55
+const EARLY_LOCK_MIN_SIM = 0.58
 /** Marge minimale pour l'accrochage précoce du cadre. */
 const EARLY_LOCK_MIN_MARGIN = 0.03
 /** À cette similarité, le cadre s'accroche même sans marge (jumeaux d'artwork). */
-const EARLY_LOCK_SURE_SIM = 0.6
+const EARLY_LOCK_SURE_SIM = 0.62
 /** En cooldown : recale le cadre quand on revoit la carte commitée. */
-const RELOCK_MIN_SIM = 0.5
+const RELOCK_MIN_SIM = 0.55
 /** Tentatives de cooldown sans revoir la carte commitée avant d'abandonner le suivi. */
 const COOLDOWN_MISSES_TO_DROP = 2
 /** Compteur de tentatives de cooldown consécutives sans la carte commitée. */

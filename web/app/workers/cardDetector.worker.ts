@@ -405,7 +405,7 @@ function warp(
 // fingers over the card edges, so the windows sweep scale and position.
 // ---------------------------------------------------------------------------
 
-const ID_CROP_EDGE = 224
+const ID_CROP_EDGE = 256
 /** Floor between two crop shipments (~3/s) — inference is main-thread work. */
 const ID_CROP_MIN_INTERVAL_MS = 300
 /** A quad is only worth identifying when it plausibly frames a close card. */

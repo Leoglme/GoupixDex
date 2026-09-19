@@ -3,8 +3,6 @@ import type { ScanCardLanguage, ScanIdentifyResult } from '~/types/ScanMatch'
 
 const ORT_UMD_URL = '/ort/ort.wasm.min.js'
 const ORT_WASM_BASE = '/ort/'
-const MODEL_URL = '/scan-model/mobilenet-embed-int8.onnx'
-const INDEX_VERSION = 2
 
 /** Réponse au-delà de ce délai = worker mort → la tentative est abandonnée. */
 const IDENTIFY_TIMEOUT_MS = 15000
@@ -66,10 +64,13 @@ function startWorkerOnce(): Promise<void> {
         t: 'init',
         ortUrl: ORT_UMD_URL,
         wasmBase: ORT_WASM_BASE,
-        modelUrl: MODEL_URL,
-        indexBinUrl: `/scan-index/embed-v${INDEX_VERSION}.bin`,
-        pcaUrl: `/scan-index/embed-pca-v${INDEX_VERSION}.bin`,
-        indexJsonUrl: `/scan-index/embed-v${INDEX_VERSION}.json`,
+        s0ModelUrl: '/scan-model/mobileclip-s0-vision.onnx',
+        s0BinUrl: '/scan-index/embed-v3.bin',
+        s0JsonUrl: '/scan-index/embed-v3.json',
+        mnetModelUrl: '/scan-model/mobilenet-embed-int8.onnx',
+        mnetBinUrl: '/scan-index/embed-v2.bin',
+        mnetPcaUrl: '/scan-index/embed-pca-v2.bin',
+        mnetJsonUrl: '/scan-index/embed-v2.json',
       })
     })
     workerReadyPromise.catch((): void => {
@@ -80,10 +81,11 @@ function startWorkerOnce(): Promise<void> {
 }
 
 /**
- * Identification visuelle v2 : embedding MobileNet matché en cosinus contre
- * les ~44k images TCGdex, exécutée dans un worker dédié — politique de
- * confiance et calibration incluses (voir `app/workers/cardIdentifier.worker.ts`
- * et `api/scripts/build_scan_embed_index.py`).
+ * Identification visuelle DOUBLE ESPACE : MobileCLIP-S0 (robuste lumière
+ * naturelle / foil) + MobileNetV2 (fidèle à l'artwork exact), chacun avec sa
+ * politique, matchés en cosinus contre les ~44k images TCGdex dans un worker
+ * dédié (voir `app/workers/cardIdentifier.worker.ts` et
+ * `api/scripts/build_scan_embed_index{,_v3}.py`).
  * @returns {object} État de chargement, `load()` et `identify()`.
  */
 export function useScanEmbedIndex() {
@@ -110,9 +112,9 @@ export function useScanEmbedIndex() {
   }
 
   /**
-   * Identifie une tentative (1 à 6 crops RGBA 224×224) via le worker — les
+   * Identifie une tentative (1 à 6 crops RGBA 256×256) via le worker — les
    * buffers sont TRANSFÉRÉS (non copiés) et deviennent inutilisables ensuite.
-   * @param crops - Crops RGBA 224×224 de la tentative.
+   * @param crops - Crops RGBA 256×256 de la tentative.
    * @param sessionLanguage - Langue de session (`auto` = locale du meilleur print).
    * @returns {Promise<ScanIdentifyResult>} Décision sûre éventuelle + meilleur hit brut
    *   (sert à la recherche focalisée, au cadre précoce et au recalage en cooldown).
