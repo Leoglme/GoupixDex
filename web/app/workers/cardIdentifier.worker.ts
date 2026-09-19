@@ -73,7 +73,8 @@ function parseIndex(binBuf, meta) {
     setId,
     localId,
   }))
-  return { cards, vectors, scales, dim }
+  const localeRows = new Set(cards.map((c) => c.tcgdexCardId + '|' + c.locale))
+  return { cards, vectors, scales, dim, localeRows }
 }
 
 /** Charge onnxruntime (UMD via importScripts) + les 2 modèles + les 2 index. */
@@ -248,7 +249,16 @@ function decideFromTop(index, top, minSim, minMargin, sessionLanguage) {
       chosen = localeMatch
     }
   }
-  const confident = bestHit.sim >= minSim && !(next && margin < minMargin)
+  // Filtre langue : en session fr/en, un print qui n'existe pas dans cette
+  // locale ne peut PAS être la carte scannée (les prints occidentaux ont
+  // toujours leurs deux locales ; ça exclut les cartes JA-only — le faux
+  // ザクロ « FR » du terrain). En session ja, le mapping vers le print
+  // occidental du même artwork reste voulu (JA récentes absentes de l'index).
+  const localeOk =
+    sessionLanguage === 'auto' ||
+    sessionLanguage === 'ja' ||
+    index.localeRows.has(bestCard.tcgdexCardId + '|' + sessionLanguage)
+  const confident = localeOk && bestHit.sim >= minSim && !(next && margin < minMargin)
   return {
     decision: confident
       ? {
@@ -276,9 +286,11 @@ async function identify(bufs, sessionLanguage) {
     return NONE_RESULT
   }
   let bestS0 = []
-  let bestMnet = []
   let bestCropIndex = 0
+  let bestRgba = null
   let cropIndex = -1
+  // Passe S0 sur CHAQUE crop (léger) — retient le mieux cadré ; MobileNet (plus
+  // lourd, + downscale + PCA) ne tourne qu'UNE fois, sur ce crop gagnant.
   for (const buf of bufs) {
     cropIndex += 1
     const rgba = new Uint8ClampedArray(buf)
@@ -290,11 +302,7 @@ async function identify(bufs, sessionLanguage) {
     if (topS0.length && (bestS0.length === 0 || topS0[0].sim > bestS0[0].sim)) {
       bestS0 = topS0
       bestCropIndex = cropIndex
-    }
-    const qMnet = await embedMnet(downscaleRgba(rgba))
-    const topMnet = searchTop8(engine.mnetIndex, qMnet)
-    if (topMnet.length && (bestMnet.length === 0 || topMnet[0].sim > bestMnet[0].sim)) {
-      bestMnet = topMnet
+      bestRgba = rgba
     }
   }
   const s0 = decideFromTop(engine.s0Index, bestS0, S0_MIN_SIM, S0_MIN_MARGIN, sessionLanguage)
@@ -305,7 +313,8 @@ async function identify(bufs, sessionLanguage) {
   const jaClusterBlocked =
     s0.decision === null && s0TopCard !== null && s0TopCard.locale === 'ja' && s0.topSim >= S0_MIN_SIM
   let decision = s0.decision
-  if (!decision && jaClusterBlocked) {
+  if (!decision && jaClusterBlocked && bestRgba) {
+    const bestMnet = searchTop8(engine.mnetIndex, await embedMnet(downscaleRgba(bestRgba)))
     const mnet = decideFromTop(engine.mnetIndex, bestMnet, MNET_MIN_SIM, MNET_MIN_MARGIN, sessionLanguage)
     decision = mnet.decision
   }

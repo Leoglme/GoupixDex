@@ -1,5 +1,4 @@
 import type { ComputedRef, Ref } from 'vue'
-import { OPENCV_URL } from '~/composables/useOpenCv'
 
 /**
  * - `idle`      : detector stopped / OpenCV not ready
@@ -29,11 +28,7 @@ export interface UseCardAutoScanOptions {
    * quad, or search-window variants whose zone is given in video coords).
    * The page runs the embedding + decision, then calls `reportIdentifyOutcome`.
    */
-  onIdentifyCrop?: (
-    bufs: ArrayBuffer[],
-    windows?: { x: number; y: number; w: number; h: number }[],
-    sharps?: number[],
-  ) => void
+  onIdentifyCrop?: (bufs: ArrayBuffer[]) => void
 }
 
 /** ~20 fps cadence — point tracking costs 3-6 ms/frame, so the overlay can glue. */
@@ -54,12 +49,6 @@ const MIN_REARM_MS = 900
  * décor) empêcherait sinon le réarmement — jamais 10 ticks sans quad.
  */
 const COOLDOWN_MAX_MS = 2500
-/**
- * Durée de caution du cadre après un verrouillage par l'identification. Les
- * contours accrochent n'importe quel rectangle (jean, permis, bureau) : le
- * cadre n'est AFFICHÉ que si l'identification a récemment cautionné la zone.
- */
-const FRAME_ENDORSE_MS = 3000
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
@@ -101,14 +90,10 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   /** False right after a commit — set back to true once the frame is clear. */
   let armed = true
   let clearTicks = 0
-  let lastCorners: Pt[] | null = null
   let displayedCorners: Pt[] | null = null
   let pendingCorners: Pt[] | null = null
   let missTicks = 0
   let lastCommitAt = 0
-  /** Le cadre suiveur n'est affiché que jusqu'à cet instant (caution identification). */
-  let frameEndorsedUntil = 0
-  let liveMatchMisses = 0
 
   /**
    * Draw the current video frame into the right scratch canvas and return its
@@ -227,18 +212,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
         clearTicks += 1
         if (clearTicks >= CLEAR_TICKS_TO_REARM) {
           armed = true
-          liveMatchMisses = 0
           phase.value = 'watching'
         }
       }
       if (missTicks >= MISS_LINGER_TICKS) {
-        lastCorners = null
         displayedCorners = null
         quad.value = null
-        frameEndorsedUntil = 0
-        if (armed) {
-          liveMatchMisses = 0
-        }
         if (phase.value !== 'idle' && armed) {
           phase.value = 'watching'
         }
@@ -262,18 +241,11 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const confirmed = averageQuad(pendingCorners, corners)
     pendingCorners = corners
 
-    // Smooth toward the confirmed quad — the perspective trapezoid hugging
-    // the card edges (the worker's point tracking keeps it steady). Il n'est
-    // AFFICHÉ que si l'identification a cautionné la zone (lock récent) : les
-    // contours accrochent n'importe quel rectangle du décor.
+    // Smooth toward the confirmed quad — le détecteur neuronal donne les
+    // coins de la CARTE (pas d'un rectangle du décor), le cadre s'affiche
+    // dès qu'elle est vue et la suit à la cadence des frames.
     displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
-    if (Date.now() < frameEndorsedUntil) {
-      quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
-    } else {
-      quad.value = null
-    }
-
-    lastCorners = corners
+    quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
 
     // Not re-armed yet: the previous card is still in frame. The UI shows
     // "Retirez la carte" — and that label is now actually true.
@@ -326,7 +298,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'idcrop'; bufs: ArrayBuffer[]; wins?: { x: number; y: number; w: number; h: number }[]; sharps?: number[] }
+      | { t: 'idcrop'; bufs: ArrayBuffer[] }
     if (d.t === 'ready') {
       ready.value = true
       loadError.value = null
@@ -356,36 +328,24 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     if (d.t === 'idcrop') {
       if (onIdentifyCrop && !busy.value && enabled.value) {
-        onIdentifyCrop(d.bufs, d.wins, d.sharps)
+        onIdentifyCrop(d.bufs)
       }
     }
   }
 
   /**
    * Verdict de l'identification asynchrone (worker d'embedding).
-   * @param committed - `true` : carte commitée → cooldown « retirez la carte » ;
-   *   `false` : raté comptabilisé vers l'abandon du suivi courant.
+   * @param committed - `true` : carte commitée → cooldown « retirez la carte ».
    */
   function reportIdentifyOutcome(committed: boolean): void {
     if (!armed) {
-      // Cooldown : les tentatives ne servent qu'au recalage du cadre.
       return
     }
     if (committed) {
       armed = false
       clearTicks = 0
-      liveMatchMisses = 0
       lastCommitAt = Date.now()
       phase.value = 'cooldown'
-    } else {
-      liveMatchMisses += 1
-      // Several misses while a quad is being tracked ⇒ that quad probably
-      // frames furniture: drop it so the search windows take over.
-      if (liveMatchMisses >= 4 && lastCorners) {
-        worker?.postMessage({ t: 'droptrack' })
-        frameEndorsedUntil = 0
-        liveMatchMisses = 0
-      }
     }
   }
 
@@ -419,7 +379,12 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     worker.onerror = (): void => {
       loadError.value = 'Moteur de scan indisponible'
     }
-    worker.postMessage({ t: 'init', url: OPENCV_URL })
+    worker.postMessage({
+      t: 'init',
+      ortUrl: '/ort/ort.wasm.min.js',
+      wasmBase: '/ort/',
+      cornerModelUrl: '/scan-model/card-corners.onnx',
+    })
   }
 
   /** Reset the per-session detection state (keeps the worker + OpenCV warm). */
@@ -431,12 +396,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     detectInFlight = false
     armed = true
     clearTicks = 0
-    lastCorners = null
     displayedCorners = null
     pendingCorners = null
     missTicks = 0
-    liveMatchMisses = 0
-    frameEndorsedUntil = 0
     quad.value = null
     phase.value = ready.value ? 'idle' : phase.value
   }
@@ -448,35 +410,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
   function pause(): void {
     resetTransientState()
     phase.value = 'idle'
-  }
-
-  /**
-   * Abandonne le suivi de points en cours (cadre collé au décor après le
-   * départ de la carte) — les fenêtres de recherche reprennent la main.
-   */
-  function dropTracking(): void {
-    worker?.postMessage({ t: 'droptrack' })
-    frameEndorsedUntil = 0
-  }
-
-  /**
-   * Start point-tracking on an identified zone (video coords) — the overlay
-   * frame then glues to the card even though its outline was never detected.
-   * @param rect - Winning search window, as given to `onIdentifyCrop`.
-   */
-  function lockTrackingRect(rect: { x: number; y: number; w: number; h: number }): void {
-    worker?.postMessage({ t: 'lock', rect })
-    frameEndorsedUntil = Date.now() + FRAME_ENDORSE_MS
-  }
-
-  /**
-   * Concentre le balayage d'identification autour d'une zone prometteuse
-   * (offsets/échelles serrés pendant ~1,5 s) — fait grimper le score d'une
-   * carte approximativement cadrée.
-   * @param rect - Fenêtre du hit prometteur (coords vidéo).
-   */
-  function focusIdentification(rect: { x: number; y: number; w: number; h: number }): void {
-    worker?.postMessage({ t: 'focus', rect })
   }
 
   /** Tear everything down (page unmount only). */
@@ -506,5 +439,5 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   onBeforeUnmount(stopAll)
 
-  return { phase, quad, ready, loadError, lockTrackingRect, focusIdentification, dropTracking, reportIdentifyOutcome }
+  return { phase, quad, ready, loadError, reportIdentifyOutcome }
 }

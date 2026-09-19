@@ -65,7 +65,6 @@ export default defineNuxtConfig({
     '/scan-model/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
     '/scan-index/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
     '/ort/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
-    '/opencv/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
     '/settings/members': { redirect: '/users' },
     '/settings/users': { redirect: '/users' },
     '/settings/users/create': { redirect: '/users' },
