@@ -12,7 +12,7 @@
           </span>
         </template>
         <template #right>
-          <UButton color="neutral" variant="ghost" icon="i-lucide-package" to="/articles/stock"> Mes articles </UButton>
+          <UButton color="neutral" variant="ghost" icon="i-lucide-store" to="/articles"> Mes articles </UButton>
         </template>
       </UDashboardNavbar>
     </template>
@@ -492,10 +492,10 @@ async function submitAll() {
           description: apiErrorMessage(e),
           color: 'warning',
         })
-        await navigateTo('/articles/stock')
+        await navigateTo('/articles')
       }
     } else {
-      await navigateTo('/articles/stock')
+      await navigateTo('/articles')
     }
   } catch (e) {
     toast.add({

@@ -1,6 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
 import { isAxiosError } from 'axios'
-import { normalizeSearchQuery } from '~/utils/searchNormalize'
 import type {
   AmazonInvite,
   AmazonInviteStatusCounts,
@@ -10,22 +9,27 @@ import type {
   AmazonStatusSelectItem,
 } from '~/types/amazonInvites'
 import type { AmazonWorkerProgressPayload } from '~/types/amazonWorkerProgress'
-import { loadAmazonInvitesPrefs, saveAmazonInvitesPrefs } from '~/composables/useAmazonInvitesPersistence'
+import {
+  loadAmazonInvitesPrefs,
+  loadInvitesCacheForAccount,
+  saveAmazonInvitesPrefs,
+  saveInvitesCacheForAccount,
+} from '~/composables/useAmazonInvitesPersistence'
 import { buildAmazonProgressWebSocketUrl, useAmazonWorker } from '~/composables/useAmazonWorker'
 import { formatAmazonWorkerProgressLine } from '~/utils/amazonWorkerProgressFormat'
 import { openAmazonProgressWebSocket } from '~/utils/amazonProgressWebSocket'
+import {
+  clampMaxItems,
+  DEFAULT_AMAZON_INVITES_MAX_ITEMS,
+  legacyMaxPagesToMaxItems,
+  maxItemsToScanPages,
+} from '~/utils/amazonInvitesScanLimit'
 
 /**
- * Clamp worker page depth to a sane `[1, 50]` integer (defaults when NaN).
  *
- * @param n - Raw UI value from `maxPages`.
- * @returns {number} Clamped page count.
  */
-function clampMaxPages(n: number): number {
-  if (!Number.isFinite(n)) {
-    return 2
-  }
-  return Math.min(50, Math.max(1, Math.round(n)))
+function trimInvitesToMaxItems(list: AmazonInvite[], maxItems: number): AmazonInvite[] {
+  return list.slice(0, clampMaxItems(maxItems))
 }
 
 /**
@@ -34,6 +38,25 @@ function clampMaxPages(n: number): number {
  * @param e - Thrown rejection from `fetch*` calls.
  * @param fallback - Generic message when status-specific text does not apply.
  * @returns {string} User-visible error line.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} (délai dépassé).`)), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e: unknown) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
+/**
+ *
  */
 function errorMessageFromUnknown(e: unknown, fallback: string): string {
   if (isAxiosError(e)) {
@@ -60,7 +83,9 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
  * @returns Reactive state, `displayItems`, `load`, and `refresh`.
  */
 export function useAmazonInvitesPage() {
-  const { fetchSession, fetchInvites, refreshInvites, requestInvite } = useAmazonWorker()
+  const { fetchSession, fetchInvites, refreshInvites, reverifyInvites, requestInvite, activateVaultAccount } =
+    useAmazonWorker()
+  const { fetchOverview, setActiveAccount } = useAmazonAccounts()
   const toast = useToast()
 
   const loading: Ref<boolean> = ref(false)
@@ -69,12 +94,9 @@ export function useAmazonInvitesPage() {
   const session: Ref<AmazonSessionResponse | null> = ref(null)
   const items: Ref<AmazonInvite[]> = ref([])
   const refreshedAt: Ref<string | null> = ref(null)
-  /** Filter on the loaded results */
+  /** Filtre local + requête Amazon lors d’« Actualiser » (vide = défaut worker). */
   const searchQuery: Ref<string> = ref('')
-  const hideExpired: Ref<boolean> = ref(false)
-  /** Optional search query sent to the worker */
-  const optionalSearch: Ref<string> = ref('')
-  const maxPages: Ref<number> = ref(2)
+  const maxItems: Ref<number> = ref(DEFAULT_AMAZON_INVITES_MAX_ITEMS)
   const statusFilter: Ref<AmazonStatusFilter> = ref('all')
   /** Live log lines during `refresh()` (WebSocket `/ws/progress`). */
   const refreshLogLines: Ref<string[]> = ref([])
@@ -87,6 +109,23 @@ export function useAmazonInvitesPage() {
   const streamingInvites: Ref<AmazonInvite[]> = ref([])
   /** ASIN whose invite request is in flight (worker ``POST /amazon/invites/request``). */
   const requestInviteLoadingAsin: Ref<string | null> = ref(null)
+  const selectedAccountId: Ref<number | undefined> = ref(undefined)
+  /** Last account id confirmed by API + worker (avoids duplicate switch toasts). */
+  const confirmedActiveAccountId: Ref<number | undefined> = ref(undefined)
+  /** True only while the API active account is being saved (should stay brief). */
+  const accountSwitching: Ref<boolean> = ref(false)
+  /** Chrome profile bind / optional reverify after an instant account swap. */
+  const accountBackgroundSync: Ref<boolean> = ref(false)
+  const vaultAccounts: Ref<{ id: number; label: string | null; amazon_email: string }[]> = ref([])
+
+  const accountSelectItems = computed(() =>
+    vaultAccounts.value.map((a) => ({
+      label: a.label ? `${a.label} (${a.amazon_email})` : a.amazon_email,
+      value: a.id,
+    })),
+  )
+
+  const vaultAccountCount = computed(() => vaultAccounts.value.length)
 
   /**
    * Upsert one invite into ``streamingInvites`` keyed by ASIN or id.
@@ -103,7 +142,7 @@ export function useAmazonInvitesPage() {
     } else {
       next.push(inv)
     }
-    streamingInvites.value = next
+    streamingInvites.value = trimInvitesToMaxItems(next, maxItems.value)
   }
 
   /**
@@ -122,8 +161,9 @@ export function useAmazonInvitesPage() {
   }
 
   const fetchParams: ComputedRef<AmazonInvitesFetchParams> = computed(() => ({
-    q: optionalSearch.value,
-    max_pages: clampMaxPages(maxPages.value),
+    q: searchQuery.value,
+    max_pages: maxItemsToScanPages(maxItems.value, Boolean(searchQuery.value.trim())),
+    max_items: clampMaxItems(maxItems.value),
   }))
 
   onMounted((): void => {
@@ -131,15 +171,13 @@ export function useAmazonInvitesPage() {
       const p = loadAmazonInvitesPrefs()
       if (p?.searchQuery != null) {
         searchQuery.value = p.searchQuery
+      } else if (p?.optionalSearch != null) {
+        searchQuery.value = p.optionalSearch
       }
-      if (p?.hideExpired != null) {
-        hideExpired.value = p.hideExpired
-      }
-      if (p?.optionalSearch != null) {
-        optionalSearch.value = p.optionalSearch
-      }
-      if (p?.maxPages != null) {
-        maxPages.value = clampMaxPages(p.maxPages)
+      if (p?.maxItems != null) {
+        maxItems.value = clampMaxItems(p.maxItems)
+      } else if (p?.maxPages != null) {
+        maxItems.value = legacyMaxPagesToMaxItems(p.maxPages)
       }
       if (p?.statusFilter != null) {
         statusFilter.value = migratePersistedStatusFilter(p.statusFilter)
@@ -158,16 +196,18 @@ export function useAmazonInvitesPage() {
   function saveInvitesCache(): void {
     if (import.meta.client) {
       saveAmazonInvitesPrefs({ cachedInvites: items.value, cachedRefreshedAt: refreshedAt.value })
+      const aid = confirmedActiveAccountId.value
+      if (aid != null && items.value.length) {
+        saveInvitesCacheForAccount(aid, items.value, refreshedAt.value)
+      }
     }
   }
 
-  watch([searchQuery, hideExpired, optionalSearch, maxPages, statusFilter], (): void => {
+  watch([searchQuery, maxItems, statusFilter], (): void => {
     if (import.meta.client) {
       saveAmazonInvitesPrefs({
         searchQuery: searchQuery.value,
-        hideExpired: hideExpired.value,
-        optionalSearch: optionalSearch.value,
-        maxPages: clampMaxPages(maxPages.value),
+        maxItems: clampMaxItems(maxItems.value),
         statusFilter: statusFilter.value,
       })
     }
@@ -178,16 +218,148 @@ export function useAmazonInvitesPage() {
    *
    * @returns Resolves after state is updated or `error` is set.
    */
+  async function loadVaultAccounts(): Promise<void> {
+    try {
+      const overview = await fetchOverview()
+      vaultAccounts.value = overview.accounts
+      const active = overview.active_account_id ?? undefined
+      selectedAccountId.value = active
+      confirmedActiveAccountId.value = active
+    } catch {
+      vaultAccounts.value = []
+    }
+  }
+
+  /**
+   *
+   */
+  async function syncWorkerAfterAccountSwitch(
+    accountId: number,
+    catalogForReverify: AmazonInvite[],
+    hadLocalCache: boolean,
+  ): Promise<void> {
+    accountBackgroundSync.value = true
+    try {
+      await withTimeout(activateVaultAccount(accountId), 620_000, 'Connexion au compte Amazon')
+      try {
+        session.value = await fetchSession()
+      } catch {
+        /* ignore */
+      }
+
+      const inv = await fetchInvites(fetchParams.value)
+      if (inv.items.length) {
+        items.value = trimInvitesToMaxItems(inv.items, maxItems.value)
+        refreshedAt.value = inv.refreshed_at ?? null
+        saveInvitesCache()
+        return
+      }
+
+      if (hadLocalCache || !catalogForReverify.length) {
+        return
+      }
+
+      const res = await withTimeout(reverifyInvites(catalogForReverify), 120_000, 'Mise à jour des statuts')
+      items.value = trimInvitesToMaxItems(res.items, maxItems.value)
+      if (res.refreshed_at) {
+        refreshedAt.value = res.refreshed_at
+      }
+      saveInvitesCache()
+    } catch {
+      /* liste déjà affichée depuis le cache compte */
+    } finally {
+      accountBackgroundSync.value = false
+    }
+  }
+
+  /**
+   *
+   */
+  async function switchActiveAccount(accountId: number): Promise<void> {
+    if (accountId === confirmedActiveAccountId.value) {
+      selectedAccountId.value = accountId
+      return
+    }
+    if (accountSwitching.value || refreshing.value) {
+      selectedAccountId.value = confirmedActiveAccountId.value
+      return
+    }
+
+    const previousConfirmed = confirmedActiveAccountId.value
+    const previousItems = [...items.value]
+    const previousRefreshedAt = refreshedAt.value
+    const catalogForReverify = items.value.length ? [...items.value] : []
+
+    if (previousConfirmed != null && items.value.length) {
+      saveInvitesCacheForAccount(previousConfirmed, items.value, refreshedAt.value)
+    }
+
+    const localHit = loadInvitesCacheForAccount(accountId)
+    const hadLocalCache = Boolean(localHit?.items.length)
+    if (localHit?.items.length) {
+      items.value = trimInvitesToMaxItems(localHit.items, maxItems.value)
+      refreshedAt.value = localHit.refreshedAt ?? null
+    }
+
+    selectedAccountId.value = accountId
+    accountSwitching.value = true
+    error.value = null
+
+    try {
+      const overview = await setActiveAccount(accountId)
+      vaultAccounts.value = overview.accounts
+      const active = overview.active_account_id ?? undefined
+      if (active == null || active !== accountId) {
+        throw new Error('Compte actif non enregistré.')
+      }
+      confirmedActiveAccountId.value = active
+      selectedAccountId.value = active
+    } catch (e: unknown) {
+      selectedAccountId.value = previousConfirmed
+      confirmedActiveAccountId.value = previousConfirmed
+      items.value = previousItems
+      refreshedAt.value = previousRefreshedAt
+      try {
+        await loadVaultAccounts()
+      } catch {
+        /* ignore */
+      }
+      toast.add({
+        title: 'Changement de compte impossible',
+        description: errorMessageFromUnknown(e, 'Réessayez.'),
+        color: 'error',
+      })
+      accountSwitching.value = false
+      return
+    } finally {
+      accountSwitching.value = false
+    }
+
+    void syncWorkerAfterAccountSwitch(accountId, catalogForReverify, hadLocalCache)
+  }
+
+  /**
+   *
+   */
   async function load(): Promise<void> {
     loading.value = true
     error.value = null
     try {
+      await loadVaultAccounts()
+      const aid = confirmedActiveAccountId.value
+      if (aid != null) {
+        const hit = loadInvitesCacheForAccount(aid)
+        if (hit?.items.length) {
+          items.value = trimInvitesToMaxItems(hit.items, maxItems.value)
+          refreshedAt.value = hit.refreshedAt ?? null
+        }
+      }
       const params = fetchParams.value
       const [s, inv] = await Promise.all([fetchSession(), fetchInvites(params)])
       session.value = s
       // A restarted worker answers with an empty cache: keep the locally cached list in that case.
       if (inv.items.length || !items.value.length) {
-        items.value = inv.items
+        items.value = trimInvitesToMaxItems(inv.items, maxItems.value)
         refreshedAt.value = inv.refreshed_at ?? null
         saveInvitesCache()
       }
@@ -240,7 +412,7 @@ export function useAmazonInvitesPage() {
     try {
       const params = fetchParams.value
       const res = await refreshInvites(params)
-      items.value = res.items
+      items.value = trimInvitesToMaxItems(res.items, maxItems.value)
       streamingInvites.value = []
       if (res.refreshed_at) {
         refreshedAt.value = res.refreshed_at
@@ -284,28 +456,17 @@ export function useAmazonInvitesPage() {
   })
 
   /**
-   * Applies status / “hide expired” / local search filters (same as ``displayItems``).
+   * Applies status + local search filters (same as ``displayItems``).
    *
    * @param list - List to filter (main cache or real-time stream).
    * @returns Filtered list.
    */
   function filterInvitesClientSide(list: AmazonInvite[]): AmazonInvite[] {
-    let out = list
     const sf = statusFilter.value
-    if (sf !== 'all') {
-      out = out.filter((i) => i.status === sf)
+    if (sf === 'all') {
+      return list
     }
-    if (hideExpired.value) {
-      out = out.filter((i) => i.status !== 'expired')
-    }
-    const q = normalizeSearchQuery(searchQuery.value)
-    if (!q) {
-      return out
-    }
-    return out.filter((i) => {
-      const hay = normalizeSearchQuery(`${i.title} ${i.asin ?? ''}`)
-      return hay.includes(q)
-    })
+    return list.filter((i) => i.status === sf)
   }
 
   const displayItems: ComputedRef<AmazonInvite[]> = computed(() => filterInvitesClientSide(items.value))
@@ -372,9 +533,7 @@ export function useAmazonInvitesPage() {
     items,
     refreshedAt,
     searchQuery,
-    hideExpired,
-    optionalSearch,
-    maxPages,
+    maxItems,
     statusFilter,
     statusSelectItems,
     displayItems,
@@ -383,9 +542,15 @@ export function useAmazonInvitesPage() {
     refreshLogLines,
     refreshPhaseHint,
     requestInviteLoadingAsin,
+    accountSelectItems,
+    vaultAccountCount,
+    selectedAccountId,
+    accountSwitching,
+    accountBackgroundSync,
     load,
     refresh,
     requestProductInvite,
+    switchActiveAccount,
   }
 }
 

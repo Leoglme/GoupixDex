@@ -1,23 +1,12 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
-import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
 
-export type ArticlesListPageVariant = 'listed' | 'stock'
-
-/**
- * Whether the article is considered listed on at least one marketplace (Vinted or eBay).
- *
- * @param a - Article row from `/articles`.
- * @returns {boolean} `true` when Vinted or eBay publication flags are set.
- */
-function isOnMarketplace(a: Article) {
-  return Boolean(a.published_on_vinted ?? false) || Boolean(a.published_on_ebay ?? false)
-}
+export type ArticlesListPageVariant = 'listed'
 
 /**
- * Shared list-page logic for “Articles” (listed) vs “My stock” (inventory): filters, bulk actions, wardrobe sync.
+ * Shared list-page logic for “Mes articles” (unsold rows linked to the selling workflow).
  *
- * @param variant - `'listed'` shows on-market rows only; `'stock'` defaults to not-yet-listed.
+ * @param variant - `'listed'` shows all articles not yet marked sold.
  * @returns Reactive state, computed lists, modals, and CRUD/publish helpers for both pages.
  */
 export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
@@ -42,11 +31,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const ebayPublishAvailable: Ref<boolean> = ref(false)
   const vintedChannelEnabled: Ref<boolean> = ref(false)
 
-  const allArticles: Ref<Article[]> = ref([])
-  const loading: Ref<boolean> = ref(true)
-
-  /** My stock: include listings already online (persisted; default off). */
-  const stockIncludeListed: Ref<boolean> = ref(false)
+  const allArticles = useState<Article[]>('goupix-articles-listed-cache', () => [])
+  const loading: Ref<boolean> = ref(allArticles.value.length === 0)
 
   const soldOpen: Ref<boolean> = ref(false)
   /** Fiches en cours de vente (1 = unitaire, plusieurs = lot). */
@@ -62,23 +48,9 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const bulkDeleteIds: Ref<number[]> = ref([])
   const bulkPublishBusy: Ref<boolean> = ref(false)
 
-  const displayedArticles = computed(() => {
-    const rows = allArticles.value
-    if (variant === 'listed') {
-      return rows.filter(isOnMarketplace)
-    }
-    if (stockIncludeListed.value) {
-      return rows
-    }
-    return rows.filter((a) => !isOnMarketplace(a))
-  })
+  const displayedArticles = computed(() => allArticles.value.filter((a) => !a.is_sold))
 
   const hasAnyArticles = computed(() => allArticles.value.length > 0)
-
-  const stockAllListed = computed(
-    () =>
-      variant === 'stock' && hasAnyArticles.value && !stockIncludeListed.value && displayedArticles.value.length === 0,
-  )
 
   /**
    * Lookup by primary key in the loaded `allArticles` cache.
@@ -140,8 +112,11 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   /**
    *
    */
-  async function refresh() {
-    loading.value = true
+  async function refresh(options?: { background?: boolean }) {
+    const background = options?.background ?? allArticles.value.length > 0
+    if (!background) {
+      loading.value = true
+    }
     try {
       allArticles.value = await listArticles()
     } catch (e) {
@@ -169,21 +144,19 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     }
   }
 
-  onMounted(async () => {
-    if (variant === 'stock' && import.meta.client) {
-      const s = loadArticleListPrefs()
-      if (typeof s?.stockIncludeListed === 'boolean') {
-        stockIncludeListed.value = s.stockIncludeListed
-      }
-    }
-    await Promise.all([refresh(), loadMarketplaceAvailability()])
-  })
+  const drawerStack = useGoupixDrawerStack()
 
-  if (variant === 'stock') {
-    watch(stockIncludeListed, (v) => {
-      saveArticleListPrefs({ stockIncludeListed: v })
-    })
-  }
+  watch(
+    () => drawerStack.articleMutationCounter.value,
+    () => {
+      void refresh({ background: true })
+    },
+  )
+
+  onMounted(async () => {
+    const listRefresh = allArticles.value.length === 0 ? refresh() : refresh({ background: true })
+    await Promise.all([listRefresh, loadMarketplaceAvailability()])
+  })
 
   /**
    * Ouvre la modale « vendu » pour un ou plusieurs articles (lot : parts égales).
@@ -674,11 +647,9 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
 
   return {
     variant,
-    stockIncludeListed,
     allArticles,
     displayedArticles,
     hasAnyArticles,
-    stockAllListed,
     loading,
     wardrobeSyncing,
     ebayPublishAvailable,

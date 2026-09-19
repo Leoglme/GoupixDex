@@ -45,6 +45,15 @@ const items: ComputedRef<DropdownMenuItem[][]> = computed(() => [
       icon: 'i-lucide-settings',
       to: '/settings',
     },
+    ...(me.value?.is_admin
+      ? [
+          {
+            label: 'Utilisateurs',
+            icon: 'i-lucide-users',
+            to: '/users',
+          },
+        ]
+      : []),
     ...(isDesktopApp.value
       ? []
       : [

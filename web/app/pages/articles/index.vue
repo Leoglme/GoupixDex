@@ -16,7 +16,10 @@
 
     <template #body>
       <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
-        <GoupixDexPageHeader title="Mes articles" description="Annonces actuellement en ligne sur Vinted ou eBay.">
+        <GoupixDexPageHeader
+          title="Mes articles"
+          description="Cartes de votre collection mises en vente — publiées ou en préparation."
+        >
           <template #actions>
             <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
               Création groupée
@@ -26,10 +29,10 @@
         </GoupixDexPageHeader>
 
         <GoupixDexPageTabs :items="ARTICLES_PAGE_TABS" />
-        <UCard v-if="!loading && !hasAnyArticles" class="ring-primary/25 ring-1" :ui="{ body: 'p-5 sm:p-6 space-y-4' }">
+        <div v-if="!loading && !hasAnyArticles" class="app-card ring-primary/25 space-y-4 p-5 ring-1 sm:p-6">
           <div class="space-y-2">
-            <p class="text-highlighted text-sm font-medium">Aucun article pour l'instant</p>
-            <p class="text-muted text-sm leading-relaxed">
+            <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article pour l'instant</p>
+            <p class="text-sm leading-relaxed text-[var(--app-ink-soft)]">
               Si vous vendez déjà sur Vinted, vous pouvez importer vos annonces actives et vendues dans GoupixDex. Une
               fenêtre Chrome s'ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
             </p>
@@ -47,59 +50,58 @@
               Créer un article manuellement
             </UButton>
           </div>
-          <p v-if="!isDesktopApp" class="text-muted text-xs">
+          <p v-if="!isDesktopApp" class="text-xs text-[var(--app-ink-soft)]">
             L'import Vinted n'est disponible que dans
             <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>
             (worker local sur ce poste).
           </p>
-        </UCard>
+        </div>
 
-        <UCard
+        <div
           v-else-if="!loading && hasAnyArticles && displayedArticles.length === 0"
-          :ui="{ body: 'p-5 sm:p-6 space-y-4' }"
+          class="app-card space-y-4 p-5 sm:p-6"
         >
-          <p class="text-highlighted text-sm font-medium">Aucune annonce en ligne sur Vinted ni eBay</p>
-          <p class="text-muted text-sm leading-relaxed">
-            Les fiches pas encore publiées se trouvent dans
-            <NuxtLink to="/articles/stock" class="text-primary font-medium underline underline-offset-2">
-              Mon stock </NuxtLink
-            >. Dès qu’une mise en ligne réussit, l’article apparaît ici.
+          <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article en cours de vente</p>
+          <p class="text-sm leading-relaxed text-[var(--app-ink-soft)]">
+            Tous vos articles sont marqués vendus. Consultez l’onglet
+            <NuxtLink to="/articles/sold" class="text-primary font-medium underline underline-offset-2">
+              Vendus
+            </NuxtLink>
+            ou créez une fiche depuis
+            <NuxtLink to="/collection" class="text-primary font-medium underline underline-offset-2">
+              Ma collection </NuxtLink
+            >.
           </p>
-          <UButton to="/articles/stock" icon="i-lucide-package" color="neutral" variant="subtle">
-            Ouvrir Mon stock
-          </UButton>
-        </UCard>
+        </div>
 
-        <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
-          <div class="p-3 sm:p-4">
-            <GoupixDexArticleList
-              :articles="displayedArticles"
-              :loading="loading"
-              :selection-reset-key="articleListSelectionReset"
-              :show-ebay-column="ebayPublishAvailable"
-              :ebay-publish-available="ebayPublishAvailable"
-              :vinted-channel-enabled="vintedChannelEnabled"
-              :bulk-publishing="bulkPublishBusy"
-              @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
-              @delete="
-                (id: number) => {
-                  deleteId = id
-                  deleteOpen = true
-                }
-              "
-              @sold="(a) => openSold([a])"
-              @bulk-sold="openSold"
-              @publish-vinted="onPublishVinted"
-              @publish-ebay="onPublishEbay"
-              @bulk-delete="openBulkDelete"
-              @bulk-publish-vinted="onBulkPublishVinted"
-              @bulk-publish-ebay="onBulkPublishEbay"
-              @bulk-publish-both="onBulkPublishBoth"
-              @retry-cross-ebay="onRetryCrossEbay"
-              @retry-cross-vinted="onRetryCrossVinted"
-            />
-          </div>
-        </UCard>
+        <GoupixDexArticleList
+          v-else
+          variant="listed"
+          :articles="displayedArticles"
+          :loading="loading"
+          :selection-reset-key="articleListSelectionReset"
+          :show-ebay-column="ebayPublishAvailable"
+          :ebay-publish-available="ebayPublishAvailable"
+          :vinted-channel-enabled="vintedChannelEnabled"
+          :bulk-publishing="bulkPublishBusy"
+          @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
+          @delete="
+            (id: number) => {
+              deleteId = id
+              deleteOpen = true
+            }
+          "
+          @sold="(a) => openSold([a])"
+          @bulk-sold="openSold"
+          @publish-vinted="onPublishVinted"
+          @publish-ebay="onPublishEbay"
+          @bulk-delete="openBulkDelete"
+          @bulk-publish-vinted="onBulkPublishVinted"
+          @bulk-publish-ebay="onBulkPublishEbay"
+          @bulk-publish-both="onBulkPublishBoth"
+          @retry-cross-ebay="onRetryCrossEbay"
+          @retry-cross-vinted="onRetryCrossVinted"
+        />
       </div>
     </template>
   </UDashboardPanel>

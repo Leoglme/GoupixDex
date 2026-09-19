@@ -196,8 +196,7 @@ const visibleGroups: ComputedRef<GoupixDexCommandPaletteGroup[]> = computed((): 
 
   const pages: Array<{ label: string; icon: string; to: string }> = [
     { label: 'Tableau de bord', icon: 'i-lucide-layout-dashboard', to: '/dashboard' },
-    { label: 'Mes articles — Stock', icon: 'i-lucide-package', to: '/articles/stock' },
-    { label: 'Mes articles — En ligne', icon: 'i-lucide-store', to: '/articles' },
+    { label: 'Mes articles — En vente', icon: 'i-lucide-store', to: '/articles' },
     { label: 'Mes articles — Vendus', icon: 'i-lucide-badge-check', to: '/articles/sold' },
     { label: 'Marché eBay — Annonces en cours', icon: 'i-lucide-tag', to: '/market' },
     { label: 'Marché eBay — Ventes terminées', icon: 'i-lucide-history', to: '/top-ventes-ebay' },

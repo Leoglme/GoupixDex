@@ -98,8 +98,8 @@
             </UCard>
 
             <UCard class="ring-default ring-1" :ui="{ body: 'p-4 sm:p-6 space-y-4' }">
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div class="space-y-1">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0 flex-1 space-y-1">
                   <p class="text-muted text-xs font-medium tracking-wide uppercase">Préparer la vente</p>
                   <p class="text-highlighted text-lg leading-snug font-semibold">
                     Créer un article à partir de cette carte
@@ -110,9 +110,11 @@
                 </div>
                 <UButton
                   v-if="!prefill"
+                  size="sm"
                   color="primary"
                   variant="solid"
                   icon="i-lucide-sparkles"
+                  class="w-full shrink-0 sm:w-auto"
                   :loading="loadingPrefill"
                   @click="onPreparePrefill"
                 >
@@ -120,9 +122,11 @@
                 </UButton>
                 <UButton
                   v-else
+                  size="sm"
                   color="neutral"
                   variant="soft"
                   icon="i-lucide-refresh-cw"
+                  class="w-full shrink-0 sm:w-auto"
                   :loading="loadingPrefill"
                   @click="onPreparePrefill(true)"
                 >
@@ -170,6 +174,16 @@
           </UButton>
         </UCard>
       </div>
+
+      <GoupixDexConfirmModal
+        v-model:open="deleteModalOpen"
+        title="Retirer de la collection ?"
+        description="Cette carte sera supprimée de votre collection. L’action est définitive."
+        confirm-label="Retirer"
+        confirm-color="error"
+        :loading="deleting"
+        @confirm="submitDelete"
+      />
     </template>
   </UDashboardPanel>
 </template>
@@ -198,6 +212,7 @@ const loadingPrefill = ref(false)
 const submitting = ref(false)
 const savingDraft = ref(false)
 const deleting = ref(false)
+const deleteModalOpen = ref(false)
 const formRef = ref<{
   applyCatalogPrefill: (p: CollectionArticlePrefillResponse) => Promise<void>
   buildCreateFormData: () => FormData
@@ -280,16 +295,21 @@ async function onSaveDraft(): Promise<void> {
   }
 }
 
-async function onDelete(): Promise<void> {
+function onDelete(): void {
   if (!card.value) {
     return
   }
-  if (!window.confirm('Retirer cette carte de votre collection ?')) {
+  deleteModalOpen.value = true
+}
+
+async function submitDelete(): Promise<void> {
+  if (!card.value) {
     return
   }
   deleting.value = true
   try {
     await deleteCollectionCard(card.value.id)
+    deleteModalOpen.value = false
     toast.add({ title: 'Carte retirée de la collection', color: 'success' })
     await navigateTo('/collection')
   } catch (e) {
@@ -337,7 +357,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
         await publishArticleToVinted(article.id)
       } catch (e) {
         toast.add({ title: 'Worker Vinted', description: apiErrorMessage(e), color: 'error' })
-        await navigateTo('/articles/stock')
+        await navigateTo('/articles')
         return
       }
       await navigateTo({

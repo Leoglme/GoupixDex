@@ -2,10 +2,9 @@
 import type { GoupixDexPageTabItem } from '~/types/GoupixDexPageTabs'
 
 /**
- * Shared tab strip of the "Mes articles" section (stock / listed / sold pages).
+ * Shared tab strip of the "Mes articles" section (active sales / sold).
  */
 export const ARTICLES_PAGE_TABS: GoupixDexPageTabItem[] = [
-  { label: 'Stock', to: '/articles/stock', icon: 'i-lucide-package' },
-  { label: 'En ligne', to: '/articles', icon: 'i-lucide-store' },
+  { label: 'En vente', to: '/articles', icon: 'i-lucide-store' },
   { label: 'Vendus', to: '/articles/sold', icon: 'i-lucide-badge-check' },
 ]

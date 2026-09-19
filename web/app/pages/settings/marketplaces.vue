@@ -7,8 +7,8 @@
       <div>
         <h1 class="text-highlighted text-lg font-semibold">Marketplace</h1>
         <p class="text-muted text-sm">
-          Activez ou désactivez Vinted et eBay, et suivez les connexions Amazon (invitations produits) et Cardmarket
-          (panier) depuis l’application bureau.
+          Activez ou désactivez Vinted et eBay. Cardmarket (panier) se configure ici ; les comptes Amazon sont sur
+          Invitations Amazon.
         </p>
       </div>
     </div>

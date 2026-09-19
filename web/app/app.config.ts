@@ -26,8 +26,9 @@ export default defineAppConfig({
     },
     modal: {
       slots: {
-        overlay: 'bg-(--app-overlay)',
-        content: 'rounded-xl',
+        // Above GoupixDexAppDrawer (backdrop z-40, panel z-50) and command palette (z-70).
+        overlay: 'bg-(--app-overlay) z-[100]',
+        content: 'rounded-xl z-[101]',
       },
     },
     slideover: {
@@ -43,6 +44,26 @@ export default defineAppConfig({
     tabs: {
       slots: {
         trigger: 'cursor-pointer',
+      },
+    },
+    progress: {
+      slots: {
+        root: 'flex w-full flex-col gap-2',
+        base: 'relative w-full overflow-hidden rounded-full bg-(--app-surface-2)',
+        indicator: 'rounded-full bg-(--app-accent) transition-[width] duration-200 ease-out',
+      },
+      variants: {
+        size: {
+          xs: { base: 'h-0.5' },
+          sm: { base: 'h-1' },
+          md: { base: 'h-1.5' },
+          lg: { base: 'h-2' },
+          xl: { base: 'h-3' },
+        },
+      },
+      defaultVariants: {
+        size: 'sm',
+        animation: 'carousel',
       },
     },
   },

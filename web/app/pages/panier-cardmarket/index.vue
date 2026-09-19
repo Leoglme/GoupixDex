@@ -190,7 +190,14 @@ function goRow(row: Row<CardmarketSearchListRow>): void {
 }
 
 async function removeRow(row: Row<CardmarketSearchListRow>): Promise<void> {
-  const ok = window.confirm(`Supprimer le panier « ${row.original.name || `#${row.original.id}`} » ?`)
+  const label = row.original.name || `#${row.original.id}`
+  const { confirm } = useGoupixConfirm()
+  const ok = await confirm({
+    title: 'Supprimer ce panier ?',
+    body: `Le panier « ${label} » sera supprimé définitivement.`,
+    confirmLabel: 'Supprimer',
+    confirmColor: 'error',
+  })
   if (!ok) {
     return
   }

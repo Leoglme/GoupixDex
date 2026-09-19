@@ -37,6 +37,32 @@ export interface CatalogSeriesDetailResponse {
   series: TcgdexSeriesDetail
 }
 
+export interface TcgdexSeriesWithSets extends TcgdexSeriesDetail {
+  sets: TcgdexSetBrief[]
+}
+
+export interface CatalogBrowseResponse {
+  locale: string
+  series: TcgdexSeriesWithSets[]
+}
+
+export interface CatalogSearchCardHit {
+  id: string
+  localId: string
+  name: string
+  display_name?: string
+  image?: string
+  image_low?: string
+  set_id: string
+  set_name: string
+}
+
+export interface CatalogSearchResponse {
+  locale: string
+  query: string
+  cards: CatalogSearchCardHit[]
+}
+
 export interface TcgdexCardInSetBrief {
   id: string
   localId: string
@@ -103,6 +129,29 @@ export function useCardCatalog() {
    *
    * @param params - Locale et filtre nom optionnel.
    * @returns {Promise<CatalogSeriesListResponse>} Séries paginées côté API.
+   */
+  /**
+   * GET `/catalog/browse` — toutes les séries avec leurs extensions (navigateur classeur).
+   */
+  async function browseCatalog(locale: CatalogLocale) {
+    const { data } = await $api.get<CatalogBrowseResponse>('/catalog/browse', {
+      params: { locale },
+    })
+    return data
+  }
+
+  /**
+   * GET `/catalog/search` — recherche carte par nom / numéro.
+   */
+  async function searchCatalogCards(locale: CatalogLocale, q: string) {
+    const { data } = await $api.get<CatalogSearchResponse>('/catalog/search', {
+      params: { locale, q: q.trim() },
+    })
+    return data
+  }
+
+  /**
+   *
    */
   async function listSeries(params: { locale: CatalogLocale; name?: string }) {
     const { data } = await $api.get<CatalogSeriesListResponse>('/catalog/series', {
@@ -183,5 +232,5 @@ export function useCardCatalog() {
     return data
   }
 
-  return { listSeries, getSeries, listSets, getSet, previewCard }
+  return { browseCatalog, searchCatalogCards, listSeries, getSeries, listSets, getSet, previewCard }
 }

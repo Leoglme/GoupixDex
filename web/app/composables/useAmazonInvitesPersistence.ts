@@ -9,20 +9,31 @@ const KEY = 'goupix_amazon_invites_prefs'
 /** Maximum number of invite rows kept in the localStorage cache. */
 const CACHED_INVITES_LIMIT = 300
 
+/** Invite rows + timestamp cached for one vault account id. */
+export interface AmazonInvitesAccountCache {
+  items: AmazonInvite[]
+  refreshedAt: string | null
+}
+
 export interface AmazonInvitesUiPrefs {
-  /** Local filter on the list already loaded */
+  /** Filtre local + requête worker à l’actualisation */
   searchQuery: string
-  hideExpired: boolean
-  /** Optional search sent to the worker (fetch) */
-  optionalSearch: string
-  /** Number of Amazon result pages to scan */
-  maxPages: number
+  /** @deprecated fusionné dans searchQuery */
+  optionalSearch?: string
+  /** @deprecated retiré */
+  hideExpired?: boolean
+  /** Max invite rows to fetch on refresh (worker derives page depth). */
+  maxItems: number
+  /** @deprecated use maxItems */
+  maxPages?: number
   /** Filter rows by invitation status */
   statusFilter?: AmazonStatusFilter
   /** Last fetched invite rows, shown immediately when reopening the page. */
   cachedInvites?: AmazonInvite[]
   /** ISO timestamp of the last successful fetch. */
   cachedRefreshedAt?: string | null
+  /** Per vault account — instant UI when switching accounts. */
+  invitesByAccount?: Record<string, AmazonInvitesAccountCache>
 }
 
 /**
@@ -64,7 +75,9 @@ export function loadAmazonInvitesPrefs(): Partial<AmazonInvitesUiPrefs> | null {
     if (typeof p.optionalSearch === 'string') {
       out.optionalSearch = p.optionalSearch
     }
-    if (typeof p.maxPages === 'number' && Number.isFinite(p.maxPages)) {
+    if (typeof p.maxItems === 'number' && Number.isFinite(p.maxItems)) {
+      out.maxItems = Math.min(500, Math.max(1, Math.round(p.maxItems)))
+    } else if (typeof p.maxPages === 'number' && Number.isFinite(p.maxPages)) {
       out.maxPages = Math.min(50, Math.max(1, Math.round(p.maxPages)))
     }
     if (
@@ -108,4 +121,60 @@ export function saveAmazonInvitesPrefs(prefs: Partial<AmazonInvitesUiPrefs>): vo
   } catch {
     /* storage quota / private mode */
   }
+}
+
+/**
+ *
+ */
+function readInvitesByAccount(): Record<string, AmazonInvitesAccountCache> {
+  const p = loadAmazonInvitesPrefs()
+  const raw = p?.invitesByAccount
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+  const out: Record<string, AmazonInvitesAccountCache> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!v || typeof v !== 'object') {
+      continue
+    }
+    const row = v as AmazonInvitesAccountCache
+    if (!Array.isArray(row.items)) {
+      continue
+    }
+    const items = row.items.filter(isPlausibleInvite).slice(0, CACHED_INVITES_LIMIT)
+    if (!items.length) {
+      continue
+    }
+    out[k] = {
+      items,
+      refreshedAt: typeof row.refreshedAt === 'string' ? row.refreshedAt : null,
+    }
+  }
+  return out
+}
+
+/**
+ * Persist invite rows for one vault account (statuses differ per Amazon login).
+ */
+export function saveInvitesCacheForAccount(accountId: number, items: AmazonInvite[], refreshedAt: string | null): void {
+  if (!import.meta.client || !Number.isFinite(accountId)) {
+    return
+  }
+  const key = String(accountId)
+  const by = readInvitesByAccount()
+  by[key] = {
+    items: items.slice(0, CACHED_INVITES_LIMIT),
+    refreshedAt,
+  }
+  saveAmazonInvitesPrefs({ invitesByAccount: by })
+}
+
+/**
+ * Load cached invite rows for a vault account, if any.
+ */
+export function loadInvitesCacheForAccount(accountId: number): AmazonInvitesAccountCache | null {
+  if (!import.meta.client || !Number.isFinite(accountId)) {
+    return null
+  }
+  return readInvitesByAccount()[String(accountId)] ?? null
 }

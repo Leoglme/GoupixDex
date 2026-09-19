@@ -1,10 +1,9 @@
 <template>
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
     viewBox="0 0 24 24"
-    class="block size-full shrink-0"
+    preserveAspectRatio="xMidYMid meet"
+    class="block h-full w-full shrink-0"
     aria-hidden="true"
     focusable="false"
   >

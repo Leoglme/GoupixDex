@@ -87,7 +87,14 @@ async function save() {
 }
 
 async function unlink() {
-  if (!confirm('Détacher votre compte Vinted ? Les publications Vinted seront désactivées.')) {
+  const { confirm } = useGoupixConfirm()
+  const ok = await confirm({
+    title: 'Détacher le compte Vinted ?',
+    body: 'Les publications Vinted seront désactivées sur GoupixDex.',
+    confirmLabel: 'Détacher',
+    confirmColor: 'error',
+  })
+  if (!ok) {
     return
   }
   saving.value = true

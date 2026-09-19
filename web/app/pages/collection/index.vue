@@ -66,12 +66,12 @@
           />
         </div>
 
-        <UCard :ui="{ body: 'p-4 sm:p-5 space-y-4' }">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div class="flex flex-1 flex-col gap-3 sm:flex-row sm:items-end">
-              <UFormField label="Recherche" class="flex-1">
-                <UInput v-model="search" icon="i-lucide-search" placeholder="Nom, set, numéro…" class="w-full" />
-              </UFormField>
+        <UCard :ui="{ body: 'p-4 sm:p-5' }">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-4">
+            <UFormField label="Recherche" class="min-w-0 flex-1">
+              <UInput v-model="search" icon="i-lucide-search" placeholder="Nom, set, numéro…" class="w-full" />
+            </UFormField>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-3 lg:shrink-0">
               <UFormField label="Langue" class="w-full sm:w-48">
                 <USelect
                   v-model="languageFilter"
@@ -91,19 +91,22 @@
                 />
               </UFormField>
             </div>
-            <div class="flex flex-wrap items-center justify-between gap-3 lg:justify-end">
-              <span class="text-muted text-xs">{{ filteredItems.length }} carte(s) affichée(s)</span>
-              <UTabs
-                v-model="viewMode"
-                :items="viewItems"
-                size="sm"
-                color="primary"
-                variant="link"
-                :ui="{ list: 'gap-1' }"
-              />
-            </div>
           </div>
         </UCard>
+
+        <div class="flex w-full flex-wrap items-center justify-between gap-y-2">
+          <UTabs
+            v-model="viewMode"
+            :items="viewItems"
+            size="lg"
+            color="primary"
+            variant="link"
+            :ui="{ list: 'gap-4', trigger: 'px-4 py-2.5 text-base font-medium', leadingIcon: 'size-5' }"
+          />
+          <span class="text-muted shrink-0 text-sm tabular-nums">
+            {{ filteredItems.length }} carte(s) affichée(s)
+          </span>
+        </div>
 
         <div v-if="loading && !payload" class="flex items-center justify-center py-20">
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
@@ -279,7 +282,7 @@ const languageItems = [
 
 const listedItems = [
   { label: 'Toutes les cartes', value: 'any' },
-  { label: 'Sans article (en stock)', value: 'without_article' },
+  { label: 'Pas en vente', value: 'without_article' },
   { label: 'Avec article (en vente)', value: 'with_article' },
 ]
 

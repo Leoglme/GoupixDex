@@ -10,7 +10,7 @@
             <UButton :to="`/articles/${id}`" color="neutral" variant="ghost" icon="i-lucide-eye">
               Fiche article
             </UButton>
-            <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mon stock </UButton>
+            <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-store"> Mes articles </UButton>
           </div>
         </template>
       </UDashboardNavbar>
@@ -109,8 +109,7 @@ async function onSubmitEdit(body: ArticleUpdateBody): Promise<void> {
     const updated = await updateArticle(id.value, body)
     article.value = updated
     toast.add({ title: 'Article mis à jour', color: 'success' })
-    const listed = Boolean(updated.published_on_vinted ?? false) || Boolean(updated.published_on_ebay ?? false)
-    await navigateTo(listed ? '/articles' : '/articles/stock')
+    await navigateTo('/articles')
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
   } finally {

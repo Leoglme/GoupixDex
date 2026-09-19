@@ -160,7 +160,14 @@ async function onBan(u: AdminUser): Promise<void> {
 }
 
 async function onDelete(u: AdminUser): Promise<void> {
-  if (!confirm(`Supprimer définitivement ${u.email} ?`)) {
+  const { confirm } = useGoupixConfirm()
+  const ok = await confirm({
+    title: 'Supprimer cet utilisateur ?',
+    body: `Supprimer définitivement ${u.email} ? Cette action est irréversible.`,
+    confirmLabel: 'Supprimer',
+    confirmColor: 'error',
+  })
+  if (!ok) {
     return
   }
   try {

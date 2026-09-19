@@ -2,7 +2,9 @@ import type { AxiosInstance } from 'axios'
 import type {
   AmazonInvitesFetchParams,
   AmazonInvitesResponse,
+  AmazonInvite,
   AmazonRefreshResponse,
+  AmazonReverifyResponse,
   AmazonRequestInviteResponse,
   AmazonSessionResponse,
 } from '~/types/amazonInvites'
@@ -75,6 +77,18 @@ export function useAmazonWorker() {
    *
    * @returns {Promise<AmazonSessionResponse>} Session payload from the sidecar.
    */
+  async function fetchWorkerMeta(): Promise<{ build: string; features: string[] } | null> {
+    try {
+      const { data } = await client.value.get<{ build: string; features: string[] }>('/amazon/meta')
+      return data
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   *
+   */
   async function fetchSession(): Promise<AmazonSessionResponse> {
     const { data } = await client.value.get<AmazonSessionResponse>('/amazon/session')
     return data
@@ -100,10 +114,36 @@ export function useAmazonWorker() {
    * @returns {Promise<AmazonRefreshResponse>} Refreshed list + optional worker `message`.
    */
   async function refreshInvites(params: AmazonInvitesFetchParams): Promise<AmazonRefreshResponse> {
-    const { data } = await client.value.post<AmazonRefreshResponse>('/amazon/invites/refresh', {
+    const body: Record<string, string | number | null> = {
       q: params.q?.trim() || null,
       max_pages: params.max_pages,
-    })
+    }
+    if (params.max_items != null) {
+      body.max_items = params.max_items
+    }
+    const { data } = await client.value.post<AmazonRefreshResponse>('/amazon/invites/refresh', body)
+    return data
+  }
+
+  /**
+   * POST `/amazon/invites/reverify` — re-check invite status for existing rows (account switch).
+   *
+   * @param items - Current catalog (ASIN + display fields); worker falls back to its search cache when empty.
+   */
+  async function reverifyInvites(items: AmazonInvite[]): Promise<AmazonReverifyResponse> {
+    const { data } = await client.value.post<AmazonReverifyResponse>(
+      '/amazon/invites/reverify',
+      {
+        items: items.map((inv) => ({
+          asin: inv.asin ?? null,
+          title: inv.title,
+          product_url: inv.product_url,
+          image_url: inv.image_url,
+          price_hint: inv.price_hint ?? null,
+        })),
+      },
+      { timeout: 120_000 },
+    )
     return data
   }
 
@@ -142,12 +182,103 @@ export function useAmazonWorker() {
     return data
   }
 
+  /**
+   *
+   */
+  async function activateVaultAccount(accountId: number): Promise<{ ok: boolean; active_account_id: number }> {
+    const { data } = await client.value.post<{ ok: boolean; active_account_id: number }>(
+      `/amazon/accounts/${accountId}/activate`,
+    )
+    return data
+  }
+
+  /**
+   *
+   */
+  async function autoLoginVaultAccount(
+    accountId: number,
+  ): Promise<{ success: boolean; message: string; active_account_id: number }> {
+    const { data } = await client.value.post<{ success: boolean; message: string; active_account_id: number }>(
+      `/amazon/accounts/${accountId}/auto-login`,
+    )
+    return data
+  }
+
+  /**
+   *
+   */
+  async function openProvisionRegister(payload: { email: string; password: string; customer_name?: string }): Promise<{
+    success: boolean
+    email_prefilled: boolean
+    message: string
+    url?: string
+    email?: string
+  }> {
+    const { data } = await client.value.post<{
+      success: boolean
+      email_prefilled: boolean
+      message: string
+      url?: string
+      email?: string
+    }>('/amazon/provision/open-register', payload, {
+      timeout: 130_000,
+    })
+    return data
+  }
+
+  /**
+   *
+   */
+  async function discardProvisionStaging(): Promise<void> {
+    await client.value.post('/amazon/provision/discard')
+  }
+
+  /**
+   *
+   */
+  async function claimStagingProfile(accountId: number): Promise<{ ok: boolean; active_account_id: number }> {
+    const { data } = await client.value.post<{ ok: boolean; active_account_id: number }>(
+      `/amazon/accounts/${accountId}/claim-staging-profile`,
+    )
+    return data
+  }
+
+  /**
+   *
+   */
+  async function openRegisterBrowser(accountId: number): Promise<{
+    success: boolean
+    email_prefilled: boolean
+    message: string
+    url?: string
+    active_account_id: number
+  }> {
+    const { data } = await client.value.post<{
+      success: boolean
+      email_prefilled: boolean
+      message: string
+      url?: string
+      active_account_id: number
+    }>(`/amazon/accounts/${accountId}/open-register`, null, {
+      timeout: 130_000,
+    })
+    return data
+  }
+
   return {
+    fetchWorkerMeta,
     fetchSession,
     fetchInvites,
     refreshInvites,
+    reverifyInvites,
     requestInvite,
     openLoginBrowser,
     closeLoginBrowser,
+    activateVaultAccount,
+    autoLoginVaultAccount,
+    openProvisionRegister,
+    discardProvisionStaging,
+    claimStagingProfile,
+    openRegisterBrowser,
   }
 }

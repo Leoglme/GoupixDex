@@ -52,6 +52,9 @@
   --app-overlay: rgba(34, 26, 19, 0.45);
   --app-shadow-soft: 0 10px 30px -18px rgba(34, 26, 19, 0.35);
   --app-shadow-lift: 0 24px 56px rgba(34, 26, 19, 0.18), 0 2px 8px rgba(34, 26, 19, 0.08);
+  --app-scrollbar-thumb: color-mix(in srgb, var(--app-ink-soft) 42%, transparent);
+  --app-scrollbar-thumb-hover: color-mix(in srgb, var(--app-ink-soft) 62%, transparent);
+  --app-scrollbar-track: transparent;
 }
 
 .dark {
@@ -77,6 +80,9 @@
   --app-overlay: rgba(0, 0, 0, 0.65);
   --app-shadow-soft: 0 10px 30px -18px rgba(0, 0, 0, 0.65);
   --app-shadow-lift: 0 24px 56px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --app-scrollbar-thumb: color-mix(in srgb, var(--app-ink-soft) 38%, transparent);
+  --app-scrollbar-thumb-hover: color-mix(in srgb, var(--app-ink-soft) 58%, transparent);
+  --app-scrollbar-track: transparent;
 }
 
 /*
@@ -133,6 +139,45 @@ html.dark {
   input[type='password']::-ms-clear {
     display: none;
   }
+
+  /*
+   * Scrollbars — same idea as DevLeadHunter (thin thumb, app tokens, no fat native bar).
+   * `.scrollbar-none` / `[class*="scrollbar-none"]` keeps hidden scroll areas unchanged.
+   */
+  html {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none']) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none'])::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none'])::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none'])::-webkit-scrollbar-thumb {
+    background-color: var(--app-scrollbar-thumb);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none'])::-webkit-scrollbar-thumb:hover {
+    background-color: var(--app-scrollbar-thumb-hover);
+  }
+
+  body *:not(.scrollbar-none):not([class*='scrollbar-none'])::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 /* GoupixDex UI primitives — the six classes that carry the whole look */
@@ -142,6 +187,59 @@ html.dark {
     @apply rounded-xl border;
     border-color: var(--app-line);
     background-color: var(--app-surface);
+  }
+
+  .app-input {
+    @apply h-9 min-h-9 w-full rounded-lg border px-3 text-sm;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+  }
+
+  .app-input::placeholder {
+    color: var(--app-faint);
+  }
+
+  .app-input:focus {
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--app-accent-soft);
+    outline: none;
+  }
+
+  .text-muted {
+    color: var(--app-ink-soft);
+  }
+
+  /* Modales & drawers téléportés — même pattern que DevLeadHunter */
+  .dialog-btn-primary {
+    @apply flex h-9 min-h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-45;
+    background-color: var(--app-accent);
+    color: var(--color-primary-950, #3c1408);
+  }
+
+  .dialog-btn-primary:not(:disabled):hover {
+    opacity: 0.92;
+  }
+
+  .dialog-btn-secondary {
+    @apply flex h-9 min-h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+  }
+
+  .dialog-btn-secondary:not(:disabled):hover {
+    border-color: var(--app-ink-soft);
+    background-color: var(--app-surface-2);
+  }
+
+  .dialog-btn-danger {
+    @apply flex h-9 min-h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-45;
+    background-color: var(--app-red);
+  }
+
+  .dialog-btn-danger:not(:disabled):hover {
+    opacity: 0.92;
   }
 
   /* Mono uppercase micro-label — table headers, eyebrows, form labels, section titles */
@@ -202,6 +300,22 @@ html.dark {
     background-color: var(--app-surface-2);
   }
 
+  /* Boot / inline spinner (DevLeadHunter `.loader-smooth`) */
+  .loader-smooth {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--app-line);
+    border-left-color: var(--app-accent);
+    border-radius: 50%;
+    animation: goupix-app-spin 0.8s linear infinite;
+  }
+
+  .loader-smooth--sm {
+    width: 32px;
+    height: 32px;
+    border-width: 2px;
+  }
+
   /* Command palette fade (GoupixDexCommandPalette) */
   .palette-fade-enter-active,
   .palette-fade-leave-active {
@@ -211,6 +325,22 @@ html.dark {
   .palette-fade-enter-from,
   .palette-fade-leave-to {
     opacity: 0;
+  }
+
+  /*
+   * Nuxt UI `UProgress` — rounded track + accent fill (determinate + carousel).
+   * Scoped under `[role="progressbar"]` so native <progress> is untouched.
+   */
+  [role='progressbar'] {
+    background-color: var(--app-surface-2) !important;
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+
+  [role='progressbar'] > div,
+  [role='progressbar'] [data-slot='indicator'] {
+    background-color: var(--app-accent) !important;
+    border-radius: 9999px;
   }
 
   /* Editorial eyebrow of the marketing landing — mono caps preceded by an orange dash */
@@ -400,6 +530,216 @@ html.dark {
     }
   }
 
+  /* ——— Tuiles carte (classeurs / collection) ——— */
+  .card-tile {
+    position: relative;
+    border-radius: 4.5% / 3.5%;
+    overflow: hidden;
+    background: var(--app-surface);
+    box-shadow: var(--app-shadow-soft);
+    transition:
+      transform 0.22s cubic-bezier(0.3, 0.7, 0.3, 1),
+      box-shadow 0.22s ease;
+  }
+
+  a:hover .card-tile,
+  .card-tile:hover {
+    transform: translateY(-4px) scale(1.015);
+    box-shadow: var(--app-shadow-lift);
+  }
+
+  .tile-badge {
+    position: absolute;
+    z-index: 10;
+    border-radius: 0.5rem;
+    padding: 0.125rem 0.4375rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--app-bg) 78%, transparent);
+    color: var(--app-ink);
+    backdrop-filter: blur(4px);
+  }
+
+  .tile-badge.num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @keyframes page-turn-left {
+    from {
+      transform: rotateY(75deg);
+      opacity: 0.55;
+    }
+    to {
+      transform: rotateY(0deg);
+      opacity: 1;
+    }
+  }
+
+  @keyframes page-turn-right {
+    from {
+      transform: rotateY(-75deg);
+      opacity: 0.55;
+    }
+    to {
+      transform: rotateY(0deg);
+      opacity: 1;
+    }
+  }
+
+  @keyframes page-fade {
+    from {
+      opacity: 0.35;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .page-turn-left {
+    transform-origin: right center;
+    animation: page-turn-left 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .page-turn-right {
+    transform-origin: left center;
+    animation: page-turn-right 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .page-fade {
+    animation: page-fade 0.55s ease both;
+  }
+
+  @keyframes page-slide-next {
+    from {
+      transform: translateX(26px);
+      opacity: 0.25;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  @keyframes page-slide-prev {
+    from {
+      transform: translateX(-26px);
+      opacity: 0.25;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  .page-slide-next {
+    animation: page-slide-next 0.3s cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+
+  .page-slide-prev {
+    animation: page-slide-prev 0.3s cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+
+  @keyframes cover-flip-open-a {
+    from {
+      transform: rotateY(0deg);
+    }
+    to {
+      transform: rotateY(-90deg);
+    }
+  }
+
+  @keyframes cover-flip-open-b {
+    from {
+      transform: rotateY(-90deg);
+    }
+    to {
+      transform: rotateY(-180deg);
+    }
+  }
+
+  @keyframes cover-flip-close-a {
+    from {
+      transform: rotateY(-180deg);
+    }
+    to {
+      transform: rotateY(-90deg);
+    }
+  }
+
+  @keyframes cover-flip-close-b {
+    from {
+      transform: rotateY(-90deg);
+    }
+    to {
+      transform: rotateY(0deg);
+    }
+  }
+
+  .cover-flip-open-a {
+    animation: cover-flip-open-a 0.34s cubic-bezier(0.5, 0, 1, 0.6) both;
+  }
+
+  .cover-flip-open-b {
+    animation: cover-flip-open-b 0.36s cubic-bezier(0, 0.4, 0.5, 1) both;
+  }
+
+  .cover-flip-close-a {
+    animation: cover-flip-close-a 0.3s cubic-bezier(0.5, 0, 1, 0.6) both;
+  }
+
+  .cover-flip-close-b {
+    animation: cover-flip-close-b 0.3s cubic-bezier(0, 0.4, 0.5, 1) both;
+  }
+
+  @keyframes spine-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes spine-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  .spine-in {
+    animation: spine-in 0.3s ease 0.2s both;
+  }
+
+  .spine-out {
+    animation: spine-out 0.25s ease 0.3s both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page-turn-left,
+    .page-turn-right,
+    .page-fade,
+    .page-slide-next,
+    .page-slide-prev,
+    .cover-flip-open-a,
+    .cover-flip-open-b,
+    .cover-flip-close-a,
+    .cover-flip-close-b,
+    .spine-in,
+    .spine-out,
+    .card-tile {
+      animation: none;
+      transition: none;
+    }
+
+    a:hover .card-tile,
+    .card-tile:hover {
+      transform: none;
+    }
+  }
+
   .unovis-xy-container {
     --vis-crosshair-line-stroke-color: var(--ui-primary);
     --vis-crosshair-circle-stroke-color: var(--ui-bg);
@@ -409,5 +749,78 @@ html.dark {
     --vis-tooltip-background-color: var(--ui-bg);
     --vis-tooltip-border-color: var(--ui-border);
     --vis-tooltip-text-color: var(--ui-text-highlighted);
+  }
+
+  /* Responsive tables — `goupix-card-table` stacks rows into cards under md; `data-label` prefixes cell values. */
+  @media (max-width: 767px) {
+    .goupix-card-table {
+      display: block;
+      min-width: 0 !important;
+    }
+    .goupix-card-table thead {
+      display: none;
+    }
+    .goupix-card-table tbody {
+      display: block;
+    }
+    .goupix-card-table tr {
+      display: block;
+      margin-bottom: 0.625rem;
+      border: 1px solid var(--app-line);
+      border-radius: 0.75rem;
+      padding: 0.375rem 0.875rem;
+      background-color: var(--app-surface);
+    }
+    .goupix-card-table tr:last-child {
+      margin-bottom: 0;
+    }
+    .goupix-card-table td {
+      display: block;
+      padding: 0.375rem 0;
+      text-align: left;
+    }
+    .goupix-card-table td[data-label] {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      text-align: right;
+    }
+    .goupix-card-table td[data-label]::before {
+      content: attr(data-label);
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--app-ink-soft);
+      text-align: left;
+      white-space: nowrap;
+    }
+    .goupix-card-table td.goupix-card-table__lead {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.25rem;
+      border-bottom: 1px solid var(--app-line-soft);
+    }
+    .goupix-card-table td.goupix-card-table__actions {
+      display: flex;
+      justify-content: flex-end;
+      padding-top: 0.25rem;
+    }
+  }
+}
+
+@keyframes goupix-app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-smooth {
+    animation-duration: 1.4s;
   }
 }

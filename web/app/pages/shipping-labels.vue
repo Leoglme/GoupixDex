@@ -26,33 +26,11 @@
     </template>
 
     <template #body>
-      <div class="mx-auto w-full max-w-[1400px] space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="w-full space-y-3 px-1 py-2.5 sm:space-y-4 sm:px-2 sm:py-4">
         <GoupixDexPageHeader
           title="Étiquettes d'envoi"
           description="Générez un PDF d'étiquettes Avery L7173 pour vos commandes eBay : destinataire, expéditeur et timbre."
         />
-        <UCard :ui="{ body: 'p-4 sm:p-5' }">
-          <template #header>
-            <div class="flex flex-col gap-1">
-              <p class="text-highlighted text-sm font-medium">Destinataires : Avery L7173 — 99 × 57 mm (8 par page)</p>
-              <p class="text-muted text-xs">
-                Chaque colis : <strong>deux vignettes L7173 distinctes</strong>, l’étiquette expéditeur est placée
-                <strong>juste sous</strong> le destinataire (même colonne sur la feuille). Destinataire : vignette
-                pleine. Expéditeur : cadre de découpe resserré en hauteur, presque toute la largeur de la vignette ; une
-                ligne pour le nom et <strong>une seule ligne</strong> pour l’adresse complète (rue, complément, CP et
-                ville). Marges haut et bas égales dans le cadre pour faciliter la découpe. Ordre sur une page : colis A
-                destinataire puis expéditeur, colis B dest. puis exp., etc. Une page A4 = jusqu’à 4 colis (8 vignettes).
-                Vous pouvez joindre un <strong>PDF timbre</strong> laposte.fr par colis : placé
-                <strong>juste sous</strong> la vignette expéditeur lorsque l’emplacement est libre sous cette colonne
-                (centré), sinon à <strong>droite</strong> de la feuille, aligné avec la paire destinataire / expéditeur
-                du colis — taille PDF identique au fichier La Poste. À l’impression, utilisez
-                <strong>taille réelle / 100 %</strong> (pas « ajuster à la page ») pour éviter une réduction visuelle.
-                Sinon une page suivante (facultatif). L’adresse expéditeur (Paramètres → Configuration) est
-                <strong>facultative</strong> : sans elle, seules les étiquettes destinataire sont imprimées.
-              </p>
-            </div>
-          </template>
-        </UCard>
 
         <GoupixDexAlert
           v-if="!senderLoading && !senderAddressComplete"
@@ -67,22 +45,18 @@
         </GoupixDexAlert>
 
         <!-- eBay orders -->
-        <UCard :ui="{ body: 'p-0' }">
-          <template #header>
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-highlighted text-sm font-medium">Commandes eBay à expédier</p>
-                <p class="text-muted text-xs">
-                  Statuts <code>NOT_STARTED</code> et <code>IN_PROGRESS</code> sur les 90 derniers jours.
-                </p>
-              </div>
-              <UBadge v-if="!loadingOrders" color="neutral" variant="subtle">
-                {{ orders.length }} commande{{ orders.length > 1 ? 's' : '' }}
-              </UBadge>
-            </div>
+        <GoupixDexCollapsibleCard
+          v-model:open="ordersSectionOpen"
+          title="Commandes eBay à expédier"
+          description="Statuts NOT_STARTED et IN_PROGRESS sur les 90 derniers jours."
+        >
+          <template #trailing>
+            <UBadge v-if="!loadingOrders" color="neutral" variant="subtle">
+              {{ orders.length }} commande{{ orders.length > 1 ? 's' : '' }}
+            </UBadge>
           </template>
 
-          <div v-if="ebayUnavailable || ebayScopeMismatch" class="p-5">
+          <div v-if="ebayUnavailable || ebayScopeMismatch" class="p-4 sm:p-5">
             <GoupixDexAlert
               variant="warning"
               :icon="ebayScopeMismatch ? 'i-lucide-shield-alert' : 'i-lucide-link-2-off'"
@@ -105,7 +79,7 @@
             <UIcon name="i-lucide-loader-2" class="text-primary size-6 animate-spin" />
           </div>
 
-          <div v-else-if="orders.length === 0" class="text-muted p-5 text-sm">
+          <div v-else-if="orders.length === 0" class="text-muted p-4 text-sm sm:p-5">
             Aucune commande eBay en attente d'expédition. Vous pouvez quand même créer des étiquettes manuelles
             ci-dessous.
           </div>
@@ -168,7 +142,7 @@
               </tbody>
             </table>
           </div>
-        </UCard>
+        </GoupixDexCollapsibleCard>
 
         <!-- Manual entry -->
         <UCard :ui="{ body: 'p-4 sm:p-5' }">
@@ -213,33 +187,27 @@
         </UCard>
 
         <!-- Selected labels -->
-        <UCard :ui="{ body: 'p-0 overflow-visible' }">
-          <template #header>
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-highlighted text-sm font-medium">Étiquettes à imprimer</p>
-                <p class="text-muted text-xs">
-                  {{ labels.length }} colis · {{ labelSlotCount }} vignettes
-                  <span v-if="pageCountDetail"> — {{ pageCountDetail }}</span
-                  >. Modifications éphémères : la commande eBay d’origine n’est pas modifiée.
-                </p>
-              </div>
-              <div class="flex items-center gap-2">
-                <UButton
-                  v-if="labels.length > 0"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-trash-2"
-                  @click="clearAll"
-                >
-                  Tout vider
-                </UButton>
-              </div>
-            </div>
+        <GoupixDexCollapsibleCard
+          v-model:open="labelsSectionOpen"
+          title="Étiquettes à imprimer"
+          :description="labelsSectionDescription"
+          body-ui="p-0 overflow-visible"
+          footer-ui="p-4 sm:p-5"
+        >
+          <template #trailing>
+            <UButton
+              v-if="labels.length > 0"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-trash-2"
+              @click.stop="clearAll"
+            >
+              Tout vider
+            </UButton>
           </template>
 
-          <div v-if="labels.length === 0" class="text-muted p-5 text-sm">
+          <div v-if="labels.length === 0" class="text-muted p-4 text-sm sm:p-5">
             Aucune étiquette sélectionnée pour le moment.
           </div>
 
@@ -343,7 +311,7 @@
               </div>
             </div>
           </template>
-        </UCard>
+        </GoupixDexCollapsibleCard>
 
         <!-- PDF preview -->
         <UCard v-if="previewUrl" :ui="{ body: 'p-0' }">
@@ -387,6 +355,8 @@ const ebayScopeMismatch: Ref<boolean> = ref(false)
 const senderAddressComplete: Ref<boolean> = ref(false)
 const senderLoading: Ref<boolean> = ref(true)
 const labels: Ref<LabelRow[]> = ref([])
+const ordersSectionOpen: Ref<boolean> = ref(false)
+const labelsSectionOpen: Ref<boolean> = ref(false)
 const previewUrl: Ref<string | null> = ref(null)
 const previewBlob: Ref<Blob | null> = ref(null)
 const previewLoading: Ref<boolean> = ref(false)
@@ -728,6 +698,46 @@ const labelSlotCount: ComputedRef<number> = computed(() => {
   if (n === 0) return 0
   return senderAddressComplete.value ? n * 2 : n
 })
+
+const labelsSectionDescription: ComputedRef<string> = computed(() => {
+  const n = labels.value.length
+  if (n === 0) {
+    return 'Modifications éphémères : la commande eBay d’origine n’est pas modifiée.'
+  }
+  const base = `${n} colis · ${labelSlotCount.value} vignettes`
+  return pageCountDetail.value ? `${base} — ${pageCountDetail.value}` : base
+})
+
+function syncOrdersSectionOpen(): void {
+  if (loadingOrders.value) {
+    return
+  }
+  if (ebayUnavailable.value || ebayScopeMismatch.value || orders.value.length > 0) {
+    ordersSectionOpen.value = true
+    return
+  }
+  ordersSectionOpen.value = false
+}
+
+watch(
+  () => [loadingOrders.value, orders.value.length, ebayUnavailable.value, ebayScopeMismatch.value] as const,
+  () => {
+    syncOrdersSectionOpen()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => labels.value.length,
+  (n, prev) => {
+    if (n === 0) {
+      labelsSectionOpen.value = false
+    } else if ((prev ?? 0) === 0) {
+      labelsSectionOpen.value = true
+    }
+  },
+  { immediate: true },
+)
 
 const pageCountDetail: ComputedRef<string> = computed(() => {
   const n = labels.value.length

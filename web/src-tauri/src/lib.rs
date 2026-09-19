@@ -695,6 +695,12 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            let vinted_port = vinted_local_port();
+            let amazon_port = amazon_local_port();
+            let cardmarket_port = cardmarket_local_port();
+            kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port]);
+            std::thread::sleep(Duration::from_millis(450));
+
             match spawn_vinted_worker(&handle) {
                 Ok(child) => {
                     app.state::<DesktopWorkers>()

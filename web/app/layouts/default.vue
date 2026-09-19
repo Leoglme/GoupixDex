@@ -71,6 +71,8 @@
     <slot />
 
     <GoupixDexBrowserMissingModal v-if="isDesktopApp" />
+    <GoupixDexConfirmHost />
+    <GoupixDexDrawerStackHost />
 
     <div
       v-if="showDevWorkerControls"
@@ -138,11 +140,16 @@ async function onRestartWorkers(): Promise<void> {
  * @returns Resolves when the sync finished or was cancelled.
  */
 async function onSyncDevDb(): Promise<void> {
-  const ok = window.confirm(
-    'Replace all data in the local Docker database with a prod dump?\n' +
-      'Stop the api container (`docker compose stop api`) if import fails (connections).\n' +
-      'Configure web/.env.sync — see web/.env.sync.example.',
-  )
+  const { confirm } = useGoupixConfirm()
+  const ok = await confirm({
+    title: 'Synchroniser la base locale depuis la prod ?',
+    body:
+      'Toutes les données du Docker local seront remplacées par un dump production. ' +
+      'En cas d’échec d’import, arrêtez le conteneur API (`docker compose stop api`). ' +
+      'Configurez web/.env.sync (voir web/.env.sync.example).',
+    confirmLabel: 'Synchroniser',
+    confirmColor: 'warning',
+  })
   if (!ok) {
     return
   }
@@ -200,12 +207,12 @@ function navLink(
 const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavGroup[] => {
   const sellingItems: NavigationMenuItem[] = [
     navLink('Mes articles', 'i-lucide-package', '/articles', ['/articles']),
-    navLink('Marché eBay', 'i-lucide-trending-up', '/market', ['/market', '/top-ventes-ebay']),
     navLink("Étiquettes d'envoi", 'i-lucide-mailbox', '/shipping-labels', ['/shipping-labels']),
   ]
 
   const collectionItems: NavigationMenuItem[] = [
     navLink('Ma collection', 'i-lucide-album', '/collection', ['/collection'], ['/collection/scan']),
+    navLink('Classeurs', 'i-lucide-book-open', '/classeurs', ['/classeurs']),
     // Scanner = phone → web flow; on desktop the page shows a QR code to open it on the phone.
     navLink('Scanner mes cartes', 'i-lucide-scan-line', '/collection/scan', ['/collection/scan']),
   ]
@@ -220,7 +227,7 @@ const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavG
     purchasesItems.push(navLink('Invitations Amazon', 'i-simple-icons-amazon', '/amazon-invites', ['/amazon-invites']))
   }
 
-  const result: AppSidebarNavGroup[] = [
+  return [
     {
       heading: 'Pilotage',
       items: [navLink('Tableau de bord', 'i-lucide-layout-dashboard', '/dashboard', ['/dashboard'])],
@@ -229,15 +236,6 @@ const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavG
     { heading: 'Collection', items: collectionItems },
     { heading: 'Achats', items: purchasesItems },
   ]
-
-  if (me.value?.is_admin) {
-    result.push({
-      heading: 'Administration',
-      items: [navLink('Utilisateurs', 'i-lucide-users', '/users', ['/users'])],
-    })
-  }
-
-  return result
 })
 
 /**

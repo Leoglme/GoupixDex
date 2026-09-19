@@ -21,9 +21,26 @@
           description="Produits Pokémon vendus sur invitation : statut de chaque demande, et bouton pour la poser sans quitter GoupixDex."
         >
           <template #actions>
-            <UBadge v-if="connectionBadge" :color="connectionBadge.color" variant="subtle" class="shrink-0">
-              {{ connectionBadge.label }}
-            </UBadge>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <UButton
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-users"
+                size="sm"
+                @click="accountsDrawerOpen = true"
+              >
+                Comptes
+              </UButton>
+              <UBadge
+                v-if="connectionBadge"
+                :color="connectionBadge.color"
+                variant="subtle"
+                class="inline-flex shrink-0 items-center gap-1.5"
+              >
+                <UIcon name="i-simple-icons-amazon" class="size-3.5 shrink-0" aria-hidden="true" />
+                <span>{{ connectionBadge.label }}</span>
+              </UBadge>
+            </div>
           </template>
         </GoupixDexPageHeader>
 
@@ -34,23 +51,14 @@
         />
 
         <template v-else>
-          <GoupixDexAmazonSessionBanner :session="session" :loading="loading" />
-
           <UCard>
             <template #header>
-              <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <p class="text-highlighted font-medium">Invitations</p>
-                <p v-if="refreshedAt" class="text-muted text-xs">
-                  Dernière récupération : {{ new Date(refreshedAt).toLocaleString('fr-FR') }}
-                </p>
-              </div>
+              <p class="text-highlighted font-medium">Invitations</p>
             </template>
 
             <GoupixDexAmazonInvitesToolbar
-              v-model:optional-search="optionalSearch"
-              v-model:max-pages="maxPages"
+              v-model:max-items="maxItems"
               v-model:search-query="searchQuery"
-              v-model:hide-expired="hideExpired"
               v-model:status-filter="statusFilter"
               :loading="loading"
               :refreshing="refreshing"
@@ -75,6 +83,22 @@
             :phase-hint="refreshPhaseHint"
             :log-lines="refreshLogLines"
           />
+
+          <div v-if="accountSelectItems.length && !refreshing" class="flex flex-wrap items-center gap-2">
+            <USelect
+              :model-value="selectedAccountId"
+              :items="accountSelectItems"
+              value-key="value"
+              class="w-full max-w-md min-w-0"
+              :disabled="accountSwitching || refreshing || loading"
+              :loading="accountSwitching"
+              placeholder="Compte Amazon"
+              @update:model-value="onAccountChange"
+            />
+            <p v-if="accountBackgroundSync" class="text-muted text-xs">
+              Sync Amazon en arrière-plan (liste déjà à jour).
+            </p>
+          </div>
 
           <div v-if="refreshing" class="space-y-3">
             <p v-if="streamingDisplayItems.length" class="text-muted text-xs">
@@ -122,6 +146,8 @@
           </div>
         </template>
       </div>
+
+      <GoupixDexAmazonAccountsDrawer v-model:open="accountsDrawerOpen" @changed="onVaultChanged" />
     </template>
   </UDashboardPanel>
 </template>
@@ -139,17 +165,19 @@ useGoupixPageSeo(
 )
 
 const { isDesktopApp } = useDesktopRuntime()
+const route = useRoute()
+const router = useRouter()
+
+const accountsDrawerOpen = ref(false)
 
 const {
   loading,
   refreshing,
   error,
   session,
-  refreshedAt,
+  refreshedAt: _refreshedAt,
   searchQuery,
-  hideExpired,
-  optionalSearch,
-  maxPages,
+  maxItems,
   items,
   statusFilter,
   statusSelectItems,
@@ -158,10 +186,34 @@ const {
   refreshLogLines,
   refreshPhaseHint,
   requestInviteLoadingAsin,
+  accountSelectItems,
+  vaultAccountCount,
+  selectedAccountId,
+  accountSwitching,
+  accountBackgroundSync,
   load,
   refresh,
   requestProductInvite,
+  switchActiveAccount,
 } = useAmazonInvitesPage()
+
+async function onAccountChange(id: number | null | undefined): Promise<void> {
+  if (id == null) {
+    return
+  }
+  await switchActiveAccount(id)
+}
+
+async function onVaultChanged(): Promise<void> {
+  await load()
+}
+
+function maybeOpenAccountsFromQuery(): void {
+  if (route.query.accounts === '1' || route.query.accounts === 'open') {
+    accountsDrawerOpen.value = true
+    void router.replace({ path: route.path, query: {} })
+  }
+}
 
 /**
  * Navbar badge reflecting Amazon worker session state (loading / error / API-derived).
@@ -176,12 +228,32 @@ const connectionBadge: ComputedRef<AmazonConnectionBadge | null> = computed(() =
   if (!session.value) {
     return null
   }
-  return amazonSessionBadge(session.value)
+  const base = amazonSessionBadge(session.value)
+  const n = vaultAccountCount.value
+  if (n > 0 && base.color === 'success') {
+    return {
+      ...base,
+      label: `${base.label} · ${n} compte${n > 1 ? 's' : ''}`,
+    }
+  }
+  if (n > 0 && session.value.state === 'needs_login') {
+    return {
+      ...base,
+      label: `${base.label} · ${n} en coffre`,
+    }
+  }
+  return base
 })
 
 onMounted((): void => {
+  maybeOpenAccountsFromQuery()
   if (isDesktopApp.value) {
-    load()
+    void load()
   }
 })
+
+watch(
+  () => route.query.accounts,
+  () => maybeOpenAccountsFromQuery(),
+)
 </script>

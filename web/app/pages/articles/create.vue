@@ -12,7 +12,7 @@
           </span>
         </template>
         <template #right>
-          <UButton to="/articles/stock" color="neutral" variant="ghost" icon="i-lucide-package"> Mes articles </UButton>
+          <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-store"> Mes articles </UButton>
         </template>
       </UDashboardNavbar>
     </template>
@@ -228,7 +228,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
           description: apiErrorMessage(err),
           color: 'error',
         })
-        await navigateTo('/articles/stock')
+        await navigateTo('/articles')
         return
       }
       notifyEbayOutcome()
@@ -281,7 +281,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
     } else if (!ebayNotified) {
       toast.add({ title: 'Article créé', color: 'success' })
     }
-    await navigateTo('/articles/stock')
+    await navigateTo('/articles')
   } catch (err) {
     toast.add({
       title: 'Création impossible',

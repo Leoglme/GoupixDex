@@ -27,6 +27,8 @@ export interface AmazonSessionResponse {
   /** True when the worker's login Chromium window is currently open. */
   browser_open?: boolean
   last_sync_at?: string | null
+  /** Vault account bound to the local Chromium profile (null = legacy single profile). */
+  active_account_id?: number | null
 }
 
 /** Client-side filter (same buckets as amazon-pokemon-scelled) */
@@ -52,6 +54,8 @@ export interface AmazonInvitesFetchParams {
   q: string
   /** Number of result pages to scan (1–50) */
   max_pages: number
+  /** Max invite rows to collect (worker stops search/check early). */
+  max_items?: number
 }
 
 export interface AmazonInvitesResponse {
@@ -72,6 +76,14 @@ export interface AmazonRefreshResponse {
     q: string | null
     max_pages: number
   }
+}
+
+/** ``POST /amazon/invites/reverify`` — same ASINs, statuses for the active account. */
+export interface AmazonReverifyResponse {
+  items: AmazonInvite[]
+  refreshed_at: string | null
+  message?: string
+  active_account_id?: number | null
 }
 
 /** ``POST /amazon/invites/request`` — worker posts Amazon’s invite API (cookies). */
