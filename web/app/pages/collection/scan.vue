@@ -580,7 +580,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { renderSVG } from 'uqr'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
-import type { ScanCardLanguage } from '~/types/ScanMatch'
+import type { ScanCardLanguage, ScanMatchDecision } from '~/types/ScanMatch'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -1639,6 +1639,18 @@ const COOLDOWN_MISSES_TO_DROP = 2
 let cooldownIdentifyMisses = 0
 
 /**
+ * ÉLECTION avant ajout : la première décision ouvre une fenêtre pendant
+ * laquelle une décision PLUS FORTE la remplace — pendant le mouvement
+ * d'entrée de la carte, un voisin d'artwork peut gagner une ou deux
+ * tentatives avec marge (Iono SV2D-091 à 0.71 sur des crops Capidextre) ;
+ * une fois la carte posée, le vrai print domine nettement (0.78+). Une
+ * seconde décision sur la MÊME carte clôt l'élection immédiatement.
+ */
+const ELECTION_WINDOW_MS = 1200
+/** Candidat de l'élection en cours (fenêtre ancrée à la première décision). */
+let electedCommit: { decision: ScanMatchDecision; topSim: number; firstAt: number; decisionCount: number } | null = null
+
+/**
  * Identification d'un crop carte produit par le worker (quad suivi ou fenêtre
  * de recherche) : embedding MobileNet + cosinus sur l'index. Un verdict sûr
  * committe la carte — bip + flash + POST en arrière-plan — et verrouille le
@@ -1678,7 +1690,7 @@ async function onIdentifyCrop(
 
   // Cooldown : la carte est déjà commitée — ces tentatives servent à RECALER
   // le cadre quand on la revoit, et à LÂCHER un suivi resté collé au décor.
-  if (autoScanPhase.value === 'cooldown' || autoScanPhase.value === 'captured') {
+  if (autoScanPhase.value === 'cooldown') {
     const committedCardSeen =
       result.topCardId !== null &&
       lastInstantCommit !== null &&
@@ -1702,7 +1714,26 @@ async function onIdentifyCrop(
     return
   }
 
-  const decision = result.decision
+  const nowMs = Date.now()
+  if (result.decision) {
+    if (!electedCommit) {
+      electedCommit = { decision: result.decision, topSim: result.topSim, firstAt: nowMs, decisionCount: 1 }
+    } else if (result.decision.tcgdexCardId === electedCommit.decision.tcgdexCardId) {
+      electedCommit.decisionCount += 1
+      electedCommit.topSim = Math.max(electedCommit.topSim, result.topSim)
+    } else if (result.topSim > electedCommit.topSim) {
+      // Challenger plus fort : il reprend la fenêtre déjà ouverte.
+      electedCommit = {
+        decision: result.decision,
+        topSim: result.topSim,
+        firstAt: electedCommit.firstAt,
+        decisionCount: 1,
+      }
+    }
+  }
+  const electionSettled =
+    electedCommit !== null && (electedCommit.decisionCount >= 2 || nowMs - electedCommit.firstAt >= ELECTION_WINDOW_MS)
+  const decision = electionSettled && electedCommit ? electedCommit.decision : null
   if (!decision) {
     // Pas encore sûr : accrocher le cadre dès qu'un hit est plausible, et
     // concentrer le balayage autour de sa zone pour faire monter le score.
@@ -1719,6 +1750,7 @@ async function onIdentifyCrop(
     reportIdentifyOutcome(false)
     return
   }
+  electedCommit = null
   const now = Date.now()
   if (
     lastInstantCommit &&
@@ -1763,36 +1795,9 @@ async function onIdentifyCrop(
     })
 }
 
-/**
- * Commit the card the detector produced. A confident on-device match (index
- * loaded, distance + margin OK) skips OCR entirely: the card id goes straight
- * to `/scan-stream/match` and the verdict lands in ~1 s. Anything uncertain
- * uploads the photo to the server pipeline, exactly as before. The success
- * chime is triggered later, when the outcome event arrives.
- */
-async function onDetectorCapture(file: File): Promise<void> {
-  uploading.value = true
-  blurryCaptureHint.value = false
-  // A new card is being processed — drop the previous overlay right away so
-  // the user sees we've moved on. The new card's overlay will appear when its
-  // outcome event lands and the outcome watcher plays the chime.
-  if (latestOutcome.value) {
-    dismissedOutcomeId.value = latestOutcome.value.event_id
-  }
-  try {
-    await uploadPhoto(file, uploadLanguage.value, undefined, WEBCAM_UPLOAD_COMPRESS, scanDirection.value)
-  } catch (err) {
-    toast.add({ title: 'Envoi impossible', description: apiErrorMessage(err), color: 'error' })
-  } finally {
-    uploading.value = false
-  }
-}
-
-// Cash-register auto-capture: OpenCV tracks the card outline; once it is held
-// steady the deskewed crop is shot once, then re-arms when the card leaves.
+// Scan sans contact : le worker vision suit la carte, le worker d'embedding
+// l'identifie — aucun envoi de photo automatique, tout se joue sur l'appareil.
 const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value && autoScan.value)
-/** `true` while the detector is retrying a motion-blurred burst — status hint. */
-const blurryCaptureHint: Ref<boolean> = ref(false)
 const {
   phase: autoScanPhase,
   quad: cardQuad,
@@ -1807,22 +1812,9 @@ const {
   enabled: autoScanEnabled,
   busy: uploading,
   identifyActive: computed(() => scanEmbed.ready.value),
-  onCapture: onDetectorCapture,
   onIdentifyCrop: (bufs, win): void => {
     void onIdentifyCrop(bufs, win)
   },
-  onBlurryRetry: (): void => {
-    blurryCaptureHint.value = true
-    vibrate(30)
-  },
-})
-
-// The hint only makes sense while a capture is being retried — clear it as
-// soon as the scanner goes back to watching / waiting.
-watch(autoScanPhase, (p): void => {
-  if (p !== 'captured') {
-    blurryCaptureHint.value = false
-  }
 })
 
 /**
@@ -1991,14 +1983,9 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   if (uploading.value) {
     return { label: 'Envoi en cours…', color: 'primary' }
   }
-  if (blurryCaptureHint.value) {
-    return { label: 'Photo floue — tenez la carte stable', color: 'primary' }
-  }
   switch (autoScanPhase.value) {
     case 'watching':
       return { label: 'Centrez la carte dans le cadre', color: 'neutral' }
-    case 'captured':
-      return { label: 'Identification en cours…', color: 'primary' }
     case 'cooldown':
       return { label: 'Retirez la carte pour la suivante', color: 'success' }
     default:

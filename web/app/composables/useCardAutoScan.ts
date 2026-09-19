@@ -3,12 +3,10 @@ import { OPENCV_URL } from '~/composables/useOpenCv'
 
 /**
  * - `idle`      : detector stopped / OpenCV not ready
- * - `watching`  : no card quad locked yet
- * - `settling`  : a card quad is tracked, waiting for it to be held steady
- * - `captured`  : a card was just shot
- * - `cooldown`  : waiting for the card to leave the frame before the next one
+ * - `watching`  : searching — no identified card on screen
+ * - `cooldown`  : a card was committed; waiting for it to leave the frame
  */
-export type AutoScanPhase = 'idle' | 'watching' | 'settling' | 'captured' | 'cooldown'
+export type AutoScanPhase = 'idle' | 'watching' | 'cooldown'
 
 /** A detected card outline, in **video intrinsic pixel** coordinates. */
 export type CardQuad = [Pt, Pt, Pt, Pt]
@@ -22,34 +20,26 @@ export interface UseCardAutoScanOptions {
   video: Ref<HTMLVideoElement | null> | ComputedRef<HTMLVideoElement | null>
   /** Detector only runs while this is `true`. */
   enabled: Ref<boolean> | ComputedRef<boolean>
-  /** `true` while an upload is in flight; never capture then. */
+  /** `true` while an upload is in flight; identification pauses then. */
   busy: Ref<boolean>
-  /** Called once per card with the deskewed, cropped card JPEG (photo-OCR fallback). */
-  onCapture: (file: File) => void | Promise<void>
-  /** `true` when the main-thread identifier (embedding index) is ready. */
+  /** `true` when the identifier worker (embedding index) is ready. */
   identifyActive: Ref<boolean> | ComputedRef<boolean>
   /**
    * Live identification crops: deskewed 224×224 RGBA candidates (tracked
    * quad, or search-window variants whose zone is given in video coords).
    * The page runs the embedding + decision, then calls `reportIdentifyOutcome`.
    */
-  onIdentifyCrop?: (bufs: ArrayBuffer[], windows?: { x: number; y: number; w: number; h: number }[]) => void
-  /** Called when a burst came out motion-blurred and is being retried — UI hint. */
-  onBlurryRetry?: () => void
+  onIdentifyCrop?: (
+    bufs: ArrayBuffer[],
+    windows?: { x: number; y: number; w: number; h: number }[],
+    sharps?: number[],
+  ) => void
 }
 
 /** ~20 fps cadence — point tracking costs 3-6 ms/frame, so the overlay can glue. */
 const FRAME_MS = 50
 /** Long edge of the downscaled frame sent for detection (more = sharper quad). */
 const PROC_EDGE = 640
-/**
- * Long edge of the frame used for the capture warp. The deskewed card is only
- * 630×880 — a 1920 source is plenty for OCR, and grabbing the raw 4K stream
- * here used to allocate ~33 MB per shot (freezes + crashes on phones).
- */
-const CAPTURE_EDGE = 1920
-/** Floor between two captures (safety net on top of the re-arm gate). */
-const MIN_COOLDOWN_MS = 450
 /**
  * Empty detection ticks required after a capture before the next card can
  * fire. Two frames (~160 ms) was far too short: a flickering contour made
@@ -64,32 +54,12 @@ const MIN_REARM_MS = 900
  * décor) empêcherait sinon le réarmement — jamais 10 ticks sans quad.
  */
 const COOLDOWN_MAX_MS = 2500
-/** Fraction of the frame height covered by the on-screen guide silhouette. */
-const GUIDE_HEIGHT_FRAC = 0.62
-/** How many shots we take in a burst — we keep the sharpest for OCR. */
-const BURST_COUNT = 3
-/** Gap between burst shots — wide enough for hand movement to expose new info. */
-const BURST_INTERVAL_MS = 160
-/** Hard cap on a burst's lifetime; a stuck worker must never freeze the scanner. */
-const BURST_WATCHDOG_MS = BURST_COUNT * BURST_INTERVAL_MS + 2500
 /**
- * Variance-of-Laplacian floor under which the whole burst counts as
- * motion-blurred. A blurred capture is what turned every scan into
- * « À vérifier »: Groq misreads the set code / collector number on soft
- * pixels. Below this floor the burst is retried on fresh frames instead of
- * uploading garbage. Calibrated on warped 630×880 crops of real card scans:
- * crisp shots land 13-23, a ~1.5 px motion blur ~7, a ~2 px blur ~4 (OCR
- * starts failing) and a ~3 px blur ~2.7 (unreadable).
+ * Durée de caution du cadre après un verrouillage par l'identification. Les
+ * contours accrochent n'importe quel rectangle (jean, permis, bureau) : le
+ * cadre n'est AFFICHÉ que si l'identification a récemment cautionné la zone.
  */
-const MIN_SHARPNESS = 3.0
-/** Blurry-burst retries while the card stays in frame (adds ~0.5 s each). */
-const MAX_BLUR_RETRIES = 2
-/**
- * Live identification attempts that must MISS before the photo-OCR fallback
- * fires. At ~5 attempts/s this gives the on-device index ≈ 0.5 s; unmatched
- * cards (sets without TCGdex images, e.g. JA s8b) then go to OCR.
- */
-const LIVE_MATCH_MISSES_BEFORE_PHOTO = 2
+const FRAME_ENDORSE_MS = 3000
 /** A detect round-trip longer than this counts as lost (worker hiccup). */
 const DETECT_TIMEOUT_MS = 2000
 /** Lerp weight (new vs previous) when tracking the displayed quad. */
@@ -100,27 +70,21 @@ const SCENE_CHANGE_FRAC = 0.22
 const VOTE_DRIFT_FRAC = 0.12
 /** Empty detections we wait through before the overlay disappears (≈ 400 ms). */
 const MISS_LINGER_TICKS = 4
-interface BurstShot {
-  buf: ArrayBuffer
-  w: number
-  h: number
-  sharpness: number
-}
 
 /**
- * Touch-free card scanner. All OpenCV work (contour detection + perspective
- * crop) runs in a Web Worker so the ~9 MB wasm never freezes the phone. The
- * worker streams back the card quad (video-pixel coords) which we **smooth**
- * before exposing as `quad` (the overlay rectangle follows your hand without
- * jitter). Once a card is confirmed, a small **burst of captures** is sent and
- * the **sharpest** one wins; the scanner then waits for the card to leave the
- * frame before re-arming — pass a card, beep, next card.
+ * Touch-free card scanner. All OpenCV work (contour detection + point
+ * tracking + identification crops) runs in a Web Worker so the ~9 MB wasm
+ * never freezes the phone. The worker streams back the card quad (video-pixel
+ * coords) which we **smooth** before exposing as `quad` — affiché seulement
+ * quand l'identification a cautionné la zone. Le commit vient de la page
+ * (worker d'embedding) via `reportIdentifyOutcome` ; le scanner attend ensuite
+ * que la carte quitte le champ — passe une carte, bip, carte suivante.
  *
- * @param opts - Video element, enable/busy flags and the capture callback.
+ * @param opts - Video element, enable/busy flags and the identify callback.
  * @returns Reactive `phase`, `quad`, `ready` and `loadError` for the UI.
  */
 export function useCardAutoScan(opts: UseCardAutoScanOptions) {
-  const { video, enabled, busy, identifyActive, onCapture, onIdentifyCrop, onBlurryRetry } = opts
+  const { video, enabled, busy, identifyActive, onIdentifyCrop } = opts
 
   const phase: Ref<AutoScanPhase> = ref('idle')
   const quad: Ref<CardQuad | null> = ref(null)
@@ -129,32 +93,21 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
 
   let worker: Worker | null = null
   let timer: ReturnType<typeof setInterval> | null = null
-  // Two dedicated canvases: resizing one shared canvas between the 640 px
-  // detection grabs and the full-size capture grabs reallocated its backing
-  // store several times per second.
   let detectCanvas: HTMLCanvasElement | null = null
   let detectCtx: CanvasRenderingContext2D | null = null
-  let captureCanvas: HTMLCanvasElement | null = null
-  let captureCtx: CanvasRenderingContext2D | null = null
 
   let detectInFlight = false
   let detectSentAt = 0
-  let capturing = false
-  /** False right after a capture — set back to true once the frame is clear. */
+  /** False right after a commit — set back to true once the frame is clear. */
   let armed = true
   let clearTicks = 0
   let lastCorners: Pt[] | null = null
   let displayedCorners: Pt[] | null = null
   let pendingCorners: Pt[] | null = null
   let missTicks = 0
-  let lastCaptureAt = 0
-
-  let burstCorners: Pt[] | null = null
-  let burstShots: BurstShot[] = []
-  let burstMisses = 0
-  let burstTimer: ReturnType<typeof setTimeout> | null = null
-  let burstWatchdog: ReturnType<typeof setTimeout> | null = null
-  let blurRetries = 0
+  let lastCommitAt = 0
+  /** Le cadre suiveur n'est affiché que jusqu'à cet instant (caution identification). */
+  let frameEndorsedUntil = 0
   let liveMatchMisses = 0
 
   /**
@@ -162,10 +115,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    * transferable RGBA buffer (no `createImageBitmap` — iOS-safe).
    *
    * @param longEdge - Target long-edge size.
-   * @param forCapture - Use the capture canvas (full quality) instead of the detection one.
    * @returns The frame buffer + its pixel dimensions, or `null`.
    */
-  function grabFrame(longEdge: number, forCapture: boolean = false): { buf: ArrayBuffer; w: number; h: number } | null {
+  function grabFrame(longEdge: number): { buf: ArrayBuffer; w: number; h: number } | null {
     const el = video.value
     if (!el || el.readyState < 2 || !el.videoWidth || !el.videoHeight) {
       return null
@@ -175,70 +127,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const scale = Math.min(1, longEdge / Math.max(vw, vh))
     const w = Math.max(1, Math.round(vw * scale))
     const h = Math.max(1, Math.round(vh * scale))
-    let canvas = forCapture ? captureCanvas : detectCanvas
-    let ctx = forCapture ? captureCtx : detectCtx
+    let canvas = detectCanvas
+    let ctx = detectCtx
     if (!canvas) {
       canvas = document.createElement('canvas')
-      if (forCapture) {
-        captureCanvas = canvas
-      } else {
-        detectCanvas = canvas
-      }
+      detectCanvas = canvas
     }
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w
       canvas.height = h
       ctx = canvas.getContext('2d', { willReadFrequently: true })
-      if (forCapture) {
-        captureCtx = ctx
-      } else {
-        detectCtx = ctx
-      }
+      detectCtx = ctx
     }
     if (!ctx) {
       return null
     }
     ctx.drawImage(el, 0, 0, w, h)
     return { buf: ctx.getImageData(0, 0, w, h).data.buffer as ArrayBuffer, w, h }
-  }
-
-  /**
-   * Fixed guide rectangle in video-intrinsic px — same geometry as the on-screen
-   * silhouette and the worker's central crop. Used for OCR capture when contour
-   * detection fails (wood table, sleeve glare…).
-   * @param vw - Largeur intrinsèque vidéo (px).
-   * @param vh - Hauteur intrinsèque vidéo (px).
-   * @returns {Pt[]} Les 4 coins du rectangle guide.
-   */
-  function guideCorners(vw: number, vh: number): Pt[] {
-    const gh = vh * GUIDE_HEIGHT_FRAC
-    const gw = Math.min(vw * 0.92, (gh * 63) / 88)
-    const x = (vw - gw) / 2
-    const y = (vh - gh) / 2
-    return [
-      { x, y },
-      { x: x + gw, y },
-      { x: x + gw, y: y + gh },
-      { x, y: y + gh },
-    ]
-  }
-
-  /**
-   * True when the scanner may fire a photo-OCR burst.
-   * @param requireLiveMisses - When true (guide-only path), identify misses are mandatory even without an index.
-   * @returns {boolean} Autorisation de déclencher la rafale photo.
-   */
-  function shouldTriggerPhotoFallback(requireLiveMisses: boolean = false): boolean {
-    if (capturing || !armed || busy.value) {
-      return false
-    }
-    if (Date.now() - lastCaptureAt < MIN_COOLDOWN_MS) {
-      return false
-    }
-    if (requireLiveMisses || identifyActive.value) {
-      return liveMatchMisses >= LIVE_MATCH_MISSES_BEFORE_PHOTO
-    }
-    return true
   }
 
   /**
@@ -291,129 +196,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     })) as Pt[]
   }
 
-  /** Start a burst: send the first warp request; subsequent ones are scheduled. */
-  function beginBurst(corners: Pt[]): void {
-    burstCorners = corners
-    burstShots = []
-    burstMisses = 0
-    blurRetries = 0
-    capturing = true
-    phase.value = 'captured'
-    if (burstWatchdog !== null) {
-      clearTimeout(burstWatchdog)
-    }
-    // Whatever happens to the worker, the scanner must re-arm itself.
-    burstWatchdog = setTimeout(finaliseBurst, BURST_WATCHDOG_MS)
-    requestWarp()
-  }
-
-  /** Send the next warp request from the burst (or finalise if we've collected enough). */
-  function requestWarp(): void {
-    if (!capturing) {
-      return
-    }
-    if (!worker || burstShots.length + burstMisses >= BURST_COUNT) {
-      finaliseBurst()
-      return
-    }
-    // Use the freshest detected corners so a pivot/move during the burst still
-    // yields a correctly cropped card. Fall back to the trigger corners if the
-    // detector hasn't returned a new quad yet.
-    const corners = lastCorners ?? burstCorners
-    const full = grabFrame(CAPTURE_EDGE, true)
-    if (!corners || !full) {
-      onBurstShotMissed()
-      return
-    }
-    // Corners are in video-intrinsic coords; scale them to the capture frame.
-    const el = video.value
-    const scale = el && el.videoWidth ? full.w / el.videoWidth : 1
-    const scaled = corners.map((p) => ({ x: p.x * scale, y: p.y * scale }))
-    worker.postMessage({ t: 'warp', buf: full.buf, w: full.w, h: full.h, corners: scaled }, [full.buf])
-  }
-
-  /** One burst shot could not be produced — count it and keep the burst going. */
-  function onBurstShotMissed(): void {
-    burstMisses += 1
-    if (burstShots.length + burstMisses >= BURST_COUNT) {
-      finaliseBurst()
-    } else {
-      burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
-    }
-  }
-
-  /** Pick the sharpest shot from the burst, encode JPEG and hand it to `onCapture`. */
-  function finaliseBurst(): void {
-    if (!capturing) {
-      return
-    }
-    if (burstTimer !== null) {
-      clearTimeout(burstTimer)
-      burstTimer = null
-    }
-    if (burstWatchdog !== null) {
-      clearTimeout(burstWatchdog)
-      burstWatchdog = null
-    }
-    // Every exit path below goes through this: re-arm only after the card
-    // leaves the frame (cash-register rhythm), never mid-frame.
-    const finishCooldown = (): void => {
-      capturing = false
-      armed = false
-      clearTicks = 0
-      lastCaptureAt = Date.now()
-      phase.value = 'cooldown'
-    }
-    if (!burstShots.length) {
-      burstCorners = null
-      finishCooldown()
-      return
-    }
-    burstShots.sort((a, b) => b.sharpness - a.sharpness)
-    const best = burstShots[0]!
-
-    // Motion-blur gate: a soft capture is what turns every scan into
-    // « À vérifier » server-side. While the card is still tracked, retry the
-    // whole burst on fresh frames instead of uploading it. After the retries
-    // the best shot is sent anyway — the server gate + OCR enhancer get their
-    // chance, and the user never sees a silent no-op for a card that beeped.
-    if (best.sharpness < MIN_SHARPNESS && blurRetries < MAX_BLUR_RETRIES && lastCorners) {
-      blurRetries += 1
-      burstShots = []
-      burstMisses = 0
-      burstCorners = lastCorners
-      onBlurryRetry?.()
-      burstWatchdog = setTimeout(finaliseBurst, BURST_WATCHDOG_MS)
-      burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
-      return
-    }
-
-    burstShots = []
-    burstCorners = null
-
-    const cnv = document.createElement('canvas')
-    cnv.width = best.w
-    cnv.height = best.h
-    const ctx = cnv.getContext('2d')
-    if (!ctx) {
-      finishCooldown()
-      return
-    }
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(best.buf), best.w, best.h), 0, 0)
-    cnv.toBlob(
-      (blob) => {
-        if (!blob) {
-          finishCooldown()
-          return
-        }
-        const file = new File([blob], `card-${Date.now()}.jpg`, { type: 'image/jpeg' })
-        void Promise.resolve(onCapture(file)).finally(finishCooldown)
-      },
-      'image/jpeg',
-      0.92,
-    )
-  }
-
   /**
    * Apply voting + miss-linger + the capture / re-arm state machine to a fresh
    * detection. Voting (two consecutive consistent detections) and a short
@@ -430,7 +212,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const longEdge = Math.max(el.videoWidth, el.videoHeight) || 1080
 
     // Réarmement garanti : quad présent ou non, le cooldown a une durée max.
-    if (!armed && !capturing && Date.now() - lastCaptureAt >= COOLDOWN_MAX_MS) {
+    if (!armed && Date.now() - lastCommitAt >= COOLDOWN_MAX_MS) {
       armed = true
       clearTicks = 0
       liveMatchMisses = 0
@@ -441,30 +223,23 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     if (!corners) {
       pendingCorners = null
       missTicks += 1
-      if (!armed) {
-        if (Date.now() - lastCaptureAt >= MIN_REARM_MS) {
-          clearTicks += 1
-          if (clearTicks >= CLEAR_TICKS_TO_REARM) {
-            armed = true
-            liveMatchMisses = 0
-            if (!capturing) {
-              phase.value = 'watching'
-            }
-          }
+      if (!armed && Date.now() - lastCommitAt >= MIN_REARM_MS) {
+        clearTicks += 1
+        if (clearTicks >= CLEAR_TICKS_TO_REARM) {
+          armed = true
+          liveMatchMisses = 0
+          phase.value = 'watching'
         }
-      } else if (shouldTriggerPhotoFallback(true) && el.videoWidth) {
-        // Contour failed but the guide crop had live misses → OCR on the guide zone.
-        beginBurst(guideCorners(el.videoWidth, el.videoHeight))
-        return
       }
       if (missTicks >= MISS_LINGER_TICKS) {
         lastCorners = null
         displayedCorners = null
         quad.value = null
+        frameEndorsedUntil = 0
         if (armed) {
           liveMatchMisses = 0
         }
-        if (phase.value !== 'idle' && !capturing && armed) {
+        if (phase.value !== 'idle' && armed) {
           phase.value = 'watching'
         }
       }
@@ -487,38 +262,28 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     const confirmed = averageQuad(pendingCorners, corners)
     pendingCorners = corners
 
-    // Smooth toward the confirmed quad and display it AS IS — the perspective
-    // trapezoid hugging the card edges (the worker's point tracking keeps it
-    // steady), not a forced upright rectangle.
+    // Smooth toward the confirmed quad — the perspective trapezoid hugging
+    // the card edges (the worker's point tracking keeps it steady). Il n'est
+    // AFFICHÉ que si l'identification a cautionné la zone (lock récent) : les
+    // contours accrochent n'importe quel rectangle du décor.
     displayedCorners = smoothCorners(displayedCorners, confirmed, longEdge)
-    quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
+    if (Date.now() < frameEndorsedUntil) {
+      quad.value = [displayedCorners[0]!, displayedCorners[1]!, displayedCorners[2]!, displayedCorners[3]!]
+    } else {
+      quad.value = null
+    }
 
     lastCorners = corners
-
-    if (capturing) {
-      return
-    }
 
     // Not re-armed yet: the previous card is still in frame. The UI shows
     // "Retirez la carte" — and that label is now actually true.
     if (!armed) {
       phase.value = 'cooldown'
-      return
     }
-
-    if (!shouldTriggerPhotoFallback()) {
-      return
-    }
-
-    // Prefer the fixed guide crop for OCR — contour quads jitter on wood / sleeves.
-    const burstCorners = el.videoWidth && identifyActive.value ? guideCorners(el.videoWidth, el.videoHeight) : corners
-    beginBurst(burstCorners)
   }
 
   /**
-   * Grab one downscaled frame and hand it to the worker for detection. Note we
-   * intentionally keep running during a capture burst so `lastCorners` stays
-   * fresh — each burst shot uses the latest detection, supporting movement.
+   * Grab one downscaled frame and hand it to the worker for detection.
    */
   function pumpFrame(): void {
     if (!worker || !enabled.value || busy.value) {
@@ -542,11 +307,9 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     detectInFlight = true
     detectSentAt = Date.now()
-    // `im` gates the in-worker identification: pointless during cooldown (the
-    // card is already committed) — tracking alone keeps the overlay glued.
     // Identification continue même en cooldown : elle sert alors au RECALAGE
     // du cadre sur la carte commitée (la page filtre selon la phase).
-    const identify = !capturing && !busy.value && identifyActive.value
+    const identify = !busy.value && identifyActive.value
     worker.postMessage(
       { t: 'detect', buf: f.buf, w: f.w, h: f.h, vw: el.videoWidth, vh: el.videoHeight, im: identify },
       [f.buf],
@@ -563,9 +326,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       | { t: 'error'; m: string }
       | { t: 'quad'; corners: Pt[] }
       | { t: 'nq' }
-      | { t: 'idcrop'; bufs: ArrayBuffer[]; wins?: { x: number; y: number; w: number; h: number }[] }
-      | { t: 'warped'; buf: ArrayBuffer; w: number; h: number; sharpness: number }
-      | { t: 'warp_failed'; m: string }
+      | { t: 'idcrop'; bufs: ArrayBuffer[]; wins?: { x: number; y: number; w: number; h: number }[]; sharps?: number[] }
     if (d.t === 'ready') {
       ready.value = true
       loadError.value = null
@@ -581,9 +342,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       loadError.value = d.m
       ready.value = false
       detectInFlight = false
-      if (capturing) {
-        finaliseBurst()
-      }
       return
     }
     if (d.t === 'quad') {
@@ -597,48 +355,27 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       return
     }
     if (d.t === 'idcrop') {
-      if (onIdentifyCrop && !capturing && !busy.value && enabled.value) {
-        onIdentifyCrop(d.bufs, d.wins)
-      }
-      return
-    }
-    if (d.t === 'warp_failed') {
-      // Non-fatal: skip this shot, the burst keeps going.
-      if (capturing) {
-        onBurstShotMissed()
-      }
-      return
-    }
-    if (d.t === 'warped') {
-      if (!capturing) {
-        return
-      }
-      burstShots.push({ buf: d.buf, w: d.w, h: d.h, sharpness: d.sharpness })
-      if (burstShots.length + burstMisses < BURST_COUNT) {
-        burstTimer = setTimeout(requestWarp, BURST_INTERVAL_MS)
-      } else {
-        finaliseBurst()
+      if (onIdentifyCrop && !busy.value && enabled.value) {
+        onIdentifyCrop(d.bufs, d.wins, d.sharps)
       }
     }
   }
 
   /**
-   * Verdict de l'identification asynchrone du main-thread (embedding).
+   * Verdict de l'identification asynchrone (worker d'embedding).
    * @param committed - `true` : carte commitée → cooldown « retirez la carte » ;
-   *   `false` : raté comptabilisé vers le fallback photo-OCR.
+   *   `false` : raté comptabilisé vers l'abandon du suivi courant.
    */
   function reportIdentifyOutcome(committed: boolean): void {
     if (!armed) {
-      // Cooldown : les tentatives ne servent qu'au recalage du cadre — ni
-      // nouveau cooldown, ni compteur de fallback.
+      // Cooldown : les tentatives ne servent qu'au recalage du cadre.
       return
     }
     if (committed) {
-      capturing = false
       armed = false
       clearTicks = 0
       liveMatchMisses = 0
-      lastCaptureAt = Date.now()
+      lastCommitAt = Date.now()
       phase.value = 'cooldown'
     } else {
       liveMatchMisses += 1
@@ -646,6 +383,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       // frames furniture: drop it so the search windows take over.
       if (liveMatchMisses >= 4 && lastCorners) {
         worker?.postMessage({ t: 'droptrack' })
+        frameEndorsedUntil = 0
         liveMatchMisses = 0
       }
     }
@@ -690,27 +428,15 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
       clearInterval(timer)
       timer = null
     }
-    if (burstTimer !== null) {
-      clearTimeout(burstTimer)
-      burstTimer = null
-    }
-    if (burstWatchdog !== null) {
-      clearTimeout(burstWatchdog)
-      burstWatchdog = null
-    }
     detectInFlight = false
-    capturing = false
     armed = true
     clearTicks = 0
     lastCorners = null
     displayedCorners = null
     pendingCorners = null
     missTicks = 0
-    burstCorners = null
-    burstShots = []
-    burstMisses = 0
-    blurRetries = 0
     liveMatchMisses = 0
+    frameEndorsedUntil = 0
     quad.value = null
     phase.value = ready.value ? 'idle' : phase.value
   }
@@ -730,6 +456,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    */
   function dropTracking(): void {
     worker?.postMessage({ t: 'droptrack' })
+    frameEndorsedUntil = 0
   }
 
   /**
@@ -739,6 +466,7 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
    */
   function lockTrackingRect(rect: { x: number; y: number; w: number; h: number }): void {
     worker?.postMessage({ t: 'lock', rect })
+    frameEndorsedUntil = Date.now() + FRAME_ENDORSE_MS
   }
 
   /**
@@ -760,8 +488,6 @@ export function useCardAutoScan(opts: UseCardAutoScanOptions) {
     }
     detectCanvas = null
     detectCtx = null
-    captureCanvas = null
-    captureCtx = null
     ready.value = false
     phase.value = 'idle'
   }

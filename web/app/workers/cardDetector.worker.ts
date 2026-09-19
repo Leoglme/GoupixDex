@@ -14,16 +14,10 @@
  *          convex-4 bonus, border safety) and pick the best
  *        → temporal voting + force-card-shape live main-thread
  *
- * Capture also measures sharpness (variance-of-Laplacian) so the main thread
- * can run a small "burst → pick sharpest" to combat hand-shake / focus hunt.
- *
  * Protocol (main ⇄ worker):
- *   → { t:'init', url }                  ← { t:'ready' } | { t:'error', m }   (fatal: engine unavailable)
- *   → { t:'detect', buf, w, h, vw, vh }  ← { t:'quad', corners } | { t:'nq' }
- *   → { t:'warp', buf, w, h, corners }   ← { t:'warped', buf, w, h, sharpness } | { t:'warp_failed', m }
- *
- * `warp_failed` is NON-fatal: the main thread must recover (skip the shot)
- * instead of tearing the whole scanner down.
+ *   → { t:'init', url }                        ← { t:'ready' } | { t:'error', m }   (fatal: engine unavailable)
+ *   → { t:'detect', buf, w, h, vw, vh, im }    ← { t:'quad', corners } | { t:'nq' } (+ { t:'idcrop', bufs, wins, sharps })
+ *   → { t:'lock', rect } / { t:'focus', rect } / { t:'droptrack' }
  *
  * `corners` are always VIDEO-intrinsic pixel coords.
  */
@@ -505,19 +499,20 @@ function shipIdentificationCrop(
   frameQuad: { x: number; y: number }[] | null,
 ): void {
   idAttemptParity += 1
-  // Pendant un focus actif, TOUTES les tentatives vont à la batterie focalisée :
-  // la convergence a besoin de chaque tour, et le quad fraîchement verrouillé
-  // produit des crops moins bons que la batterie (mesuré 0.47 vs 0.59).
+  // Pendant un focus actif, la parité alterne batterie focalisée / balayage
+  // normal (jamais le quad suivi, dont les crops sont moins bons — mesuré
+  // 0.47 vs 0.59) : la convergence garde sa cadence ET le balayage peut
+  // découvrir un candidat plus fort qui reprendra le focus.
   const focusActive = focusRect !== null && Date.now() < focusUntil
+  const focusedAttempt = focusActive && idAttemptParity % 2 === 0
   const useQuad = !focusActive && frameQuad !== null && idAttemptParity % 2 === 0 && quadWorthIdentifying(frameQuad, h)
   if (useQuad) {
-    const { out } = warp(buf, w, h, frameQuad!, ID_CROP_EDGE, ID_CROP_EDGE, false)
-    ;(self as any).postMessage({ t: 'idcrop', bufs: [out] }, [out])
+    const { out, sharpness } = warp(buf, w, h, frameQuad!, ID_CROP_EDGE, ID_CROP_EDGE, true)
+    ;(self as any).postMessage({ t: 'idcrop', bufs: [out], sharps: [sharpness] }, [out])
     return
   }
   let rect: { x: number; y: number; w: number; h: number }
-  const focused = focusRect !== null && Date.now() < focusUntil
-  if (focused) {
+  if (focusedAttempt) {
     const sx = w / vw
     const sy = h / vh
     rect = { x: focusRect!.x * sx, y: focusRect!.y * sy, w: focusRect!.w * sx, h: focusRect!.h * sy }
@@ -526,8 +521,9 @@ function shipIdentificationCrop(
     idWindowCursor += 1
   }
   const bufs: ArrayBuffer[] = []
+  const sharps: number[] = []
   const variantRects: { x: number; y: number; w: number; h: number }[] = []
-  if (focused) {
+  if (focusedAttempt) {
     const cx = rect.x + rect.w / 2
     const cy = rect.y + rect.h / 2
     for (const b of FOCUS_BATTERY) {
@@ -539,8 +535,9 @@ function shipIdentificationCrop(
         w: bw,
         h: bh,
       }
-      const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
+      const { out, sharpness } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, true)
       bufs.push(out)
+      sharps.push(sharpness)
       variantRects.push(v)
     }
   } else {
@@ -559,8 +556,9 @@ function shipIdentificationCrop(
     }
     const variants = [scaled(1, 0), scaled(0.87, 0), scaled(0.76, 0), scaled(0.66, 0), scaled(0.57, 0)]
     for (const v of variants) {
-      const { out } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, false)
+      const { out, sharpness } = warp(buf, w, h, rectCorners(v), ID_CROP_EDGE, ID_CROP_EDGE, true)
       bufs.push(out)
+      sharps.push(sharpness)
       variantRects.push(v)
     }
   }
@@ -569,7 +567,7 @@ function shipIdentificationCrop(
   const fx = vw / w
   const fy = vh / h
   const wins = variantRects.map((v) => ({ x: v.x * fx, y: v.y * fy, w: v.w * fx, h: v.h * fy }))
-  ;(self as any).postMessage({ t: 'idcrop', bufs, wins }, bufs)
+  ;(self as any).postMessage({ t: 'idcrop', bufs, wins, sharps }, bufs)
 }
 
 // ---------------------------------------------------------------------------
@@ -964,20 +962,6 @@ self.onmessage = (e: MessageEvent): void => {
     // The main thread saw several identification misses on this quad — it is
     // probably framing furniture, not a card. Free the sweep and re-acquire.
     resetTrack()
-    return
-  }
-  if (d.t === 'warp') {
-    if (!cv) {
-      ;(self as any).postMessage({ t: 'warp_failed', m: 'Moteur non initialisé' })
-      return
-    }
-    try {
-      const { out, sharpness } = warp(d.buf, d.w, d.h, d.corners)
-      ;(self as any).postMessage({ t: 'warped', buf: out, w: WARP_W, h: WARP_H, sharpness }, [out])
-    } catch {
-      // Non-fatal: the main thread skips this shot and keeps scanning.
-      ;(self as any).postMessage({ t: 'warp_failed', m: 'Découpe carte impossible' })
-    }
     return
   }
 }
