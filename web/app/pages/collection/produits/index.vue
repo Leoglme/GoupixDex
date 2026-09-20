@@ -123,51 +123,52 @@
             v-for="product in filteredItems"
             :key="product.id"
             variant="subtle"
+            :ui="{ body: 'p-0' }"
             class="group focus-within:ring-primary cursor-pointer overflow-hidden transition-all focus-within:ring-2 hover:shadow-md"
             tabindex="0"
             role="link"
-            @click="openProduct(product.id)"
-            @keydown.enter.prevent="openProduct(product.id)"
+            @click="onProductClick(product.id, $event)"
+            @keydown.enter.prevent="openSealed(product.id)"
           >
-            <div class="space-y-2 p-2">
-              <div class="bg-muted/30 relative aspect-square w-full overflow-hidden rounded-md">
-                <img
-                  v-if="product.image_url"
-                  :src="product.image_url"
-                  :alt="product.name"
-                  class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                  referrerpolicy="no-referrer"
-                  decoding="async"
-                  loading="lazy"
-                />
-                <div v-else class="flex h-full items-center justify-center">
-                  <UIcon name="i-lucide-box" class="text-muted size-8" />
-                </div>
-                <span
-                  class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
-                >
-                  {{ sealedProductTypeLabel(product.product_type) }}
-                </span>
-                <span
-                  v-if="product.quantity > 1"
-                  class="bg-elevated/95 text-highlighted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                >
-                  ×{{ product.quantity }}
-                </span>
-                <span
-                  v-if="product.market_price_eur != null"
-                  class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                >
-                  {{ eur.format(product.market_price_eur) }}
-                </span>
-                <span
-                  v-if="product.gain_percent != null"
-                  class="absolute right-1.5 bottom-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                  :class="product.gain_percent >= 0 ? 'bg-success/90 text-inverted' : 'bg-error/90 text-inverted'"
-                >
-                  {{ formatSignedPercent(product.gain_percent) }}
-                </span>
+            <div class="bg-muted/20 relative aspect-square w-full overflow-hidden">
+              <img
+                v-if="product.image_url"
+                :src="product.image_url"
+                :alt="product.name"
+                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                referrerpolicy="no-referrer"
+                decoding="async"
+                loading="lazy"
+              />
+              <div v-else class="flex h-full items-center justify-center">
+                <UIcon name="i-lucide-box" class="text-muted size-8" />
               </div>
+              <span
+                class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
+              >
+                {{ sealedProductTypeLabel(product.product_type) }}
+              </span>
+              <span
+                v-if="product.quantity > 1"
+                class="bg-elevated/95 text-highlighted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+              >
+                ×{{ product.quantity }}
+              </span>
+              <span
+                v-if="product.market_price_eur != null"
+                class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+              >
+                {{ eur.format(product.market_price_eur) }}
+              </span>
+              <span
+                v-if="product.gain_percent != null"
+                class="absolute right-1.5 bottom-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                :class="product.gain_percent >= 0 ? 'bg-success/90 text-inverted' : 'bg-error/90 text-inverted'"
+              >
+                {{ formatSignedPercent(product.gain_percent) }}
+              </span>
+            </div>
+            <div class="space-y-0.5 p-2">
               <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ product.name }}</p>
               <p class="text-muted truncate text-[10px]">{{ product.set_name || '—' }}</p>
             </div>
@@ -192,7 +193,7 @@
                 v-for="row in filteredItems"
                 :key="row.id"
                 class="border-default hover:bg-elevated/40 cursor-pointer border-b transition-colors last:border-b-0"
-                @click="openProduct(row.id)"
+                @click="onProductClick(row.id, $event)"
               >
                 <td class="goupix-card-table__lead px-3 py-2.5">
                   <div class="flex min-w-0 items-center gap-3">
@@ -263,6 +264,8 @@ useGoupixPageSeo(
 )
 
 const { listSealed } = useSealed()
+const { openSealed, openSealedFromClick } = useOpenSealedDrawer()
+const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
 const payload = ref<SealedListResponse | null>(null)
@@ -351,9 +354,22 @@ async function load(): Promise<void> {
   }
 }
 
-function openProduct(id: number): void {
-  void navigateTo(`/collection/produits/${id}`)
+/**
+ * Ouvre la fiche produit dans le drawer (clic modifié = navigation normale).
+ * @param id - Identifiant du produit scellé.
+ * @param event - Événement souris du clic.
+ */
+function onProductClick(id: number, event: MouseEvent): void {
+  openSealedFromClick(id, event)
 }
+
+// Resynchronise la liste quand le drawer modifie ou supprime un produit.
+watch(
+  () => drawerStack.sealedMutationCounter.value,
+  () => {
+    void load()
+  },
+)
 
 onMounted(() => {
   void load()

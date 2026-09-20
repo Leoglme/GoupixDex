@@ -131,51 +131,52 @@
             v-for="card in filteredItems"
             :key="card.id"
             variant="subtle"
+            :ui="{ body: 'p-0' }"
             class="group focus-within:ring-primary cursor-pointer overflow-hidden transition-all focus-within:ring-2 hover:shadow-md"
             tabindex="0"
             role="link"
             @click="openCard(card.id)"
             @keydown.enter.prevent="openCard(card.id)"
           >
-            <div class="space-y-2 p-2">
-              <div class="bg-muted/30 relative aspect-[63/88] w-full overflow-hidden rounded-md">
-                <img
-                  v-if="card.image_url"
-                  :src="card.image_url"
-                  :alt="card.display_name"
-                  class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                  referrerpolicy="no-referrer"
-                  decoding="async"
-                  loading="lazy"
-                />
-                <div v-else class="flex h-full items-center justify-center">
-                  <UIcon name="i-lucide-image-off" class="text-muted size-8" />
-                </div>
-                <span
-                  class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
-                >
-                  {{ languageLabel(card.language) }}
-                </span>
-                <span
-                  v-if="card.quantity > 1"
-                  class="bg-elevated/95 text-highlighted absolute right-1.5 bottom-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                >
-                  ×{{ card.quantity }}
-                </span>
-                <span
-                  v-if="card.market_price_eur != null"
-                  class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                >
-                  {{ eur.format(card.market_price_eur) }}
-                </span>
-                <span
-                  v-if="card.article_id"
-                  class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full p-1 backdrop-blur-sm"
-                  title="Article créé"
-                >
-                  <UIcon name="i-lucide-tag" class="size-3" />
-                </span>
+            <div class="bg-muted/20 relative aspect-[63/88] w-full overflow-hidden">
+              <img
+                v-if="card.image_url"
+                :src="card.image_url"
+                :alt="card.display_name"
+                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                referrerpolicy="no-referrer"
+                decoding="async"
+                loading="lazy"
+              />
+              <div v-else class="flex h-full items-center justify-center">
+                <UIcon name="i-lucide-image-off" class="text-muted size-8" />
               </div>
+              <span
+                class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
+              >
+                {{ languageLabel(card.language) }}
+              </span>
+              <span
+                v-if="card.quantity > 1"
+                class="bg-elevated/95 text-highlighted absolute right-1.5 bottom-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+              >
+                ×{{ card.quantity }}
+              </span>
+              <span
+                v-if="card.market_price_eur != null"
+                class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+              >
+                {{ eur.format(card.market_price_eur) }}
+              </span>
+              <span
+                v-if="card.article_id"
+                class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full p-1 backdrop-blur-sm"
+                title="Article créé"
+              >
+                <UIcon name="i-lucide-tag" class="size-3" />
+              </span>
+            </div>
+            <div class="space-y-0.5 p-2">
               <p class="text-highlighted truncate text-xs leading-snug font-medium">
                 {{ card.display_name }}
               </p>

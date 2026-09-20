@@ -116,6 +116,16 @@ def _is_non_physical(name: str) -> bool:
     return any(token in low for token in _NON_PHYSICAL)
 
 
+def _is_wholesale(name: str) -> bool:
+    """Vrai pour un lot grossiste (« … Case » = carton de N boîtes), inutile à un collectionneur."""
+    return re.search(r"\bcase\b", name.lower()) is not None
+
+
+def _is_card(product: dict) -> bool:
+    """Vrai pour une carte (a une « Rarity » en extendedData) — les scellés ont une « UPC », pas de Rarity."""
+    return any(e.get("name") == "Rarity" for e in (product.get("extendedData") or []))
+
+
 _CACHE_DIR = SCRIPT_DIR.parent / "var" / "tcgcsv_cache"
 _CACHE_TTL_SEC = 18 * 3600.0
 
@@ -218,10 +228,13 @@ def load_tcgdex_sets() -> tuple[dict[str, dict], list[dict]]:
         detail = _fetch_json(f"https://api.tcgdex.net/v2/fr/series/{serie['id']}", cache=True)
         series_meta.append({"id": serie["id"], "name": serie.get("name", ""), "logo": serie.get("logo")})
         for st in detail.get("sets", []):
+            # Certaines sorties récentes (30e Anniversaire) n'ont pas d'asset logo FR mais un EN :
+            # on construit une base EN de repli, GoupixDexCatalogSetLogo teste l'extension et retombe sur l'icône.
+            logo = st.get("logo") or f"https://assets.tcgdex.net/en/{serie['id']}/{st['id']}/logo"
             info = {
                 "set_id": st["id"],
                 "fr_name": st.get("name", ""),
-                "logo": st.get("logo"),
+                "logo": logo,
                 "serie_id": serie["id"],
                 "serie_name": serie.get("name", ""),
             }
@@ -246,8 +259,7 @@ def load_tcgcsv_groups() -> list[dict]:
         sealed = [
             p
             for p in products
-            if not any(e.get("name") == "Number" for e in (p.get("extendedData") or []))
-            and not _is_non_physical(p.get("name", ""))
+            if not _is_card(p) and not _is_non_physical(p.get("name", "")) and not _is_wholesale(p.get("name", ""))
         ]
         if not sealed:
             continue
@@ -270,7 +282,6 @@ def build() -> dict[str, Any]:
     tcgdex, series_meta = load_tcgdex_sets()
     groups = load_tcgcsv_groups()
 
-    serie_order = {s["name"]: i for i, s in enumerate(series_meta)}
     serie_logo = {s["name"]: s["logo"] for s in series_meta}
     series: dict[str, dict] = {}
 
@@ -337,12 +348,20 @@ def build() -> dict[str, Any]:
             }
         )
 
-    ordered = sorted(
-        series.values(),
-        key=lambda s: (serie_order.get(s["name"], 999 if s["name"] != SERIE_OTHER else 1000), s["name"]),
-    )
-    for serie in ordered:
+    # Extensions récentes en premier dans chaque série ; séries dans l'ordre chronologique
+    # inverse de TCGdex (série la plus récente d'abord), inconnues puis « Autres » en dernier.
+    for serie in series.values():
         serie["expansions"].sort(key=lambda e: e["published_on"], reverse=True)
+    serie_pos = {s["name"]: i for i, s in enumerate(series_meta)}
+    last = len(series_meta)
+
+    def _serie_rank(serie: dict[str, Any]) -> int:
+        name = serie["name"]
+        if name == SERIE_OTHER:
+            return last + 1
+        return last - serie_pos[name] if name in serie_pos else last
+
+    ordered = sorted(series.values(), key=_serie_rank)
 
     generated_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     print(

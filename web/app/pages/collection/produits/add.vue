@@ -73,6 +73,7 @@
               :key="hit.product.tp"
               type="button"
               class="border-default bg-elevated/30 focus-visible:ring-primary group flex flex-col overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+              :class="ownedOf(hit.product.p) > 0 ? 'border-(--app-green) ring-2 ring-(--app-green)' : ''"
               :disabled="pendingTp === hit.product.tp"
               @click="addProduct(hit.product, hit.expansionName)"
             >
@@ -91,9 +92,9 @@
                 <UIcon v-else :name="sealedProductTypeIcon(hit.product.c)" class="text-muted size-8" />
                 <span
                   v-if="ownedOf(hit.product.p) > 0"
-                  class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                  class="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-full bg-(--app-green) px-1.5 py-0.5 text-[11px] font-bold text-white shadow-sm"
                 >
-                  ×{{ ownedOf(hit.product.p) }}
+                  <UIcon name="i-lucide-check" class="size-3" />{{ ownedOf(hit.product.p) }}
                 </span>
                 <span
                   class="bg-elevated/95 text-highlighted absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-full backdrop-blur-sm transition-colors group-hover:bg-(--app-accent) group-hover:text-white"
