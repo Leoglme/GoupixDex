@@ -10,7 +10,7 @@
     </div>
     <div
       v-if="$slots.actions"
-      class="grid w-full grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 lg:w-auto lg:justify-end [&>*]:min-w-0"
+      class="app-page-header-actions grid w-full grid-cols-1 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 lg:w-auto lg:justify-end [&>*]:min-w-0"
     >
       <slot name="actions" />
     </div>

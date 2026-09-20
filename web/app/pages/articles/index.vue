@@ -21,10 +21,10 @@
           description="Cartes de votre collection mises en vente — publiées ou en préparation."
         >
           <template #actions>
-            <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
+            <UButton to="/articles/create" icon="i-lucide-plus" size="md"> Nouvel article </UButton>
+            <UButton to="/articles/batch-create" color="neutral" variant="outline" icon="i-lucide-layers" size="md">
               Création groupée
             </UButton>
-            <UButton to="/articles/create" icon="i-lucide-plus"> Nouvel article </UButton>
           </template>
         </GoupixDexPageHeader>
 

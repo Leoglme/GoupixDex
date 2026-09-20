@@ -24,11 +24,18 @@
           description="Votre binder personnel : cartes possédées, extensions et mises en vente."
         >
           <template #actions>
-            <UButton v-if="!isDesktopApp" color="neutral" variant="subtle" icon="i-lucide-camera" to="/collection/scan">
-              Scanner
-            </UButton>
-            <UButton color="primary" variant="solid" icon="i-lucide-plus" to="/collection/add">
+            <UButton color="primary" variant="solid" icon="i-lucide-plus" size="md" to="/collection/add">
               Ajouter à ma collection
+            </UButton>
+            <UButton
+              v-if="!isDesktopApp"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-scan-line"
+              size="md"
+              to="/collection/scan"
+            >
+              Scanner une carte
             </UButton>
           </template>
         </GoupixDexPageHeader>
@@ -175,7 +182,7 @@
           </UCard>
         </div>
 
-        <UCard v-else class="app-card-bleed-md overflow-hidden" :ui="{ body: 'p-0' }">
+        <UCard v-else class="overflow-hidden" :ui="{ body: 'p-0' }">
           <table class="goupix-card-table w-full border-separate border-spacing-0 text-sm">
             <thead class="sticky top-0 z-10">
               <tr class="bg-elevated/95 border-default border-y backdrop-blur">

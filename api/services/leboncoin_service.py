@@ -32,6 +32,11 @@ BASE_URL = "https://www.leboncoin.fr"
 DEPOSIT_URL = f"{BASE_URL}/deposer-une-annonce"
 ACCOUNT_URL = f"{BASE_URL}/mes-annonces"
 LOGIN_URL = f"{BASE_URL}/compte/connexion-securite"
+# Pages accessibles uniquement avec une session membre (Leboncoin redirige souvent vers /favorites).
+_MEMBER_AREA_PATH_RE = re.compile(
+    r"/(mes-annonces|favorites|mon-compte|account/|deposer-une-annonce)",
+    re.I,
+)
 LOGIN_URL_PATTERN = re.compile(
     r"(auth\.leboncoin\.fr|/(compte/connexion|connexion-securite|login|authentification|account/login))",
     re.I,
@@ -321,26 +326,47 @@ class LeboncoinService:
               if (/\\bse déconnecter\\b/i.test(body)) {
                 return { logged_in: true, reason: 'logout_link' };
               }
-              let loginCta = false;
-              for (const el of document.querySelectorAll('a, button, [role="button"]')) {
-                const t = (el.textContent || '').trim().toLowerCase();
-                if (t === 'se connecter' || t === 'me connecter') {
-                  loginCta = true;
-                  break;
+              const header =
+                document.querySelector('header') ||
+                document.querySelector('[role="banner"]') ||
+                document.querySelector('[data-test-id="header"]');
+              let headerLogin = false;
+              if (header) {
+                for (const el of header.querySelectorAll('a, button, [role="button"]')) {
+                  const t = (el.textContent || '').trim().toLowerCase();
+                  if (t === 'se connecter' || t === 'me connecter') {
+                    headerLogin = true;
+                    break;
+                  }
                 }
               }
-              const onAccount =
-                /\\/account\\//i.test(url) ||
-                /mes-annonces/i.test(url) ||
-                /mon-compte/i.test(url);
+              const hasMessages = !!document.querySelector(
+                'a[href*="/messages"], a[href*="messages.leboncoin"]'
+              );
               const hasDeposit = !!document.querySelector('a[href*="deposer-une-annonce"]');
-              if (hasDeposit && !loginCta) {
+              const hasAccountNav = !!document.querySelector(
+                'a[href*="/account/"], a[href*="/compte/"], a[href*="mon-compte"]'
+              );
+              if ((hasMessages || hasDeposit) && !headerLogin) {
+                return { logged_in: true, reason: 'nav_logged_in' };
+              }
+              if (hasDeposit && !headerLogin) {
                 return { logged_in: true, reason: 'deposit_nav' };
               }
-              if (/mes-annonces/i.test(url) && !loginCta) {
+              if (/mes-annonces/i.test(url) && !headerLogin) {
                 return { logged_in: true, reason: 'mes_annonces' };
               }
-              return { logged_in: false, reason: loginCta ? 'login_cta' : 'unknown' };
+              if (/\\/favorites/i.test(url) && !headerLogin) {
+                return { logged_in: true, reason: 'favorites' };
+              }
+              if (
+                (/\\/account\\//i.test(url) || /mon-compte/i.test(url)) &&
+                (hasAccountNav || hasMessages) &&
+                !headerLogin
+              ) {
+                return { logged_in: true, reason: 'account_area' };
+              }
+              return { logged_in: false, reason: headerLogin ? 'login_header' : 'unknown' };
             })())
             """,
             return_by_value=True,
@@ -352,6 +378,13 @@ class LeboncoinService:
         if not isinstance(data, dict):
             data = {}
         return {"logged_in": bool(data.get("logged_in")), "reason": data.get("reason")}
+
+    @classmethod
+    def _url_is_member_area(cls, url: str) -> bool:
+        low = (url or "").lower()
+        if "auth.leboncoin.fr" in low:
+            return False
+        return bool(_MEMBER_AREA_PATH_RE.search(low))
 
     @classmethod
     async def _cdp_has_auth_cookie(cls) -> bool:
@@ -403,7 +436,23 @@ class LeboncoinService:
             return False
         if await cls._cdp_has_auth_cookie():
             return True
-        return "mes-annonces" in url.lower()
+        return cls._url_is_member_area(url)
+
+    @classmethod
+    async def try_confirm_session_on_current_page(cls, tab: Tab) -> bool:
+        """Validate session without forcing navigation (current tab may already be /favorites)."""
+        await cls._accept_didomi_cookies(tab)
+        url = await cls._current_url(tab)
+        if "auth.leboncoin.fr" in url.lower() or LOGIN_URL_PATTERN.search(url):
+            return False
+        if await cls._page_shows_login_gate(tab):
+            return False
+        dom = await cls.read_login_state_from_tab(tab)
+        if not dom.get("logged_in"):
+            return False
+        if await cls._cdp_has_auth_cookie():
+            return True
+        return cls._url_is_member_area(url)
 
     @classmethod
     async def safe_close_browser_graceful(cls) -> None:
@@ -437,16 +486,21 @@ class LeboncoinService:
 
     @classmethod
     async def _page_shows_login_gate(cls, tab: Tab) -> bool:
+        """True only on auth URLs or a visible header « Se connecter » (not footer/marketing links)."""
         raw = await tab.evaluate(
             """
             JSON.stringify((() => {
-              const url = location.href;
+              const url = location.href || '';
               if (/auth\\.leboncoin\\.fr/i.test(url)) return true;
               if (/(compte\\/connexion|connexion-securite|login|authentification)/i.test(url)) return true;
-              const body = (document.body && document.body.innerText) || '';
-              if (/\\bme connecter\\b/i.test(body) && !/\\bse déconnecter\\b/i.test(body)) {
-                const hasSubject = !!document.querySelector('input[name="subject"], input#subject');
-                if (!hasSubject) return true;
+              const header =
+                document.querySelector('header') ||
+                document.querySelector('[role="banner"]') ||
+                document.querySelector('[data-test-id="header"]');
+              if (!header) return false;
+              for (const el of header.querySelectorAll('a, button, [role="button"]')) {
+                const t = (el.textContent || '').trim().toLowerCase();
+                if (t === 'se connecter' || t === 'me connecter') return true;
               }
               return false;
             })())
@@ -459,11 +513,11 @@ class LeboncoinService:
 
     @classmethod
     async def open_login_browser(cls) -> dict[str, Any]:
-        """Open Chromium on leboncoin connexion (persistent profile). Browser stays open."""
+        """Open Chromium on « Mes annonces » (redirect login si besoin). Browser stays open."""
         await cls.init_browser()
-        tab = await cls._browser.get(LOGIN_URL)  # type: ignore[union-attr]
+        tab = await cls._browser.get(ACCOUNT_URL)  # type: ignore[union-attr]
         cls._tab = tab
-        await tab.sleep(0.5)
+        await tab.sleep(0.8)
         await cls._accept_didomi_cookies(tab)
         return {"opened": True, "url": await cls._current_url(tab)}
 

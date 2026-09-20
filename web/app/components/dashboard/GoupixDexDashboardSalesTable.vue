@@ -1,6 +1,6 @@
 <template>
   <UCard
-    class="app-card-bleed-md overflow-hidden"
+    class="overflow-hidden"
     :ui="{
       header: 'px-4 sm:px-6 pt-6 pb-3 border-b border-[var(--app-line)]',
       body: 'p-0 sm:p-0',
@@ -13,7 +13,7 @@
       </div>
     </template>
 
-    <div v-if="sortedSales.length" :class="maxHeightClass">
+    <div v-if="sortedSales.length" :class="[maxHeightClass, 'max-md:p-3']">
       <GoupixDexBaseTable min-width="720px">
         <template #head>
           <GoupixDexBaseTableTh>Date</GoupixDexBaseTableTh>

@@ -229,7 +229,16 @@ async function init(d) {
     setId,
     localId,
   }))
-  engine = { wholes, arts, cards, count }
+  // Indices groupés par langue : quand une langue de session est fixée, on ne
+  // compare qu'à ce sous-ensemble (~6× moins que les 94k 6 langues) = beaucoup
+  // plus rapide sur téléphone.
+  const byLocale = {}
+  for (let i = 0; i < count; i += 1) {
+    const loc = cards[i].locale
+    if (!byLocale[loc]) byLocale[loc] = []
+    byLocale[loc].push(i)
+  }
+  engine = { wholes, arts, cards, count, byLocale }
 }
 
 /**
@@ -242,9 +251,13 @@ function match(rgba, cw, ch, language) {
   if (!engine) return { status: 'none', decision: null, score: 1 }
   const g = cardGray(rgba, cw, ch)
   const coarse = COARSE.map((t) => variantWords(g, t))
+  // Sous-ensemble de la langue de session (sinon tout l'index) — le gros gain de vitesse.
+  const subset = language && language !== 'auto' ? engine.byLocale[language] : null
+  const count = subset ? subset.length : engine.count
   const best = new Float32Array(engine.count)
   best.fill(2)
-  for (let i = 0; i < engine.count; i += 1) {
+  for (let n = 0; n < count; n += 1) {
+    const i = subset ? subset[n] : n
     let m = 2
     for (let k = 0; k < coarse.length; k += 1) {
       const dd = distTo(coarse[k], i)
@@ -252,8 +265,8 @@ function match(rgba, cw, ch, language) {
     }
     best[i] = m
   }
-  // shortlist
-  const idx = Array.from({ length: engine.count }, (_, i) => i)
+  // shortlist (uniquement sur le sous-ensemble scanné)
+  const idx = subset ? subset.slice() : Array.from({ length: engine.count }, (_, i) => i)
   idx.sort((a, b) => best[a] - best[b])
   const shortlist = idx.slice(0, SHORTLIST)
   const dense = DENSE.map((t) => variantWords(g, t))

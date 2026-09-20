@@ -209,7 +209,19 @@ async def _lbc_login_polling_loop() -> None:
             return
         tab = LeboncoinService._tab
         try:
-            ready = await LeboncoinService.confirm_session_ready(tab)
+            ready = await LeboncoinService.try_confirm_session_on_current_page(tab)
+            if not ready:
+                ready = await LeboncoinService.confirm_session_ready(tab)
+            if not ready:
+                url = await LeboncoinService._current_url(tab)
+                dom = await LeboncoinService.read_login_state_from_tab(tab)
+                gate = await LeboncoinService._page_shows_login_gate(tab)
+                logger.debug(
+                    "lbc login poll waiting: url=%s gate=%s dom=%s",
+                    url,
+                    gate,
+                    dom,
+                )
         except Exception as exc:  # noqa: BLE001
             logger.debug("lbc login poll confirm failed: %s", exc)
             continue
@@ -232,8 +244,7 @@ async def leboncoin_session_state() -> dict[str, object]:
 
     if browser_open and LeboncoinService._tab is not None:
         try:
-            live = await LeboncoinService.read_login_state_from_tab(LeboncoinService._tab)
-            if live.get("logged_in"):
+            if await LeboncoinService.try_confirm_session_on_current_page(LeboncoinService._tab):
                 return {
                     "state": "ready",
                     "profile_dir": str(profile),
