@@ -82,12 +82,14 @@
               @click="openCatalogPreview(hit)"
               @keydown.enter.prevent="openCatalogPreview(hit)"
             >
-              <div class="bg-muted/20 relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden">
+              <div
+                class="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden bg-[var(--app-surface-2)] p-2"
+              >
                 <img
                   v-if="hit.product.img"
                   :src="hit.product.img"
                   :alt="hit.product.full"
-                  class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
                   referrerpolicy="no-referrer"
                   loading="lazy"
                   decoding="async"

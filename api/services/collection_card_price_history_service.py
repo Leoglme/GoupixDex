@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from models.collection_card import CollectionCard
 from models.collection_card_price_snapshot import CollectionCardPriceSnapshot
-from services.cardmarket_local_price_service import get_price_api
+from services.price_history_seed_service import synthesized_price_points
 
 _PARIS_TZ = ZoneInfo("Europe/Paris")
 
@@ -66,24 +66,6 @@ def snapshot_all_collection_cards(db: Session) -> int:
     return len(rows)
 
 
-def _synthesized_points(id_product: int | None) -> list[dict[str, Any]]:
-    """Amorce approximative depuis les moyennes du guide (avg30 à J-30, avg7 à J-7, référence à J)."""
-    if id_product is None:
-        return []
-    prices = get_price_api().get_card_prices(id_product)
-    if prices is None:
-        return []
-    today = _today_paris()
-    plan = [(30, prices.avg30), (7, prices.avg7), (1, prices.avg1), (0, prices.reference_eur)]
-    points: list[dict[str, Any]] = []
-    for days_ago, value in plan:
-        if isinstance(value, (int, float)) and value > 0:
-            points.append(
-                {"date": (today - dt.timedelta(days=days_ago)).isoformat(), "price_eur": round(float(value), 2)}
-            )
-    return points
-
-
 def price_history(db: Session, card: CollectionCard) -> dict[str, Any]:
     """
     Courbe de prix d'une carte : historique réel, complété par l'amorce approximative
@@ -101,7 +83,7 @@ def price_history(db: Session, card: CollectionCard) -> dict[str, Any]:
     if len(real_points) >= 2:
         return {"points": real_points, "approximate": False}
 
-    seed = _synthesized_points(card.cardmarket_id_product)
+    seed = synthesized_price_points(card.cardmarket_id_product)
     real_dates = {p["date"] for p in real_points}
     merged = [p for p in seed if p["date"] not in real_dates] + real_points
     merged.sort(key=lambda p: p["date"])

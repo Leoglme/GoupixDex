@@ -127,24 +127,19 @@
             @click="onProductClick(product.id, $event)"
             @keydown.enter.prevent="openSealed(product.id)"
           >
-            <div class="bg-muted/20 relative aspect-[3/4] w-full overflow-hidden">
+            <div
+              class="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden bg-[var(--app-surface-2)] p-2"
+            >
               <img
                 v-if="product.image_url"
                 :src="product.image_url"
                 :alt="product.name"
-                class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
                 referrerpolicy="no-referrer"
                 decoding="async"
                 loading="lazy"
               />
-              <div v-else class="flex h-full items-center justify-center">
-                <UIcon name="i-lucide-box" class="text-muted size-8" />
-              </div>
-              <span
-                class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
-              >
-                {{ sealedProductTypeLabel(product.product_type) }}
-              </span>
+              <UIcon v-else name="i-lucide-box" class="text-muted size-8" />
               <span
                 v-if="product.quantity > 1"
                 class="bg-elevated/95 text-highlighted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
