@@ -38,7 +38,7 @@ from urllib.parse import urlparse
 
 from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
-from schemas.articles import VintedBatchStartBody
+from schemas.articles import VintedBatchRefreshBody, VintedBatchStartBody
 from services.wardrobe_job_store_service import WardrobeJobStoreService as wardrobe_jobs
 from services.desktop_vinted_runner_service import DesktopVintedRunnerService
 from services.desktop_wardrobe_sync_runner_service import DesktopWardrobeSyncRunnerService
@@ -306,6 +306,56 @@ async def start_vinted_batch(
         )
     asyncio.create_task(
         DesktopVintedRunnerService.run_desktop_vinted_batch_job(
+            job_id, user_id, unique_ids, raw_token, remote
+        ),
+    )
+    return {
+        "job_id": job_id,
+        "stream_path": f"/articles/vinted-batch/{job_id}/stream",
+    }
+
+
+@router.post("/vinted-batch-delist", status_code=status.HTTP_202_ACCEPTED)
+async def start_vinted_batch_delist(
+    body: VintedBatchStartBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    unique_ids = list(dict.fromkeys(body.article_ids))
+    job_id = str(uuid.uuid4())
+    if not vinted_batch_hub.try_register_job(job_id, user_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A batch Vinted job is already running for this account.",
+        )
+    asyncio.create_task(
+        DesktopVintedRunnerService.run_desktop_vinted_batch_delist_job(
+            job_id, user_id, unique_ids, raw_token, remote
+        ),
+    )
+    return {
+        "job_id": job_id,
+        "stream_path": f"/articles/vinted-batch/{job_id}/stream",
+    }
+
+
+@router.post("/vinted-batch-refresh", status_code=status.HTTP_202_ACCEPTED)
+async def start_vinted_batch_refresh(
+    body: VintedBatchRefreshBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    unique_ids = list(dict.fromkeys(body.article_ids))
+    job_id = str(uuid.uuid4())
+    if not vinted_batch_hub.try_register_job(job_id, user_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A batch Vinted job is already running for this account.",
+        )
+    asyncio.create_task(
+        DesktopVintedRunnerService.run_desktop_vinted_batch_refresh_job(
             job_id, user_id, unique_ids, raw_token, remote
         ),
     )

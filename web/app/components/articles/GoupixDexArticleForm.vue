@@ -133,6 +133,18 @@
       </div>
     </UCard>
 
+    <GoupixDexArticlePricingGuide
+      class="col-span-full"
+      :set-code="setCode"
+      :card-number="cardNumber"
+      :pokemon-name="pokemonName"
+      :purchase-price="purchasePriceNumber"
+      :cached-cardmarket-eur="article?.market_cardmarket_eur ?? null"
+      :cached-tcgplayer-eur="article?.market_tcgplayer_eur ?? null"
+      :order-context="article?.order_context ?? null"
+      @apply-suggested="onApplySuggestedPrice"
+    />
+
     <div class="grid gap-4 sm:grid-cols-2">
       <UFormField label="Prix d'achat (€)" required>
         <UInput v-model="purchasePrice" type="text" inputmode="decimal" class="w-full" />
@@ -165,9 +177,7 @@
       <template #description>
         <p class="text-sm leading-relaxed">
           Réactivez Vinted dans
-          <NuxtLink to="/settings/marketplaces" class="text-primary font-medium underline underline-offset-2">
-            Paramètres → Places de marché
-          </NuxtLink>
+          <NuxtLink to="/settings" class="text-primary font-medium underline underline-offset-2"> Paramètres </NuxtLink>
           pour proposer la publication automatisée.
         </p>
       </template>
@@ -210,16 +220,12 @@
       </p>
       <p v-else-if="!svcSettings?.ebay_connected" class="text-muted text-sm">
         Connectez votre compte eBay dans
-        <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
-          Paramètres → Places de marché
-        </NuxtLink>
+        <NuxtLink to="/settings" class="text-primary underline underline-offset-2"> Paramètres </NuxtLink>
         pour activer cette option.
       </p>
       <p v-else class="text-muted text-sm">
         Terminez la configuration eBay (adresse d'expédition et règles automatiques) dans
-        <NuxtLink to="/settings/marketplaces" class="text-primary underline underline-offset-2">
-          Paramètres → Places de marché </NuxtLink
-        >.
+        <NuxtLink to="/settings" class="text-primary underline underline-offset-2"> Paramètres </NuxtLink>.
       </p>
     </div>
 
@@ -267,10 +273,32 @@
     </div>
 
     <div
-      v-if="
+      v-if="mode === 'edit' && relistMode && !article?.is_sold"
+      class="border-default space-y-3 rounded-lg border border-[var(--app-accent)]/25 bg-[var(--app-accent-soft)]/30 p-4"
+    >
+      <p class="text-highlighted text-sm font-medium">Republication</p>
+      <p class="text-muted text-xs leading-relaxed">
+        Enregistrez la fiche puis lancez la mise en ligne sur les canaux cochés (comme à la création).
+      </p>
+      <UCheckbox
+        v-if="canUseVinted"
+        v-model="publishToVinted"
+        label="Mettre en ligne sur Vinted après enregistrement"
+      />
+      <UCheckbox
+        v-if="showEbayPublish"
+        v-model="publishToEbay"
+        :disabled="!canPublishEbay"
+        label="Mettre en ligne sur eBay après enregistrement"
+      />
+    </div>
+
+    <div
+      v-else-if="
         mode === 'edit' &&
         article &&
         !article.is_sold &&
+        !relistMode &&
         ((article.published_on_vinted ?? false) || (article.published_on_ebay ?? false))
       "
       class="border-default space-y-3 rounded-lg border p-4"
@@ -293,7 +321,7 @@
     </div>
 
     <UButton v-if="showSubmitButton" color="primary" :loading="loading" @click="submit">
-      {{ mode === 'create' ? "Créer l'article" : 'Enregistrer' }}
+      {{ mode === 'create' ? "Créer l'article" : relistMode ? 'Enregistrer et continuer' : 'Enregistrer' }}
     </UButton>
     <p v-if="showSubmitButton && loading && loadingHint" class="text-muted flex items-center gap-2 text-sm">
       <UIcon name="i-lucide-loader-2" class="size-4 shrink-0 animate-spin" />
@@ -323,18 +351,26 @@ const props = withDefaults(
     loadingHint?: string | null
     /** Hide the "Publish on Vinted" checkbox (e.g. batch create with a global option). */
     hideVintedOption?: boolean
+    /** Mode remise en vente : propose republication après enregistrement. */
+    relistMode?: boolean
     /** Show the form submit button (disable if the parent handles submit). */
     showSubmitButton?: boolean
   }>(),
   {
     hideVintedOption: false,
+    relistMode: false,
     showSubmitButton: true,
   },
 )
 
+export type ArticleEditSubmitOptions = {
+  publishVinted: boolean
+  publishEbay: boolean
+}
+
 const emit = defineEmits<{
   submitCreate: [form: FormData]
-  submitEdit: [body: ArticleUpdateBody]
+  submitEdit: [body: ArticleUpdateBody, relist?: ArticleEditSubmitOptions]
 }>()
 
 const VINTED_TITLE_MAX_CHARS: number = 100
@@ -365,6 +401,19 @@ const clearVintedPublication: Ref<boolean> = ref(false)
 const clearEbayPublication: Ref<boolean> = ref(false)
 const purchasePrice: Ref<string> = ref('')
 const sellPrice: Ref<string> = ref('')
+
+const purchasePriceNumber = computed((): number | null => {
+  const raw = purchasePrice.value.trim().replace(',', '.')
+  if (!raw) {
+    return null
+  }
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+})
+
+function onApplySuggestedPrice(priceEur: number): void {
+  sellPrice.value = formatMoneyInput(priceEur)
+}
 const toast = useToast()
 const { matchOrderLines, listLinkableOrderLines } = useOrders()
 const orderMatchLoading: Ref<boolean> = ref(false)
@@ -720,6 +769,10 @@ watch(
     gradedCertNumber.value = a.graded_cert_number ?? ''
     clearVintedPublication.value = false
     clearEbayPublication.value = false
+    if (props.relistMode && !a.is_sold) {
+      publishToVinted.value = Boolean(canUseVinted.value)
+      publishToEbay.value = Boolean(canPublishEbay.value)
+    }
   },
   { immediate: true },
 )
@@ -1135,6 +1188,13 @@ function submit() {
   }
   if (clearEbayPublication.value) {
     editBody.clear_ebay_publication = true
+  }
+  if (props.relistMode) {
+    emit('submitEdit', editBody, {
+      publishVinted: canUseVinted.value && publishToVinted.value,
+      publishEbay: canPublishEbay.value && publishToEbay.value,
+    })
+    return
   }
   emit('submitEdit', editBody)
 }

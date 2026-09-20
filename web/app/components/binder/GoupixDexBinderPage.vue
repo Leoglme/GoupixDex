@@ -55,8 +55,8 @@
         @click="onPocketClick(pageIdx * perPage + (k - 1))"
       >
         <div
-          v-if="itemAt(pageIdx * perPage + (k - 1))"
-          :key="itemAt(pageIdx * perPage + (k - 1))!.id"
+          v-if="displayItem(pageIdx * perPage + (k - 1))"
+          :key="displayItem(pageIdx * perPage + (k - 1))!.id"
           class="absolute inset-[3%]"
         >
           <div
@@ -71,14 +71,26 @@
           >
             <div
               class="card-tile h-full w-full transition"
-              :class="isSource(pageIdx * perPage + (k - 1)) ? 'opacity-30' : ''"
+              :class="[
+                isSource(pageIdx * perPage + (k - 1)) ? 'opacity-30' : '',
+                displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' ? 'opacity-75 grayscale-[0.35]' : '',
+              ]"
             >
               <GoupixDexBinderCardImage
-                :src="itemAt(pageIdx * perPage + (k - 1))!.image_url"
-                :alt="itemAt(pageIdx * perPage + (k - 1))!.card_name"
+                :src="displayItem(pageIdx * perPage + (k - 1))!.image_url"
+                :alt="displayItem(pageIdx * perPage + (k - 1))!.card_name"
               />
-              <span v-if="itemAt(pageIdx * perPage + (k - 1))!.quantity > 1" class="tile-badge num top-1 right-1">
-                ×{{ itemAt(pageIdx * perPage + (k - 1))!.quantity }}
+              <span
+                v-if="displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted'"
+                class="tile-badge num top-1 left-1 z-10 !bg-black/70 !text-white"
+              >
+                Manquante
+              </span>
+              <span
+                v-else-if="displayItem(pageIdx * perPage + (k - 1))!.quantity > 1"
+                class="tile-badge num top-1 right-1"
+              >
+                ×{{ displayItem(pageIdx * perPage + (k - 1))!.quantity }}
               </span>
             </div>
           </div>
@@ -94,7 +106,7 @@
           <UIcon name="i-lucide-x" class="h-3 w-3" />
         </button>
         <UIcon
-          v-if="!itemAt(pageIdx * perPage + (k - 1)) && !readOnly"
+          v-if="!displayItem(pageIdx * perPage + (k - 1)) && !readOnly"
           name="i-lucide-plus"
           class="pointer-events-none absolute top-1/2 left-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-(--app-faint) opacity-0 transition group-hover/p:opacity-70"
           :class="pickerPocket === pageIdx * perPage + (k - 1) ? 'text-(--app-accent) opacity-90' : ''"
@@ -148,6 +160,7 @@ const props = defineProps<{
   dragId: string | null
   overPocket: string | null
   pickerPocket: number | null
+  cleanView?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -168,6 +181,13 @@ const padRight = computed(() => (holesLeft.value ? 30 : 28))
 
 function itemAt(pocket: number) {
   return props.byPocket.get(pocket) ?? null
+}
+
+function displayItem(pocket: number) {
+  const item = itemAt(pocket)
+  if (!item) return null
+  if (props.cleanView && item.kind === 'wanted') return null
+  return item
 }
 
 function pocketClass(pocket: number) {

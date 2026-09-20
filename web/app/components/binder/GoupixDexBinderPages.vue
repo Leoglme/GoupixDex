@@ -1,10 +1,5 @@
 <template>
   <div ref="rootEl" class="max-w-full min-w-0 overflow-x-hidden outline-none" tabindex="0" @keydown="onKeyDown">
-    <p v-if="!opened && !flipping && pageSize && !cleanView" class="text-muted mb-4 text-center text-sm">
-      Clique sur la couverture ou appuie sur
-      <kbd class="rounded border border-(--app-line) bg-(--app-surface-2) px-1.5 py-0.5 font-mono text-[10px]">→</kbd>
-      pour ouvrir
-    </p>
     <div class="relative mx-auto w-full max-w-[1400px] min-w-0 overflow-x-hidden md:pr-12">
       <div
         ref="spreadEl"
@@ -43,6 +38,7 @@
                 :drag-id="drag?.id ?? null"
                 :over-pocket="over"
                 :picker-pocket="picker"
+                :clean-view="cleanView"
                 @edge-prev="closeBinder()"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -60,7 +56,15 @@
                 @animationend="onCoverAnimEnd"
               >
                 <div v-if="showCoverFront" class="absolute inset-0">
-                  <GoupixDexBinderCover v-bind="coverProps" fill />
+                  <GoupixDexBinderCover
+                    :cover-style="coverProps.coverStyle"
+                    :covers="coverProps.covers"
+                    :name="coverProps.name"
+                    :color-hex="coverProps.colorHex"
+                    :texture="coverProps.texture"
+                    :layout="coverProps.layout"
+                    fill
+                  />
                 </div>
                 <div
                   v-else
@@ -113,6 +117,7 @@
                 :drag-id="drag?.id ?? null"
                 :over-pocket="over"
                 :picker-pocket="picker"
+                :clean-view="cleanView"
                 @edge-prev="onPageEdgePrev(i)"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -145,7 +150,15 @@
                     @click="openTo(0)"
                   >
                     <div class="relative h-full w-full transition group-hover:brightness-110">
-                      <GoupixDexBinderCover v-bind="coverProps" fill />
+                      <GoupixDexBinderCover
+                        :cover-style="coverProps.coverStyle"
+                        :covers="coverProps.covers"
+                        :name="coverProps.name"
+                        :color-hex="coverProps.colorHex"
+                        :texture="coverProps.texture"
+                        :layout="coverProps.layout"
+                        fill
+                      />
                     </div>
                   </button>
                 </div>
@@ -156,7 +169,7 @@
       </div>
 
       <GoupixDexBinderTabs
-        v-if="perView === 2 && pageSize"
+        v-if="perView === 2 && pageSize && !cleanView"
         orientation="vertical"
         :opened="opened"
         :view="view"
@@ -174,7 +187,7 @@
     </div>
 
     <GoupixDexBinderTabs
-      v-if="perView === 1 && pageSize"
+      v-if="perView === 1 && pageSize && !cleanView"
       orientation="horizontal"
       :opened="opened"
       :view="view"
@@ -202,73 +215,48 @@
       </div>
     </div>
 
-    <UModal v-model:open="pickerOpen" :ui="{ content: 'max-w-3xl w-full' }">
-      <template #content>
-        <div class="flex max-h-[85vh] flex-col">
-          <div class="border-b border-(--app-line) px-5 py-4">
-            <p class="font-display text-base font-semibold">Ranger une carte</p>
-            <p v-if="picker != null" class="mt-0.5 text-sm text-(--app-ink-soft)">
-              Page {{ Math.floor(picker / perPage) + 1 }} · Pochette {{ (picker % perPage) + 1 }}
-            </p>
-            <UInput v-model="pickerQ" icon="i-lucide-search" placeholder="Nom, numéro…" class="mt-3" />
-            <USelectMenu
-              v-if="pickerSets.length > 1"
-              v-model="pickerSet"
-              :items="pickerSets"
-              placeholder="Toutes les extensions"
-              class="mt-2"
-            />
-          </div>
-          <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <p v-if="pickerResults.length === 0" class="text-sm text-(--app-ink-soft)">Aucune carte ne correspond.</p>
-            <ul v-else class="grid grid-cols-3 gap-3 xl:grid-cols-4">
-              <li v-for="c in pickerResults" :key="c.collection_card_id">
-                <button type="button" class="group/c block w-full text-left" @click="place(c)">
-                  <div class="card-tile relative aspect-[63/88]">
-                    <GoupixDexBinderCardImage :src="c.image_url" :alt="c.card_name" />
-                    <span
-                      v-if="pockets.has(`i:${c.collection_card_id}`)"
-                      class="tile-badge num bottom-1.5 left-1/2 z-10 -translate-x-1/2 !bg-black/75 whitespace-nowrap !text-white"
-                    >
-                      Déjà rangée
-                    </span>
-                    <span v-if="c.quantity > 1" class="tile-badge num top-1.5 right-1.5 z-10">×{{ c.quantity }}</span>
-                  </div>
-                  <p class="mt-1.5 truncate text-xs font-medium group-hover/c:text-(--app-accent)">{{ c.card_name }}</p>
-                  <p class="truncate text-[11px] text-(--app-faint)">{{ c.set_name }} · {{ c.local_id }}</p>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </template>
-    </UModal>
+    <GoupixDexBinderPickerModal
+      v-model:open="pickerOpen"
+      v-model:query="pickerQ"
+      v-model:set-filter="pickerSet"
+      :place-label="pickerPlaceLabel"
+      :results="pickerResults"
+      :placed-ids="placedCollectionIds"
+      :set-options="pickerSets"
+      :catalog-searching="catalogSearching"
+      :has-collection-candidates="candidates.length > 0"
+      @pick="place"
+    />
 
-    <UModal v-model:open="detailOpen" :ui="{ content: 'max-w-md w-full' }">
-      <template #content>
-        <div v-if="detail" class="space-y-4 p-5">
-          <div class="card-tile mx-auto aspect-[63/88] max-w-[280px]">
-            <GoupixDexBinderCardImage :src="detail.image_url" :alt="detail.card_name" />
-          </div>
-          <div>
-            <p class="font-display text-xl font-semibold">{{ detail.card_name }}</p>
-            <p class="text-sm text-(--app-ink-soft)">{{ detail.set_name }} · {{ detail.local_id }}</p>
-          </div>
-          <UButton v-if="hrefBase" :to="`${hrefBase}${detail.collection_card_id}`" block
-            >Voir dans ma collection</UButton
+    <GoupixDexDialogModal v-model:open="detailOpen" :title="detail?.card_name ?? 'Carte'" width-class="max-w-md">
+      <template v-if="detail">
+        <div class="card-tile mx-auto aspect-[63/88] max-w-[240px]">
+          <GoupixDexBinderCardImage :src="detail.image_url" :alt="detail.card_name" />
+        </div>
+        <p class="text-muted mt-3 text-center text-sm">{{ detail.set_name }} · {{ detail.local_id }}</p>
+        <div class="mt-5 flex flex-col gap-2">
+          <NuxtLink
+            v-if="hrefBase && detail.kind === 'owned'"
+            :to="`${hrefBase}${detail.collection_card_id}`"
+            class="dialog-btn-secondary text-center no-underline"
+            @click="detail = null"
           >
-          <UButton
+            Voir dans ma collection
+          </NuxtLink>
+          <p v-else-if="detail.kind === 'wanted'" class="text-muted text-center text-sm">
+            Carte du catalogue — pas encore dans ta collection physique.
+          </p>
+          <button
             v-if="!readOnly && detail.position != null"
-            color="neutral"
-            variant="soft"
-            block
+            type="button"
+            class="dialog-btn-primary"
             @click="openPickerFromDetail"
           >
             Changer la carte de cette pochette
-          </UButton>
+          </button>
         </div>
       </template>
-    </UModal>
+    </GoupixDexDialogModal>
   </div>
 </template>
 
@@ -282,13 +270,17 @@ import {
   SWIPE_MIN,
   fitPage,
   SPINE_W,
-  filterPickerCandidates,
   useBinderPagesSpread,
   useBinderPagesState,
   type Drag,
   type PointerState,
 } from '~/composables/useBinderPages'
+import { buildBinderPickerResults, CATALOG_MIN_QUERY } from '~/composables/useBinderPickerResults'
+import type { CatalogSearchCardHit } from '~/composables/useCardCatalog'
+import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
+import { binderStyle } from '~/utils/binder/binder-styles'
+import { coverLayout, renderCover } from '~/utils/binder/binder-cover'
 
 const props = withDefaults(
   defineProps<{
@@ -348,17 +340,36 @@ const {
 
 const colorHex = computed(() => binderColorHex(props.binder.color))
 const name = computed(() => props.binder.name)
+const coverLayoutResolved = computed(() => coverLayout(props.binder.cover))
+const coverRender = computed(() =>
+  renderCover(
+    coverLayoutResolved.value,
+    (path) => props.binder.cover_urls?.[path] ?? null,
+    (itemId) => {
+      const cardId = Number(itemId)
+      const item = props.binder.items.find((i) => i.collection_card_id === cardId)
+      return item?.image_url ?? null
+    },
+  ),
+)
 const coverProps = computed(() => ({
-  style: props.binder.style,
+  coverStyle: props.binder.style,
   covers: props.binder.covers as CoverItem[],
   name: name.value,
   colorHex: colorHex.value,
   texture: design.value.coverTexture,
+  layout: binderStyle(props.binder.style) === 'custom' ? coverRender.value : null,
 }))
 
 const candidates = computed(() => props.candidates ?? props.binder.candidates ?? [])
+const cleanView = computed(() => props.cleanView)
 const bindersApi = useBinders()
+const { searchCatalogCards } = useCardCatalog()
 const toast = useToast()
+const catalogHits = ref<CatalogSearchCardHit[]>([])
+const catalogSearching = ref(false)
+let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null
+let catalogSearchAbort: AbortController | null = null
 
 const spreadEl = ref<HTMLElement | null>(null)
 const frame = ref<{ top: number; width: number; vh: number } | null>(null)
@@ -383,29 +394,36 @@ function pageRole(i: number): 'left' | 'right' | 'single' {
   return i === 0 ? 'left' : 'right'
 }
 
-function setupSpreadMeasure() {
+let spreadResizeObserver: ResizeObserver | null = null
+
+function measureSpread() {
   if (!spreadEl.value) return
-  const measure = () => {
-    if (!spreadEl.value) return
-    const r = spreadEl.value.getBoundingClientRect()
-    frame.value = {
-      top: Math.round(r.top + window.scrollY),
-      width: Math.round(r.width),
-      vh: window.innerHeight,
-    }
+  const r = spreadEl.value.getBoundingClientRect()
+  frame.value = {
+    top: Math.round(r.top + window.scrollY),
+    width: Math.round(r.width),
+    vh: window.innerHeight,
   }
-  const ro = new ResizeObserver(measure)
-  ro.observe(spreadEl.value)
-  window.addEventListener('resize', measure)
-  setTimeout(measure, 0)
-  onUnmounted(() => {
-    ro.disconnect()
-    window.removeEventListener('resize', measure)
-  })
 }
 
-onMounted(setupSpreadMeasure)
-watch(spreadEl, () => setupSpreadMeasure())
+function teardownSpreadMeasure() {
+  spreadResizeObserver?.disconnect()
+  spreadResizeObserver = null
+  window.removeEventListener('resize', measureSpread)
+}
+
+function attachSpreadMeasure() {
+  teardownSpreadMeasure()
+  if (!spreadEl.value) return
+  spreadResizeObserver = new ResizeObserver(measureSpread)
+  spreadResizeObserver.observe(spreadEl.value)
+  window.addEventListener('resize', measureSpread)
+  measureSpread()
+}
+
+onMounted(attachSpreadMeasure)
+watch(spreadEl, attachSpreadMeasure)
+onUnmounted(teardownSpreadMeasure)
 
 const coverFlipClass = computed(() => {
   if (closing.value) return half.value ? 'cover-flip-close-b' : 'cover-flip-close-a'
@@ -445,7 +463,14 @@ async function remove(key: string) {
   patchOv([], undefined, key)
   try {
     const detail = await bindersApi.removeFromPocket(props.binder.id, key)
-    toast.add({ title: 'Retirée du classeur — elle reste dans ta collection', color: 'success' })
+    const item = itemById.value.get(key)
+    toast.add({
+      title:
+        item?.kind === 'wanted'
+          ? 'Retirée du classeur (carte catalogue)'
+          : 'Retirée du classeur — elle reste dans ta collection',
+      color: 'success',
+    })
     await refresh(detail)
   } catch {
     ov.value = before
@@ -462,12 +487,69 @@ const pickerOpen = computed({
 })
 const pickerQ = ref('')
 const pickerSet = ref('')
-const pickerSets = computed(() =>
-  [...new Set(candidates.value.map((c) => c.set_name))].sort((a, b) => a.localeCompare(b, 'fr')),
-)
+const pickerSets = computed(() => {
+  const sets = new Set(candidates.value.map((c) => c.set_name))
+  for (const hit of catalogHits.value) {
+    if (hit.set_name?.trim()) sets.add(hit.set_name.trim())
+  }
+  return [...sets].sort((a, b) => a.localeCompare(b, 'fr'))
+})
 const pickerResults = computed(() =>
-  filterPickerCandidates(candidates.value, pockets.value, pickerQ.value, pickerSet.value),
+  buildBinderPickerResults(candidates.value, pockets.value, pickerQ.value, pickerSet.value, catalogHits.value),
 )
+
+watch(pickerQ, (q) => {
+  if (catalogSearchTimer) clearTimeout(catalogSearchTimer)
+  const trimmed = q.trim()
+  if (trimmed.length < CATALOG_MIN_QUERY) {
+    catalogHits.value = []
+    catalogSearching.value = false
+    catalogSearchAbort?.abort()
+    return
+  }
+  catalogSearching.value = true
+  catalogSearchTimer = setTimeout(() => {
+    catalogSearchAbort?.abort()
+    const controller = new AbortController()
+    catalogSearchAbort = controller
+    void searchCatalogCards('fr', trimmed)
+      .then((res) => {
+        if (!controller.signal.aborted) catalogHits.value = res.cards
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) catalogHits.value = []
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) catalogSearching.value = false
+      })
+  }, 300)
+})
+
+watch(pickerOpen, (isOpen) => {
+  if (!isOpen) {
+    catalogHits.value = []
+    catalogSearching.value = false
+  }
+})
+
+const pickerPlaceLabel = computed(() => {
+  if (picker.value == null) {
+    return undefined
+  }
+  const page = Math.floor(picker.value / perPage.value) + 1
+  const slot = (picker.value % perPage.value) + 1
+  return `Emplacement visé : page ${page} · pochette ${slot}`
+})
+
+const placedCollectionIds = computed(() => {
+  const ids = new Set<number>()
+  for (const key of pockets.value.keys()) {
+    if (key.startsWith('i:')) {
+      ids.add(Number(key.slice(2)))
+    }
+  }
+  return ids
+})
 
 function openPickerFromDetail(): void {
   const position = detail.value?.position
@@ -489,10 +571,26 @@ function advancePicker(fromPocket: number) {
   picker.value = next
 }
 
-async function place(c: BinderCandidateItem) {
+async function place(c: BinderPickerItem) {
   const pocket = picker.value
   if (pocket == null) return
   toast.add({ title: `${c.card_name} · ${pocketLabel(pocket)}`, color: 'success' })
+
+  if (c.source === 'catalog') {
+    const occupant = byPocket.value.get(pocket)
+    advancePicker(pocket)
+    const before = ov.value
+    try {
+      if (occupant) await bindersApi.removeFromPocket(props.binder.id, occupant.id)
+      const detail = await bindersApi.placeCatalogInPocket(props.binder.id, c.tcgdex_card_id, pocket, 'fr')
+      await refresh(detail)
+    } catch {
+      ov.value = before
+      toast.add({ title: 'Carte non rangée', description: 'Catalogue ou réseau indisponible.', color: 'error' })
+    }
+    return
+  }
+
   const key = `i:${c.collection_card_id}`
   if (pockets.value.has(key)) {
     advancePicker(pocket)

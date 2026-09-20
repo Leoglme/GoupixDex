@@ -1,5 +1,6 @@
 <template>
   <UCard
+    class="app-card-bleed-md overflow-hidden"
     :ui="{
       header: 'px-4 sm:px-6 pt-6 pb-3 border-b border-[var(--app-line)]',
       body: 'p-0 sm:p-0',

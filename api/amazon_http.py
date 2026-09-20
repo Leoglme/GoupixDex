@@ -226,6 +226,8 @@ def looks_like_blocked_or_bot(html: str) -> bool:
         return True
     if "sorry, we just need to make sure you're not a robot" in low:
         return True
+    if "sp-cc" in low and "cookies et choix" in low and 'data-component-type="s-search-result"' not in html:
+        return True
     return False
 
 

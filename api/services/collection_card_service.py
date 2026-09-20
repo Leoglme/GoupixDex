@@ -31,7 +31,10 @@ def list_collection_for_user(
 
     ``listed_state`` filter values: ``"any"`` (default), ``"with_article"``, ``"without_article"``.
     """
-    q = db.query(CollectionCard).filter(CollectionCard.user_id == user_id)
+    q = db.query(CollectionCard).filter(
+        CollectionCard.user_id == user_id,
+        CollectionCard.is_placeholder.is_(False),
+    )
     if search:
         like = f"%{search.strip()}%"
         q = q.filter(
@@ -83,6 +86,7 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "language": card.language,
         "image_url": card.image_url,
         "quantity": int(card.quantity),
+        "is_placeholder": bool(card.is_placeholder),
         "notes": card.notes,
         "article_id": card.article_id,
         "cardmarket_id_product": card.cardmarket_id_product,

@@ -15,7 +15,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Mes articles"
           description="Cartes de votre collection mises en vente — publiées ou en préparation."
@@ -58,7 +58,9 @@
         </div>
 
         <div
-          v-else-if="!loading && hasAnyArticles && displayedArticles.length === 0"
+          v-else-if="
+            !loading && hasAnyArticles && displayedArticles.length === 0 && withdrawnFromSaleArticles.length === 0
+          "
           class="app-card space-y-4 p-5 sm:p-6"
         >
           <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article en cours de vente</p>
@@ -74,34 +76,79 @@
           </p>
         </div>
 
-        <GoupixDexArticleList
-          v-else
-          variant="listed"
-          :articles="displayedArticles"
-          :loading="loading"
-          :selection-reset-key="articleListSelectionReset"
-          :show-ebay-column="ebayPublishAvailable"
-          :ebay-publish-available="ebayPublishAvailable"
-          :vinted-channel-enabled="vintedChannelEnabled"
-          :bulk-publishing="bulkPublishBusy"
-          @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
-          @delete="
-            (id: number) => {
-              deleteId = id
-              deleteOpen = true
-            }
-          "
-          @sold="(a) => openSold([a])"
-          @bulk-sold="openSold"
-          @publish-vinted="onPublishVinted"
-          @publish-ebay="onPublishEbay"
-          @bulk-delete="openBulkDelete"
-          @bulk-publish-vinted="onBulkPublishVinted"
-          @bulk-publish-ebay="onBulkPublishEbay"
-          @bulk-publish-both="onBulkPublishBoth"
-          @retry-cross-ebay="onRetryCrossEbay"
-          @retry-cross-vinted="onRetryCrossVinted"
-        />
+        <template v-else-if="!loading">
+          <GoupixDexArticleList
+            v-if="displayedArticles.length"
+            variant="listed"
+            :articles="displayedArticles"
+            :loading="loading"
+            :selection-reset-key="articleListSelectionReset"
+            :show-ebay-column="ebayPublishAvailable"
+            :ebay-publish-available="ebayPublishAvailable"
+            :vinted-channel-enabled="vintedChannelEnabled"
+            :leboncoin-publish-available="leboncoinPublishAvailable"
+            :bulk-publishing="bulkPublishBusy"
+            :bulk-delisting="bulkDelistBusy"
+            @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
+            @delete="
+              (id: number) => {
+                deleteId = id
+                deleteOpen = true
+              }
+            "
+            @sold="(a) => openSold([a])"
+            @bulk-sold="openSold"
+            @publish-vinted="onPublishVinted"
+            @publish-ebay="onPublishEbay"
+            @publish-leboncoin="onPublishLeboncoin"
+            @bulk-delete="openBulkDelete"
+            @bulk-publish="openBulkPublish"
+            @bulk-delist="openBulkDelist"
+            @bulk-relist="openBulkRelist"
+            @retry-cross-ebay="onRetryCrossEbay"
+            @retry-cross-vinted="onRetryCrossVinted"
+          />
+
+          <section v-if="withdrawnFromSaleArticles.length" class="mt-8 space-y-3">
+            <div class="space-y-1">
+              <h2 class="text-sm font-semibold text-[var(--app-ink)]">Retirés de la vente</h2>
+              <p class="text-xs leading-relaxed text-[var(--app-ink-soft)]">
+                Fiches masquées ici après un retrait sur toutes les marketplaces — utilisez
+                <span class="font-medium text-[var(--app-ink)]">Relister</span> pour les remettre en ligne.
+              </p>
+            </div>
+            <GoupixDexArticleList
+              variant="listed"
+              :articles="withdrawnFromSaleArticles"
+              :loading="loading"
+              :selection-reset-key="articleListSelectionReset"
+              :show-ebay-column="ebayPublishAvailable"
+              :ebay-publish-available="ebayPublishAvailable"
+              :vinted-channel-enabled="vintedChannelEnabled"
+              :leboncoin-publish-available="leboncoinPublishAvailable"
+              :bulk-publishing="bulkPublishBusy"
+              :bulk-delisting="bulkDelistBusy"
+              @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
+              @delete="
+                (id: number) => {
+                  deleteId = id
+                  deleteOpen = true
+                }
+              "
+              @sold="(a) => openSold([a])"
+              @bulk-sold="openSold"
+              @publish-vinted="onPublishVinted"
+              @publish-ebay="onPublishEbay"
+              @publish-leboncoin="onPublishLeboncoin"
+              @bulk-delete="openBulkDelete"
+              @bulk-publish="openBulkPublish"
+              @bulk-delist="openBulkDelist"
+              @bulk-relist="openBulkRelist"
+              @retry-cross-ebay="onRetryCrossEbay"
+              @retry-cross-vinted="onRetryCrossVinted"
+            />
+          </section>
+        </template>
       </div>
     </template>
   </UDashboardPanel>
@@ -112,6 +159,38 @@
     :ebay-enabled="ebayPublishAvailable"
     :loading="soldSubmitting"
     @confirm="confirmSold"
+  />
+
+  <GoupixDexArticleBulkPublishModal
+    v-model:open="bulkPublishOpen"
+    :article-count="bulkPublishIds.length"
+    :vinted-channel-enabled="vintedChannelEnabled"
+    :ebay-publish-available="ebayPublishAvailable"
+    :leboncoin-publish-available="leboncoinPublishAvailable"
+    :is-desktop-app="isDesktopApp"
+    :loading="bulkPublishBusy"
+    @confirm="confirmBulkPublish"
+  />
+
+  <GoupixDexArticleBulkRelistModal
+    v-model:open="bulkRelistOpen"
+    :article-count="bulkRelistIds.length"
+    :mode="bulkRelistChannelState.mode"
+    :any-vinted-listed="bulkRelistChannelState.anyVintedListed"
+    :loading="bulkRelistBusy"
+    @confirm="confirmBulkRelist"
+  />
+
+  <GoupixDexArticleBulkDelistModal
+    v-model:open="bulkDelistOpen"
+    :article-count="bulkDelistIds.length"
+    :vinted-channel-enabled="vintedChannelEnabled"
+    :is-desktop-app="isDesktopApp"
+    :any-vinted-listed="bulkDelistChannelState.anyVinted"
+    :any-ebay-listed="bulkDelistChannelState.anyEbay"
+    :any-leboncoin-listed="bulkDelistChannelState.anyLeboncoin"
+    :loading="bulkDelistBusy"
+    @confirm="confirmBulkDelist"
   />
 
   <UModal
@@ -149,11 +228,13 @@ const { isDesktopApp } = useDesktopRuntime()
 
 const {
   displayedArticles,
+  withdrawnFromSaleArticles,
   hasAnyArticles,
   loading,
   wardrobeSyncing,
   ebayPublishAvailable,
   vintedChannelEnabled,
+  leboncoinPublishAvailable,
   soldOpen,
   soldArticles,
   soldSubmitting,
@@ -162,17 +243,31 @@ const {
   deleteId,
   bulkDeleteOpen,
   bulkDeleteIds,
+  bulkPublishOpen,
+  bulkPublishIds,
   bulkPublishBusy,
+  bulkDelistOpen,
+  bulkDelistIds,
+  bulkDelistBusy,
+  bulkDelistChannelState,
+  bulkRelistOpen,
+  bulkRelistIds,
+  bulkRelistBusy,
+  bulkRelistChannelState,
   confirmSold,
   confirmDelete,
   openBulkDelete,
   confirmBulkDelete,
+  openBulkPublish,
+  openBulkDelist,
+  openBulkRelist,
+  confirmBulkPublish,
+  confirmBulkDelist,
+  confirmBulkRelist,
   onWardrobeImportFromVinted,
   onPublishEbay,
-  onBulkPublishVinted,
-  onBulkPublishEbay,
-  onBulkPublishBoth,
   onPublishVinted,
+  onPublishLeboncoin,
   onRetryCrossEbay,
   onRetryCrossVinted,
   openSold,

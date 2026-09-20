@@ -15,7 +15,7 @@
     </template>
 
     <template #body>
-      <div class="mx-auto w-full max-w-7xl space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page mx-auto w-full max-w-7xl">
         <GoupixDexPageHeader
           title="Télécharger l'application"
           description="Windows ou macOS, choisissez la ligne adaptée à votre processeur. La publication Vinted n'existe que dans l'app desktop — le site web gère le reste."

@@ -11,7 +11,7 @@ use tauri_plugin_shell::ShellExt;
 #[cfg(debug_assertions)]
 mod db_sync;
 
-/// Local Python workers (Vinted, Amazon, Cardmarket sidecars / dev scripts).
+/// Local Python workers (Vinted, Amazon, Cardmarket, Leboncoin sidecars / dev scripts).
 ///
 /// In `release`: embedded binaries via `bundle.externalBin` (PyInstaller).
 /// In `debug`  : `python` from PATH (or `GOUPIX_PYTHON`) running scripts in `api/`.
@@ -21,6 +21,7 @@ struct DesktopWorkersInner {
     vinted: Option<CommandChild>,
     amazon: Option<CommandChild>,
     cardmarket: Option<CommandChild>,
+    leboncoin: Option<CommandChild>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -174,6 +175,13 @@ fn cardmarket_local_port() -> u16 {
         .unwrap_or(18770)
 }
 
+fn leboncoin_local_port() -> u16 {
+    std::env::var("GOUPIX_LEBONCOIN_LOCAL_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(18769)
+}
+
 /// Tue tout processus qui **écoute** déjà sur ces ports (instance Python orpheline, ancien worker).
 /// Sans ça, `restart_local_workers` ne fait que tuer les `CommandChild` suivis — insuffisant si le
 /// port est tenu par un autre PID (ex. script lancé à la main).
@@ -241,7 +249,7 @@ fn verify_local_workers_accept_tcp(ports: &[u16]) -> Result<(), String> {
     ))
 }
 
-/// Stop local workers (Vinted + Amazon + Cardmarket) before a Tauri app update.
+/// Stop local workers (Vinted + Amazon + Cardmarket + Leboncoin) before a Tauri app update.
 #[tauri::command]
 fn stop_local_worker(state: tauri::State<'_, DesktopWorkers>) -> Result<(), String> {
     let mut inner = match state.0.lock() {
@@ -257,10 +265,13 @@ fn stop_local_worker(state: tauri::State<'_, DesktopWorkers>) -> Result<(), Stri
     if let Some(child) = inner.cardmarket.take() {
         kill_worker_tree(child);
     }
+    if let Some(child) = inner.leboncoin.take() {
+        kill_worker_tree(child);
+    }
     Ok(())
 }
 
-/// Arrête puis relance les workers locaux (Vinted + Amazon + Cardmarket).
+/// Arrête puis relance les workers locaux (Vinted + Amazon + Cardmarket + Leboncoin).
 #[tauri::command]
 fn restart_local_workers(
     app: tauri::AppHandle,
@@ -269,6 +280,7 @@ fn restart_local_workers(
     let vinted_port = vinted_local_port();
     let amazon_port = amazon_local_port();
     let cardmarket_port = cardmarket_local_port();
+    let leboncoin_port = leboncoin_local_port();
 
     {
         let mut inner = state
@@ -284,9 +296,12 @@ fn restart_local_workers(
         if let Some(child) = inner.cardmarket.take() {
             kill_worker_tree(child);
         }
+        if let Some(child) = inner.leboncoin.take() {
+            kill_worker_tree(child);
+        }
     }
 
-    kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port]);
+    kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port, leboncoin_port]);
     std::thread::sleep(Duration::from_millis(500));
 
     let mut errs: Vec<String> = Vec::new();
@@ -321,6 +336,16 @@ fn restart_local_workers(
         }
         Err(e) => errs.push(format!("Cardmarket: {e}")),
     }
+    match spawn_leboncoin_worker(&app) {
+        Ok(child) => {
+            app.state::<DesktopWorkers>()
+                .0
+                .lock()
+                .expect("desktop workers mutex")
+                .leboncoin = Some(child);
+        }
+        Err(e) => errs.push(format!("Leboncoin: {e}")),
+    }
 
     if !errs.is_empty() {
         let mut inner = state
@@ -336,12 +361,15 @@ fn restart_local_workers(
         if let Some(child) = inner.cardmarket.take() {
             kill_worker_tree(child);
         }
+        if let Some(child) = inner.leboncoin.take() {
+            kill_worker_tree(child);
+        }
         return Err(errs.join(" ; "));
     }
 
-    match verify_local_workers_accept_tcp(&[vinted_port, amazon_port, cardmarket_port]) {
+    match verify_local_workers_accept_tcp(&[vinted_port, amazon_port, cardmarket_port, leboncoin_port]) {
         Ok(()) => {
-            eprintln!("[GoupixDex] Workers locaux redémarrés (Vinted + Amazon + Cardmarket).");
+            eprintln!("[GoupixDex] Workers locaux redémarrés (Vinted + Amazon + Cardmarket + Leboncoin).");
             Ok(())
         }
         Err(msg) => {
@@ -356,6 +384,9 @@ fn restart_local_workers(
                 kill_worker_tree(child);
             }
             if let Some(child) = inner.cardmarket.take() {
+                kill_worker_tree(child);
+            }
+            if let Some(child) = inner.leboncoin.take() {
                 kill_worker_tree(child);
             }
             Err(msg)
@@ -663,6 +694,86 @@ fn spawn_cardmarket_worker(app: &tauri::AppHandle) -> Result<CommandChild, Strin
     Ok(child)
 }
 
+fn build_leboncoin_worker_command(
+    app: &tauri::AppHandle,
+) -> Result<tauri_plugin_shell::process::Command, String> {
+    let info = detect_browsers();
+    let chrome_path = info.chrome_path.clone().or(info.edge_path.clone());
+
+    #[cfg(debug_assertions)]
+    {
+        if let Some(api_dir) = dev_repo_api_dir_with("desktop_leboncoin_server.py") {
+            let bin = std::env::var("GOUPIX_PYTHON").unwrap_or_else(|_| "python".to_string());
+            eprintln!(
+                "[GoupixDex] Worker Leboncoin : exécutable `{} desktop_leboncoin_server.py` (cwd={})",
+                bin,
+                api_dir.display()
+            );
+            let mut cmd = app
+                .shell()
+                .command(bin)
+                .args(["desktop_leboncoin_server.py"])
+                .current_dir(api_dir);
+            if std::env::var("GOUPIX_LEBONCOIN_LOCAL_PORT").is_err() {
+                cmd = cmd.env("GOUPIX_LEBONCOIN_LOCAL_PORT", "18769");
+            }
+            if let Some(p) = chrome_path {
+                cmd = cmd.env("VINTED_CHROME_EXECUTABLE", p);
+            }
+            return Ok(cmd);
+        }
+        eprintln!(
+            "[GoupixDex] Worker Leboncoin : aucun dossier `api/` trouvé pour ce script — utilisation du sidecar.\n\
+             Astuces : définir `GOUPIX_API_DIR` vers votre dossier `api`, ou `npm run leboncoin-worker:sync-dist` après PyInstaller."
+        );
+    }
+
+    let mut sidecar = app
+        .shell()
+        .sidecar("goupix-leboncoin-worker")
+        .map_err(|e| format!("sidecar `goupix-leboncoin-worker` introuvable: {e}"))?;
+    if let Some(p) = chrome_path {
+        sidecar = sidecar.env("VINTED_CHROME_EXECUTABLE", p);
+    }
+    Ok(sidecar)
+}
+
+fn spawn_leboncoin_worker(app: &tauri::AppHandle) -> Result<CommandChild, String> {
+    let cmd = build_leboncoin_worker_command(app)?;
+    let (mut rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("Impossible de lancer le worker Leboncoin local: {e}"))?;
+
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    eprintln!(
+                        "[goupix-leboncoin-worker:out] {}",
+                        String::from_utf8_lossy(&line).trim_end()
+                    );
+                }
+                CommandEvent::Stderr(line) => {
+                    eprintln!(
+                        "[goupix-leboncoin-worker:err] {}",
+                        String::from_utf8_lossy(&line).trim_end()
+                    );
+                }
+                CommandEvent::Terminated(payload) => {
+                    eprintln!(
+                        "[goupix-leboncoin-worker] terminé (code={:?}, signal={:?})",
+                        payload.code, payload.signal
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(child)
+}
+
 #[tauri::command]
 fn sync_dev_database_from_prod() -> Result<String, String> {
     #[cfg(debug_assertions)]
@@ -685,6 +796,7 @@ pub fn run() {
             vinted: None,
             amazon: None,
             cardmarket: None,
+            leboncoin: None,
         })))
         .invoke_handler(tauri::generate_handler![
             check_browser_availability,
@@ -698,7 +810,8 @@ pub fn run() {
             let vinted_port = vinted_local_port();
             let amazon_port = amazon_local_port();
             let cardmarket_port = cardmarket_local_port();
-            kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port]);
+            let leboncoin_port = leboncoin_local_port();
+            kill_processes_listening_on_ports(&[vinted_port, amazon_port, cardmarket_port, leboncoin_port]);
             std::thread::sleep(Duration::from_millis(450));
 
             match spawn_vinted_worker(&handle) {
@@ -756,6 +869,23 @@ pub fn run() {
                 }
             }
 
+            match spawn_leboncoin_worker(&handle) {
+                Ok(child) => {
+                    app.state::<DesktopWorkers>()
+                        .0
+                        .lock()
+                        .expect("desktop workers mutex")
+                        .leboncoin = Some(child);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[GoupixDex] Worker Leboncoin local indisponible : {e}\n\
+                         → En dev : `python desktop_leboncoin_server.py` depuis « api ».\n\
+                         → En prod : sidecar `goupix-leboncoin-worker` (PyInstaller, à ajouter à la CI)."
+                    );
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -770,6 +900,9 @@ pub fn run() {
                         kill_worker_tree(child);
                     }
                     if let Some(child) = guard.cardmarket.take() {
+                        kill_worker_tree(child);
+                    }
+                    if let Some(child) = guard.leboncoin.take() {
                         kill_worker_tree(child);
                     }
                 }

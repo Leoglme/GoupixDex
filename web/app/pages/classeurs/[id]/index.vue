@@ -16,26 +16,6 @@
             Classeur
           </span>
         </template>
-        <template #right>
-          <UButton
-            to="/classeurs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-chevron-left"
-            class="hidden sm:inline-flex"
-          >
-            Classeurs
-          </UButton>
-          <UButton
-            to="/classeurs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-chevron-left"
-            square
-            class="sm:hidden"
-            aria-label="Retour aux classeurs"
-          />
-        </template>
       </UDashboardNavbar>
     </template>
 
@@ -45,49 +25,68 @@
       </div>
 
       <div v-else-if="binder" class="flex min-h-0 min-w-0 flex-col overflow-x-hidden">
-        <div
-          class="border-default flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-4 sm:py-4"
-        >
-          <div class="min-w-0">
-            <h1 class="font-display truncate text-lg font-semibold tracking-tight sm:text-xl">{{ binder.name }}</h1>
-            <p class="text-muted mt-0.5 text-xs tabular-nums sm:text-sm">{{ binderMetaLine }}</p>
+        <div class="app-dashboard-page w-full space-y-4 sm:space-y-5">
+          <div class="flex items-center justify-between gap-3">
+            <NuxtLink
+              to="/classeurs"
+              class="inline-flex min-w-0 items-center gap-1 text-sm font-medium text-(--app-accent) underline-offset-4 transition hover:underline"
+            >
+              <UIcon name="i-lucide-arrow-left" class="size-4 shrink-0" aria-hidden />
+              Retour
+            </NuxtLink>
+            <UButton
+              size="sm"
+              color="error"
+              variant="soft"
+              icon="i-lucide-trash-2"
+              class="shrink-0"
+              @click="confirmDelete"
+            >
+              Supprimer
+            </UButton>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-            <UTabs
-              v-model="viewMode"
-              :items="viewTabItems"
-              size="sm"
-              color="primary"
-              variant="pill"
-              :content="false"
-              aria-label="Mode d'affichage"
-              class="shrink-0"
-              :ui="{ list: 'w-auto', trigger: 'px-3.5 py-1.5' }"
-            />
-
-            <UButton
-              v-if="viewMode === 'pages'"
-              size="sm"
-              color="neutral"
-              variant="ghost"
-              :icon="cleanView ? 'i-lucide-eye' : 'i-lucide-eye-off'"
-              square
-              :aria-label="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
-              :title="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
-              @click="cleanView = !cleanView"
-            />
-
-            <UDropdownMenu :items="actionMenuItems">
+          <div class="min-w-0">
+            <div class="flex min-w-0 items-center gap-0.5">
+              <h1 class="app-page-title min-w-0 truncate">{{ binder.name }}</h1>
               <UButton
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-pencil"
+                size="xs"
+                square
+                class="shrink-0"
+                aria-label="Renommer le classeur"
+                @click="openRename"
+              />
+            </div>
+            <p class="text-muted mt-1.5 text-sm tabular-nums">{{ binderMetaLine }}</p>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <GoupixDexCollectionViewTabs v-model="viewMode" :items="viewTabItems" class="shrink-0" />
+            <div class="flex shrink-0 items-center gap-2">
+              <UButton
+                :to="`/classeurs/${id}/editeur`"
                 size="sm"
                 color="neutral"
                 variant="outline"
-                icon="i-lucide-ellipsis"
+                icon="i-lucide-palette"
+              >
+                Personnaliser
+              </UButton>
+              <UButton
+                v-if="viewMode === 'pages'"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                :icon="cleanView ? 'i-lucide-eye' : 'i-lucide-eye-off'"
                 square
-                aria-label="Actions"
+                :aria-label="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
+                :title="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
+                @click="cleanView = !cleanView"
               />
-            </UDropdownMenu>
+            </div>
           </div>
         </div>
 
@@ -100,7 +99,7 @@
           />
         </div>
 
-        <div v-else class="space-y-4 px-3 py-4 sm:px-4">
+        <div v-else class="app-dashboard-page space-y-4">
           <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
             Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
           </p>
@@ -146,7 +145,6 @@
 
 <script setup lang="ts">
 import type { BinderDetail } from '~/types/binders'
-import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -174,8 +172,8 @@ const viewMode = computed({
 const cleanView = ref(false)
 
 const viewTabItems = [
-  { label: 'Pages', value: 'pages' },
-  { label: 'Grille', value: 'grille' },
+  { label: 'Pages', value: 'pages', icon: 'i-lucide-book-open' },
+  { label: 'Grille', value: 'grille', icon: 'i-lucide-grid-2x2' },
 ]
 
 const gridItems = computed(() => [...(binder.value?.items ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)))
@@ -193,27 +191,12 @@ const renameOpen = ref(false)
 const renameName = ref('')
 const renaming = ref(false)
 
-const actionMenuItems = computed((): DropdownMenuItem[][] => [
-  [
-    {
-      label: 'Renommer',
-      icon: 'i-lucide-pencil',
-      onSelect: () => {
-        renameOpen.value = true
-      },
-    },
-  ],
-  [
-    {
-      label: 'Supprimer le classeur',
-      icon: 'i-lucide-trash-2',
-      color: 'error' as const,
-      onSelect: () => {
-        void confirmDelete()
-      },
-    },
-  ],
-])
+function openRename(): void {
+  if (binder.value) {
+    renameName.value = binder.value.name
+  }
+  renameOpen.value = true
+}
 
 async function load() {
   loading.value = true

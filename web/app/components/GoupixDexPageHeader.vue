@@ -8,7 +8,10 @@
       <h1 class="app-page-title" :class="props.eyebrow ? 'mt-2' : ''">{{ props.title }}</h1>
       <p v-if="props.description" class="mt-1.5 text-sm text-(--app-ink-soft)">{{ props.description }}</p>
     </div>
-    <div v-if="$slots.actions" class="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end">
+    <div
+      v-if="$slots.actions"
+      class="grid w-full grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 lg:w-auto lg:justify-end [&>*]:min-w-0"
+    >
       <slot name="actions" />
     </div>
   </div>

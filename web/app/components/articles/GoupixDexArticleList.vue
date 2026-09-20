@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div ref="listRoot" class="space-y-4">
     <UAlert
       v-if="!isDesktopApp"
       color="info"
@@ -31,8 +31,8 @@
       </p>
     </div>
 
-    <div v-else class="app-card overflow-hidden">
-      <div class="border-b border-[var(--app-line)] p-4">
+    <div v-else class="app-card app-card-bleed-md overflow-hidden">
+      <div class="border-b border-[var(--app-line)] p-3 sm:p-4">
         <div class="relative w-full md:max-w-md">
           <UIcon
             name="i-lucide-search"
@@ -45,79 +45,6 @@
             aria-label="Rechercher un article"
             class="app-input pl-9"
           />
-        </div>
-      </div>
-
-      <div
-        v-if="selectedCount > 0"
-        class="flex flex-col gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface-2)]/60 px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
-      >
-        <p class="text-sm text-[var(--app-ink)]">
-          {{ selectedCount }} article{{ selectedCount > 1 ? 's' : '' }} sélectionné{{ selectedCount > 1 ? 's' : '' }}
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <UButton size="sm" color="neutral" variant="outline" @click="clearSelection"> Tout désélectionner </UButton>
-          <UButton
-            v-if="showBulkBoth"
-            size="sm"
-            color="primary"
-            icon="i-lucide-upload-cloud"
-            class="shadow-sm"
-            :disabled="!!bulkBothDisabledReason || bulkPublishing"
-            :title="bulkBothDisabledReason || undefined"
-            :loading="bulkPublishing"
-            @click="emit('bulk-publish-both', [...selectedIds])"
-          >
-            Mettre en ligne
-          </UButton>
-          <UButton
-            v-if="showBulkVinted"
-            size="sm"
-            color="neutral"
-            variant="solid"
-            icon="i-lucide-store"
-            class="border-0 !bg-[rgb(0,131,143)] !text-white hover:!bg-[rgb(0,118,129)] disabled:opacity-50"
-            :disabled="!!bulkVintedDisabledReason || bulkPublishing"
-            :title="bulkVintedDisabledReason || undefined"
-            :loading="bulkPublishing"
-            @click="emit('bulk-publish-vinted', [...selectedIds])"
-          >
-            Mettre en ligne sur Vinted
-          </UButton>
-          <UButton
-            v-if="showBulkEbay"
-            size="sm"
-            color="neutral"
-            variant="solid"
-            icon="i-lucide-shopping-bag"
-            class="border-0 !bg-[rgb(134,184,23)] !text-neutral-950 hover:!bg-[rgb(124,174,20)] disabled:opacity-50"
-            :disabled="!!bulkEbayDisabledReason || bulkPublishing"
-            :title="bulkEbayDisabledReason || undefined"
-            :loading="bulkPublishing"
-            @click="emit('bulk-publish-ebay', [...selectedIds])"
-          >
-            Mettre en ligne sur eBay
-          </UButton>
-          <UButton
-            size="sm"
-            color="success"
-            variant="subtle"
-            icon="i-lucide-circle-check"
-            :disabled="!!bulkSoldDisabledReason || bulkPublishing"
-            :title="bulkSoldDisabledReason || undefined"
-            @click="emitBulkSold"
-          >
-            Marquer comme vendu
-          </UButton>
-          <UButton
-            size="sm"
-            color="error"
-            icon="i-lucide-trash-2"
-            :disabled="bulkPublishing"
-            @click="emit('bulk-delete', [...selectedIds])"
-          >
-            Supprimer la sélection
-          </UButton>
         </div>
       </div>
 
@@ -137,6 +64,7 @@
           <GoupixDexBaseTableSortTh
             label="Nom"
             title="Nom de l'article"
+            th-class="goupix-card-table__name-col"
             :active="sortColumn === 'name'"
             :direction="sortDirection"
             @sort="toggleSort('name')"
@@ -214,7 +142,7 @@
           :key="row.id"
           :class="isSelected(row.id) ? 'bg-[var(--app-accent-soft)] hover:bg-[var(--app-accent-soft)]' : ''"
         >
-          <GoupixDexBaseTableTd class="w-12 align-middle">
+          <GoupixDexBaseTableTd class="goupix-card-table__select w-12 align-middle">
             <input
               type="checkbox"
               class="h-4 w-4 cursor-pointer accent-(--app-accent)"
@@ -254,20 +182,53 @@
               >
                 {{ row.pokemon_name || row.title || '—' }}
               </a>
-              <p class="truncate text-xs text-[var(--app-ink-soft)]">{{ row.title }}</p>
+              <p
+                v-if="articleTableSecondaryLine(row)"
+                class="truncate text-xs text-[var(--app-ink-soft)]"
+                :title="row.title"
+              >
+                {{ articleTableSecondaryLine(row) }}
+              </p>
+              <p class="mt-1 text-xs text-[var(--app-ink-soft)] tabular-nums">
+                {{ eur.format(row.purchase_price) }}
+                <span class="text-[var(--app-faint)]">→</span>
+                {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+              </p>
+              <div class="mt-1.5 flex flex-wrap gap-1.5">
+                <span v-if="row.published_on_vinted ?? false" class="app-badge app-badge--success py-0 text-[10px]">
+                  Vinted
+                </span>
+                <span v-else-if="vintedChannelEnabled" class="app-badge py-0 text-[10px] text-[var(--app-faint)]">
+                  Vinted
+                </span>
+                <span
+                  v-if="showEbayColumn && (row.published_on_ebay ?? false)"
+                  class="app-badge app-badge--success py-0 text-[10px]"
+                >
+                  eBay
+                </span>
+                <span v-else-if="showEbayColumn" class="app-badge py-0 text-[10px]"> eBay </span>
+              </div>
             </div>
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd class="hidden min-w-[12rem] align-middle md:table-cell">
-            <div class="flex flex-col gap-0.5">
+          <GoupixDexBaseTableTd class="goupix-card-table__name-col hidden min-w-0 align-middle md:table-cell">
+            <div class="flex min-w-0 flex-col gap-0.5">
               <a
                 :href="articleDetailHref(row.id)"
                 class="truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
+                :title="row.pokemon_name || row.title || undefined"
                 @click="onOpenArticle(row.id, $event)"
               >
                 {{ row.pokemon_name || row.title || '—' }}
               </a>
-              <span class="truncate text-xs text-[var(--app-ink-soft)]">{{ row.title }}</span>
+              <span
+                v-if="articleTableSecondaryLine(row)"
+                class="truncate text-xs text-[var(--app-ink-soft)]"
+                :title="row.title"
+              >
+                {{ articleTableSecondaryLine(row) }}
+              </span>
             </div>
           </GoupixDexBaseTableTd>
 
@@ -288,19 +249,27 @@
             </span>
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="Set" class="text-[var(--app-ink-soft)]">
+          <GoupixDexBaseTableTd label="Set" class="hidden text-[var(--app-ink-soft)] md:table-cell">
             {{ row.set_code || '—' }}
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="N°" class="tabular-nums">
+          <GoupixDexBaseTableTd label="N°" class="hidden tabular-nums md:table-cell">
             {{ row.card_number || '—' }}
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="Achat" align="right" class="text-[var(--app-ink)] tabular-nums">
+          <GoupixDexBaseTableTd
+            label="Achat"
+            align="right"
+            class="hidden text-[var(--app-ink)] tabular-nums md:table-cell"
+          >
             {{ eur.format(row.purchase_price) }}
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="Vente" align="right" class="text-[var(--app-ink-soft)] tabular-nums">
+          <GoupixDexBaseTableTd
+            label="Vente"
+            align="right"
+            class="hidden text-[var(--app-ink-soft)] tabular-nums md:table-cell"
+          >
             {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
           </GoupixDexBaseTableTd>
 
@@ -314,7 +283,7 @@
             <span v-else class="text-[var(--app-faint)]">—</span>
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="Vinted" align="center">
+          <GoupixDexBaseTableTd label="Vinted" align="center" class="hidden md:table-cell">
             <span v-if="row.published_on_vinted ?? false" class="app-badge app-badge--success">
               <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
               Oui
@@ -322,7 +291,7 @@
             <span v-else class="text-[var(--app-faint)]">—</span>
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd v-if="showEbayColumn" label="eBay" align="center">
+          <GoupixDexBaseTableTd v-if="showEbayColumn" label="eBay" align="center" class="hidden md:table-cell">
             <span v-if="row.published_on_ebay ?? false" class="app-badge app-badge--success">
               <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
               Oui
@@ -330,7 +299,10 @@
             <span v-else class="app-badge">Non</span>
           </GoupixDexBaseTableTd>
 
-          <GoupixDexBaseTableTd label="Créé" class="text-xs whitespace-nowrap text-[var(--app-ink-soft)]">
+          <GoupixDexBaseTableTd
+            label="Créé"
+            class="hidden text-xs whitespace-nowrap text-[var(--app-ink-soft)] md:table-cell"
+          >
             {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}
           </GoupixDexBaseTableTd>
 
@@ -352,9 +324,9 @@
       </GoupixDexBaseTable>
 
       <div
-        class="flex flex-col gap-3 border-t border-[var(--app-line)] bg-[var(--app-surface-2)]/50 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+        class="flex flex-col gap-3 border-t border-[var(--app-line)] bg-[var(--app-surface-2)]/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6"
       >
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
           <p class="text-xs text-[var(--app-ink-soft)] tabular-nums">
             {{ paginationFrom }}–{{ paginationTo }} sur {{ filtered.length }} article{{
               filtered.length > 1 ? 's' : ''
@@ -372,16 +344,17 @@
             />
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center justify-between gap-2 sm:justify-end">
           <UButton
             color="neutral"
             variant="subtle"
             size="sm"
             icon="i-lucide-arrow-left"
             :disabled="page <= 1"
+            class="max-sm:px-2.5"
             @click="page = Math.max(1, page - 1)"
           >
-            Précédent
+            <span class="max-sm:sr-only">Précédent</span>
           </UButton>
           <span class="px-1 text-xs text-[var(--app-ink-soft)] tabular-nums">Page {{ page }} / {{ totalPages }}</span>
           <UButton
@@ -390,24 +363,213 @@
             size="sm"
             icon="i-lucide-arrow-right"
             :disabled="page >= totalPages"
+            class="max-sm:px-2.5"
             @click="page = Math.min(totalPages, page + 1)"
           >
-            Suivant
+            <span class="max-sm:sr-only">Suivant</span>
           </UButton>
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <Transition name="bulkbar">
+        <div
+          v-if="selectedCount > 0"
+          class="pointer-events-none fixed z-40 flex justify-center px-0 sm:px-4"
+          :style="bulkBarDockStyle"
+        >
+          <div
+            class="app-bulk-bar-sheet pointer-events-auto w-full rounded-t-2xl rounded-b-none border-x-0 border-b-0 px-4 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:hidden"
+          >
+            <div class="mx-auto mb-3 h-1 w-9 rounded-full bg-[var(--app-line)]" aria-hidden="true" />
+            <div class="mb-3 flex items-center justify-between">
+              <span class="text-xs font-medium text-[var(--app-ink)]">
+                {{ selectedCount }} article{{ selectedCount > 1 ? 's' : '' }} sélectionné{{
+                  selectedCount > 1 ? 's' : ''
+                }}
+              </span>
+              <button
+                type="button"
+                class="flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--app-ink-soft)] transition-colors hover:bg-[var(--app-surface-2)] hover:text-[var(--app-ink)]"
+                aria-label="Désélectionner tout"
+                @click="clearSelection"
+              >
+                <UIcon name="i-lucide-x" class="size-4" />
+              </button>
+            </div>
+            <div class="grid grid-cols-1 gap-2">
+              <button
+                v-if="showBulkPublish"
+                type="button"
+                class="app-btn-primary h-11 w-full"
+                :disabled="!!bulkPublishDisabledReason || bulkMarketBusy"
+                :title="bulkPublishDisabledReason || undefined"
+                @click="emitBulkPublish"
+              >
+                <UIcon
+                  :name="bulkPublishing ? 'i-lucide-loader-circle' : 'i-lucide-upload-cloud'"
+                  :class="['size-4', bulkPublishing && 'animate-spin']"
+                  aria-hidden="true"
+                />
+                Mettre en ligne
+              </button>
+              <button
+                v-if="showBulkRelist"
+                type="button"
+                class="app-btn-accent-soft h-11 w-full"
+                :disabled="bulkMarketBusy"
+                @click="emitBulkRelist"
+              >
+                <UIcon name="i-lucide-refresh-cw" class="size-4" aria-hidden="true" />
+                Remettre en vente
+              </button>
+              <button
+                v-if="showBulkDelist"
+                type="button"
+                class="app-btn-secondary h-11 w-full"
+                :disabled="bulkMarketBusy"
+                @click="emitBulkDelist"
+              >
+                <UIcon
+                  :name="bulkDelisting ? 'i-lucide-loader-circle' : 'i-lucide-arrow-down-from-line'"
+                  :class="['size-4', bulkDelisting && 'animate-spin']"
+                  aria-hidden="true"
+                />
+                Retirer de la vente
+              </button>
+              <button
+                type="button"
+                class="app-btn-success-soft h-11 w-full"
+                :disabled="!!bulkSoldDisabledReason || bulkMarketBusy"
+                :title="bulkSoldDisabledReason || undefined"
+                @click="emitBulkSold"
+              >
+                <UIcon name="i-lucide-circle-check" class="size-4" aria-hidden="true" />
+                Marquer comme vendu
+              </button>
+              <button
+                type="button"
+                class="app-btn-danger h-11 w-full"
+                :disabled="bulkMarketBusy"
+                @click="emit('bulk-delete', [...selectedIds])"
+              >
+                <UIcon name="i-lucide-trash-2" class="size-4" aria-hidden="true" />
+                Supprimer la sélection
+              </button>
+            </div>
+          </div>
+
+          <div
+            class="app-bulk-bar pointer-events-auto hidden max-w-full overflow-x-auto rounded-full [-ms-overflow-style:none] [scrollbar-width:none] sm:flex [&::-webkit-scrollbar]:hidden"
+          >
+            <div
+              class="mx-auto flex w-max max-w-full flex-nowrap items-center gap-1.5 px-3 py-2 sm:gap-2 sm:px-4 sm:py-2.5"
+            >
+              <span class="shrink-0 px-1.5 text-xs font-medium whitespace-nowrap text-[var(--app-ink)]">
+                {{ selectedCount }} article{{ selectedCount > 1 ? 's' : '' }} sélectionné{{
+                  selectedCount > 1 ? 's' : ''
+                }}
+              </span>
+              <span class="hidden h-5 w-px shrink-0 bg-[var(--app-line)] sm:block" aria-hidden="true" />
+              <button
+                v-if="showBulkPublish"
+                type="button"
+                class="app-btn-primary bulk-bar-btn"
+                :disabled="!!bulkPublishDisabledReason || bulkMarketBusy"
+                :title="bulkPublishDisabledReason || undefined"
+                @click="emitBulkPublish"
+              >
+                <UIcon
+                  :name="bulkPublishing ? 'i-lucide-loader-circle' : 'i-lucide-upload-cloud'"
+                  :class="['size-3.5', bulkPublishing && 'animate-spin']"
+                  aria-hidden="true"
+                />
+                Publier
+              </button>
+              <button
+                v-if="showBulkRelist"
+                type="button"
+                class="app-btn-accent-soft bulk-bar-btn"
+                :disabled="bulkMarketBusy"
+                title="Retirer les annonces actives si besoin, puis republier depuis la fiche préremplie (Vinted, eBay…)"
+                @click="emitBulkRelist"
+              >
+                <UIcon name="i-lucide-refresh-cw" class="size-3.5" aria-hidden="true" />
+                Relister
+              </button>
+              <button
+                v-if="showBulkDelist"
+                type="button"
+                class="app-btn-secondary bulk-bar-btn"
+                :disabled="bulkMarketBusy"
+                title="Retirer les annonces Vinted, eBay ou Leboncoin"
+                @click="emitBulkDelist"
+              >
+                <UIcon
+                  :name="bulkDelisting ? 'i-lucide-loader-circle' : 'i-lucide-arrow-down-from-line'"
+                  :class="['size-3.5', bulkDelisting && 'animate-spin']"
+                  aria-hidden="true"
+                />
+                Retirer
+              </button>
+              <button
+                type="button"
+                class="app-btn-success-soft bulk-bar-btn"
+                :disabled="!!bulkSoldDisabledReason || bulkMarketBusy"
+                :title="bulkSoldDisabledReason || 'Marquer comme vendu'"
+                @click="emitBulkSold"
+              >
+                <UIcon name="i-lucide-circle-check" class="size-3.5" aria-hidden="true" />
+                Vendu
+              </button>
+              <button
+                type="button"
+                class="app-btn-danger bulk-bar-btn"
+                :disabled="bulkMarketBusy"
+                title="Supprimer la sélection"
+                @click="emit('bulk-delete', [...selectedIds])"
+              >
+                <UIcon name="i-lucide-trash-2" class="size-3.5" aria-hidden="true" />
+                Supprimer
+              </button>
+              <button
+                type="button"
+                class="ml-0.5 shrink-0 cursor-pointer rounded-full p-2 text-[var(--app-ink-soft)] transition-colors hover:bg-[var(--app-surface-2)] hover:text-[var(--app-ink)]"
+                aria-label="Désélectionner tout"
+                @click="clearSelection"
+              >
+                <UIcon name="i-lucide-x" class="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useMediaQuery } from '@vueuse/core'
 import { reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { ArticleListSortColumn, ArticleListSortDirection } from '~/composables/useUiPrefsLocalStorage'
 import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
+import { articleTableSecondaryLine } from '~/utils/articleTableSecondaryLine'
+import { articleEligibleForBulkRelist } from '~/utils/articleSaleState'
 
 export type GoupixDexArticleListVariant = 'listed' | 'full'
+
+const listRoot: Ref<HTMLElement | null> = ref(null)
+const { left: mainColumnLeft, width: mainColumnWidth } = useDashboardMainColumnBounds(listRoot)
+const isSmUp = useMediaQuery('(min-width: 640px)')
+
+const bulkBarDockStyle: ComputedRef<Record<string, string>> = computed(() => ({
+  left: `${mainColumnLeft.value}px`,
+  width: `${mainColumnWidth.value}px`,
+  bottom: isSmUp.value ? 'calc(1.5rem + env(safe-area-inset-bottom))' : '0px',
+}))
 
 const props = withDefaults(
   defineProps<{
@@ -423,8 +585,11 @@ const props = withDefaults(
     ebayPublishAvailable?: boolean
     /** Vinted enabled in Settings → marketplaces (otherwise the API rejects publish). */
     vintedChannelEnabled?: boolean
+    /** Leboncoin enabled + code postal (desktop). */
+    leboncoinPublishAvailable?: boolean
     /** Disable bulk publish buttons while an API call is in flight. */
     bulkPublishing?: boolean
+    bulkDelisting?: boolean
   }>(),
   {
     variant: 'listed',
@@ -441,10 +606,11 @@ const emit = defineEmits<{
   sold: [article: Article]
   'publish-vinted': [article: Article]
   'publish-ebay': [article: Article]
+  'publish-leboncoin': [article: Article]
   'bulk-delete': [ids: number[]]
-  'bulk-publish-vinted': [ids: number[]]
-  'bulk-publish-ebay': [ids: number[]]
-  'bulk-publish-both': [ids: number[]]
+  'bulk-publish': [ids: number[]]
+  'bulk-delist': [ids: number[]]
+  'bulk-relist': [ids: number[]]
   'bulk-sold': [articles: Article[]]
   'retry-cross-ebay': [id: number]
   'retry-cross-vinted': [id: number]
@@ -508,6 +674,16 @@ function buildRowMenu(row: Article) {
             },
           ]
         : []),
+      ...(props.leboncoinPublishAvailable
+        ? [
+            {
+              label: 'Mettre en ligne sur Leboncoin',
+              icon: 'i-lucide-megaphone',
+              disabled: !isDesktopApp.value || row.is_sold || !row.images?.length,
+              onSelect: () => emit('publish-leboncoin', row),
+            },
+          ]
+        : []),
       {
         label: 'Marquer vendu',
         icon: 'i-lucide-circle-check',
@@ -525,30 +701,12 @@ function buildRowMenu(row: Article) {
 }
 
 /**
- * Whether at least one attached image uses HTTPS (required for eBay bulk publish).
- * @param row - Article row
- * @returns {boolean} True when an HTTPS image exists
- */
-function hasHttpsImage(row: Article): boolean {
-  return row.images?.some((img) => (img.image_url || '').startsWith('https://')) ?? false
-}
-
-/**
  * Whether bulk Vinted publish applies to this row.
  * @param row - Article row
  * @returns {boolean} True when eligible
  */
 function canBulkVinted(row: Article): boolean {
   return !row.is_sold && (row.images?.length ?? 0) > 0
-}
-
-/**
- * Whether bulk eBay publish applies to this row.
- * @param row - Article row
- * @returns {boolean} True when eligible
- */
-function canBulkEbay(row: Article): boolean {
-  return !row.is_sold && !(row.published_on_ebay ?? false) && hasHttpsImage(row)
 }
 
 /**
@@ -1047,12 +1205,9 @@ const selectedRows: ComputedRef<Article[]> = computed(() =>
   props.articles.filter((a) => selectedIds.value.includes(a.id)),
 )
 
-const bulkVintedDisabledReason: ComputedRef<string> = computed(() => {
-  if (!props.vintedChannelEnabled) {
-    return 'Activez Vinted dans les paramètres marché.'
-  }
-  if (!isDesktopApp.value) {
-    return 'La publication Vinted groupée nécessite l’application desktop.'
+const bulkPublishDisabledReason: ComputedRef<string> = computed(() => {
+  if (!props.vintedChannelEnabled && !props.ebayPublishAvailable && !props.leboncoinPublishAvailable) {
+    return 'Activez au moins une marketplace dans les paramètres.'
   }
   if (selectedRows.value.some((a) => !canBulkVinted(a))) {
     return 'Tous les articles sélectionnés doivent être non vendus et avoir au moins une photo.'
@@ -1060,28 +1215,26 @@ const bulkVintedDisabledReason: ComputedRef<string> = computed(() => {
   return ''
 })
 
-const bulkEbayDisabledReason: ComputedRef<string> = computed(() => {
-  if (!props.ebayPublishAvailable) {
-    return 'eBay n’est pas prêt (connexion OAuth et configuration des annonces).'
-  }
-  if (selectedRows.value.some((a) => !canBulkEbay(a))) {
-    return 'Articles non vendus, pas déjà sur eBay, avec au moins une image en HTTPS.'
-  }
-  return ''
-})
+const showBulkPublish: ComputedRef<boolean> = computed(
+  () =>
+    props.vintedChannelEnabled === true ||
+    props.ebayPublishAvailable === true ||
+    props.leboncoinPublishAvailable === true,
+)
 
-const bulkBothDisabledReason: ComputedRef<string> = computed(() => {
-  if (!props.vintedChannelEnabled || !props.ebayPublishAvailable) {
-    return 'Activez Vinted et eBay dans les paramètres, et terminez la configuration eBay.'
-  }
-  if (!isDesktopApp.value) {
-    return 'Le duo eBay + Vinted nécessite l’application desktop pour Vinted.'
-  }
-  if (selectedRows.value.some((a) => !canBulkVinted(a) || !canBulkEbay(a))) {
-    return 'Chaque article doit être éligible à la fois pour Vinted (photos) et pour eBay (HTTPS, pas déjà publié).'
-  }
-  return ''
-})
+const showBulkRelist: ComputedRef<boolean> = computed(() =>
+  selectedRows.value.some((a) => articleEligibleForBulkRelist(a)),
+)
+
+const showBulkDelist: ComputedRef<boolean> = computed(() =>
+  selectedRows.value.some(
+    (r) => (r.published_on_vinted ?? false) || (r.published_on_ebay ?? false) || (r.published_on_leboncoin ?? false),
+  ),
+)
+
+const bulkMarketBusy: ComputedRef<boolean> = computed(
+  () => (props.bulkPublishing ?? false) || (props.bulkDelisting ?? false),
+)
 
 const bulkSoldDisabledReason: ComputedRef<string> = computed(() => {
   if (!selectedRows.value.length) {
@@ -1092,13 +1245,6 @@ const bulkSoldDisabledReason: ComputedRef<string> = computed(() => {
   }
   return ''
 })
-
-const showBulkVinted: ComputedRef<boolean> = computed(() => props.vintedChannelEnabled === true)
-const showBulkEbay: ComputedRef<boolean> = computed(() => props.ebayPublishAvailable === true)
-/** Shown when both channels are ready (disabled on web: see bulkBothDisabledReason). */
-const showBulkBoth: ComputedRef<boolean> = computed(
-  () => props.vintedChannelEnabled === true && props.ebayPublishAvailable === true,
-)
 
 const selectedCount: ComputedRef<number> = computed(() => selectedIds.value.length)
 
@@ -1201,4 +1347,58 @@ function emitBulkSold() {
   }
   emit('bulk-sold', rows)
 }
+
+/**
+ * Ouvre la modale de publication groupée (canaux choisis dans la modale).
+ */
+function emitBulkPublish() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) {
+    return
+  }
+  emit('bulk-publish', ids)
+}
+
+function emitBulkDelist() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) {
+    return
+  }
+  emit('bulk-delist', ids)
+}
+
+function emitBulkRelist() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) {
+    return
+  }
+  emit('bulk-relist', ids)
+}
 </script>
+
+<style scoped>
+.bulkbar-enter-active,
+.bulkbar-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.bulkbar-enter-from,
+.bulkbar-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bulkbar-enter-active,
+  .bulkbar-leave-active {
+    transition: none;
+  }
+
+  .bulkbar-enter-from,
+  .bulkbar-leave-to {
+    transform: none;
+  }
+}
+</style>

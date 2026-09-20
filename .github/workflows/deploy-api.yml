@@ -90,6 +90,8 @@ jobs:
           EBAY_USE_SANDBOX: ${{ secrets.EBAY_USE_SANDBOX }}
           EBAY_FR_FULFILLMENT_CARRIER_CODE: ${{ secrets.EBAY_FR_FULFILLMENT_CARRIER_CODE }}
           EBAY_FR_FULFILLMENT_SERVICE_CODE: ${{ secrets.EBAY_FR_FULFILLMENT_SERVICE_CODE }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
           f=api/.env
@@ -119,6 +121,8 @@ jobs:
             echo "EBAY_USE_SANDBOX=${EBAY_USE_SANDBOX:-true}"
             echo "EBAY_FR_FULFILLMENT_CARRIER_CODE=${EBAY_FR_FULFILLMENT_CARRIER_CODE:-Colissimo}"
             echo "EBAY_FR_FULFILLMENT_SERVICE_CODE=${EBAY_FR_FULFILLMENT_SERVICE_CODE:-FR_ColiposteColissimo}"
+            echo "RESEND_API_KEY=${RESEND_API_KEY:-}"
+            echo "RESEND_WEBHOOK_SECRET=${RESEND_WEBHOOK_SECRET:-}"
           } > "$f"
 
       - name: Pack api tree

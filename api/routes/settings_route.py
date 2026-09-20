@@ -15,6 +15,7 @@ from models.user import User
 from schemas.settings import SettingsResponse, SettingsUpdate
 from services.ebay_oauth_service import ebay_oauth_configured
 from services.user_settings_service import (
+    effective_sender_full_name,
     ebay_listing_config_complete,
     get_or_create_user_settings,
     sender_address_complete,
@@ -30,6 +31,7 @@ def _to_response(db: Session, user: User) -> SettingsResponse:
         margin_percent=s.margin_percent,
         vinted_enabled=bool(s.vinted_enabled),
         ebay_enabled=bool(s.ebay_enabled),
+        leboncoin_enabled=bool(s.leboncoin_enabled),
         ebay_marketplace_id=s.ebay_marketplace_id,
         ebay_category_id=s.ebay_category_id,
         ebay_default_category_id=EBAY_FR_DEFAULT_LEAF_CATEGORY_ID,
@@ -41,12 +43,12 @@ def _to_response(db: Session, user: User) -> SettingsResponse:
         ebay_listing_config_complete=ebay_listing_config_complete(s),
         ebay_oauth_configured=ebay_oauth_configured(app),
         ebay_environment="sandbox" if app.ebay_use_sandbox else "production",
-        sender_full_name=(s.sender_full_name or "").strip() or None,
+        sender_full_name=effective_sender_full_name(user, s) or None,
         sender_line1=(s.sender_line1 or "").strip() or None,
         sender_line2=(s.sender_line2 or "").strip() or None,
         sender_postal_code=(s.sender_postal_code or "").strip() or None,
         sender_city=(s.sender_city or "").strip() or None,
-        sender_address_complete=sender_address_complete(s),
+        sender_address_complete=sender_address_complete(s, user),
     )
 
 
@@ -77,6 +79,8 @@ def put_margin_settings(
         s.vinted_enabled = bool(data["vinted_enabled"])
     if "ebay_enabled" in data and data["ebay_enabled"] is not None:
         s.ebay_enabled = bool(data["ebay_enabled"])
+    if "leboncoin_enabled" in data and data["leboncoin_enabled"] is not None:
+        s.leboncoin_enabled = bool(data["leboncoin_enabled"])
     if "ebay_marketplace_id" in data and data["ebay_marketplace_id"] is not None:
         s.ebay_marketplace_id = data["ebay_marketplace_id"].strip() or "EBAY_FR"
     for key in (
@@ -85,19 +89,6 @@ def put_margin_settings(
         "ebay_fulfillment_policy_id",
         "ebay_payment_policy_id",
         "ebay_return_policy_id",
-    ):
-        if key in data:
-            val = data[key]
-            if val is None or (isinstance(val, str) and not val.strip()):
-                setattr(s, key, None)
-            else:
-                setattr(s, key, str(val).strip())
-    for key in (
-        "sender_full_name",
-        "sender_line1",
-        "sender_line2",
-        "sender_postal_code",
-        "sender_city",
     ):
         if key in data:
             val = data[key]

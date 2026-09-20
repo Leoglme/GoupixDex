@@ -197,6 +197,98 @@ html.dark {
     background-color: var(--app-surface);
   }
 
+  /* Dashboard page content — single column spacing; horizontal padding lives on UDashboardPanel #body. */
+  .app-dashboard-page {
+    @apply @container w-full min-w-0 space-y-3 sm:space-y-4;
+  }
+
+  /* Full-bleed cards on mobile (align with panel px-3). Desktop unchanged. */
+  .app-card-bleed-md {
+    @apply max-md:-mx-3 max-md:rounded-none max-md:border-x-0;
+  }
+
+  .app-page-tabs-scroll {
+    @apply -mx-3 overflow-x-auto px-3 [-ms-overflow-style:none] [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden;
+  }
+
+  /* Barre d’actions bulk (téléportée) — plus élevée que la table pour le contraste */
+  .app-bulk-bar {
+    @apply border;
+    border-color: color-mix(in srgb, var(--app-line) 70%, var(--app-ink-soft));
+    background-color: color-mix(in srgb, var(--app-surface-2) 90%, var(--app-bg));
+    box-shadow: var(--app-shadow-lift);
+    backdrop-filter: blur(12px);
+  }
+
+  .app-bulk-bar-sheet {
+    @apply border-t;
+    border-color: var(--app-line);
+    background-color: color-mix(in srgb, var(--app-surface-2) 94%, var(--app-bg));
+    box-shadow: var(--app-shadow-lift);
+    backdrop-filter: blur(14px);
+  }
+
+  /* Pilule desktop : une seule ligne (scroll horizontal si colonne étroite) */
+  .bulk-bar-btn {
+    @apply h-9 shrink-0 px-3 text-xs whitespace-nowrap;
+  }
+
+  /* Boutons barre bulk — même gabarit que DevLeadHunter (pilule, bordure lisible) */
+  .app-btn-primary {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50;
+    background-color: var(--app-accent);
+    color: var(--color-primary-950, #3c1408);
+  }
+
+  .app-btn-primary:not(:disabled):hover {
+    opacity: 0.92;
+  }
+
+  .app-btn-secondary {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+  }
+
+  .app-btn-secondary:not(:disabled):hover {
+    border-color: var(--app-ink-soft);
+    background-color: var(--app-surface-2);
+  }
+
+  .app-btn-accent-soft {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: color-mix(in srgb, var(--app-accent) 38%, var(--app-line));
+    background-color: var(--app-accent-soft);
+    color: var(--app-accent-ink);
+  }
+
+  .app-btn-accent-soft:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--app-accent) 55%, var(--app-line));
+    background-color: color-mix(in srgb, var(--app-accent-soft) 70%, var(--app-surface-2));
+  }
+
+  .app-btn-success-soft {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: color-mix(in srgb, var(--app-green) 35%, var(--app-line));
+    background-color: var(--app-green-soft);
+    color: var(--app-green);
+  }
+
+  .app-btn-success-soft:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--app-green) 50%, var(--app-line));
+    background-color: color-mix(in srgb, var(--app-green-soft) 75%, var(--app-surface-2));
+  }
+
+  .app-btn-danger {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50;
+    background-color: var(--app-red);
+  }
+
+  .app-btn-danger:not(:disabled):hover {
+    opacity: 0.92;
+  }
+
   .app-input {
     @apply h-9 min-h-9 w-full rounded-lg border px-3 text-sm;
     border-color: var(--app-line);
@@ -766,66 +858,108 @@ html.dark {
     --vis-tooltip-border-color: var(--ui-border);
     --vis-tooltip-text-color: var(--ui-text-highlighted);
   }
+}
 
-  /* Responsive tables — `goupix-card-table` stacks rows into cards under md; `data-label` prefixes cell values. */
-  @media (max-width: 767px) {
-    .goupix-card-table {
-      display: block;
-      min-width: 0 !important;
-    }
-    .goupix-card-table thead {
-      display: none;
-    }
-    .goupix-card-table tbody {
-      display: block;
-    }
-    .goupix-card-table tr {
-      display: block;
-      margin-bottom: 0.625rem;
-      border: 1px solid var(--app-line);
-      border-radius: 0.75rem;
-      padding: 0.375rem 0.875rem;
-      background-color: var(--app-surface);
-    }
-    .goupix-card-table tr:last-child {
-      margin-bottom: 0;
-    }
-    .goupix-card-table td {
-      display: block;
-      padding: 0.375rem 0;
-      text-align: left;
-    }
-    .goupix-card-table td[data-label] {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 1rem;
-      text-align: right;
-    }
-    .goupix-card-table td[data-label]::before {
-      content: attr(data-label);
-      flex-shrink: 0;
-      font-family: var(--font-mono);
-      font-size: 0.62rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--app-ink-soft);
-      text-align: left;
-      white-space: nowrap;
-    }
-    .goupix-card-table td.goupix-card-table__lead {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding-bottom: 0.5rem;
-      margin-bottom: 0.25rem;
-      border-bottom: 1px solid var(--app-line-soft);
-    }
-    .goupix-card-table td.goupix-card-table__actions {
-      display: flex;
-      justify-content: flex-end;
-      padding-top: 0.25rem;
-    }
+@media (min-width: 768px) {
+  .goupix-card-table {
+    table-layout: fixed;
+  }
+
+  .goupix-card-table__name-col {
+    width: 11rem;
+    max-width: 28vw;
+    overflow: hidden;
+  }
+}
+
+/* Responsive tables — stacks rows into cards under md (DevLeadHunter `dlh-card-table` pattern). */
+@media (max-width: 767px) {
+  .goupix-card-table {
+    display: block;
+    min-width: 0 !important;
+  }
+
+  .goupix-card-table thead {
+    display: none;
+  }
+
+  .goupix-card-table tbody {
+    display: block;
+  }
+
+  .goupix-card-table tr {
+    position: relative;
+    display: block;
+    margin-bottom: 0.625rem;
+    border: 1px solid var(--app-line);
+    border-radius: 0.75rem;
+    padding: 0.375rem 0.875rem 0.375rem 0.875rem;
+    background-color: var(--app-surface);
+  }
+
+  .goupix-card-table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .goupix-card-table td.hidden {
+    display: none !important;
+  }
+
+  .goupix-card-table td:not(.hidden) {
+    display: block;
+    padding: 0.375rem 0;
+    text-align: left;
+  }
+
+  .goupix-card-table td[data-label]:not(.goupix-card-table__lead):not(.goupix-card-table__actions) {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .goupix-card-table td[data-label]:not(.goupix-card-table__lead):not(.goupix-card-table__actions)::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--app-ink-soft);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .goupix-card-table td.goupix-card-table__lead {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+    padding-right: 2.25rem;
+    margin-bottom: 0.25rem;
+    border-bottom: 1px solid var(--app-line-soft);
+  }
+
+  .goupix-card-table td.goupix-card-table__select {
+    position: absolute;
+    top: 0.625rem;
+    right: 0.75rem;
+    display: block;
+    padding: 0;
+    margin: 0;
+    width: auto;
+  }
+
+  .goupix-card-table td.goupix-card-table__actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.25rem;
+  }
+
+  .goupix-card-table td.goupix-card-table__actions[data-label]::before {
+    display: none;
   }
 }
 

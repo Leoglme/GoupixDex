@@ -171,7 +171,8 @@ class DesktopVintedRunnerService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 r = await client.post(
                     f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
-                    headers=hdrs,
+                    headers=hdrs_json,
+                    json={"hide_when_off_all_platforms": True},
                 )
                 r.raise_for_status()
         except Exception as exc:  # noqa: BLE001
@@ -308,3 +309,105 @@ class DesktopVintedRunnerService:
             )
             batch_hub.clear_active_job_for_user(user_id)
             batch_hub.cleanup_later(job_id)
+
+    @staticmethod
+    async def run_desktop_vinted_batch_delist_job(
+        job_id: str,
+        user_id: int,
+        article_ids: list[int],
+        token: str,
+        remote_base: str,
+    ) -> None:
+        """Retire plusieurs annonces Vinted dans une session Chrome."""
+        n = len(article_ids)
+        summary: list[dict[str, Any]] = []
+        try:
+            await batch_hub.emit_event(
+                job_id,
+                {"type": "log", "step": "prep", "message": f"Retrait Vinted — {n} article(s)…", "form_step": "prep"},
+            )
+            for i, aid in enumerate(article_ids):
+                await batch_hub.emit_event(
+                    job_id,
+                    {
+                        "type": "progress",
+                        "current": i + 1,
+                        "total": n,
+                        "article_id": aid,
+                    },
+                )
+                try:
+                    await DesktopVintedRunnerService._run_vinted_listing_removal(aid, user_id, token, remote_base)
+                    summary.append({"article_id": aid, "delisted": True})
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Vinted batch delist failed article_id=%s", aid)
+                    summary.append({"article_id": aid, "delisted": False, "detail": str(exc)[:200]})
+            await batch_hub.finish_job(
+                job_id,
+                {"summary": summary, "vinted": {"delisted": True, "count": len(summary)}},
+            )
+        except Exception:
+            logger.exception("Vinted batch delist crashed job_id=%s", job_id)
+            await batch_hub.finish_job(
+                job_id,
+                {"summary": summary, "vinted": {"delisted": False, "detail": "internal_error"}},
+            )
+        finally:
+            batch_hub.clear_active_job_for_user(user_id)
+            batch_hub.cleanup_later(job_id)
+
+    @staticmethod
+    async def run_desktop_vinted_batch_refresh_job(
+        job_id: str,
+        user_id: int,
+        article_ids: list[int],
+        token: str,
+        remote_base: str,
+    ) -> None:
+        """Supprime puis republie sur Vinted (annonces neuves)."""
+        hdrs = _headers(token)
+        try:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                await client.post(
+                    f"{remote_base}/articles/bulk-prepare-for-sale",
+                    headers={**hdrs, "Content-Type": "application/json"},
+                    json={"ids": article_ids},
+                )
+        except Exception:
+            logger.exception("bulk-prepare-for-sale before refresh failed")
+
+        to_delist: list[int] = []
+        try:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                for aid in article_ids:
+                    ar = await client.get(f"{remote_base}/articles/{aid}", headers=hdrs)
+                    if ar.status_code != 200:
+                        continue
+                    d = ar.json()
+                    if d.get("user_id") != user_id:
+                        continue
+                    if d.get("published_on_vinted"):
+                        to_delist.append(aid)
+        except Exception:
+            logger.exception("Vinted refresh preflight failed")
+
+        if to_delist:
+            await batch_hub.emit_event(
+                job_id,
+                {
+                    "type": "log",
+                    "step": "prep",
+                    "message": f"Suppression de {len(to_delist)} annonce(s) existante(s)…",
+                    "form_step": "prep",
+                },
+            )
+            for aid in to_delist:
+                await DesktopVintedRunnerService._run_vinted_listing_removal(aid, user_id, token, remote_base)
+
+        await batch_hub.emit_event(
+            job_id,
+            {"type": "log", "step": "prep", "message": "Republication sur Vinted…", "form_step": "prep"},
+        )
+        await DesktopVintedRunnerService.run_desktop_vinted_batch_job(
+            job_id, user_id, article_ids, token, remote_base
+        )

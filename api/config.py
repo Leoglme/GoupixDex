@@ -89,6 +89,8 @@ class AppSettings(BaseSettings):
     cardmarket_nightly_refresh_enabled: bool = True
     #: Min seconds between two « sold-scrape » calls **per user** (limits burst traffic to eBay).
     ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
+    resend_api_key: str | None = None
+    resend_webhook_secret: str | None = None
 
 
 @lru_cache

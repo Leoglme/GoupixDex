@@ -148,10 +148,10 @@
 
     <GoupixDexConfirmModal
       v-model:open="provisionSaveOpen"
-      title="Enregistrer dans le coffre ?"
+      title="Compte prêt sur Amazon ?"
       :description="provisionSaveDescription"
-      confirm-label="Compte créé sur Amazon — Enregistrer"
-      cancel-label="Annuler (ne pas enregistrer)"
+      confirm-label="Enregistrer"
+      cancel-label="Pas maintenant"
       confirm-color="primary"
       :loading="provisionSaveLoading"
       @confirm="resolveProvisionSave(true)"
@@ -164,6 +164,7 @@
 import type { Ref } from 'vue'
 import type { AmazonVaultAccount } from '~/types/amazonAccounts'
 import { generateAmazonProvisionEmail, generateAmazonProvisionPassword } from '~/utils/amazonAccountProvision'
+import { resolveAmazonProvisionCustomerName } from '~/utils/amazonProvisionCustomerName'
 
 const MASKED_PASSWORD = '••••••••••••'
 
@@ -171,11 +172,13 @@ const emit = defineEmits<{
   changed: []
 }>()
 
+const { me } = useAuth()
 const { isDesktopApp } = useDesktopRuntime()
 const { fetchOverview, createAccount, updateAccount, deleteAccount, revealCredentials, setActiveAccount } =
   useAmazonAccounts()
 const { openProvisionRegister, discardProvisionStaging, claimStagingProfile, closeLoginBrowser, fetchWorkerMeta } =
   useAmazonWorker()
+const { registerInboundWatch, pollInboundCode } = useAmazonProvisionInbound()
 const toast = useToast()
 
 const loading: Ref<boolean> = ref(false)
@@ -202,6 +205,7 @@ const provisionSaveOpen = ref(false)
 const provisionSaveDescription = ref('')
 const provisionSaveLoading = ref(false)
 let provisionSaveResolver: ((save: boolean) => void) | null = null
+let stopProvisionInboundPoll: (() => void) | null = null
 const deleteModalOpen = ref(false)
 const deleteTarget: Ref<AmazonVaultAccount | null> = ref(null)
 const deleteSubmitting = ref(false)
@@ -351,8 +355,14 @@ async function runProvision(): Promise<void> {
       const email = generateAmazonProvisionEmail()
       const password = generateAmazonProvisionPassword()
 
+      const customer_name = resolveAmazonProvisionCustomerName(me.value?.full_name)
+      try {
+        await registerInboundWatch(email)
+      } catch {
+        /* prod pas à jour : la modale reste utilisable sans code auto */
+      }
       const res = await withWorkerTimeout(
-        openProvisionRegister({ email, password }),
+        openProvisionRegister({ email, password, customer_name }),
         130_000,
         'Ouverture Chrome Amazon',
       )
@@ -476,16 +486,21 @@ function resolveProvisionContinue(cont: boolean): void {
 }
 
 function askProvisionSaveToVault(email: string): Promise<boolean> {
-  provisionSaveDescription.value =
-    `Terminez l’inscription sur Amazon (SMS / CAPTCHA) pour ${email}. ` +
-    'Enregistrez dans le coffre uniquement lorsque le compte Amazon fonctionne.'
+  stopProvisionInboundPoll?.()
+  stopProvisionInboundPoll = null
+  provisionSaveDescription.value = `${email} — enregistrez ce compte seulement si vous arrivez à vous connecter sur Amazon.`
   provisionSaveOpen.value = true
+  stopProvisionInboundPoll = pollInboundCode(email, (code) => {
+    provisionSaveDescription.value = `${email} — code e-mail Amazon : ${code} (copiez-le dans Chrome si besoin).`
+  })
   return new Promise((resolve) => {
     provisionSaveResolver = resolve
   })
 }
 
 function resolveProvisionSave(save: boolean): void {
+  stopProvisionInboundPoll?.()
+  stopProvisionInboundPoll = null
   provisionSaveOpen.value = false
   provisionSaveResolver?.(save)
   provisionSaveResolver = null

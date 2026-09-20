@@ -2,6 +2,7 @@ export interface AppSettings {
   margin_percent: number
   vinted_enabled: boolean
   ebay_enabled: boolean
+  leboncoin_enabled: boolean
   ebay_marketplace_id: string
   ebay_category_id: string | null
   /** France leaf category baked into the API; read-only (override possible via ebay_category_id). */
@@ -26,17 +27,13 @@ export type AppSettingsPatch = Partial<{
   margin_percent: number
   vinted_enabled: boolean
   ebay_enabled: boolean
+  leboncoin_enabled: boolean
   ebay_marketplace_id: string
   ebay_category_id: string | null
   ebay_merchant_location_key: string | null
   ebay_fulfillment_policy_id: string | null
   ebay_payment_policy_id: string | null
   ebay_return_policy_id: string | null
-  sender_full_name: string | null
-  sender_line1: string | null
-  sender_line2: string | null
-  sender_postal_code: string | null
-  sender_city: string | null
 }>
 
 /**

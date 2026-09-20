@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page">
         <GoupixDexPageHeader
           title="Commandes Cardmarket"
           description="Vos achats Cardmarket importés depuis les factures PDF ou la synchronisation automatique."
@@ -114,25 +114,54 @@
           :loading="loading"
         />
 
-        <UTable
-          ref="tableRef"
-          v-model:pagination="pagination"
-          :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
-          :data="orders"
-          :columns="columns"
-          :loading="loading"
-          class="shrink-0"
-          :ui="{
-            base: 'table-fixed border-separate border-spacing-0',
-            thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-            tbody: '[&>tr]:last:[&>td]:border-b-0',
-            th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-            td: 'border-b border-default',
-            separator: 'h-0',
-          }"
-        />
+        <div v-if="loading" class="flex justify-center py-12 md:hidden">
+          <UIcon name="i-lucide-loader-2" class="text-primary size-7 animate-spin" />
+        </div>
+        <ul v-else-if="orders.length" class="space-y-2 md:hidden">
+          <li v-for="order in pagedOrders" :key="order.id">
+            <button
+              type="button"
+              class="app-card w-full p-3 text-left transition-colors hover:bg-(--app-surface-2)"
+              @click="openOrder(order)"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <p class="text-primary font-medium tabular-nums">#{{ order.external_order_id }}</p>
+                  <p class="text-highlighted truncate text-sm font-medium">
+                    {{ order.seller_username || '—' }}
+                  </p>
+                  <p class="text-muted mt-0.5 text-xs tabular-nums">
+                    {{ formatWhen(order.paid_at) }} · {{ eur.format(order.order_total) }}
+                  </p>
+                </div>
+                <UIcon name="i-lucide-chevron-right" class="text-muted mt-1 size-4 shrink-0" aria-hidden="true" />
+              </div>
+            </button>
+          </li>
+        </ul>
+        <p v-else-if="!loading" class="text-muted py-8 text-center text-sm md:hidden">Aucune commande.</p>
 
-        <div class="border-default flex items-center justify-between gap-3 border-t pt-4">
+        <div class="app-card app-card-bleed-md hidden min-w-0 overflow-x-auto md:block">
+          <UTable
+            ref="tableRef"
+            v-model:pagination="pagination"
+            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
+            :data="orders"
+            :columns="columns"
+            :loading="loading"
+            class="shrink-0"
+            :ui="{
+              base: 'table-fixed border-separate border-spacing-0',
+              thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
+              tbody: '[&>tr]:last:[&>td]:border-b-0',
+              th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
+              td: 'border-b border-default',
+              separator: 'h-0',
+            }"
+          />
+        </div>
+
+        <div class="border-default flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="text-muted text-sm">{{ orders.length }} commande(s).</div>
           <UPagination
             :default-page="(tableRef?.tableApi?.getState().pagination.pageIndex || 0) + 1"
@@ -314,6 +343,20 @@ async function onPdfSelected(e: Event): Promise<void> {
 function goOrder(row: Row<OrderListRow>): void {
   void navigateTo(`/orders/${row.original.id}`)
 }
+
+/**
+ * Opens an order detail page from a list row (mobile cards).
+ * @param order - Order row from the API.
+ */
+function openOrder(order: OrderListRow): void {
+  void navigateTo(`/orders/${order.id}`)
+}
+
+const pagedOrders = computed((): OrderListRow[] => {
+  const { pageIndex, pageSize } = pagination.value
+  const start = pageIndex * pageSize
+  return orders.value.slice(start, start + pageSize)
+})
 
 const columns: TableColumn<OrderListRow>[] = [
   {

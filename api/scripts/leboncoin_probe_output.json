@@ -1,0 +1,102 @@
+[
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": null,
+    "placeholder": null,
+    "aria": null,
+    "text": "Quitter"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": null,
+    "placeholder": null,
+    "aria": "Quitter",
+    "text": ""
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": null,
+    "placeholder": null,
+    "aria": null,
+    "text": "Me connecter"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": null,
+    "placeholder": null,
+    "aria": null,
+    "text": "Créer un compte"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "submit",
+    "name": null,
+    "id": null,
+    "qa": "didomi_cta_continue_without_consent",
+    "placeholder": null,
+    "aria": "Continuer sans accepter",
+    "text": "Continuer sans accepter"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": null,
+    "placeholder": null,
+    "aria": "En savoir plus sur nos 192 partenaires",
+    "text": "192 partenaires"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": "didomi_cta_customize",
+    "placeholder": null,
+    "aria": "Personnaliser",
+    "text": "En savoir plus"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": "didomi-agree-to-all",
+    "qa": "didomi_cta_accept_cookies",
+    "placeholder": null,
+    "aria": "Accepter",
+    "text": "Accepter & Fermer →"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": null,
+    "qa": "didomi_cta_customize",
+    "placeholder": null,
+    "aria": "Personnaliser",
+    "text": "En savoir plus"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": null,
+    "id": "didomi-agree-to-all",
+    "qa": "didomi_cta_accept_cookies",
+    "placeholder": null,
+    "aria": "Accepter",
+    "text": "Accepter & Fermer →"
+  }
+]

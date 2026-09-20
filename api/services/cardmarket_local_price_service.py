@@ -39,9 +39,9 @@ _PRICING_BLOCK_TTL_SEC = 6 * 3600.0
 _api_lock = threading.Lock()
 _price_api: CardmarketPriceApi | None = None
 
-#: TTL cache of TCGdex pricing blocks: ``tcgdex_card_id`` → (fetched_at, block | None).
+#: TTL cache: ``tcgdex_card_id`` → (fetched_at, cardmarket block | None, tcgplayer USD | None).
 _pricing_block_lock = threading.Lock()
-_pricing_block_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_pricing_block_cache: dict[str, tuple[float, dict[str, Any] | None, float | None]] = {}
 
 
 def get_price_api() -> CardmarketPriceApi:
@@ -61,6 +61,42 @@ def get_price_api() -> CardmarketPriceApi:
 def refresh_price_guide(*, force: bool = False) -> PriceGuideRefreshReport:
     """Refresh the guide from Cardmarket's S3 bucket (network — never call in a request path)."""
     return get_price_api().refresh(force=force)
+
+
+def reference_usd_from_tcgplayer_block(block: dict[str, Any]) -> float | None:
+    """
+    Pick a reference USD price from a TCGdex ``pricing.tcgplayer`` object
+    (``normal`` / ``holofoil`` / … sub-blocks with ``marketPrice`` or ``midPrice``).
+    """
+    best: float | None = None
+    for key, val in block.items():
+        if key in ("unit", "updated") or not isinstance(val, dict):
+            continue
+        picked: float | None = None
+        for field in ("marketPrice", "midPrice", "lowPrice"):
+            raw = val.get(field)
+            if isinstance(raw, (int, float)) and float(raw) > 0:
+                picked = float(raw)
+                break
+        if picked is None:
+            continue
+        best = picked if best is None else max(best, picked)
+    return round(best, 2) if best is not None else None
+
+
+def extract_tcgplayer_usd(card_payloads: list[dict[str, Any]]) -> float | None:
+    """First usable TCGPlayer USD reference among locale payloads."""
+    for payload in card_payloads:
+        pricing = payload.get("pricing")
+        if not isinstance(pricing, dict):
+            continue
+        tcg_block = pricing.get("tcgplayer")
+        if not isinstance(tcg_block, dict):
+            continue
+        usd = reference_usd_from_tcgplayer_block(tcg_block)
+        if usd is not None:
+            return usd
+    return None
 
 
 def extract_cardmarket_block(card_payloads: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -101,43 +137,61 @@ def resolve_market_price_eur(
     return None
 
 
-def fetch_pricing_block_for_card(
+def fetch_tcgdex_pricing_snapshot(
     tcgdex_card_id: str,
     physical_language: str | None = None,
     client: TcgdexClientService | None = None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, float | None]:
     """
-    TCGdex ``pricing.cardmarket`` block for a card id, with a 6 h TTL cache.
+    Cardmarket block + TCGPlayer USD from TCGdex (6 h TTL cache).
 
-    Tries the physical language's locale first, then the other supported ones
-    (Japan-only prints have no EN payload). Returns ``None`` when the card has
-    no individual Cardmarket listing.
+    Tries the physical language's locale first, then the other supported ones.
     """
     cid = tcgdex_card_id.strip()
     if not cid:
-        return None
+        return None, None
 
     now = time.time()
     with _pricing_block_lock:
         cached = _pricing_block_cache.get(cid)
         if cached is not None and now - cached[0] < _PRICING_BLOCK_TTL_SEC:
-            return cached[1]
+            return cached[1], cached[2]
 
     lang = (physical_language or "").strip().lower()
     locales = [lang] if lang in SUPPORTED_LOCALES else []
     locales += [loc for loc in sorted(SUPPORTED_LOCALES) if loc not in locales]
 
     tcgdex = client or TcgdexClientService()
-    block: dict[str, Any] | None = None
+    payloads: list[dict[str, Any]] = []
     for locale in locales:
         try:
-            payload = dict(tcgdex.get_card(locale, cid))
+            payloads.append(dict(tcgdex.get_card(locale, cid)))
         except (RuntimeError, ValueError):
             continue
-        block = extract_cardmarket_block([payload])
-        if block is not None:
-            break
+
+    block = extract_cardmarket_block(payloads)
+    tcg_usd = extract_tcgplayer_usd(payloads)
 
     with _pricing_block_lock:
-        _pricing_block_cache[cid] = (now, block)
+        _pricing_block_cache[cid] = (now, block, tcg_usd)
+    return block, tcg_usd
+
+
+def fetch_pricing_block_for_card(
+    tcgdex_card_id: str,
+    physical_language: str | None = None,
+    client: TcgdexClientService | None = None,
+) -> dict[str, Any] | None:
+    """TCGdex ``pricing.cardmarket`` block for a card id (cached)."""
+    block, _ = fetch_tcgdex_pricing_snapshot(tcgdex_card_id, physical_language, client)
     return block
+
+
+def fetch_tcgplayer_usd_for_card(
+    tcgdex_card_id: str,
+    physical_language: str | None = None,
+    client: TcgdexClientService | None = None,
+) -> float | None:
+    """TCGPlayer reference USD from TCGdex ``pricing.tcgplayer`` (cached)."""
+    _, tcg_usd = fetch_tcgdex_pricing_snapshot(tcgdex_card_id, physical_language, client)
+    return tcg_usd

@@ -28,7 +28,7 @@
         <div class="border-default border-t" :class="bodyUi">
           <slot />
         </div>
-        <div v-if="$slots.footer" class="border-default border-t" :class="footerUi ?? 'p-4 sm:p-5'">
+        <div v-if="$slots.footer" :class="footerUi ?? 'p-4 pt-4 sm:p-5 sm:pt-5'">
           <slot name="footer" />
         </div>
       </div>

@@ -1,21 +1,23 @@
 <template>
+  <GoupixDexProfileDrawer :open="profileOpen" @close="profileOpen = false" />
+
   <UDropdownMenu
     :items="items"
     :content="{ align: 'center', collisionPadding: 12 }"
     :ui="{ content: collapsed ? 'w-48' : 'w-(--reka-dropdown-menu-trigger-width)', item: 'cursor-pointer' }"
   >
-    <UButton
-      color="neutral"
-      variant="ghost"
-      block
-      :square="collapsed"
-      class="data-[state=open]:bg-elevated"
-      :class="[!collapsed && 'py-2']"
-      :icon="collapsed ? 'i-lucide-circle-user' : undefined"
-      :label="collapsed ? undefined : (me?.email ?? 'Compte')"
-      :trailing-icon="collapsed ? undefined : 'i-lucide-chevrons-up-down'"
+    <button
+      type="button"
+      class="text-highlighted hover:bg-elevated/80 data-[state=open]:bg-elevated flex w-full cursor-pointer items-center rounded-lg transition-colors"
+      :class="collapsed ? 'justify-center px-2 py-2' : 'gap-2.5 px-2 py-2 text-left'"
       :aria-label="collapsed ? 'Menu compte et paramètres' : undefined"
-    />
+    >
+      <UIcon v-if="collapsed" name="i-lucide-circle-user" class="text-muted size-5 shrink-0" />
+      <template v-else>
+        <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ accountLabel ?? 'Compte' }}</span>
+        <UIcon name="i-lucide-chevrons-up-down" class="text-muted size-3.5 shrink-0" />
+      </template>
+    </button>
   </UDropdownMenu>
 </template>
 
@@ -30,16 +32,32 @@ defineProps<{
 const colorMode = useColorMode()
 const { me, logout } = useAuth()
 const { isDesktopApp } = useDesktopRuntime()
+const profileOpen = ref(false)
+
+const accountLabel = computed(() => {
+  const name = me.value?.full_name?.trim()
+  if (name) {
+    return name
+  }
+  return me.value?.email ?? 'Compte'
+})
 
 const items: ComputedRef<DropdownMenuItem[][]> = computed(() => [
   [
     {
       type: 'label',
-      label: me.value?.email ?? 'Compte',
+      label: me.value?.full_name?.trim() || me.value?.email || 'Compte',
       icon: 'i-lucide-user',
     },
   ],
   [
+    {
+      label: 'Mon profil',
+      icon: 'i-lucide-user-pen',
+      onSelect() {
+        profileOpen.value = true
+      },
+    },
     {
       label: 'Paramètres',
       icon: 'i-lucide-settings',

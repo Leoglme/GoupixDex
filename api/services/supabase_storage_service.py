@@ -124,3 +124,30 @@ async def upload_image_bytes(
         data=data,
         original_filename=original_filename,
     )
+
+
+def upload_at_path_sync(*, object_path: str, data: bytes, content_type: str) -> str:
+    """Upload bytes at an explicit bucket path; returns public URL."""
+    if not data:
+        raise ValueError("empty payload")
+    s = get_settings()
+    bucket = (s.supabase_storage_bucket or "").strip()
+    if not bucket:
+        raise RuntimeError("SUPABASE_STORAGE_BUCKET missing")
+    client = _get_client()
+    file_options = {"content-type": content_type, "upsert": "true"}
+    client.storage.from_(bucket).upload(object_path, data, file_options=file_options)
+    public_url = client.storage.from_(bucket).get_public_url(object_path)
+    if not public_url or not str(public_url).startswith("http"):
+        raise RuntimeError(f"Invalid Supabase public URL: {public_url!r}")
+    return str(public_url)
+
+
+def public_url_for_path(object_path: str) -> str:
+    s = get_settings()
+    bucket = (s.supabase_storage_bucket or "").strip()
+    if not bucket:
+        raise RuntimeError("SUPABASE_STORAGE_BUCKET missing")
+    client = _get_client()
+    public_url = client.storage.from_(bucket).get_public_url(object_path)
+    return str(public_url)

@@ -23,12 +23,16 @@ from schemas.articles import (
     ARTICLE_TITLE_MAX_LEN_VINTED,
     ArticleUpdate,
     BulkIdsBody,
+    BulkMarketplaceChannelsBody,
+    ConfirmLeboncoinPublishBody,
+    ConfirmVintedDelistBody,
     ConfirmVintedPublishBody,
     SoldPatch,
     VintedBatchStartBody,
     VintedCrossRemovalFailBody,
 )
 from services import article_service
+from services.article_market_reference_service import refresh_article_market_reference
 from services.cardmarket_order_service import assign_article_order_line
 from services.combined_marketplace_service import CombinedMarketplaceService
 from services.cross_marketplace_removal_service import run_background_ebay_removal_after_vinted_sale
@@ -174,6 +178,63 @@ def bulk_delete_articles(
     unique_ids = list(dict.fromkeys(body.ids))
     deleted = article_service.delete_articles_by_ids(db, user.id, unique_ids)
     return {"deleted": deleted, "requested": len(unique_ids)}
+
+
+@router.post("/bulk-delist-channels", status_code=status.HTTP_200_OK)
+async def bulk_delist_channels(
+    body: BulkMarketplaceChannelsBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Retire eBay / Leboncoin côté API ; renvoie les ids Vinted à traiter sur le worker desktop."""
+    if not body.vinted and not body.ebay and not body.leboncoin:
+        raise HTTPException(status_code=400, detail="Sélectionnez au moins une marketplace.")
+    unique_ids = list(dict.fromkeys(body.article_ids))
+    vinted_ids: list[int] = []
+    ebay_removed = 0
+    leboncoin_cleared = 0
+    for aid in unique_ids:
+        article = article_service.get_article(db, aid, user.id)
+        if article is None or article.is_sold:
+            continue
+        if body.vinted and article.published_on_vinted:
+            vinted_ids.append(aid)
+        if body.ebay and article.published_on_ebay:
+            ok, _err = await delete_ebay_listing_for_article(db, article, user)
+            if ok:
+                clear_ebay_publication_fields(article)
+                article.cross_ebay_removal_failed = False
+                article.cross_ebay_removal_error = None
+                ebay_removed += 1
+        if body.leboncoin and article.published_on_leboncoin:
+            article_service.clear_leboncoin_publication_fields(article)
+            leboncoin_cleared += 1
+        article_service.apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
+        db.add(article)
+    db.commit()
+    return {
+        "vinted_article_ids": vinted_ids,
+        "ebay_removed": ebay_removed,
+        "leboncoin_cleared": leboncoin_cleared,
+    }
+
+
+@router.post("/bulk-prepare-for-sale", status_code=status.HTTP_200_OK)
+def bulk_prepare_for_sale(
+    body: BulkIdsBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """Réaffiche les fiches dans « Mes articles » avant une remise en vente."""
+    unique_ids = list(dict.fromkeys(body.ids))
+    for aid in unique_ids:
+        article = article_service.get_article(db, aid, user.id)
+        if article is None or article.is_sold:
+            continue
+        article.offers_for_sale = True
+        db.add(article)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/vinted-batch/active")
@@ -433,26 +494,84 @@ def confirm_vinted_publish(
     return {"ok": True}
 
 
+@router.post("/{article_id}/publish-leboncoin")
+def publish_leboncoin_for_article(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Prépare une publication Leboncoin (worker desktop requis).
+    L’app Tauri appelle le worker local ; cette route valide l’article et renvoie le flux SSE.
+    """
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if article.is_sold:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Article déjà vendu — publication Leboncoin impossible.",
+        )
+    if not article.images:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Au moins une photo est requise pour Leboncoin.",
+        )
+    ms = get_or_create_user_settings(db, user.id)
+    if not getattr(ms, "leboncoin_enabled", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Leboncoin est désactivé dans vos paramètres marketplace.",
+        )
+    if not (ms.sender_postal_code or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Renseignez votre code postal expéditeur (Paramètres → Expédition).",
+        )
+    stream_path = f"/articles/{article_id}/listing-progress"
+    return {
+        "leboncoin": {
+            "status": "pending",
+            "stream_path": stream_path,
+            "desktop_local": True,
+        },
+    }
+
+
+@router.post("/{article_id}/confirm-leboncoin-publish", status_code=status.HTTP_200_OK)
+def confirm_leboncoin_publish(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    body: ConfirmLeboncoinPublishBody | None = Body(default=None),
+) -> dict[str, bool]:
+    """Marque l’article comme publié sur Leboncoin après succès du worker desktop."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    b = body or ConfirmLeboncoinPublishBody()
+    article_service.mark_article_published_on_leboncoin(
+        article_id,
+        user.id,
+        listing_id=b.listing_id,
+    )
+    return {"ok": True}
+
+
 @router.post("/{article_id}/confirm-vinted-unlist", status_code=status.HTTP_200_OK)
 def confirm_vinted_unlist(
     article_id: int,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    body: ConfirmVintedDelistBody | None = Body(default=None),
 ) -> dict[str, bool]:
     """Après suppression réelle sur Vinted (worker local) : aligne l’état GoupixDex."""
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    if not article.is_sold or (article.sale_source or "").lower() != "ebay":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Réservé aux articles marqués vendus sur eBay.",
-        )
-    article.published_on_vinted = False
-    article.vinted_published_at = None
-    article.vinted_id = None
-    article.cross_vinted_removal_failed = False
-    article.cross_vinted_removal_error = None
+    article_service.clear_vinted_publication_fields(article)
+    hide = body.hide_when_off_all_platforms if body is not None else True
+    article_service.apply_offers_for_sale_after_delist(article, hide_when_off_all=hide)
     db.add(article)
     db.commit()
     return {"ok": True}
@@ -670,6 +789,7 @@ async def create_article(
         sale_source=sale_src,
         is_sold=sold_flag,
         sold_at=sold_at_dt if sold_flag else None,
+        offers_for_sale=not sold_flag,
     )
     _validate_graded_article_or_raise(article)
     _apply_order_line_assignment(db, user, article, _parse_optional_order_line_id(order_line_id))
@@ -705,6 +825,9 @@ async def create_article(
         db.add(ImageModel(article_id=article.id, image_url=public_url))
         stored_sources.append(public_url)
 
+    db.commit()
+    db.refresh(article)
+    refresh_article_market_reference(article)
     db.commit()
     db.refresh(article)
 
@@ -801,6 +924,9 @@ def update_article(
     unset = body.model_dump(exclude_unset=True)
     if "order_line_id" in unset:
         _apply_order_line_assignment(db, user, article, body.order_line_id)
+    identity_keys = {"set_code", "card_number", "pokemon_name"}
+    if identity_keys & set(unset.keys()):
+        refresh_article_market_reference(article)
     db.commit()
     db.refresh(article)
     return article_service.article_to_dict(article)

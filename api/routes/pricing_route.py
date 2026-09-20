@@ -42,7 +42,7 @@ def lookup_prices(
     card_number: str = Query(..., min_length=1),
     pokemon_name: str | None = Query(None),
 ) -> dict[str, Any]:
-    """Resolve Cardmarket / TCGPlayer refs via PokéWallet; suggested price uses saved margin %."""
+    """Cardmarket local (TCGdex) first, PokéWallet last resort; suggested price uses saved margin %."""
     margin = _margin_percent(db, user.id)
     pricing = pricing_service.fetch_card_prices(
         set_code.strip(),

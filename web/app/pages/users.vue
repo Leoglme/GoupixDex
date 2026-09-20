@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page">
         <GoupixDexPageHeader
           title="Utilisateurs"
           description="Approuvez, refusez ou bannissez les demandes d'accès, et générez les liens de mot de passe."

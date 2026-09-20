@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -43,6 +43,8 @@ class CollectionCard(Base):
     language: Mapped[str] = mapped_column(String(8), default="fr", server_default="fr")
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer(), default=1, server_default="1")
+    #: True when the row exists only to fill a binder slot (not owned physically).
+    is_placeholder: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     #: Cardmarket product id (harvested from TCGdex ``pricing.cardmarket.idProduct``).

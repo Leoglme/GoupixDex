@@ -38,6 +38,13 @@ class Article(Base):
     sold_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     sale_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_sold: Mapped[bool] = mapped_column(Boolean(), default=False)
+    #: False = fiche conservée mais masquée dans « Mes articles » (retirée de toutes les marketplaces).
+    offers_for_sale: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=True,
+        server_default="1",
+        nullable=False,
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),
@@ -50,6 +57,17 @@ class Article(Base):
         nullable=False,
     )
     vinted_published_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    published_on_leboncoin: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+    leboncoin_listing_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    leboncoin_published_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -87,6 +105,10 @@ class Article(Base):
         nullable=True,
         index=True,
     )
+    cardmarket_id_product: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    market_cardmarket_eur: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    market_tcgplayer_eur: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    market_priced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="articles")
     images: Mapped[list["Image"]] = relationship(back_populates="article", cascade="all, delete-orphan")

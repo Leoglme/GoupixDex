@@ -1,5 +1,6 @@
 <template>
-  <UApp>
+  <UApp :toaster="null">
+    <GoupixDexToastHost />
     <GoupixDexDesktopUpdaterPanel />
     <NuxtLoadingIndicator />
 

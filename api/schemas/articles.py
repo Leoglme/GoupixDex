@@ -54,10 +54,37 @@ class ConfirmVintedPublishBody(BaseModel):
     vinted_id: int | None = Field(default=None, ge=1)
 
 
+class ConfirmLeboncoinPublishBody(BaseModel):
+    """Corps optionnel pour ``POST …/confirm-leboncoin-publish`` (worker desktop)."""
+
+    listing_id: str | None = Field(default=None, max_length=64)
+
+
 class VintedCrossRemovalFailBody(BaseModel):
     """Rapport d’échec du worker local (suppression Vinted après vente eBay)."""
 
     detail: str = Field(default="Erreur inconnue", max_length=500)
+
+
+class ConfirmVintedDelistBody(BaseModel):
+    """Après suppression Vinted (worker) : aligner GoupixDex et éventuellement masquer la fiche."""
+
+    hide_when_off_all_platforms: bool = True
+
+
+class BulkMarketplaceChannelsBody(BaseModel):
+    """Retrait ou préparation groupée sur plusieurs marketplaces."""
+
+    article_ids: list[int] = Field(min_length=1, max_length=40)
+    vinted: bool = False
+    ebay: bool = False
+    leboncoin: bool = False
+
+
+class VintedBatchRefreshBody(BaseModel):
+    """Lot Vinted : retirer puis republier (annonces neuves)."""
+
+    article_ids: list[int] = Field(min_length=1, max_length=40)
 
 
 class BulkIdsBody(BaseModel):

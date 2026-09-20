@@ -27,3 +27,4 @@ class CollectionCardPrepareSaleBody(BaseModel):
 
     #: Optional cardmarket / fallback price used by the front-end suggestion.
     refresh_pricing: bool = True
+

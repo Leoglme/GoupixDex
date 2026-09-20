@@ -13,6 +13,8 @@ from core.security import decrypt_vinted_credential, store_user_vinted_password
 from models.user import User
 from schemas.users import (
     AdminUserResponse,
+    ProfileResponse,
+    ProfileUpdate,
     UserCreate,
     UserResponse,
     UserUpdate,
@@ -20,7 +22,11 @@ from schemas.users import (
     VintedDecryptedResponse,
 )
 from services import auth_service
-from services.user_settings_service import get_or_create_user_settings
+from services.user_settings_service import (
+    effective_sender_full_name,
+    get_or_create_user_settings,
+    sender_address_complete,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -29,6 +35,7 @@ def _serialize(u: User) -> UserResponse:
     return UserResponse(
         id=u.id,
         email=u.email,
+        full_name=(u.full_name or "").strip() or None,
         vinted_email=u.vinted_email,
         is_admin=bool(u.is_admin),
         status=u.status,
@@ -97,6 +104,54 @@ def me_vinted_decrypted(current: Annotated[User, Depends(get_current_user)]) -> 
         vinted_email=current.vinted_email,
         vinted_password=plain,
     )
+
+
+def _serialize_profile(db: Session, user: User) -> ProfileResponse:
+    ms = get_or_create_user_settings(db, user.id)
+    return ProfileResponse(
+        id=user.id,
+        email=user.email,
+        full_name=(user.full_name or "").strip() or None,
+        sender_line1=(ms.sender_line1 or "").strip() or None,
+        sender_line2=(ms.sender_line2 or "").strip() or None,
+        sender_postal_code=(ms.sender_postal_code or "").strip() or None,
+        sender_city=(ms.sender_city or "").strip() or None,
+        sender_address_complete=sender_address_complete(ms, user),
+    )
+
+
+@router.get("/me/profile", response_model=ProfileResponse)
+def get_my_profile(
+    db: Annotated[Session, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> ProfileResponse:
+    return _serialize_profile(db, current)
+
+
+@router.put("/me/profile", response_model=ProfileResponse)
+def update_my_profile(
+    body: ProfileUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> ProfileResponse:
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update.")
+    ms = get_or_create_user_settings(db, current.id)
+    if "full_name" in data:
+        current.full_name = (data["full_name"] or "").strip() or None
+        ms.sender_full_name = current.full_name
+    for key in ("sender_line1", "sender_line2", "sender_postal_code", "sender_city"):
+        if key in data:
+            val = data[key]
+            if val is None or (isinstance(val, str) and not val.strip()):
+                setattr(ms, key, None)
+            else:
+                setattr(ms, key, str(val).strip())
+    db.commit()
+    db.refresh(current)
+    db.refresh(ms)
+    return _serialize_profile(db, current)
 
 
 @router.put("/me/vinted", response_model=UserResponse)

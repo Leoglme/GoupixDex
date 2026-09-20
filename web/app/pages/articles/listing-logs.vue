@@ -153,6 +153,12 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
+import {
+  navigateToRelistEditorFromStorage,
+  parseRelistQueueParam,
+  relistSuccessorLocation,
+  RELIST_QUEUE_STORAGE_KEY,
+} from '~/utils/articleRelistQueue'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -251,6 +257,10 @@ async function connectBatchJob(jobId: string): Promise<void> {
     await batchStream.followBatchStream(`/articles/vinted-batch/${jobId}/stream`, {
       quiet: true,
     })
+    const after = typeof route.query.after === 'string' ? route.query.after.trim().toLowerCase() : ''
+    if (after === 'relist') {
+      await navigateToRelistEditorFromStorage()
+    }
   } catch (e) {
     streamError.value = e instanceof Error ? e.message : 'Flux interrompu'
   } finally {
@@ -290,12 +300,26 @@ async function connectSingleArticle(articleId: number): Promise<void> {
   publishStream.closeStream()
   wardrobeStream.closeStream()
   const progressQ = typeof route.query.progress === 'string' ? route.query.progress.trim().toLowerCase() : ''
+  const workerQ = typeof route.query.worker === 'string' ? route.query.worker.trim().toLowerCase() : ''
   const sseBase = progressQ === 'local' && isDesktopApp.value ? 'local' : 'api'
+  const localWorker = workerQ === 'leboncoin' ? 'leboncoin' : 'vinted'
   try {
     await publishStream.followStream(`/articles/${articleId}/listing-progress`, 'logs', {
       sseBase,
+      localWorker,
     })
     singleFinished.value = true
+    const relistQ = typeof route.query.relist === 'string' ? route.query.relist.trim() : ''
+    if (relistQ === '1') {
+      const tail = parseRelistQueueParam(route.query.queue)
+      const next = relistSuccessorLocation(tail)
+      if (next) {
+        await navigateTo(next)
+      } else {
+        sessionStorage.removeItem(RELIST_QUEUE_STORAGE_KEY)
+        await navigateTo('/articles')
+      }
+    }
   } catch (e) {
     streamError.value = e instanceof Error ? e.message : 'Flux interrompu'
   } finally {

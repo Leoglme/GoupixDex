@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS amazon_accounts (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  label VARCHAR(120) NULL,
+  amazon_email VARCHAR(255) NOT NULL,
+  password_encrypted TEXT NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_amazon_accounts_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  INDEX idx_amazon_accounts_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE settings
+  ADD COLUMN IF NOT EXISTS active_amazon_account_id BIGINT NULL;

@@ -4,7 +4,7 @@
     :items="items"
     value-key="value"
     variant="ghost"
-    class="data-[state=open]:bg-elevated min-w-[12rem]"
+    class="data-[state=open]:bg-elevated w-full min-w-0 sm:w-auto sm:min-w-[12rem]"
     :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200' }"
     @update:model-value="onSelect"
   />

@@ -18,6 +18,7 @@ export type GoupixDexBaseTableSortThProps = {
   active?: boolean
   direction?: GoupixDexBaseTableSortDirection
   title?: string
+  thClass?: string
 }
 
 export type GoupixDexBaseTableTdProps = {

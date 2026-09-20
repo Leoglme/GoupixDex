@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from config import EBAY_FR_DEFAULT_LEAF_CATEGORY_ID
 from models.margin_settings import MarginSettings
+from models.user import User
 
 
 def get_or_create_user_settings(db: Session, user_id: int) -> MarginSettings:
@@ -26,10 +27,20 @@ def effective_ebay_category_id(ms: MarginSettings) -> str:
     return EBAY_FR_DEFAULT_LEAF_CATEGORY_ID.strip()
 
 
-def sender_address_complete(ms: MarginSettings) -> bool:
+def effective_sender_full_name(user: User, ms: MarginSettings) -> str:
+    """Nom expéditeur : profil utilisateur, repli sur l’ancien champ ``settings``."""
+    return (user.full_name or ms.sender_full_name or "").strip()
+
+
+def sender_address_complete(ms: MarginSettings, user: User | None = None) -> bool:
     """True when the envelope flap (return) address is filled in for label printing."""
+    name = (
+        effective_sender_full_name(user, ms)
+        if user is not None
+        else (ms.sender_full_name or "").strip()
+    )
     return bool(
-        (ms.sender_full_name or "").strip()
+        name
         and (ms.sender_line1 or "").strip()
         and (ms.sender_postal_code or "").strip()
         and (ms.sender_city or "").strip()

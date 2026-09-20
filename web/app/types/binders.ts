@@ -24,7 +24,7 @@ export interface BinderSummary {
 
 export interface BinderPocketItem {
   id: string
-  kind: 'owned'
+  kind: 'owned' | 'wanted'
   collection_card_id: number
   card_name: string
   set_name?: string | null
@@ -51,6 +51,7 @@ export interface BinderCandidateItem {
 export interface BinderDetail extends BinderSummary {
   items: BinderPocketItem[]
   candidates: BinderCandidateItem[]
+  cover_urls?: Record<string, string>
 }
 
 export type BinderDesignResolved = BinderDesign

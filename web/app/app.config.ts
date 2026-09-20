@@ -18,10 +18,17 @@ export default defineAppConfig({
     },
     card: {
       slots: {
-        root: 'rounded-xl shadow-none',
-        header: 'p-3 sm:p-4',
-        body: 'p-3 sm:p-4',
-        footer: 'p-3 sm:p-4',
+        root: 'rounded-xl shadow-none ring ring-default !divide-y-0 bg-(--app-surface)',
+        header: 'p-5 pb-0',
+        body: 'p-5',
+        footer: 'p-5 pt-4',
+      },
+      variants: {
+        variant: {
+          outline: { root: '!divide-y-0' },
+          soft: { root: '!divide-y-0' },
+          subtle: { root: '!divide-y-0' },
+        },
       },
     },
     modal: {
@@ -67,6 +74,16 @@ export default defineAppConfig({
     dropdownMenu: {
       slots: {
         item: 'cursor-pointer',
+      },
+    },
+    dashboardPanel: {
+      slots: {
+        body: 'flex flex-col gap-4 sm:gap-6 flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-6',
+      },
+    },
+    dashboardNavbar: {
+      slots: {
+        root: 'h-(--ui-header-height) shrink-0 flex items-center justify-between border-b border-default px-3 pt-[max(0px,env(safe-area-inset-top))] sm:px-6 gap-1.5',
       },
     },
     progress: {

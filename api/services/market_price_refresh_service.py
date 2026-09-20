@@ -27,8 +27,10 @@ from cardmarket_api import CardmarketDataUnavailableError
 
 from config import get_settings
 from core.database import SessionLocal
+from models.article import Article
 from models.collection_card import CollectionCard
 from services import collection_card_service
+from services.article_market_reference_service import revalue_all_articles
 from services.cardmarket_local_price_service import (
     fetch_pricing_block_for_card,
     get_price_api,
@@ -52,13 +54,20 @@ def refresh_market_prices() -> dict[str, Any]:
     call from a worker thread or a manual endpoint, never an async event loop.
     """
     report = refresh_price_guide(force=True)
-    revaluation = _revalue_all_collection_cards()
+    db = SessionLocal()
+    try:
+        revaluation = _revalue_all_collection_cards()
+        articles_reval = revalue_all_articles(db)
+        db.commit()
+    finally:
+        db.close()
     result = {
         "guide_refreshed": report.refreshed,
         "guide_source": report.source,
         "guide_row_count": report.row_count,
         "guide_created_at": report.created_at,
         **revaluation,
+        **articles_reval,
     }
     logger.info("Cardmarket market refresh done: %s", result)
     return result
@@ -105,6 +114,27 @@ def _revalue_all_collection_cards() -> dict[str, int]:
     }
 
 
+def _bootstrap_article_market_references_if_needed() -> None:
+    """Backfill article market columns when the guide exists but articles were never priced."""
+    db = SessionLocal()
+    try:
+        pending = (
+            db.query(Article)
+            .filter(Article.market_priced_at.is_(None))
+            .filter(Article.set_code.isnot(None))
+            .filter(Article.card_number.isnot(None))
+            .count()
+        )
+        if pending == 0:
+            return
+        logger.info("Backfilling market reference for %s article(s)…", pending)
+        stats = revalue_all_articles(db)
+        db.commit()
+        logger.info("Article market backfill done: %s", stats)
+    finally:
+        db.close()
+
+
 async def bootstrap_market_prices_async() -> None:
     """Startup task: make the local guide usable without waiting for the night."""
     api = get_price_api()
@@ -115,6 +145,7 @@ async def bootstrap_market_prices_async() -> None:
             api.row_count,
             age,
         )
+        await asyncio.to_thread(_bootstrap_article_market_references_if_needed)
         return
     try:
         await asyncio.to_thread(refresh_market_prices)

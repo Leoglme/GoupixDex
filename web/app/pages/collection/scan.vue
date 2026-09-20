@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-5 sm:px-5 sm:py-5">
+      <div class="app-dashboard-page w-full space-y-3 sm:space-y-5">
         <GoupixDexPageHeader
           title="Scanner mes cartes"
           description="Photographiez vos cartes à la chaîne : langue reconnue automatiquement, capture en mode caisse (HTTPS) et arrivée en temps réel dans la collection."

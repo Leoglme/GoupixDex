@@ -1,5 +1,12 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
+import { persistRelistQueue, relistEditLocation } from '~/utils/articleRelistQueue'
+import {
+  articleEligibleForBulkRelist,
+  articleEligibleForVintedRelist,
+  articleWithdrawnFromSale,
+  type BulkRelistModalMode,
+} from '~/utils/articleSaleState'
 
 export type ArticlesListPageVariant = 'listed'
 
@@ -19,8 +26,12 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     vintedUnlistAfterEbaySale,
     publishArticleToVinted,
     publishArticleToEbay,
+    publishArticleToLeboncoin,
     startVintedBatch,
+    startVintedBatchDelist,
     startEbayBatch,
+    bulkDelistChannels,
+    bulkPrepareForSale,
   } = useArticles()
   const { getSettings } = useSettings()
   const toast = useToast()
@@ -30,6 +41,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const wardrobeSyncing: Ref<boolean> = ref(false)
   const ebayPublishAvailable: Ref<boolean> = ref(false)
   const vintedChannelEnabled: Ref<boolean> = ref(false)
+  const leboncoinPublishAvailable: Ref<boolean> = ref(false)
 
   const allArticles = useState<Article[]>('goupix-articles-listed-cache', () => [])
   const loading: Ref<boolean> = ref(allArticles.value.length === 0)
@@ -46,9 +58,19 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
 
   const bulkDeleteOpen: Ref<boolean> = ref(false)
   const bulkDeleteIds: Ref<number[]> = ref([])
+  const bulkPublishOpen: Ref<boolean> = ref(false)
+  const bulkPublishIds: Ref<number[]> = ref([])
   const bulkPublishBusy: Ref<boolean> = ref(false)
+  const bulkDelistOpen: Ref<boolean> = ref(false)
+  const bulkDelistIds: Ref<number[]> = ref([])
+  const bulkDelistBusy: Ref<boolean> = ref(false)
+  const bulkRelistOpen: Ref<boolean> = ref(false)
+  const bulkRelistIds: Ref<number[]> = ref([])
+  const bulkRelistBusy: Ref<boolean> = ref(false)
 
-  const displayedArticles = computed(() => allArticles.value.filter((a) => !a.is_sold))
+  const displayedArticles = computed(() => allArticles.value.filter((a) => !a.is_sold && (a.offers_for_sale ?? true)))
+
+  const withdrawnFromSaleArticles = computed(() => allArticles.value.filter((a) => articleWithdrawnFromSale(a)))
 
   const hasAnyArticles = computed(() => allArticles.value.length > 0)
 
@@ -138,9 +160,11 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         s.ebay_oauth_configured === true &&
         s.ebay_connected === true &&
         s.ebay_listing_config_complete === true
+      leboncoinPublishAvailable.value = s.leboncoin_enabled === true && Boolean((s.sender_postal_code || '').trim())
     } catch {
       vintedChannelEnabled.value = false
       ebayPublishAvailable.value = false
+      leboncoinPublishAvailable.value = false
     }
   }
 
@@ -335,6 +359,117 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   /**
    *
    */
+  function openBulkPublish(ids: number[]) {
+    bulkPublishIds.value = ids
+    bulkPublishOpen.value = true
+  }
+
+  /**
+   *
+   */
+  function openBulkDelist(ids: number[]) {
+    bulkDelistIds.value = ids
+    bulkDelistOpen.value = true
+  }
+
+  /**
+   *
+   */
+  function openBulkRelist(ids: number[]) {
+    const eligible = ids.filter((id) => {
+      const a = articleById(id)
+      return a && articleEligibleForBulkRelist(a)
+    })
+    if (!eligible.length) {
+      toast.add({
+        title: 'Relister',
+        description:
+          'Sélectionnez des articles déjà en ligne sur Vinted, ou des fiches retirées de la vente après un retrait total.',
+        color: 'neutral',
+      })
+      return
+    }
+    bulkRelistIds.value = eligible
+    bulkRelistOpen.value = true
+  }
+
+  /**
+   *
+   */
+  function articlesForIds(ids: number[]): Article[] {
+    const out: Article[] = []
+    for (const id of ids) {
+      const a = allArticles.value.find((x) => x.id === id)
+      if (a) {
+        out.push(a)
+      }
+    }
+    return out
+  }
+
+  const bulkDelistChannelState = computed(() => {
+    const rows = articlesForIds(bulkDelistIds.value)
+    return {
+      anyVinted: rows.some((r) => r.published_on_vinted),
+      anyEbay: rows.some((r) => r.published_on_ebay),
+      anyLeboncoin: rows.some((r) => r.published_on_leboncoin),
+    }
+  })
+
+  const bulkRelistChannelState = computed(() => {
+    const rows = articlesForIds(bulkRelistIds.value)
+    const anyVintedListed = rows.some((r) => r.published_on_vinted)
+    const anyWithdrawn = rows.some((r) => articleWithdrawnFromSale(r))
+    const anyVintedRenew = rows.some((r) => articleEligibleForVintedRelist(r))
+    const mode: BulkRelistModalMode = anyVintedRenew ? 'vinted-renew' : 'restore-sale'
+    return {
+      anyVintedListed,
+      anyWithdrawn,
+      mode,
+    }
+  })
+
+  /**
+   * Lance la publication groupée selon les canaux cochés dans la modale.
+   */
+  async function confirmBulkPublish(payload: {
+    vinted: boolean
+    ebay: boolean
+    leboncoin: boolean
+    refreshVinted?: boolean
+  }) {
+    const ids = bulkPublishIds.value
+    if (!ids.length) {
+      return
+    }
+    bulkPublishOpen.value = false
+    if (payload.leboncoin && !payload.vinted && !payload.ebay) {
+      await onBulkPublishLeboncoin(ids)
+      return
+    }
+    if (payload.vinted && payload.ebay) {
+      await onBulkPublishBoth(ids)
+      return
+    }
+    if (payload.vinted) {
+      await onBulkPublishVinted(ids)
+      return
+    }
+    if (payload.ebay) {
+      await onBulkPublishEbay(ids)
+    }
+    if (payload.leboncoin) {
+      toast.add({
+        title: 'Leboncoin + autre canal',
+        description: 'Lancez d’abord Vinted/eBay, puis republiez sur Leboncoin article par article.',
+        color: 'warning',
+      })
+    }
+  }
+
+  /**
+   *
+   */
   async function confirmBulkDelete() {
     if (!bulkDeleteIds.value.length) {
       return
@@ -420,6 +555,119 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   /**
    *
    * @param ids
+   */
+  async function confirmBulkDelist(payload: { vinted: boolean; ebay: boolean; leboncoin: boolean }) {
+    const ids = bulkDelistIds.value
+    if (!ids.length) {
+      return
+    }
+    bulkDelistOpen.value = false
+    bulkDelistBusy.value = true
+    try {
+      const res = await bulkDelistChannels({
+        article_ids: ids,
+        vinted: payload.vinted,
+        ebay: payload.ebay,
+        leboncoin: payload.leboncoin,
+      })
+      const parts: string[] = []
+      if (res.ebay_removed) {
+        parts.push(`${res.ebay_removed} retrait(s) eBay`)
+      }
+      if (res.leboncoin_cleared) {
+        parts.push(`${res.leboncoin_cleared} retrait(s) Leboncoin`)
+      }
+      if (payload.vinted && res.vinted_article_ids.length) {
+        if (!isDesktopApp.value) {
+          toast.add({
+            title: 'Application desktop requise',
+            description: 'Le retrait Vinted s’exécute sur votre machine.',
+            color: 'warning',
+          })
+          await navigateTo('/downloads')
+        } else {
+          const { job_id } = await startVintedBatchDelist(res.vinted_article_ids)
+          if (job_id) {
+            await navigateTo({ path: '/articles/listing-logs', query: { job: job_id } })
+            return
+          }
+        }
+      }
+      if (parts.length) {
+        toast.add({ title: 'Retrait enregistré', description: parts.join(' · '), color: 'success' })
+      } else if (!payload.vinted || !res.vinted_article_ids.length) {
+        toast.add({
+          title: 'Aucun retrait',
+          description: 'Aucune annonce active sur les canaux choisis pour cette sélection.',
+          color: 'neutral',
+        })
+      }
+      articleListSelectionReset.value += 1
+      await refresh()
+    } catch (e) {
+      toast.add({ title: 'Retrait impossible', description: apiErrorMessage(e), color: 'error' })
+    } finally {
+      bulkDelistBusy.value = false
+    }
+  }
+
+  /**
+   *
+   */
+  async function confirmBulkRelist(payload: { renewVinted: boolean; mode: BulkRelistModalMode }) {
+    const ids = [...bulkRelistIds.value]
+    if (!ids.length) {
+      return
+    }
+    bulkRelistOpen.value = false
+    bulkRelistBusy.value = true
+    try {
+      const withdrawnIds = ids.filter((id) => {
+        const a = articleById(id)
+        return a && articleWithdrawnFromSale(a)
+      })
+      if (withdrawnIds.length) {
+        await bulkPrepareForSale(withdrawnIds)
+      }
+      persistRelistQueue(ids)
+      const rows = articlesForIds(ids)
+      const vintedDelistIds = rows.filter((r) => r.published_on_vinted).map((r) => r.id)
+      const renewVinted =
+        payload.mode === 'vinted-renew' ? vintedDelistIds.length > 0 : payload.renewVinted && vintedDelistIds.length > 0
+
+      if (renewVinted) {
+        if (!isDesktopApp.value) {
+          toast.add({
+            title: 'Application desktop requise',
+            description: 'Le retrait Vinted avant republication s’exécute sur votre machine.',
+            color: 'warning',
+          })
+          await navigateTo('/downloads')
+          return
+        }
+        const { job_id } = await startVintedBatchDelist(vintedDelistIds)
+        if (job_id) {
+          articleListSelectionReset.value += 1
+          await navigateTo({
+            path: '/articles/listing-logs',
+            query: { job: job_id, after: 'relist' },
+          })
+          return
+        }
+      }
+
+      articleListSelectionReset.value += 1
+      await refresh()
+      await navigateTo(relistEditLocation(ids[0]!, ids))
+    } catch (e) {
+      toast.add({ title: 'Remise en vente', description: apiErrorMessage(e), color: 'error' })
+    } finally {
+      bulkRelistBusy.value = false
+    }
+  }
+
+  /**
+   *
    */
   async function onBulkPublishVinted(ids: number[]) {
     const eligible = eligibleIdsForVintedBulk(ids)
@@ -611,6 +859,94 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    *
    * @param a
    */
+  async function onBulkPublishLeboncoin(ids: number[]) {
+    const eligible = eligibleIdsForVintedBulk(ids)
+    if (!eligible.length) {
+      toast.add({
+        title: 'Sélection invalide',
+        description: 'Articles non vendus avec au moins une photo requis (app desktop).',
+        color: 'warning',
+      })
+      return
+    }
+    if (!isDesktopApp.value) {
+      toast.add({
+        title: 'Application desktop requise',
+        description: 'Leboncoin s’exécute sur votre machine via Chrome.',
+        color: 'warning',
+      })
+      await navigateTo('/downloads')
+      return
+    }
+    bulkPublishBusy.value = true
+    try {
+      const first = eligible[0]!
+      const { leboncoin } = await publishArticleToLeboncoin(first)
+      if (leboncoin?.stream_path) {
+        await navigateTo({
+          path: '/articles/listing-logs',
+          query: { article: String(first), progress: 'local', worker: 'leboncoin' },
+        })
+        if (eligible.length > 1) {
+          toast.add({
+            title: 'Publication Leboncoin',
+            description: `${eligible.length} article(s) sélectionné(s) — traitez-les un par un pour l’instant.`,
+            color: 'neutral',
+          })
+        }
+        return
+      }
+      toast.add({ title: 'Leboncoin', description: 'Réponse inattendue du worker.', color: 'warning' })
+    } catch (e) {
+      toast.add({
+        title: 'Publication Leboncoin impossible',
+        description: apiErrorMessage(e),
+        color: 'error',
+      })
+    } finally {
+      bulkPublishBusy.value = false
+    }
+  }
+
+  /**
+   *
+   */
+  async function onPublishLeboncoin(a: Article) {
+    if (!isDesktopApp.value) {
+      toast.add({
+        title: 'Application desktop requise',
+        description: 'La mise en ligne Leboncoin utilise Chrome sur ce poste.',
+        color: 'warning',
+      })
+      await navigateTo('/downloads')
+      return
+    }
+    try {
+      const { leboncoin } = await publishArticleToLeboncoin(a.id)
+      if (leboncoin?.stream_path) {
+        await navigateTo({
+          path: '/articles/listing-logs',
+          query: { article: String(a.id), progress: 'local', worker: 'leboncoin' },
+        })
+        return
+      }
+      toast.add({
+        title: 'Publication Leboncoin',
+        description: 'Réponse inattendue du worker local.',
+        color: 'warning',
+      })
+    } catch (e) {
+      toast.add({
+        title: 'Publication Leboncoin impossible',
+        description: apiErrorMessage(e),
+        color: 'error',
+      })
+    }
+  }
+
+  /**
+   *
+   */
   async function onPublishVinted(a: Article) {
     if (!isDesktopApp.value) {
       toast.add({
@@ -649,11 +985,13 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     variant,
     allArticles,
     displayedArticles,
+    withdrawnFromSaleArticles,
     hasAnyArticles,
     loading,
     wardrobeSyncing,
     ebayPublishAvailable,
     vintedChannelEnabled,
+    leboncoinPublishAvailable,
     soldOpen,
     soldArticles,
     soldSubmitting,
@@ -662,19 +1000,37 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     deleteId,
     bulkDeleteOpen,
     bulkDeleteIds,
+    bulkPublishOpen,
+    bulkPublishIds,
     bulkPublishBusy,
+    bulkDelistOpen,
+    bulkDelistIds,
+    bulkDelistBusy,
+    bulkDelistChannelState,
+    bulkRelistOpen,
+    bulkRelistIds,
+    bulkRelistBusy,
+    bulkRelistChannelState,
     refresh,
     openSold,
     confirmSold,
     confirmDelete,
     openBulkDelete,
     confirmBulkDelete,
+    openBulkPublish,
+    openBulkDelist,
+    openBulkRelist,
+    confirmBulkPublish,
+    confirmBulkDelist,
+    confirmBulkRelist,
     onWardrobeImportFromVinted,
     onPublishEbay,
     onBulkPublishVinted,
     onBulkPublishEbay,
     onBulkPublishBoth,
     onPublishVinted,
+    onPublishLeboncoin,
+    onBulkPublishLeboncoin,
     onRetryCrossEbay,
     onRetryCrossVinted,
   }

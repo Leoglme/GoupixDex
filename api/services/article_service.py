@@ -75,9 +75,15 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "sold_price": float(article.sold_price) if article.sold_price is not None else None,
         "sale_source": article.sale_source,
         "is_sold": article.is_sold,
+        "offers_for_sale": bool(getattr(article, "offers_for_sale", True)),
         "published_on_vinted": bool(article.published_on_vinted),
         "vinted_published_at": article.vinted_published_at.isoformat()
         if article.vinted_published_at
+        else None,
+        "published_on_leboncoin": bool(getattr(article, "published_on_leboncoin", False)),
+        "leboncoin_listing_id": getattr(article, "leboncoin_listing_id", None),
+        "leboncoin_published_at": article.leboncoin_published_at.isoformat()
+        if getattr(article, "leboncoin_published_at", None)
         else None,
         "published_on_ebay": bool(article.published_on_ebay),
         "ebay_listing_id": article.ebay_listing_id,
@@ -99,8 +105,49 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "order_line_id": article.order_line_id,
         "order_context": order_ctx,
+        "cardmarket_id_product": int(article.cardmarket_id_product)
+        if article.cardmarket_id_product is not None
+        else None,
+        "market_cardmarket_eur": float(article.market_cardmarket_eur)
+        if article.market_cardmarket_eur is not None
+        else None,
+        "market_tcgplayer_eur": float(article.market_tcgplayer_eur)
+        if article.market_tcgplayer_eur is not None
+        else None,
+        "market_priced_at": article.market_priced_at.isoformat() if article.market_priced_at else None,
         "images": [{"id": img.id, "image_url": img.image_url, "created_at": img.created_at.isoformat()} for img in article.images],
     }
+
+
+def clear_vinted_publication_fields(article: Article) -> None:
+    article.published_on_vinted = False
+    article.vinted_published_at = None
+    article.vinted_id = None
+    article.cross_vinted_removal_failed = False
+    article.cross_vinted_removal_error = None
+
+
+def clear_leboncoin_publication_fields(article: Article) -> None:
+    article.published_on_leboncoin = False
+    article.leboncoin_listing_id = None
+    article.leboncoin_published_at = None
+
+
+def article_live_on_any_marketplace(article: Article) -> bool:
+    return bool(
+        article.published_on_vinted
+        or article.published_on_ebay
+        or getattr(article, "published_on_leboncoin", False)
+    )
+
+
+def apply_offers_for_sale_after_delist(article: Article, *, hide_when_off_all: bool) -> None:
+    if article.is_sold:
+        return
+    if article_live_on_any_marketplace(article):
+        article.offers_for_sale = True
+    elif hide_when_off_all:
+        article.offers_for_sale = False
 
 
 def mark_article_published_on_vinted(
@@ -119,6 +166,31 @@ def mark_article_published_on_vinted(
         article.vinted_published_at = dt.datetime.now(dt.UTC)
         if vinted_id is not None and vinted_id > 0:
             article.vinted_id = int(vinted_id)
+        if not article.is_sold:
+            article.offers_for_sale = True
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def mark_article_published_on_leboncoin(
+    article_id: int,
+    user_id: int,
+    *,
+    listing_id: str | None = None,
+) -> bool:
+    db = SessionLocal()
+    try:
+        article = get_article(db, article_id, user_id)
+        if article is None:
+            return False
+        article.published_on_leboncoin = True
+        article.leboncoin_published_at = dt.datetime.now(dt.UTC)
+        if listing_id:
+            article.leboncoin_listing_id = listing_id.strip()[:64]
+        if not article.is_sold:
+            article.offers_for_sale = True
         db.commit()
         return True
     finally:
@@ -138,6 +210,8 @@ def mark_article_published_on_ebay(
         if inventory_sku:
             article.ebay_inventory_sku = inventory_sku.strip()[:50]
         article.ebay_published_at = dt.datetime.now(dt.UTC)
+        if not article.is_sold:
+            article.offers_for_sale = True
         db.commit()
         return True
     finally:
@@ -197,11 +271,10 @@ def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
             c = str(cert).strip()[:30]
             article.graded_cert_number = c or None
     if data.get("clear_vinted_publication") is True:
-        article.published_on_vinted = False
-        article.vinted_published_at = None
-        article.vinted_id = None
+        clear_vinted_publication_fields(article)
+        apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
     if data.get("clear_ebay_publication") is True:
-        article.published_on_ebay = False
-        article.ebay_listing_id = None
-        article.ebay_inventory_sku = None
-        article.ebay_published_at = None
+        from services.ebay_listing_delete_service import clear_ebay_publication_fields
+
+        clear_ebay_publication_fields(article)
+        apply_offers_for_sale_after_delist(article, hide_when_off_all=True)

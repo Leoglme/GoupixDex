@@ -69,6 +69,23 @@ export function useBinders() {
   }
 
   /**
+   * Place une carte du catalogue (crée une entrée « manquante » si besoin).
+   */
+  async function placeCatalogInPocket(
+    binderId: number,
+    tcgdexCardId: string,
+    pocket: number,
+    language = 'fr',
+  ): Promise<BinderDetail> {
+    const { data } = await $api.post<BinderDetail>(`/binders/${binderId}/place-catalog`, {
+      tcgdex_card_id: tcgdexCardId,
+      pocket,
+      language,
+    })
+    return data
+  }
+
+  /**
    *
    */
   async function movePocket(binderId: number, pocketKey: string, toPocket: number): Promise<BinderDetail> {
@@ -109,6 +126,28 @@ export function useBinders() {
     return data
   }
 
+  /**
+   * POST `/binders/:id/cover-image` — image de couverture sur mesure (max 3 Mo côté API).
+   */
+  async function uploadCoverImage(binderId: number, file: File): Promise<{ path: string; url: string }> {
+    const fd = new FormData()
+    fd.set('image', file)
+    const { data } = await $api.post<{ path: string; url: string }>(`/binders/${binderId}/cover-image`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  }
+
+  /**
+   * POST `/binders/:id/cover-urls` — URLs signées pour les chemins stockés dans `cover`.
+   */
+  async function resolveCoverUrls(binderId: number, paths: string[]): Promise<Record<string, string>> {
+    const { data } = await $api.post<{ urls: Record<string, string> }>(`/binders/${binderId}/cover-urls`, {
+      paths,
+    })
+    return data.urls ?? {}
+  }
+
   return {
     listBinders,
     getBinder,
@@ -117,9 +156,12 @@ export function useBinders() {
     deleteBinder,
     reorderBinders,
     placeItemInPocket,
+    placeCatalogInPocket,
     movePocket,
     removeFromPocket,
     setPageCount,
     addItems,
+    uploadCoverImage,
+    resolveCoverUrls,
   }
 }

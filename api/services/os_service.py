@@ -92,8 +92,29 @@ class OsService:
             )
         return Path.home() / ".local" / "share" / "GoupixDex" / "cardmarket-nodriver-profile"
 
+    @staticmethod
+    def resolve_leboncoin_nodriver_user_data_dir(explicit: str | None) -> Path:
+        """Profil Chromium Leboncoin (session persistée). Surcharge : ``LEBONCOIN_USER_DATA_DIR``."""
+        if explicit is not None and str(explicit).strip():
+            return Path(str(explicit).strip()).expanduser().resolve()
+        if sys.platform == "win32":
+            local = os.environ.get("LOCALAPPDATA")
+            if local:
+                return Path(local) / "GoupixDex" / "leboncoin-nodriver-profile"
+            return Path.home() / "GoupixDex" / "leboncoin-nodriver-profile"
+        if sys.platform == "darwin":
+            return (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "GoupixDex"
+                / "leboncoin-nodriver-profile"
+            )
+        return Path.home() / ".local" / "share" / "GoupixDex" / "leboncoin-nodriver-profile"
+
 
 get_project_root = OsService.get_project_root
 resolve_vinted_nodriver_user_data_dir = OsService.resolve_vinted_nodriver_user_data_dir
 resolve_amazon_nodriver_user_data_dir = OsService.resolve_amazon_nodriver_user_data_dir
 resolve_cardmarket_nodriver_user_data_dir = OsService.resolve_cardmarket_nodriver_user_data_dir
+resolve_leboncoin_nodriver_user_data_dir = OsService.resolve_leboncoin_nodriver_user_data_dir

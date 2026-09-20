@@ -43,10 +43,13 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000',
+      /** OTP Amazon (webhook Resend sur prod) — utilisé quand apiBase est localhost */
+      provisionInboundApiBase: process.env.NUXT_PUBLIC_PROVISION_INBOUND_API_BASE || 'https://api.goupixdex.dibodev.fr',
       /** Local Python worker (Vinted / nodriver) — Tauri app only */
       vintedLocalBase: process.env.NUXT_PUBLIC_VINTED_LOCAL_BASE || 'http://127.0.0.1:18766',
       /** Local Python worker (Amazon invites / nodriver) — mainly desktop app */
       amazonLocalBase: process.env.NUXT_PUBLIC_AMAZON_LOCAL_BASE || 'http://127.0.0.1:18768',
+      leboncoinLocalBase: process.env.NUXT_PUBLIC_LEBONCOIN_LOCAL_BASE || 'http://127.0.0.1:18769',
       /** Local Python worker (Cardmarket panier / nodriver) — desktop app */
       cardmarketLocalBase: process.env.NUXT_PUBLIC_CARDMARKET_LOCAL_BASE || 'http://127.0.0.1:18770',
       siteUrl: process.env.NUXT_PUBLIC_SITE_URL || 'https://goupixdex.dibodev.fr',
@@ -135,6 +138,8 @@ export default defineNuxtConfig({
         'lucide:users',
         'lucide:flame',
         'simple-icons:amazon',
+        'simple-icons:vinted',
+        'simple-icons:leboncoin',
       ],
     },
   },

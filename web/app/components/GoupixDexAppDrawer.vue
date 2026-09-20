@@ -7,11 +7,11 @@
     <Transition name="goupix-drawer-panel">
       <div
         v-if="open"
-        class="border-default fixed top-0 right-0 z-50 flex h-dvh w-full max-w-[460px] flex-col border-l bg-(--app-surface) shadow-2xl"
+        class="goupix-drawer-panel border-default fixed top-0 right-0 z-50 flex h-dvh flex-col border-l bg-(--app-surface) pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] shadow-2xl"
         role="dialog"
         aria-modal="true"
       >
-        <div class="border-default flex items-start gap-3 border-b px-4 py-4 sm:px-5">
+        <div class="border-default flex shrink-0 items-start gap-3 border-b px-5 py-4">
           <span
             v-if="icon || $slots.icon"
             class="border-default bg-elevated/40 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border"
@@ -36,11 +36,11 @@
           </button>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-x-visible overflow-y-auto px-4 py-4 sm:px-5">
+        <div class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-4">
           <slot />
         </div>
 
-        <div v-if="$slots.footer" class="border-default flex gap-2 border-t px-4 py-4 sm:px-5">
+        <div v-if="$slots.footer" class="border-default flex shrink-0 gap-2 border-t px-5 py-4">
           <slot name="footer" />
         </div>
       </div>
@@ -94,6 +94,11 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.goupix-drawer-panel {
+  width: min(480px, 100dvw);
+  max-width: 480px;
+}
+
 .goupix-drawer-panel-enter-active,
 .goupix-drawer-panel-leave-active {
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);

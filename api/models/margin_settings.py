@@ -18,6 +18,7 @@ class MarginSettings(Base):
     margin_percent: Mapped[int] = mapped_column(Integer(), default=20)
     vinted_enabled: Mapped[bool] = mapped_column(Boolean(), default=True)
     ebay_enabled: Mapped[bool] = mapped_column(Boolean(), default=False)
+    leboncoin_enabled: Mapped[bool] = mapped_column(Boolean(), default=False)
     ebay_marketplace_id: Mapped[str] = mapped_column(String(32), default="EBAY_FR")
     ebay_category_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ebay_merchant_location_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -30,5 +31,9 @@ class MarginSettings(Base):
     sender_line2: Mapped[str | None] = mapped_column(String(180), nullable=True)
     sender_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sender_city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    active_amazon_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("amazon_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="margin_settings")

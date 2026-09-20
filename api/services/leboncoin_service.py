@@ -1,0 +1,557 @@
+"""Leboncoin « déposer une annonce » automation (nodriver / CDP)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import time
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlparse
+
+import nodriver as uc
+from nodriver import Element
+
+from config import get_settings
+from services.os_service import get_project_root, resolve_leboncoin_nodriver_user_data_dir
+from services.timer_service import TimerService
+from services.vinted_service import _build_browser_args
+
+if TYPE_CHECKING:
+    from nodriver import Browser, Tab
+
+logger = logging.getLogger(__name__)
+
+FormProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
+
+BASE_URL = "https://www.leboncoin.fr"
+DEPOSIT_URL = f"{BASE_URL}/deposer-une-annonce"
+ACCOUNT_URL = f"{BASE_URL}/mes-annonces"
+LOGIN_URL = f"{BASE_URL}/compte/connexion-securite"
+LOGIN_URL_PATTERN = re.compile(
+    r"(auth\.leboncoin\.fr|/(compte/connexion|connexion-securite|login|authentification|account/login))",
+    re.I,
+)
+PUBLISHED_URL_PATTERNS = (
+    re.compile(r"/ad/[^/]+/(\d{4,})"),
+    re.compile(r"/(\d{6,})\.htm"),
+    re.compile(r"[?&]listing_id=(\d+)"),
+)
+CONFIRMED_URL_PATTERNS = (
+    re.compile(r"/deposer-une-annonce/(confirmation|merci|success)", re.I),
+    re.compile(r"/ad/"),
+)
+
+# Autocomplete label for Pokémon singles (Loisirs → Collection).
+DEFAULT_CATEGORY_LABEL = os.environ.get("LEBONCOIN_CATEGORY", "Cartes à collectionner")
+# Optional wizard clicks before the category autocomplete (comma-separated labels).
+_CATEGORY_WIZARD_LABELS = tuple(
+    x.strip()
+    for x in os.environ.get(
+        "LEBONCOIN_CATEGORY_WIZARD",
+        "Loisirs,Collection,Cartes",
+    ).split(",")
+    if x.strip()
+)
+
+_CATEGORY_INPUT_SELECTORS = (
+    'input[name="category"]',
+    'input[data-qa-id="adsubject_category"]',
+    'input[placeholder*="catégorie" i]',
+    '[data-qa-id="category"] input',
+)
+_TITLE_SELECTORS = (
+    'input[name="subject"]',
+    'input[data-qa-id="input_subject"]',
+    "input#subject",
+)
+_DESC_SELECTORS = (
+    'textarea[name="body"]',
+    'textarea[data-qa-id="textarea_body"]',
+    "textarea#body",
+)
+_PRICE_SELECTORS = (
+    'input[name="price"]',
+    'input[data-qa-id="input_price"]',
+    "input#price",
+)
+_ZIP_SELECTORS = (
+    'input[name="location"]',
+    'input[name="zipcode"]',
+    'input[data-qa-id="input_location"]',
+    'input[placeholder*="code postal" i]',
+)
+_SUGGESTION_SELECTORS = (
+    '[role="option"]',
+    'li[data-qa-id*="suggestion"]',
+    'ul[role="listbox"] li',
+    '[data-qa-id="suggestion"]',
+)
+_FILE_INPUT_SELECTORS = ('input[type="file"][accept*="image"]', 'input[type="file"]')
+_PUBLISH_BUTTON_CSS = ('button[type="submit"]', 'button[data-qa-id="adsubmit"]')
+_PUBLISH_BUTTON_TEXT = (
+    "Déposer mon annonce",
+    "Déposer l'annonce",
+    "Publier mon annonce",
+    "Publier",
+    "Valider",
+)
+
+
+class LeboncoinService:
+    """One browser session per publish job (mirrors VintedService lifecycle)."""
+
+    _browser: Optional[Browser] = None
+    _tab: Optional[Tab] = None
+
+    @classmethod
+    def _require_tab(cls) -> Tab:
+        if cls._tab is None:
+            raise RuntimeError("Leboncoin tab not initialized")
+        return cls._tab
+
+    @classmethod
+    async def init_browser(cls) -> None:
+        settings = get_settings()
+        headless = settings.vinted_browser_headless
+        discreet = bool(settings.vinted_browser_discreet) and not headless
+        start_kw: dict[str, Any] = {
+            "headless": headless,
+            "browser_args": _build_browser_args(headless=headless, discreet=discreet),
+            "sandbox": False,
+        }
+        if settings.vinted_chrome_executable:
+            start_kw["browser_executable_path"] = settings.vinted_chrome_executable.strip()
+        uds = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
+        uds.mkdir(parents=True, exist_ok=True)
+        start_kw["user_data_dir"] = str(uds)
+        logger.info("Leboncoin browser: persistent profile %s", uds)
+        cls._browser = await uc.start(**start_kw)
+        if cls._browser is None:
+            raise RuntimeError("nodriver.start() returned no browser instance")
+
+    @classmethod
+    async def init_page(cls) -> None:
+        cls._tab = await cls._browser.get(DEPOSIT_URL)  # type: ignore[union-attr]
+        await cls._require_tab().sleep(0.6)
+
+    @classmethod
+    def close_browser(cls) -> None:
+        try:
+            if cls._browser is not None:
+                cls._browser.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Leboncoin browser stop: %s", exc)
+        cls._browser = None
+        cls._tab = None
+
+    @classmethod
+    async def _set_input_value(cls, tab: Tab, css_selector: str, value: str) -> bool:
+        sel_json = json.dumps(css_selector)
+        val_json = json.dumps(value)
+        ok = await tab.evaluate(
+            f"""
+            (() => {{
+                const el = document.querySelector({sel_json});
+                if (!el) return false;
+                el.focus();
+                const val = {val_json};
+                const proto = Object.getPrototypeOf(el);
+                const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+                    || Object.getOwnPropertyDescriptor(
+                        el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+                        'value'
+                    );
+                if (desc && desc.set) desc.set.call(el, val);
+                else el.value = val;
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return true;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        return ok is True
+
+    @classmethod
+    async def _first_matching_selector(cls, tab: Tab, selectors: tuple[str, ...]) -> str | None:
+        for sel in selectors:
+            found = await tab.evaluate(
+                f"!!document.querySelector({json.dumps(sel)})",
+                return_by_value=True,
+            )
+            if found is True:
+                return sel
+        return None
+
+    @classmethod
+    async def _pick_suggestion(cls, tab: Tab, needle: str) -> None:
+        needle_low = needle.lower()
+        await tab.evaluate(
+            f"""
+            (() => {{
+                const needle = {json.dumps(needle_low)};
+                const sels = {json.dumps(list(_SUGGESTION_SELECTORS))};
+                for (const sel of sels) {{
+                    for (const el of document.querySelectorAll(sel)) {{
+                        const t = (el.textContent || '').trim().toLowerCase();
+                        if (t && (t.includes(needle) || needle.includes(t.slice(0, 12)))) {{
+                            el.click();
+                            return true;
+                        }}
+                    }}
+                }}
+                const first = document.querySelector('[role="option"]');
+                if (first) {{ first.click(); return true; }}
+                return false;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        await tab.sleep(0.35)
+
+    @classmethod
+    async def _click_button_containing(cls, tab: Tab, needle: str) -> bool:
+        needle_json = json.dumps(needle.lower())
+        clicked = await tab.evaluate(
+            f"""
+            (() => {{
+                const needle = {needle_json};
+                for (const el of document.querySelectorAll('button, a, [role="button"]')) {{
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    if (t && (t === needle || t.includes(needle))) {{
+                        el.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        if clicked is True:
+            await tab.sleep(0.55)
+        return clicked is True
+
+    @classmethod
+    async def _try_category_wizard(cls, tab: Tab) -> None:
+        if await cls._first_matching_selector(tab, _CATEGORY_INPUT_SELECTORS):
+            return
+        for label in _CATEGORY_WIZARD_LABELS:
+            if await cls._click_button_containing(tab, label):
+                logger.info("Leboncoin wizard click: %s", label)
+                await tab.sleep(0.4)
+
+    @classmethod
+    async def _fill_first(cls, tab: Tab, selectors: tuple[str, ...], value: str, *, pick_suggestion: bool = False) -> bool:
+        sel = await cls._first_matching_selector(tab, selectors)
+        if not sel:
+            return False
+        if not await cls._set_input_value(tab, sel, value):
+            return False
+        if pick_suggestion:
+            await cls._pick_suggestion(tab, value)
+            await tab.sleep(1.2)
+        return True
+
+    @classmethod
+    async def _current_url(cls, tab: Tab) -> str:
+        raw = await tab.evaluate("location.href", return_by_value=True)
+        return str(raw or "")
+
+    @classmethod
+    async def _accept_didomi_cookies(cls, tab: Tab, timeout_sec: float = 12.0) -> None:
+        """Didomi consent banner (blocks form interaction until dismissed)."""
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            await tab
+            clicked = await tab.evaluate(
+                """
+                (() => {
+                  const ids = ['#didomi-agree-to-all', '#didomi-notice-agree-button'];
+                  for (const id of ids) {
+                    const el = document.querySelector(id);
+                    if (el && typeof el.click === 'function') { el.click(); return 'id'; }
+                  }
+                  const qa = document.querySelector('[data-qa-id="didomi_cta_accept_cookies"]');
+                  if (qa && typeof qa.click === 'function') { qa.click(); return 'qa'; }
+                  const btns = [...document.querySelectorAll('button')];
+                  for (const b of btns) {
+                    const t = (b.textContent || '').toLowerCase();
+                    if (t.includes('accepter') && t.includes('fermer')) {
+                      b.click();
+                      return 'text';
+                    }
+                  }
+                  return '';
+                })()
+                """,
+                return_by_value=True,
+            )
+            if clicked:
+                logger.info("Leboncoin Didomi dismissed (%s)", clicked)
+                await tab.sleep(0.45)
+                return
+            await asyncio.sleep(0.15)
+        logger.debug("Leboncoin Didomi banner not found (may already be accepted).")
+
+    @classmethod
+    async def _page_shows_login_gate(cls, tab: Tab) -> bool:
+        raw = await tab.evaluate(
+            """
+            JSON.stringify((() => {
+              const url = location.href;
+              if (/auth\\.leboncoin\\.fr/i.test(url)) return true;
+              if (/(compte\\/connexion|connexion-securite|login|authentification)/i.test(url)) return true;
+              const body = (document.body && document.body.innerText) || '';
+              if (/\\bme connecter\\b/i.test(body) && !/\\bse déconnecter\\b/i.test(body)) {
+                const hasSubject = !!document.querySelector('input[name="subject"], input#subject');
+                if (!hasSubject) return true;
+              }
+              return false;
+            })())
+            """,
+            return_by_value=True,
+        )
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() == "true"
+
+    @classmethod
+    async def open_login_browser(cls) -> dict[str, Any]:
+        """Open Chromium on leboncoin connexion (persistent profile). Browser stays open."""
+        await cls.init_browser()
+        tab = await cls._browser.get(LOGIN_URL)  # type: ignore[union-attr]
+        cls._tab = tab
+        await tab.sleep(0.5)
+        await cls._accept_didomi_cookies(tab)
+        return {"opened": True, "url": await cls._current_url(tab)}
+
+    @classmethod
+    async def ensure_logged_in(cls, progress: FormProgressFn | None = None) -> None:
+        tab = cls._require_tab()
+        await tab.get(ACCOUNT_URL)
+        await tab.sleep(0.8)
+        await cls._accept_didomi_cookies(tab)
+        url = await cls._current_url(tab)
+        if LOGIN_URL_PATTERN.search(url) or await cls._page_shows_login_gate(tab):
+            raise RuntimeError(
+                "Session Leboncoin requise : Paramètres / Marketplace / Ouvrir Chrome, "
+                "puis relancez la publication."
+            )
+        if progress:
+            await progress({"type": "log", "step": "auth", "message": "Session Leboncoin OK.", "form_step": "auth_ok"})
+
+    @classmethod
+    async def open_deposit_form(cls, progress: FormProgressFn | None = None) -> None:
+        tab = cls._require_tab()
+        await tab.get(DEPOSIT_URL)
+        await tab.sleep(0.9)
+        await cls._accept_didomi_cookies(tab)
+        url = await cls._current_url(tab)
+        if LOGIN_URL_PATTERN.search(url) or await cls._page_shows_login_gate(tab):
+            raise RuntimeError(
+                "Connectez-vous a Leboncoin (Parametres / Marketplace / Ouvrir Chrome)."
+            )
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "page",
+                    "message": "Formulaire « Déposer une annonce » ouvert.",
+                    "form_step": "deposit_page",
+                }
+            )
+
+    @classmethod
+    async def fill_listing(
+        cls,
+        *,
+        title: str,
+        description: str,
+        price_eur: float,
+        postal_code: str,
+        category_label: str = DEFAULT_CATEGORY_LABEL,
+        progress: FormProgressFn | None = None,
+    ) -> None:
+        tab = cls._require_tab()
+
+        async def log(step: str, msg: str, form_step: str) -> None:
+            if progress:
+                await progress({"type": "log", "step": step, "message": msg, "form_step": form_step})
+
+        await log("form", f"Catégorie : {category_label}…", "category")
+        await cls._try_category_wizard(tab)
+        if not await cls._fill_first(tab, _CATEGORY_INPUT_SELECTORS, category_label, pick_suggestion=True):
+            await cls._try_category_wizard(tab)
+            if not await cls._fill_first(tab, _CATEGORY_INPUT_SELECTORS, category_label, pick_suggestion=True):
+                logger.warning("Leboncoin category field not found — pick category manually in Chrome if needed.")
+        await TimerService.wait(400)
+
+        await log("form", "Titre et description…", "title_desc")
+        if not await cls._fill_first(tab, _TITLE_SELECTORS, title[:200]):
+            raise RuntimeError("Champ titre introuvable sur le formulaire Leboncoin.")
+        if not await cls._fill_first(tab, _DESC_SELECTORS, description[:4000]):
+            raise RuntimeError("Champ description introuvable sur le formulaire Leboncoin.")
+
+        price_str = str(int(price_eur)) if price_eur == int(price_eur) else f"{price_eur:.2f}".replace(".", ",")
+        await log("form", f"Prix : {price_str} €…", "price")
+        if not await cls._fill_first(tab, _PRICE_SELECTORS, price_str):
+            raise RuntimeError("Champ prix introuvable sur le formulaire Leboncoin.")
+
+        zip_clean = postal_code.strip()
+        if zip_clean:
+            await log("form", f"Localisation : {zip_clean}…", "location")
+            if not await cls._fill_first(tab, _ZIP_SELECTORS, zip_clean, pick_suggestion=True):
+                logger.warning("Leboncoin location field not found — verify city in browser.")
+
+    @classmethod
+    async def upload_photos(cls, photo_basenames: list[str], progress: FormProgressFn | None = None) -> None:
+        tab = cls._require_tab()
+        root = get_project_root()
+        paths = [str(root / "images" / name) for name in photo_basenames]
+        for p in paths:
+            if not Path(p).is_file():
+                raise RuntimeError(f"Photo introuvable pour Leboncoin : {p}")
+
+        file_sel = await cls._first_matching_selector(tab, _FILE_INPUT_SELECTORS)
+        if not file_sel:
+            await tab.evaluate(
+                """
+                (() => {
+                  for (const b of document.querySelectorAll('button')) {
+                    const t = (b.textContent || '').toLowerCase();
+                    if (t.includes('ajouter') && t.includes('photo')) { b.click(); return true; }
+                  }
+                  return false;
+                })()
+                """,
+                return_by_value=True,
+            )
+            await tab.sleep(0.8)
+            file_sel = await cls._first_matching_selector(tab, _FILE_INPUT_SELECTORS)
+        if not file_sel:
+            raise RuntimeError("Input fichier photo introuvable sur Leboncoin.")
+        input_el = await tab.select(file_sel, timeout=20)
+        if not isinstance(input_el, Element):
+            raise RuntimeError("Input photo Leboncoin non interactif.")
+        await input_el.send_file(*paths)
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "images",
+                    "message": f"{len(paths)} photo(s) envoyée(s).",
+                    "form_step": "photos_ok",
+                }
+            )
+        await tab.sleep(1.2)
+
+    @classmethod
+    async def _click_publish(cls, tab: Tab) -> bool:
+        for css in _PUBLISH_BUTTON_CSS:
+            btn = await tab.select(css, timeout=4)
+            if isinstance(btn, Element):
+                await btn.click()
+                return True
+        for label in _PUBLISH_BUTTON_TEXT:
+            clicked = await tab.evaluate(
+                f"""
+                (() => {{
+                    const needle = {json.dumps(label.lower())};
+                    for (const b of document.querySelectorAll('button')) {{
+                        const t = (b.textContent || '').trim().toLowerCase();
+                        if (t === needle || t.includes(needle)) {{
+                            b.click();
+                            return true;
+                        }}
+                    }}
+                    return false;
+                }})()
+                """,
+                return_by_value=True,
+            )
+            if clicked is True:
+                return True
+        return False
+
+    @classmethod
+    def _extract_listing_id(url: str) -> str | None:
+        for pat in PUBLISHED_URL_PATTERNS:
+            m = pat.search(url)
+            if m:
+                return m.group(1)
+        return None
+
+    @classmethod
+    async def submit_and_wait(
+        cls,
+        progress: FormProgressFn | None = None,
+        *,
+        timeout_sec: float = 180.0,
+    ) -> dict[str, Any]:
+        tab = cls._require_tab()
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "publish",
+                    "message": "Envoi de l’annonce… (captcha DataDome : validez dans la fenêtre Chrome si besoin).",
+                    "form_step": "publish_click",
+                }
+            )
+        if not await cls._click_publish(tab):
+            raise RuntimeError(
+                "Bouton « Déposer mon annonce » introuvable — complétez le formulaire manuellement dans Chrome."
+            )
+
+        deadline = time.monotonic() + timeout_sec
+        last_url = ""
+        while time.monotonic() < deadline:
+            await tab.sleep(0.5)
+            url = await cls._current_url(tab)
+            last_url = url
+            if any(p.search(url) for p in CONFIRMED_URL_PATTERNS):
+                listing_id = cls._extract_listing_id(url)
+                return {"published": True, "listing_id": listing_id, "url": url}
+            if "datadome" in url.lower() and progress:
+                await progress(
+                    {
+                        "type": "log",
+                        "step": "captcha",
+                        "message": "DataDome — résolvez le captcha dans Chrome…",
+                        "form_step": "datadome",
+                    }
+                )
+        raise RuntimeError(
+            f"Publication Leboncoin non confirmée avant timeout (dernière URL : {urlparse(last_url).path or last_url})."
+        )
+
+    @classmethod
+    async def publish_pokemon_listing(
+        cls,
+        *,
+        title: str,
+        description: str,
+        price_eur: float,
+        postal_code: str,
+        photo_basenames: list[str],
+        progress: FormProgressFn | None = None,
+    ) -> dict[str, Any]:
+        """Full flow: session check → form → photos → submit."""
+        await cls.ensure_logged_in(progress)
+        await cls.open_deposit_form(progress)
+        await cls.fill_listing(
+            title=title,
+            description=description,
+            price_eur=price_eur,
+            postal_code=postal_code,
+            progress=progress,
+        )
+        await cls.upload_photos(photo_basenames, progress)
+        result = await cls.submit_and_wait(progress)
+        return result

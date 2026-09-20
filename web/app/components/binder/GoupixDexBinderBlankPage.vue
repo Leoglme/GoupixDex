@@ -2,13 +2,9 @@
   <section
     aria-label="Feuille vierge"
     :style="{ width: `${size.w}px`, height: `${size.h}px` }"
-    class="relative z-0 shrink-0 rounded-l-xl border shadow-(--app-shadow-soft)"
+    class="relative z-0 shrink-0 overflow-hidden rounded-l-xl border-y border-l shadow-(--app-shadow-soft)"
     :class="[sheet.page, turnClass]"
   >
-    <span
-      aria-hidden
-      class="absolute inset-y-2 -left-1 w-1 rounded-sm border border-(--app-line) bg-(--app-surface-2)"
-    />
     <span
       aria-hidden
       class="pointer-events-none absolute inset-y-0 right-0 w-12 rounded-r-[inherit] bg-gradient-to-l to-transparent"

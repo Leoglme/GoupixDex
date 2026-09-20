@@ -44,6 +44,15 @@ load_worker_dotenv()
 from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.amazon_profile_session_service import detect_amazon_session_from_profile
+from services.amazon_worker_accounts import (
+    bind_amazon_profile_for,
+    bind_provision_staging_profile,
+    claim_provision_staging_profile,
+    discard_provision_staging_profile,
+    fetch_account_credentials,
+    fetch_active_account_id,
+    legacy_amazon_profile_dir,
+)
 from services.os_service import OsService
 
 ensure_proactor_event_loop()
@@ -126,6 +135,18 @@ async def get_user_id_introspected(
     return await introspect_user_id(raw_token, remote)
 
 
+async def bind_active_amazon_profile(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> int | None:
+    """Select Chromium profile for the user's active vault account (legacy path if none)."""
+    account_id = await fetch_active_account_id(raw_token, remote)
+    bind_amazon_profile_for(user_id, account_id)
+    _reset_amazon_scraper()
+    return account_id
+
+
 _progress_ws_clients: set[WebSocket] = set()
 
 
@@ -148,6 +169,7 @@ def _run_search_with_progress(
     query_arg: str,
     max_pages: int,
     loop: asyncio.AbstractEventLoop,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     scraper = _get_amazon_scraper()
 
@@ -170,6 +192,7 @@ def _run_search_with_progress(
         query=query_arg,
         max_pages=max_pages,
         progress_callback=progress_cb,
+        max_items=max_items,
     )
     return [dict(x) for x in raw]
 
@@ -230,10 +253,26 @@ def _run_check_invites_with_progress(
     return [dict(x) for x in raw]
 
 
-# In-memory cache filled by ``AmazonScraper.search_invitation_items`` (same logic as the integration app).
-_invites_cache: list[dict[str, object]] = []
-_refreshed_at: str | None = None
+# In-memory cache per (user, active account).
+_invites_cache: dict[str, list[dict[str, object]]] = {}
+_refreshed_at: dict[str, str | None] = {}
+# Last Amazon search rows per user (shared across vault accounts — statuses differ per profile).
+_catalog_search_rows: dict[int, list[dict[str, Any]]] = {}
 _amazon_scraper = None
+
+
+def _invites_cache_key(user_id: int, account_id: int | None) -> str:
+    return f"{user_id}:{account_id or 0}"
+
+
+def _reset_amazon_scraper() -> None:
+    global _amazon_scraper
+    if _amazon_scraper is not None:
+        try:
+            _amazon_scraper.close_browser()
+        except Exception:  # noqa: BLE001
+            pass
+    _amazon_scraper = None
 
 
 def _get_amazon_scraper():
@@ -243,6 +282,8 @@ def _get_amazon_scraper():
         from scraper import AmazonScraper
 
         _amazon_scraper = AmazonScraper()
+    else:
+        _amazon_scraper._invalidate_http()
     return _amazon_scraper
 
 
@@ -289,6 +330,44 @@ class AmazonRefreshBody(BaseModel):
 
     q: str | None = None
     max_pages: int = Field(default=2, ge=1, le=50)
+    max_items: int | None = Field(default=None, ge=1, le=500)
+
+
+class AmazonReverifyItem(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    asin: str | None = None
+    title: str | None = None
+    product_url: str | None = None
+    image_url: str | None = None
+    price_hint: str | None = None
+
+
+class AmazonReverifyBody(BaseModel):
+    """Re-check invitation status for known ASINs on the active account (no new Amazon search)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AmazonReverifyItem] = Field(default_factory=list, max_length=500)
+
+
+def _goupix_invites_to_search_rows(items: list[AmazonReverifyItem]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for inv in items:
+        asin = str(inv.asin or "").strip().upper()
+        if not re.match(r"^[A-Z0-9]{10}$", asin):
+            continue
+        row: dict[str, Any] = {"asin": asin}
+        if inv.title:
+            row["title"] = inv.title
+        if inv.product_url:
+            row["url"] = inv.product_url
+        if inv.image_url:
+            row["image"] = inv.image_url
+        if inv.price_hint:
+            row["price"] = inv.price_hint
+        out.append(row)
+    return out
 
 
 class AmazonRequestInviteBody(BaseModel):
@@ -307,15 +386,41 @@ class AmazonRequestInviteBody(BaseModel):
         return t
 
 
+class AmazonProvisionRegisterBody(BaseModel):
+    """Chrome inscription Amazon sans compte coffre (profil staging local)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    email: str
+    password: str
+    customer_name: str = "GoupixDex"
+
+
 def _norm_q(q: str | None) -> str | None:
     if not q or not str(q).strip():
         return None
     return str(q).strip()
 
 
+def _resolve_invite_scan_pages(max_pages: int, max_items: int | None, query: str) -> int:
+    """
+    Invite-only rows are sparse on filtered searches — scan more Amazon pages until
+    ``max_items`` is reached (search loop stops early) or this budget is exhausted.
+    """
+    pages = max(1, min(50, int(max_pages)))
+    if not max_items or int(max_items) <= 0:
+        return pages
+    mi = int(max_items)
+    if (query or "").strip():
+        sparse_min = min(50, max(3, (mi + 2) // 2))
+        pages = max(pages, sparse_min)
+    return min(50, pages)
+
+
 def _amazon_profile_dir() -> Path:
-    explicit = os.environ.get("GOUPIX_AMAZON_USER_DATA_DIR") or os.environ.get("AMAZON_USER_DATA_DIR")
-    return OsService.resolve_amazon_nodriver_user_data_dir(explicit)
+    import amazon_config as ac
+
+    return Path(ac.AMAZON_USER_DATA_DIR or str(legacy_amazon_profile_dir()))
 
 
 def _amazon_base_url() -> str:
@@ -379,6 +484,21 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 
 
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
+
+# Bump when new local routes are added (UI can warn if the running sidecar is stale).
+AMAZON_WORKER_BUILD = "2026-03-20-register-name-no-email-touch"
+
+
+@router.get("/meta")
+async def amazon_worker_meta() -> dict[str, object]:
+    return {
+        "build": AMAZON_WORKER_BUILD,
+        "features": [
+            "accounts-open-register",
+            "provision-open-register",
+            "invites-reverify",
+        ],
+    }
 
 
 #: Localized "please sign in" greetings shown in Amazon's nav when signed out.
@@ -455,8 +575,11 @@ def _session_marker_fresh() -> bool:
 
 @router.get("/session")
 async def amazon_session(
-    _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
 ) -> dict[str, object]:
+    cache_key = _invites_cache_key(user_id, active_account_id)
+    last_sync = _refreshed_at.get(cache_key)
     live = await _detect_session_via_live_browser()
     if live == "ready":
         _write_session_marker()
@@ -464,14 +587,16 @@ async def amazon_session(
             "state": "ready",
             "message": "Session détectée dans la fenêtre Chrome ouverte.",
             "browser_open": True,
-            "last_sync_at": _refreshed_at,
+            "last_sync_at": last_sync,
+            "active_account_id": active_account_id,
         }
     if live == "needs_login":
         return {
             "state": "needs_login",
             "message": "Fenêtre Chrome ouverte — connectez-vous à Amazon, l'état se mettra à jour tout seul.",
             "browser_open": True,
-            "last_sync_at": _refreshed_at,
+            "last_sync_at": last_sync,
+            "active_account_id": active_account_id,
         }
 
     profile = _amazon_profile_dir()
@@ -481,7 +606,8 @@ async def amazon_session(
             "state": "busy",
             "message": "Un Chrome Amazon semble ouvert — fermez la fenêtre ou attendez, puis réessayez.",
             "browser_open": False,
-            "last_sync_at": _refreshed_at,
+            "last_sync_at": last_sync,
+            "active_account_id": active_account_id,
         }
     if det == "ready":
         _write_session_marker()
@@ -489,23 +615,45 @@ async def amazon_session(
             "state": "ready",
             "message": None,
             "browser_open": False,
-            "last_sync_at": _refreshed_at,
+            "last_sync_at": last_sync,
+            "active_account_id": active_account_id,
         }
     if det == "unreadable" and _session_marker_fresh():
-        # Cookie DB undecryptable but a signed-in session was positively seen
-        # recently — trust it rather than sending the user back to the login.
         return {
             "state": "ready",
             "message": "Session confirmée récemment (cookies illisibles sur ce Chrome, comportement normal).",
             "browser_open": False,
-            "last_sync_at": _refreshed_at,
+            "last_sync_at": last_sync,
+            "active_account_id": active_account_id,
         }
     return {
         "state": "needs_login",
-        "message": "Utilisez « Ouvrir Chrome » dans les réglages marketplace, connectez-vous, l'état suivra.",
+        "message": "Utilisez « Connexion auto » ou « Ouvrir Chrome » dans les réglages marketplace.",
         "browser_open": False,
-        "last_sync_at": _refreshed_at,
+        "last_sync_at": last_sync,
+        "active_account_id": active_account_id,
     }
+
+
+async def _close_all_amazon_chromium() -> None:
+    """Fermer le Chrome du worker ET celui de ``amazon_nodriver`` (un seul profil à la fois)."""
+    global _amazon_browser, _amazon_tab
+    async with _amazon_browser_lock:
+        browser = _amazon_browser
+        _amazon_browser = None
+        _amazon_tab = None
+    if browser is not None:
+        try:
+            browser.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Amazon browser stop before register: %s", exc)
+    from amazon_nodriver import close_browser_sync
+
+    try:
+        close_browser_sync()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("amazon_nodriver close before register: %s", exc)
+    await asyncio.sleep(0.5)
 
 
 @router.post("/browser/close")
@@ -667,6 +815,7 @@ async def _amazon_browser_open_login_impl() -> dict[str, object]:
 @router.post("/browser/open-login")
 async def amazon_browser_open_login(
     _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    _active: Annotated[int | None, Depends(bind_active_amazon_profile)],
 ) -> dict[str, object]:
     """e.g. POST /amazon/browser/open-login (JWT required)."""
     return await _amazon_browser_open_login_impl()
@@ -675,42 +824,248 @@ async def amazon_browser_open_login(
 @router.post("/open-login")
 async def amazon_open_login_short(
     _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    _active: Annotated[int | None, Depends(bind_active_amazon_profile)],
 ) -> dict[str, object]:
     """e.g. POST /amazon/open-login — same handler (client compatibility)."""
     return await _amazon_browser_open_login_impl()
 
 
+async def _try_vault_auto_login_if_needed(
+    user_id: int,
+    account_id: int,
+    raw_token: str,
+    remote: str,
+    profile: Path,
+) -> dict[str, object] | None:
+    """
+    When the bound profile has no Amazon session, sign in with vault credentials
+    (2FA/CAPTCHA may still require manual steps in the Chrome window).
+    """
+    det = detect_amazon_session_from_profile(profile)
+    if det == "ready":
+        return {"success": True, "skipped": True, "message": "Session déjà active sur ce profil."}
+    try:
+        email, password = await fetch_account_credentials(raw_token, remote, account_id)
+    except (ValueError, PermissionError) as exc:
+        logger.info("Vault auto-login skipped for account %s: %s", account_id, exc)
+        return None
+    except httpx.HTTPError as exc:
+        logger.warning("Vault auto-login credentials fetch failed: %s", exc)
+        return None
+
+    from amazon_nodriver import login_to_amazon
+
+    logger.info("Vault auto-login for account %s (%s)", account_id, email[:3] + "***")
+    result = await asyncio.to_thread(login_to_amazon, email, password)
+    if result.get("success"):
+        _write_session_marker()
+        _reset_amazon_scraper()
+    return dict(result)
+
+
+@router.post("/accounts/{account_id}/activate")
+async def amazon_activate_account(
+    account_id: int,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Set active vault account on the API and bind the local Chromium profile."""
+    remote_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.put(
+                f"{remote}/amazon-accounts/active",
+                headers={"Authorization": f"Bearer {raw_token}", "Accept": "application/json"},
+                json={"account_id": account_id},
+            )
+        if r.status_code == 401:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        remote_ok = r.is_success
+        if not remote_ok:
+            logger.warning(
+                "Remote active Amazon account sync failed (HTTP %s); binding local profile anyway.",
+                r.status_code,
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Remote active Amazon account sync unreachable (%s); binding local profile anyway.", exc)
+    profile = bind_amazon_profile_for(user_id, account_id)
+    _reset_amazon_scraper()
+    auto_login = await _try_vault_auto_login_if_needed(
+        user_id, account_id, raw_token, remote, profile
+    )
+    return {
+        "ok": True,
+        "active_account_id": account_id,
+        "remote_sync": remote_ok,
+        "auto_login": auto_login,
+    }
+
+
+@router.post("/accounts/{account_id}/auto-login")
+async def amazon_auto_login_account(
+    account_id: int,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Open Chromium on the account profile and sign in with stored credentials (2FA may still be required)."""
+    bind_amazon_profile_for(user_id, account_id)
+    _reset_amazon_scraper()
+    try:
+        email, password = await fetch_account_credentials(raw_token, remote, account_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not load credentials: {exc}",
+        ) from exc
+
+    from amazon_nodriver import login_to_amazon
+
+    result = await asyncio.to_thread(login_to_amazon, email, password)
+    if result.get("success"):
+        _write_session_marker()
+    return {
+        "success": bool(result.get("success")),
+        "message": str(result.get("message") or ""),
+        "active_account_id": account_id,
+    }
+
+
+async def _amazon_register_chrome(
+    email: str, password: str, customer_name: str = "GoupixDex"
+) -> dict[str, object]:
+    await _close_all_amazon_chromium()
+    from amazon_nodriver import register_to_amazon
+
+    result = await asyncio.to_thread(register_to_amazon, email, password, customer_name)
+    email_prefilled = bool(result.get("email_prefilled"))
+    success = bool(result.get("success")) and email_prefilled
+    return {
+        "success": success,
+        "email_prefilled": email_prefilled,
+        "message": str(result.get("message") or ""),
+        "url": str(result.get("url") or ""),
+    }
+
+
+@router.post("/provision/open-register")
+async def amazon_provision_open_register(
+    body: AmazonProvisionRegisterBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    """Ouvre Chrome et préremplit l’e-mail — **sans** compte enregistré sur l’API."""
+    email = body.email.strip()
+    if not email or not body.password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email et mot de passe requis.",
+        )
+    bind_provision_staging_profile(user_id)
+    _reset_amazon_scraper()
+    logger.info("Amazon provision open-register user_id=%s email=%s…", user_id, email[:8])
+    out = await _amazon_register_chrome(email, body.password, body.customer_name)
+    out["email"] = email
+    return out
+
+
+@router.post("/provision/discard")
+async def amazon_provision_discard(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    discard_provision_staging_profile(user_id)
+    return {"discarded": True}
+
+
+@router.post("/accounts/{account_id}/claim-staging-profile")
+async def amazon_claim_staging_profile(
+    account_id: int,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    claim_provision_staging_profile(user_id, account_id)
+    bind_amazon_profile_for(user_id, account_id)
+    return {"ok": True, "active_account_id": account_id}
+
+
+@router.post("/accounts/{account_id}/open-register")
+async def amazon_open_register_account(
+    account_id: int,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Bind profile, pre-fill Amazon registration in Chrome with vault credentials."""
+    bind_amazon_profile_for(user_id, account_id)
+    _reset_amazon_scraper()
+    try:
+        email, password = await fetch_account_credentials(raw_token, remote, account_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not load credentials: {exc}",
+        ) from exc
+
+    logger.info("Amazon open-register account_id=%s email=%s…", account_id, email[:8])
+    out = await _amazon_register_chrome(email, password)
+    logger.info(
+        "Amazon open-register done account_id=%s email_prefilled=%s success=%s",
+        account_id,
+        out.get("email_prefilled"),
+        out.get("success"),
+    )
+    out["active_account_id"] = account_id
+    return out
+
+
 @router.get("/invites")
 async def amazon_invites_list(
-    _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     q: Annotated[str | None, Query(description="Optional Amazon-side search query")] = None,
     max_pages: Annotated[int, Query(ge=1, le=50, description="Number of result pages to scan")] = 2,
 ) -> dict[str, object]:
+    key = _invites_cache_key(user_id, active_account_id)
     return {
-        "items": list(_invites_cache),
-        "refreshed_at": _refreshed_at,
+        "items": list(_invites_cache.get(key, [])),
+        "refreshed_at": _refreshed_at.get(key),
         "params": {"q": _norm_q(q), "max_pages": max_pages},
+        "active_account_id": active_account_id,
     }
 
 
 @router.post("/invites/refresh")
 async def amazon_invites_refresh(
-    _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     body: AmazonRefreshBody,
 ) -> dict[str, object]:
-    global _invites_cache, _refreshed_at  # noqa: PLW0603
+    cache_key = _invites_cache_key(user_id, active_account_id)
 
     qn = _norm_q(body.q)
     query_arg = qn if qn else ""
     loop = asyncio.get_running_loop()
 
     try:
+        max_items = body.max_items
+        scan_pages = _resolve_invite_scan_pages(body.max_pages, max_items, query_arg)
         search_rows = await asyncio.to_thread(
             _run_search_with_progress,
             query_arg,
-            body.max_pages,
+            scan_pages,
             loop,
+            max_items,
         )
+        if max_items is not None and max_items > 0:
+            search_rows = search_rows[: int(max_items)]
+        _catalog_search_rows[user_id] = [dict(x) for x in search_rows]
         merged_rows: list[dict[str, Any]] = list(search_rows)
         asins_ordered: list[str] = []
         seen_asin: set[str] = set()
@@ -719,6 +1074,8 @@ async def amazon_invites_refresh(
             if a and a not in seen_asin:
                 seen_asin.add(a)
                 asins_ordered.append(a)
+                if max_items is not None and len(asins_ordered) >= int(max_items):
+                    break
         if asins_ordered:
             try:
                 await _broadcast_amazon_progress(
@@ -750,10 +1107,14 @@ async def amazon_invites_refresh(
             detail=f"Amazon fetch failed: {exc}",
         ) from exc
 
-    _invites_cache = [_integration_item_to_goupix_invite(x) for x in merged_rows]
-    _refreshed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    invite_rows = [_integration_item_to_goupix_invite(x) for x in merged_rows]
+    if max_items is not None and max_items > 0:
+        invite_rows = invite_rows[: int(max_items)]
+    _invites_cache[cache_key] = invite_rows
+    refreshed_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    _refreshed_at[cache_key] = refreshed_iso
 
-    n = len(_invites_cache)
+    n = len(_invites_cache[cache_key])
     if n == 0:
         msg = (
             "No « invite-only » products found on the scanned pages. "
@@ -774,22 +1135,86 @@ async def amazon_invites_refresh(
         pass
 
     return {
-        "items": list(_invites_cache),
-        "refreshed_at": _refreshed_at,
+        "items": list(_invites_cache[cache_key]),
+        "refreshed_at": refreshed_iso,
         "message": msg,
-        "params": {"q": qn, "max_pages": body.max_pages},
+        "params": {
+            "q": qn,
+            "max_pages": scan_pages,
+            "max_items": max_items,
+        },
+        "active_account_id": active_account_id,
+    }
+
+
+@router.post("/invites/reverify")
+async def amazon_invites_reverify(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
+    body: AmazonReverifyBody,
+) -> dict[str, object]:
+    """
+    Re-run product-page checks for the active account without a new search.
+    Uses the request body or the last in-memory search catalog for this user.
+    """
+    cache_key = _invites_cache_key(user_id, active_account_id)
+    search_rows = _goupix_invites_to_search_rows(body.items)
+    if not search_rows:
+        search_rows = [dict(x) for x in _catalog_search_rows.get(user_id, [])]
+    if not search_rows:
+        cached = list(_invites_cache.get(cache_key, []))
+        return {
+            "items": cached,
+            "refreshed_at": _refreshed_at.get(cache_key),
+            "message": "Aucun produit à revérifier — lancez d’abord une actualisation.",
+            "active_account_id": active_account_id,
+        }
+
+    asins_ordered: list[str] = []
+    seen_asin: set[str] = set()
+    for x in search_rows:
+        a = str(x.get("asin") or "").strip().upper()
+        if a and a not in seen_asin:
+            seen_asin.add(a)
+            asins_ordered.append(a)
+
+    loop = asyncio.get_running_loop()
+    try:
+        checked_rows = await asyncio.to_thread(
+            _run_check_invites_with_progress,
+            asins_ordered,
+            loop,
+        )
+        merged_rows = _merge_search_rows_with_checked(search_rows, checked_rows)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Amazon invites reverify")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Amazon status check failed: {exc}",
+        ) from exc
+
+    _invites_cache[cache_key] = [_integration_item_to_goupix_invite(x) for x in merged_rows]
+    refreshed_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    _refreshed_at[cache_key] = refreshed_iso
+    n = len(_invites_cache[cache_key])
+    return {
+        "items": list(_invites_cache[cache_key]),
+        "refreshed_at": refreshed_iso,
+        "message": f"Statuts mis à jour pour {n} produit(s) sur ce compte.",
+        "active_account_id": active_account_id,
     }
 
 
 @router.post("/invites/request")
 async def amazon_invites_request(
-    _user_id: Annotated[int, Depends(get_user_id_introspected)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     body: AmazonRequestInviteBody,
 ) -> dict[str, object]:
     """
     POST Amazon ``request-invite`` for one ASIN (session cookies), then refresh that row in the local cache.
     """
-    global _invites_cache  # noqa: PLW0603
+    cache_key = _invites_cache_key(user_id, active_account_id)
 
     asin = body.asin
     try:
@@ -811,9 +1236,10 @@ async def amazon_invites_request(
     goupix: dict[str, object] | None = None
     if isinstance(raw_item, dict):
         goupix = _integration_item_to_goupix_invite(raw_item)
+        rows = list(_invites_cache.get(cache_key, []))
         new_cache: list[dict[str, object]] = []
         replaced = False
-        for row in _invites_cache:
+        for row in rows:
             r_asin = str(row.get("asin") or "").strip().upper()
             if r_asin == asin:
                 new_cache.append(goupix)
@@ -821,7 +1247,7 @@ async def amazon_invites_request(
             else:
                 new_cache.append(dict(row))
         if replaced:
-            _invites_cache = new_cache
+            _invites_cache[cache_key] = new_cache
 
     return {
         "success": True,

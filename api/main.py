@@ -22,10 +22,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import get_settings
 from routes import access_requests as access_requests_routes
+from routes import amazon_accounts as amazon_accounts_routes
 from routes import articles as articles_routes
 from routes import auth as auth_routes
 from routes import cardmarket_searches as cardmarket_searches_routes
 from routes import catalog_route
+from routes import binders_route
 from routes import collection_route
 from routes import ebay_market_route
 from routes import ebay_route
@@ -36,6 +38,7 @@ from routes import settings_route
 from routes import shipping_route
 from routes import stats_route
 from routes import orders as orders_routes
+from routes import resend_webhook as resend_webhook_routes
 from routes import users as users_routes
 
 from core.win32_asyncio import ensure_proactor_event_loop
@@ -51,10 +54,18 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Background jobs: Cardmarket price guide bootstrap + nightly refresh loop."""
+    from services.local_desktop_workers import (
+        auto_start_amazon_worker_enabled,
+        start_managed_amazon_worker,
+        stop_managed_amazon_worker,
+    )
     from services.market_price_refresh_service import (
         bootstrap_market_prices_async,
         nightly_refresh_loop_async,
     )
+
+    if auto_start_amazon_worker_enabled():
+        await asyncio.to_thread(start_managed_amazon_worker)
 
     background_tasks: list[asyncio.Task[None]] = []
     if settings.cardmarket_nightly_refresh_enabled:
@@ -67,6 +78,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        if auto_start_amazon_worker_enabled():
+            await asyncio.to_thread(stop_managed_amazon_worker)
 
 
 app = FastAPI(
@@ -176,7 +189,10 @@ app.include_router(ebay_market_route.router)
 app.include_router(pricing_route.router)
 app.include_router(catalog_route.router)
 app.include_router(collection_route.router)
+app.include_router(binders_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
 app.include_router(scan_stream_route.router)
 app.include_router(shipping_route.router)
+app.include_router(amazon_accounts_routes.router)
+app.include_router(resend_webhook_routes.router, prefix="/webhooks", tags=["webhooks"])

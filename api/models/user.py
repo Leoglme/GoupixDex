@@ -20,6 +20,8 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    #: Optional display name (Amazon account creation, UI profile drawer).
+    full_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     #: Bcrypt hash. ``None`` while the user has only requested access (no password yet).
     password: Mapped[str | None] = mapped_column("password", String(255), nullable=True)
     vinted_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -59,6 +61,14 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     collection_cards: Mapped[list["CollectionCard"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    amazon_accounts: Mapped[list["AmazonAccount"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    binders: Mapped[list["Binder"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

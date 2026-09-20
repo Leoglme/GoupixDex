@@ -18,7 +18,11 @@ from services.ebay_orders_service import list_unshipped_orders
 from services.ebay_publish_service import ensure_ebay_access_token
 from services.shipping_label_service import LabelAddress, render_labels_pdf
 from services.stamp_overlay_service import decode_stamp_pdf_base64, overlay_stamps_on_labels_pdf
-from services.user_settings_service import get_or_create_user_settings, sender_address_complete
+from services.user_settings_service import (
+    effective_sender_full_name,
+    get_or_create_user_settings,
+    sender_address_complete,
+)
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
 
@@ -108,7 +112,7 @@ async def shipping_labels_pdf(
     fits, an extra A4 page is appended for that stamp.
     """
     ms = get_or_create_user_settings(db, user.id)
-    include_sender = sender_address_complete(ms)
+    include_sender = sender_address_complete(ms, user)
 
     stamps_by_parcel: list[bytes | None] = []
     addresses: list[LabelAddress] = []
@@ -139,7 +143,7 @@ async def shipping_labels_pdf(
     sender: LabelAddress | None = None
     if include_sender:
         sender = LabelAddress(
-            full_name=(ms.sender_full_name or "").strip(),
+            full_name=effective_sender_full_name(user, ms),
             line1=(ms.sender_line1 or "").strip(),
             line2=(ms.sender_line2 or "").strip() or None,
             postal_code=(ms.sender_postal_code or "").strip(),

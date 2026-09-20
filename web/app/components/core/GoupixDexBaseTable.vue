@@ -1,5 +1,5 @@
 <template>
-  <div class="md:overflow-x-auto">
+  <div class="min-w-0 max-md:overflow-x-hidden md:overflow-x-auto">
     <table class="goupix-card-table w-full border-collapse text-sm" :style="tableStyle">
       <thead v-if="$slots.head">
         <tr class="bg-[var(--app-surface-2)]">

@@ -14,6 +14,7 @@ export interface VintedLogEntry {
 }
 
 export type ListingProgressSseBase = 'api' | 'local'
+export type ListingProgressLocalWorker = 'vinted' | 'leboncoin'
 
 /**
  * Single-listing publish progress via SSE — logs, toasts, and optional local-worker hub.
@@ -83,13 +84,13 @@ export function useVintedPublishStream() {
    *
    * @param streamPath - Absolute path under the hub (`/articles/.../listing-progress`).
    * @param context - Controls toast vs log-only UX (`logs` page stays silent on success toasts).
-   * @param options - Optional `{ sseBase?: 'local' | 'api' }` to route via desktop worker.
+   * @param options - `{ sseBase?, localWorker? }` — `localWorker` picks Vinted vs Leboncoin port on desktop.
    * @returns {Promise<void>} Resolves when the hub emits terminal events.
    */
   function followStream(
     streamPath: string,
     context: ListingStreamContext = 'list',
-    options?: { sseBase?: ListingProgressSseBase },
+    options?: { sseBase?: ListingProgressSseBase; localWorker?: ListingProgressLocalWorker },
   ): Promise<void> {
     close()
     logEntries.value = []
@@ -98,7 +99,12 @@ export function useVintedPublishStream() {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(/\/$/, '')
+    const worker = options?.localWorker ?? 'vinted'
+    const localBaseRaw =
+      worker === 'leboncoin'
+        ? config.public.leboncoinLocalBase || 'http://127.0.0.1:18769'
+        : config.public.vintedLocalBase || 'http://127.0.0.1:18766'
+    const localBase = String(localBaseRaw).replace(/\/$/, '')
     const useLocal = options?.sseBase === 'local' && isDesktopApp.value
     const base = useLocal ? localBase : remoteBase
     const remoteParam = isDesktopApp.value && useLocal ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
@@ -119,6 +125,7 @@ export function useVintedPublishStream() {
             screenshot?: string
             vinted?: { published?: boolean; detail?: string }
             ebay?: { published?: boolean; detail?: string; listing_id?: string }
+            leboncoin?: { published?: boolean; detail?: string; listing_id?: string }
           }
           if (data.type === 'log') {
             pushLog(data)
@@ -127,6 +134,7 @@ export function useVintedPublishStream() {
             close()
             const v = data.vinted
             const eb = data.ebay
+            const lbc = data.leboncoin
             if (context === 'logs') {
               // Publish journal: surface failures as log entries (otherwise
               // the user only sees a silent `done`).
@@ -140,6 +148,10 @@ export function useVintedPublishStream() {
               if (eb && eb.published === false) {
                 const detail = String(eb.detail ?? 'Échec ou annulation.')
                 logEntries.value.push({ text: `[eBay · Erreur] ${detail}` })
+              }
+              if (lbc && lbc.published === false) {
+                const detail = String(lbc.detail ?? 'Publication non confirmée.')
+                logEntries.value.push({ text: `[Leboncoin · Erreur] ${detail}` })
               }
             }
             if (context !== 'logs') {
@@ -170,6 +182,20 @@ export function useVintedPublishStream() {
                   toast.add({
                     title: 'Publication eBay',
                     description: String(eb.detail ?? 'Échec ou annulation.'),
+                    color: 'warning',
+                  })
+                }
+              }
+              if (lbc && typeof lbc.published === 'boolean') {
+                if (lbc.published) {
+                  toast.add({
+                    title: 'Publié sur Leboncoin',
+                    color: 'success',
+                  })
+                } else {
+                  toast.add({
+                    title: 'Publication Leboncoin',
+                    description: String(lbc.detail ?? 'Échec ou annulation.'),
                     color: 'warning',
                   })
                 }

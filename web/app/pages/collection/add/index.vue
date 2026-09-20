@@ -15,7 +15,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-4 px-2 py-2.5 sm:space-y-5 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page w-full space-y-4 sm:space-y-5">
         <NuxtLink
           to="/collection"
           class="inline-flex w-fit items-center gap-1 text-sm font-medium text-(--app-accent) underline-offset-4 transition hover:text-(--app-accent) hover:underline"

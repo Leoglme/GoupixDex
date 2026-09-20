@@ -379,11 +379,12 @@ export function filterPickerCandidates(
   q: string,
   fSet: string,
 ): BinderCandidateItem[] {
+  const setName = typeof fSet === 'string' ? fSet.trim() : ''
   const needle = normalize(q.trim())
   return candidates
     .filter(
       (c) =>
-        (!fSet || c.set_name === fSet) &&
+        (!setName || c.set_name === setName) &&
         (!needle || normalize(`${c.card_name} ${c.set_name} ${c.local_id}`).includes(needle)),
     )
     .sort(

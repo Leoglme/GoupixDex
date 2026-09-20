@@ -1,6 +1,6 @@
 <template>
-  <UCard>
-    <template #header>
+  <UCard :ui="cardUi">
+    <template v-if="!embedded" #header>
       <p class="text-highlighted font-medium">Amazon (invitations)</p>
     </template>
     <p class="text-muted text-sm">
@@ -13,3 +13,24 @@
     </UButton>
   </UCard>
 </template>
+
+<script setup lang="ts">
+import type { ComputedRef } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
+
+const cardUi: ComputedRef<Record<string, string> | undefined> = computed(() =>
+  props.embedded
+    ? {
+        root: 'ring-0 shadow-none rounded-none bg-transparent',
+        header: 'hidden',
+        body: 'p-4 sm:p-5',
+      }
+    : undefined,
+)
+</script>

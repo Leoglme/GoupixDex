@@ -26,7 +26,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-1 py-2.5 sm:space-y-4 sm:px-2 sm:py-4">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Étiquettes d'envoi"
           description="Générez un PDF d'étiquettes Avery L7173 pour vos commandes eBay : destinataire, expéditeur et timbre."
@@ -68,7 +68,7 @@
               "
             >
               <template #actions>
-                <UButton to="/settings/marketplaces" size="xs" color="neutral" variant="subtle">
+                <UButton to="/settings" size="xs" color="neutral" variant="subtle">
                   {{ ebayScopeMismatch ? 'Reconnecter eBay' : 'Ouvrir les paramètres' }}
                 </UButton>
               </template>
@@ -84,8 +84,8 @@
             ci-dessous.
           </div>
 
-          <div v-else class="overflow-x-auto">
-            <table class="w-full text-sm">
+          <div v-else class="min-w-0 max-md:overflow-x-hidden md:overflow-x-auto">
+            <table class="goupix-card-table w-full text-sm">
               <thead class="text-muted bg-elevated/60 text-xs tracking-wide uppercase">
                 <tr>
                   <th class="w-10 px-4 py-2 text-left" />
@@ -102,20 +102,20 @@
                   class="border-default hover:bg-elevated/40 cursor-pointer border-t"
                   @click="toggleOrder(order)"
                 >
-                  <td class="px-4 py-3 align-top">
+                  <td class="goupix-card-table__select px-4 py-3 align-top">
                     <UCheckbox
                       :model-value="isOrderSelected(order.order_id)"
                       @update:model-value="toggleOrder(order)"
                       @click.stop
                     />
                   </td>
-                  <td class="px-3 py-3 align-top">
+                  <td class="goupix-card-table__lead px-3 py-3 align-top">
                     <p class="text-highlighted font-medium">
                       {{ order.address.full_name || '—' }}
                     </p>
                     <p v-if="order.buyer_username" class="text-muted text-xs">@{{ order.buyer_username }}</p>
                   </td>
-                  <td class="text-muted px-3 py-3 align-top">
+                  <td class="text-muted px-3 py-3 align-top" data-label="Adresse">
                     <div class="leading-snug">
                       <p>{{ order.address.line1 }}</p>
                       <p v-if="order.address.line2">
@@ -132,10 +132,10 @@
                       </p>
                     </div>
                   </td>
-                  <td class="text-muted px-3 py-3 align-top">
+                  <td class="text-muted px-3 py-3 align-top" data-label="Article(s)">
                     {{ orderSummary(order) }}
                   </td>
-                  <td class="text-muted px-3 py-3 align-top whitespace-nowrap">
+                  <td class="text-muted px-3 py-3 align-top whitespace-nowrap" data-label="Date">
                     {{ formatOrderDate(order.creation_date) }}
                   </td>
                 </tr>

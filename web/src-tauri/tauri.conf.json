@@ -31,7 +31,8 @@
     "externalBin": [
       "binaries/goupix-vinted-worker",
       "binaries/goupix-amazon-worker",
-      "binaries/goupix-cardmarket-worker"
+      "binaries/goupix-cardmarket-worker",
+      "binaries/goupix-leboncoin-worker"
     ],
     "icon": [
       "../public/favicon.ico",

@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Nouvel article"
           description="Importez une photo, laissez GoupixDex lire le set, le numéro et les prix de référence, puis ajustez la fiche avant publication."
@@ -203,9 +203,8 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
       if (ebay?.skipped && ebay?.detail) {
         const ebayMsg: Record<string, string> = {
           ebay_disabled: 'eBay est désactivé dans les paramètres.',
-          ebay_listing_config_incomplete:
-            'Terminez la configuration eBay dans Paramètres → Places de marché (adresse et règles).',
-          ebay_not_connected: 'Connectez votre compte eBay dans Paramètres → Places de marché.',
+          ebay_listing_config_incomplete: 'Terminez la configuration eBay dans Paramètres (section eBay France).',
+          ebay_not_connected: 'Connectez votre compte eBay dans Paramètres.',
           ebay_requires_https_images:
             'Les photos doivent être enregistrées et accessibles en ligne pour publier sur eBay — réessayez après upload des images.',
         }
@@ -271,7 +270,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
             vinted.detail === 'missing_vinted_credentials'
               ? "Identifiants Vinted manquants (profil utilisateur ou variables d'environnement)."
               : vinted.detail === 'vinted_disabled'
-                ? 'Vinted est désactivé dans Paramètres → Places de marché.'
+                ? 'Vinted est désactivé dans Paramètres.'
                 : typeof vinted.detail === 'string'
                   ? vinted.detail
                   : 'Publication Vinted non confirmée.',

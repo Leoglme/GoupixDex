@@ -3,6 +3,7 @@ const TOKEN_KEY = 'goupix_token'
 export interface MeUser {
   id: number
   email: string
+  full_name: string | null
   vinted_email: string | null
   is_admin: boolean
   status: 'pending' | 'approved' | 'rejected' | 'banned'

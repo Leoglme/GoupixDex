@@ -44,3 +44,15 @@ AMAZON_CHROME_EXECUTABLE = (
     or os.getenv("CHROME_EXECUTABLE")
     or os.getenv("GOOGLE_CHROME_BIN")
 )
+
+
+def bind_amazon_profile(user_data_dir: str, cookies_export_file: str | None = None) -> None:
+    """Point nodriver / scraper at a specific Chromium profile (multi-account)."""
+    global AMAZON_USER_DATA_DIR, AMAZON_COOKIES_EXPORT_FILE
+    AMAZON_USER_DATA_DIR = str(Path(user_data_dir).expanduser().resolve())
+    if cookies_export_file:
+        AMAZON_COOKIES_EXPORT_FILE = str(Path(cookies_export_file).expanduser().resolve())
+    else:
+        AMAZON_COOKIES_EXPORT_FILE = str(
+            Path(AMAZON_USER_DATA_DIR).parent / f"amazon_cookies_{Path(AMAZON_USER_DATA_DIR).name}.json"
+        )

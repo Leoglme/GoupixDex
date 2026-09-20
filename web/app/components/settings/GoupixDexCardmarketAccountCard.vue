@@ -1,6 +1,6 @@
 <template>
-  <UCard>
-    <template #header>
+  <UCard :ui="cardUi">
+    <template v-if="!embedded" #header>
       <div class="space-y-1">
         <div class="flex items-center justify-between gap-3">
           <p class="text-highlighted font-medium">Compte Cardmarket (panier)</p>
@@ -93,9 +93,26 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
 import { cardmarketSessionBadge } from '~/utils/cardmarketConnectionUi'
+
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
+
+const cardUi: ComputedRef<Record<string, string> | undefined> = computed(() =>
+  props.embedded
+    ? {
+        root: 'ring-0 shadow-none rounded-none bg-transparent',
+        header: 'hidden',
+        body: 'p-4 sm:p-5',
+      }
+    : undefined,
+)
 
 const { isDesktopApp } = useDesktopRuntime()
 const { fetchSession, openLoginBrowser: postOpenLogin, logout: postLogout } = useCardmarketWorker()

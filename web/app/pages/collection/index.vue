@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Ma collection"
           description="Votre binder personnel : cartes possédées, extensions et mises en vente."
@@ -33,7 +33,7 @@
           </template>
         </GoupixDexPageHeader>
 
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
           <GoupixDexStatsCard
             title="Valeur estimée"
             :value="estimatedValueLabel"
@@ -95,14 +95,7 @@
         </UCard>
 
         <div class="flex w-full flex-wrap items-center justify-between gap-y-2">
-          <UTabs
-            v-model="viewMode"
-            :items="viewItems"
-            size="lg"
-            color="primary"
-            variant="link"
-            :ui="{ list: 'gap-4', trigger: 'px-4 py-2.5 text-base font-medium', leadingIcon: 'size-5' }"
-          />
+          <GoupixDexCollectionViewTabs v-model="viewMode" :items="viewItems" />
           <span class="text-muted shrink-0 text-sm tabular-nums">
             {{ filteredItems.length }} carte(s) affichée(s)
           </span>
@@ -182,8 +175,8 @@
           </UCard>
         </div>
 
-        <UCard v-else class="overflow-hidden" :ui="{ body: 'p-0' }">
-          <table class="w-full border-separate border-spacing-0 text-sm">
+        <UCard v-else class="app-card-bleed-md overflow-hidden" :ui="{ body: 'p-0' }">
+          <table class="goupix-card-table w-full border-separate border-spacing-0 text-sm">
             <thead class="sticky top-0 z-10">
               <tr class="bg-elevated/95 border-default border-y backdrop-blur">
                 <th class="text-muted px-3 py-2.5 text-left font-medium first:rounded-tl-lg">Carte</th>
@@ -202,8 +195,8 @@
                 class="border-default hover:bg-elevated/40 cursor-pointer border-b transition-colors last:border-b-0"
                 @click="openCard(row.id)"
               >
-                <td class="px-3 py-2.5">
-                  <div class="flex items-center gap-3">
+                <td class="goupix-card-table__lead px-3 py-2.5">
+                  <div class="flex min-w-0 items-center gap-3">
                     <div class="bg-muted/30 size-12 shrink-0 overflow-hidden rounded-md">
                       <img
                         v-if="row.image_url"
@@ -215,32 +208,32 @@
                         loading="lazy"
                       />
                     </div>
-                    <p class="text-highlighted truncate text-sm font-medium">{{ row.display_name }}</p>
+                    <p class="text-highlighted min-w-0 truncate text-sm font-medium">{{ row.display_name }}</p>
                   </div>
                 </td>
-                <td class="text-muted px-3 py-2.5 text-xs">
+                <td class="text-muted px-3 py-2.5 text-xs" data-label="Extension">
                   {{ row.set_name || row.tcgdex_set_id }} · #{{ row.card_number }}
                 </td>
-                <td class="px-3 py-2.5">
+                <td class="px-3 py-2.5" data-label="Langue">
                   <UBadge color="neutral" variant="subtle" size="sm">
                     {{ languageLabel(row.language) }}
                   </UBadge>
                 </td>
-                <td class="px-3 py-2.5 text-right tabular-nums">×{{ row.quantity }}</td>
-                <td class="px-3 py-2.5 text-right tabular-nums">
+                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Qté">×{{ row.quantity }}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Prix marché">
                   <span v-if="row.market_price_eur != null" class="text-highlighted font-medium">
                     {{ eur.format(row.market_price_eur) }}
                   </span>
                   <span v-else class="text-muted text-xs">—</span>
                 </td>
-                <td class="px-3 py-2.5">
+                <td class="px-3 py-2.5" data-label="Statut">
                   <UBadge v-if="row.article_id" color="success" variant="subtle" size="sm" icon="i-lucide-tag">
                     Article #{{ row.article_id }}
                   </UBadge>
                   <span v-else class="text-muted text-xs">—</span>
                 </td>
-                <td class="px-2 py-2.5 text-right">
-                  <UIcon name="i-lucide-chevron-right" class="text-muted size-4" />
+                <td class="goupix-card-table__actions px-2 py-2.5 text-right">
+                  <UIcon name="i-lucide-chevron-right" class="text-muted size-4" aria-hidden="true" />
                 </td>
               </tr>
             </tbody>

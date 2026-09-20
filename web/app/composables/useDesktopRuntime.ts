@@ -16,7 +16,7 @@ export function useDesktopRuntime() {
   })
 
   /**
-   * Stops then restarts Vinted + Amazon workers (ports released). No-op outside desktop.
+   * Stops then restarts Vinted, Amazon, Cardmarket and Leboncoin workers (ports released). No-op outside desktop.
    */
   async function restartLocalWorkers(): Promise<void> {
     if (!import.meta.client || !isDesktopApp.value) {

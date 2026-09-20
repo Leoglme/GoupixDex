@@ -18,7 +18,7 @@
         title="Glisser pour réordonner"
       >
         <GoupixDexBinderCover
-          :style="tile(id).style"
+          :cover-style="tile(id).style"
           :covers="tile(id).covers"
           :name="tile(id).name"
           :color-hex="binderColorHex(tile(id).color)"

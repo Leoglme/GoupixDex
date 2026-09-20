@@ -1,18 +1,22 @@
 <template>
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    preserveAspectRatio="xMidYMid meet"
+    :viewBox="viewBox"
+    :preserveAspectRatio="props.tight ? 'xMinYMid meet' : 'xMidYMid meet'"
     class="block h-full w-full shrink-0"
     aria-hidden="true"
     focusable="false"
   >
     <defs>
       <linearGradient :id="gradId" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="#e81b31" />
-        <stop offset="33%" stop-color="#296ef1" />
-        <stop offset="66%" stop-color="#f9bb35" />
-        <stop offset="100%" stop-color="#99c838" />
+        <stop offset="0%" stop-color="#E53238" />
+        <stop offset="26%" stop-color="#E53238" />
+        <stop offset="26%" stop-color="#0064D2" />
+        <stop offset="51%" stop-color="#0064D2" />
+        <stop offset="51%" stop-color="#F5AF02" />
+        <stop offset="76%" stop-color="#F5AF02" />
+        <stop offset="76%" stop-color="#86B817" />
+        <stop offset="100%" stop-color="#86B817" />
       </linearGradient>
     </defs>
     <path
@@ -25,9 +29,19 @@
 <script setup lang="ts">
 import { useId } from 'vue'
 
+const props = withDefaults(
+  defineProps<{
+    /** Recadre le glyphe (moins de marge interne) pour les listes / modales. */
+    tight?: boolean
+  }>(),
+  { tight: false },
+)
+
 /**
- * eBay glyph (single path) with a 4-stop horizontal gradient
- * (e → b → a → y brand hues).
+ * eBay wordmark (single path) — dégradé à stops durs (e/b/a/y), couleurs marque.
  */
 const gradId = `ebay-grad-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+
+/** Bande horizontale du wordmark (conserve le « e », rogne le vide vertical). */
+const viewBox = computed(() => (props.tight ? '0 10.2 24 3.8' : '0 0 24 24'))
 </script>

@@ -1,6 +1,6 @@
 <template>
-  <UCard>
-    <template #header>
+  <UCard :ui="cardUi">
+    <template v-if="!embedded" #header>
       <div class="space-y-1">
         <div class="flex items-center justify-between gap-3">
           <p class="text-highlighted font-medium">Compte Vinted</p>
@@ -47,7 +47,25 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    /** Intégré dans une carte repliable Paramètres (sans en-tête UCard). */
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
+
+const cardUi: ComputedRef<Record<string, string> | undefined> = computed(() =>
+  props.embedded
+    ? {
+        root: 'ring-0 shadow-none rounded-none bg-transparent',
+        header: 'hidden',
+        body: 'p-4 sm:p-5',
+      }
+    : undefined,
+)
 
 const { me, refreshMe } = useAuth()
 const { updateMyVintedCredentials } = useUsers()

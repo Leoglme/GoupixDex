@@ -1,5 +1,9 @@
 <template>
-  <th class="group/th border-b border-[var(--app-line)] px-3 py-2 md:px-4" :class="alignClass" scope="col">
+  <th
+    class="group/th border-b border-[var(--app-line)] px-3 py-2 md:px-4"
+    :class="[alignClass, props.thClass]"
+    scope="col"
+  >
     <button
       type="button"
       class="app-label inline-flex max-w-full cursor-pointer items-center gap-1 whitespace-nowrap transition-colors"
@@ -57,6 +61,10 @@ const props: GoupixDexBaseTableSortThProps = defineProps({
     default: 'desc',
   },
   title: {
+    type: String,
+    default: '',
+  },
+  thClass: {
     type: String,
     default: '',
   },

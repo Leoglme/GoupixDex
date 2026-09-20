@@ -18,10 +18,12 @@ from core.deps import get_current_user
 from models.margin_settings import MarginSettings
 from models.user import User
 from services.catalog_browse_service import (
+    browse_catalog_for_ui,
     get_series_for_ui,
     get_set_for_ui,
     list_series_for_ui,
     list_sets_for_ui,
+    search_cards_for_ui,
 )
 from services.catalog_prefill_service import build_catalog_card_preview
 from services.tcgdex_client_service import SUPPORTED_LOCALES
@@ -65,6 +67,38 @@ def list_catalog_sets(
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"locale": loc, "page": page, "per_page": per_page, "sets": rows}
+
+
+@router.get("/browse")
+def browse_catalog(
+    user: Annotated[User, Depends(get_current_user)],
+    locale: str = Query("fr", min_length=2, max_length=8),
+) -> dict[str, Any]:
+    """All series with nested sets (binder-style catalogue browser)."""
+    loc = _ensure_locale(locale)
+    try:
+        series = browse_catalog_for_ui(loc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"locale": loc, "series": series}
+
+
+@router.get("/search")
+def search_catalog_cards(
+    user: Annotated[User, Depends(get_current_user)],
+    locale: str = Query("fr", min_length=2, max_length=8),
+    q: str = Query(..., min_length=2, max_length=120),
+) -> dict[str, Any]:
+    loc = _ensure_locale(locale)
+    try:
+        cards = search_cards_for_ui(loc, q)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"locale": loc, "query": q.strip(), "cards": cards}
 
 
 @router.get("/series")

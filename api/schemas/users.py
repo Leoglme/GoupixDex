@@ -22,11 +22,33 @@ class VintedCredentialsUpdate(BaseModel):
     vinted_password: str | None = Field(default=None, max_length=255)
 
 
+class ProfileUpdate(BaseModel):
+    """Self-service profile fields (drawer « Mon profil »)."""
+
+    full_name: str | None = Field(default=None, max_length=120)
+    sender_line1: str | None = Field(default=None, max_length=180)
+    sender_line2: str | None = Field(default=None, max_length=180)
+    sender_postal_code: str | None = Field(default=None, max_length=20)
+    sender_city: str | None = Field(default=None, max_length=80)
+
+
+class ProfileResponse(BaseModel):
+    id: int
+    email: str
+    full_name: str | None
+    sender_line1: str | None
+    sender_line2: str | None
+    sender_postal_code: str | None
+    sender_city: str | None
+    sender_address_complete: bool
+
+
 class UserResponse(BaseModel):
     """Light response returned to the user themselves (``/users/me``)."""
 
     id: int
     email: str
+    full_name: str | None
     vinted_email: str | None
     is_admin: bool
     status: str

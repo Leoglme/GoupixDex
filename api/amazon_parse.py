@@ -97,8 +97,17 @@ def parse_product_page(
         invitation_status = "accepted"
         invitation_requested = True
     else:
+        already_requested = bool(
+            soup.find("div", id="hdp-detail-requested-id")
+            or "Invitation demandée" in page_source
+            or "invitation a été demandée" in page_source.lower()
+            or "vous serez notifié" in page_source.lower()
+        )
         has_invite_button_text = "Demander une invitation" in page_source
-        if has_invite_button_text:
+        if already_requested:
+            invitation_status = "requested"
+            invitation_requested = True
+        elif has_invite_button_text:
             invitation_status = "not_requested"
             invitation_requested = False
         else:

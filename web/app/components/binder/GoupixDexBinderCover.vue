@@ -1,29 +1,13 @@
 <template>
   <div class="group block w-full">
-    <!-- custom (stub) -->
-    <div
+    <GoupixDexBinderCoverCustom
       v-if="kind === 'custom'"
-      class="[container-type:inline-size] relative aspect-[63/88] overflow-hidden rounded-l-lg rounded-r-xl border border-(--app-line) bg-(--app-surface-2)"
-      :style="fillStyle"
-    >
-      <span
-        v-if="textureClass"
-        aria-hidden
-        class="pointer-events-none absolute inset-0 z-10 rounded-[inherit]"
-        :class="textureClass"
-      />
-      <span
-        aria-hidden
-        class="pointer-events-none absolute inset-y-0 left-0 w-[7cqw] bg-gradient-to-r from-black/35 to-transparent"
-      />
-      <div class="absolute inset-0 z-20 flex items-center justify-center p-[10cqw]">
-        <span
-          class="font-display text-center text-[9cqw] leading-tight font-bold text-white/85 drop-shadow-[0_1px_2px_rgba(0,0,0,.5)]"
-        >
-          {{ name }}
-        </span>
-      </div>
-    </div>
+      :name="name"
+      :color-hex="colorHex"
+      :layout="layout"
+      :fill="fill"
+      :texture="texture"
+    />
 
     <!-- mosaic -->
     <div
@@ -179,22 +163,24 @@
 import { binderStyle } from '~/utils/binder/binder-styles'
 import type { CoverTexture } from '~/utils/binder/binder-design'
 import { coverTextureClass } from '~/utils/binder/binder-design'
+import type { CoverRender } from '~/utils/binder/binder-cover'
 
 export type CoverItem = { image_url: string }
 
 const props = withDefaults(
   defineProps<{
-    style: string | null
+    coverStyle: string | null
     covers: CoverItem[]
     name: string
     colorHex: string | null
     fill?: boolean
     texture?: CoverTexture
+    layout?: CoverRender | null
   }>(),
-  { fill: false, texture: 'plain' },
+  { fill: false, texture: 'plain', layout: null },
 )
 
-const kind = computed(() => binderStyle(props.style))
+const kind = computed(() => binderStyle(props.coverStyle))
 const fanCovers = computed(() => props.covers.slice(0, 3))
 const fillStyle = computed(() => (props.fill ? { aspectRatio: 'auto', height: '100%' } : undefined))
 const tintBg = computed(() => (props.colorHex ? `${props.colorHex}1f` : undefined))

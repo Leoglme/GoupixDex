@@ -8,13 +8,7 @@
     :icon-class="loading ? 'animate-spin' : ''"
   >
     <template v-if="session?.state !== 'ready'" #actions>
-      <UButton
-        to="/settings/marketplaces#cardmarket-connection"
-        size="xs"
-        color="neutral"
-        variant="subtle"
-        icon="i-lucide-settings"
-      >
+      <UButton to="/settings#cardmarket-connection" size="xs" color="neutral" variant="subtle" icon="i-lucide-settings">
         Paramètres marketplace
       </UButton>
     </template>

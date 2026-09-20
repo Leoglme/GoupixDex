@@ -3,8 +3,8 @@
     aria-label="Onglets"
     :class="
       orientation === 'vertical'
-        ? 'scrollbar-none absolute top-8 right-0 z-30 flex max-h-[calc(100%-4rem)] flex-col gap-1.5 overflow-y-auto pb-1'
-        : 'scrollbar-none mt-3 flex gap-1.5 overflow-x-auto pb-1'
+        ? 'scrollbar-none absolute top-6 right-1 z-30 flex max-h-[min(70vh,32rem)] flex-col gap-1.5 overflow-y-auto pb-1'
+        : 'scrollbar-none mt-4 flex justify-center gap-1.5 overflow-x-auto pb-1'
     "
   >
     <button
@@ -69,8 +69,8 @@ defineEmits<{ close: []; 'open-to': [number]; 'add-sheet': []; 'remove-sheet': [
 function tabClass(active: boolean, dashed = false) {
   const base =
     props.orientation === 'vertical'
-      ? 'h-9 min-w-[2.75rem] rounded-r-lg border border-l-0 px-2 text-[11px] font-semibold'
-      : 'h-8 min-w-[2.5rem] rounded-lg border px-2 text-[11px] font-semibold'
+      ? 'h-10 min-w-[2.85rem] rounded-r-lg border border-l-0 px-2 text-[11px] font-semibold tabular-nums'
+      : 'h-9 min-w-[2.75rem] rounded-lg border px-2.5 text-[11px] font-semibold tabular-nums'
   if (active) return `${base} border-(--app-accent) bg-(--app-accent) text-white`
   if (dashed)
     return `${base} border-dashed border-(--app-line) bg-(--app-surface-2)/60 text-(--app-ink-soft) hover:text-(--app-ink)`

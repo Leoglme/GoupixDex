@@ -1,5 +1,7 @@
 """SQLAlchemy ORM models."""
 
+from models.amazon_account import AmazonAccount
+from models.binder import Binder, BinderItem
 from models.article import Article
 from models.base import Base
 from models.cardmarket_order import CardmarketOrder
@@ -11,6 +13,9 @@ from models.margin_settings import MarginSettings
 from models.user import User
 
 __all__ = [
+    "AmazonAccount",
+    "Binder",
+    "BinderItem",
     "Article",
     "Base",
     "CardmarketOrder",

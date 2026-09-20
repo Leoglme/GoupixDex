@@ -89,7 +89,11 @@ def add_to_collection(
         language=meta["language"],
     )
     if existing is not None:
-        existing.quantity = int(existing.quantity) + int(body.quantity)
+        if existing.is_placeholder:
+            existing.is_placeholder = False
+            existing.quantity = int(body.quantity)
+        else:
+            existing.quantity = int(existing.quantity) + int(body.quantity)
         if body.notes:
             existing.notes = body.notes.strip() or existing.notes
         collection_card_service.apply_market_price(

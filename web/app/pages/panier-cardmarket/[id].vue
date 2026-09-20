@@ -32,7 +32,7 @@
     </template>
 
     <template #body>
-      <div class="space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div class="app-dashboard-page space-y-6">
         <UAlert
           v-if="!isDesktopApp"
           color="warning"

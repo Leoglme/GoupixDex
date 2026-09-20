@@ -18,7 +18,7 @@
     </template>
 
     <template #body>
-      <div class="w-full space-y-3 px-2 py-2.5 sm:space-y-4 sm:px-4 sm:py-4">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Création groupée"
           description="Remplissez plusieurs fiches puis lancez la création (et la publication Vinted groupée) en un clic — idéal après une session de scan."
@@ -86,9 +86,7 @@
             />
             <p class="text-muted text-sm">
               Nécessite eBay connecté et configuré dans
-              <NuxtLink to="/settings/marketplaces" class="underline underline-offset-2">
-                Paramètres → Places de marché
-              </NuxtLink>
+              <NuxtLink to="/settings" class="underline underline-offset-2"> Paramètres </NuxtLink>
               .
             </p>
           </div>

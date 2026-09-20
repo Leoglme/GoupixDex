@@ -24,9 +24,14 @@ export interface Article {
   /** Sales channel recorded at checkout. */
   sale_source: 'vinted' | 'ebay' | null
   is_sold: boolean
+  /** False = fiche masquée dans « Mes articles » (données conservées). */
+  offers_for_sale?: boolean
   /** Updated server-side after a successful Vinted listing. */
   published_on_vinted?: boolean
   vinted_published_at?: string | null
+  published_on_leboncoin?: boolean
+  leboncoin_listing_id?: string | null
+  leboncoin_published_at?: string | null
   published_on_ebay?: boolean
   ebay_listing_id?: string | null
   ebay_inventory_sku?: string | null
@@ -50,6 +55,11 @@ export interface Article {
     seller_username: string | null
     seller_country_code: string | null
   } | null
+  /** Pre-computed market reference (option B — no lookup on open). */
+  cardmarket_id_product?: number | null
+  market_cardmarket_eur?: number | null
+  market_tcgplayer_eur?: number | null
+  market_priced_at?: string | null
   images: ArticleImage[]
 }
 
@@ -107,6 +117,14 @@ export interface PublishEbayResponse {
   }
 }
 
+export interface PublishLeboncoinResponse {
+  leboncoin: {
+    status: 'running' | 'pending'
+    stream_path: string
+    desktop_local?: boolean
+  }
+}
+
 export interface ArticleUpdateBody {
   title?: string
   description?: string
@@ -133,7 +151,7 @@ export interface ArticleUpdateBody {
  * @returns HTTP helpers; `vintedHttp()` picks `$vintedLocal` when running inside Tauri with publish intent.
  */
 export function useArticles() {
-  const { $api, $vintedLocal } = useNuxtApp()
+  const { $api, $vintedLocal, $leboncoinLocal } = useNuxtApp()
   const { isDesktopApp } = useDesktopRuntime()
 
   /**
@@ -144,6 +162,14 @@ export function useArticles() {
   function vintedHttp() {
     if (import.meta.client && isDesktopApp.value && $vintedLocal) {
       return $vintedLocal
+    }
+    return $api
+  }
+
+  /** Worker local Leboncoin (desktop Tauri). */
+  function leboncoinHttp() {
+    if (import.meta.client && isDesktopApp.value && $leboncoinLocal) {
+      return $leboncoinLocal
     }
     return $api
   }
@@ -305,6 +331,50 @@ export function useArticles() {
   }
 
   /**
+   *
+   */
+  async function bulkDelistChannels(payload: {
+    article_ids: number[]
+    vinted: boolean
+    ebay: boolean
+    leboncoin: boolean
+  }) {
+    const { data } = await $api.post<{
+      vinted_article_ids: number[]
+      ebay_removed: number
+      leboncoin_cleared: number
+    }>('/articles/bulk-delist-channels', payload)
+    return data
+  }
+
+  /**
+   *
+   */
+  async function bulkPrepareForSale(ids: number[]) {
+    await $api.post('/articles/bulk-prepare-for-sale', { ids })
+  }
+
+  /**
+   *
+   */
+  async function startVintedBatchDelist(articleIds: number[]) {
+    const { data } = await vintedHttp().post<VintedBatchStartResponse>('/articles/vinted-batch-delist', {
+      article_ids: articleIds,
+    })
+    return data
+  }
+
+  /**
+   *
+   */
+  async function startVintedBatchRefresh(articleIds: number[]) {
+    const { data } = await vintedHttp().post<VintedBatchStartResponse>('/articles/vinted-batch-refresh', {
+      article_ids: articleIds,
+    })
+    return data
+  }
+
+  /**
    * GET `/articles/vinted-batch/active` — resume UI state after reload.
    *
    * @returns {Promise<VintedBatchActiveResponse>} Active job pointer or nulls when idle.
@@ -322,6 +392,15 @@ export function useArticles() {
    */
   async function publishArticleToEbay(id: number) {
     const { data } = await $api.post<PublishEbayResponse>(`/articles/${id}/publish-ebay`)
+    return data
+  }
+
+  /**
+   * POST Leboncoin publish — valide sur l’API puis exécute sur le worker local (desktop).
+   */
+  async function publishArticleToLeboncoin(id: number) {
+    await $api.post(`/articles/${id}/publish-leboncoin`)
+    const { data } = await leboncoinHttp().post<PublishLeboncoinResponse>(`/articles/${id}/publish-leboncoin`)
     return data
   }
 
@@ -352,8 +431,13 @@ export function useArticles() {
     removeEbayListing,
     publishArticleToVinted,
     publishArticleToEbay,
+    publishArticleToLeboncoin,
     startVintedBatch,
+    startVintedBatchDelist,
+    startVintedBatchRefresh,
     startEbayBatch,
     getVintedBatchActive,
+    bulkDelistChannels,
+    bulkPrepareForSale,
   }
 }
