@@ -31,6 +31,16 @@ const ID_CROP_SCALES = [0.6, 0.48]
 /** Carte REDRESSÉE (warp perspective du quad) envoyée au matcher pHash — aspect 63:88. */
 const PHASH_CARD_W = 180
 const PHASH_CARD_H = 252
+/**
+ * Repli « zone-guide centrale » : après tant de frames SANS quad valide (doigt
+ * sur un coin, reflet de pochette/toploader qui casse la détection), on envoie
+ * quand même la région centrale au format carte au matcher pHash — la carte est
+ * centrée (consigne UI), donc l'empreinte matche souvent là où la détection
+ * échoue. Idée reprise du scanner de TailTCG (repli sur le cadre-guide).
+ */
+const FALLBACK_AFTER = 6
+const GUIDE_H_FRAC = 0.62
+const CARD_ASPECT = 63 / 88
 /** Jitter de position alterné d'une tentative à l'autre (fraction du bbox). */
 const ID_CROP_JITTER = [
   { dx: 0, dy: 0 },
@@ -67,6 +77,8 @@ let session = null
 let ortRef = null
 let lastIdCropAt = 0
 let idJitterCursor = 0
+/** Frames consécutives sans quad valide (déclenche le repli zone-guide). */
+let missCount = 0
 
 /**
  * Le quad prédit ressemble-t-il à une carte ? (convexe, aire plausible,
@@ -275,8 +287,31 @@ async function detect(d) {
   const presence = 1 / (1 + Math.exp(-out.presence.data[0]))
   if (presence < PRESENCE_MIN || !quadLooksLikeCard(corners)) {
     self.postMessage({ t: 'nq' })
+    missCount += 1
+    // Repli : détection en échec depuis FALLBACK_AFTER frames (doigt/pochette),
+    // on tente la pHash sur la zone-guide centrale, la carte y est déjà.
+    if (d.im && missCount >= FALLBACK_AFTER && Date.now() - lastIdCropAt >= ID_CROP_MIN_INTERVAL_MS) {
+      lastIdCropAt = Date.now()
+      try {
+        const gh = d.h * GUIDE_H_FRAC
+        const gw = gh * CARD_ASPECT
+        const gx = (d.w - gw) / 2
+        const gy = (d.h - gh) / 2
+        const guideQuad = [
+          { x: gx, y: gy },
+          { x: gx + gw, y: gy },
+          { x: gx + gw, y: gy + gh },
+          { x: gx, y: gy + gh },
+        ]
+        const card = warpQuadToRect(rgba, d.w, d.h, guideQuad, PHASH_CARD_W, PHASH_CARD_H)
+        self.postMessage({ t: 'cardcrop', buf: card.buffer, w: PHASH_CARD_W, h: PHASH_CARD_H }, [card.buffer])
+      } catch {
+        /* repli best-effort */
+      }
+    }
     return
   }
+  missCount = 0
   // coins normalisés (repère letterbox) vers coords frame, pour les crops et
   // le cadre affiché, LÉGÈREMENT resserré (5 %) pour épouser au ras de la carte.
   const frameQuad = []
@@ -299,6 +334,13 @@ async function detect(d) {
   if (d.im && Date.now() - lastIdCropAt >= ID_CROP_MIN_INTERVAL_MS) {
     lastIdCropAt = Date.now()
     try {
+      // pHash : carte redressée pleine, envoyée à CHAQUE frame throttlée (même
+      // légèrement floue — la pHash refuse d'elle-même) : plus de tentatives,
+      // reconnaissance plus rapide quand un doigt / une pochette gêne la netteté.
+      const card = warpQuadToRect(rgba, d.w, d.h, frameQuad, PHASH_CARD_W, PHASH_CARD_H)
+      self.postMessage({ t: 'cardcrop', buf: card.buffer, w: PHASH_CARD_W, h: PHASH_CARD_H }, [card.buffer])
+      // Embedding : crops intérieurs ancrés, seulement sur frame NETTE (un crop
+      // flou casse l'embedding ; le cadre, lui, continue de suivre).
       let bx0 = Infinity
       let by0 = Infinity
       let bx1 = -Infinity
@@ -322,16 +364,11 @@ async function detect(d) {
         const crop = cropRgba(rgba, d.w, d.h, cx - sw / 2, cy - sh / 2, sw, sh, CROP_EDGE)
         bufs.push({ buf: crop.buffer, isMid: k === midK })
       }
-      // Gate de netteté : sauter l'ID sur une frame floue (mouvement/tremblement),
-      // le cadre continue de suivre. On mesure sur le crop central.
       const mid = bufs.find((b) => b.isMid) || bufs[0]
       if (sharpness(new Uint8ClampedArray(mid.buf), CROP_EDGE) >= ID_SHARPNESS_MIN) {
         idJitterCursor += 1
         const out = bufs.map((b) => b.buf)
         self.postMessage({ t: 'idcrop', bufs: out }, out)
-        // Carte redressée pleine pour le matcher pHash (chemin rapide parallèle).
-        const card = warpQuadToRect(rgba, d.w, d.h, frameQuad, PHASH_CARD_W, PHASH_CARD_H)
-        self.postMessage({ t: 'cardcrop', buf: card.buffer, w: PHASH_CARD_W, h: PHASH_CARD_H }, [card.buffer])
       }
     } catch {
       /* crop best-effort — la détection continue */
