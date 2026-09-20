@@ -396,6 +396,12 @@ class AmazonProvisionRegisterBody(BaseModel):
     customer_name: str = "GoupixDex"
 
 
+class AmazonProvisionEmailCodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    code: str = Field(min_length=4, max_length=12)
+
+
 def _norm_q(q: str | None) -> str | None:
     if not q or not str(q).strip():
         return None
@@ -486,7 +492,7 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
 
 # Bump when new local routes are added (UI can warn if the running sidecar is stale).
-AMAZON_WORKER_BUILD = "2026-03-20-register-name-no-email-touch"
+AMAZON_WORKER_BUILD = "2026-03-20-provision-email-code-fill"
 
 
 @router.get("/meta")
@@ -496,6 +502,7 @@ async def amazon_worker_meta() -> dict[str, object]:
         "features": [
             "accounts-open-register",
             "provision-open-register",
+            "provision-fill-email-code",
             "invites-reverify",
         ],
     }
@@ -979,6 +986,21 @@ async def amazon_provision_discard(
 ) -> dict[str, object]:
     discard_provision_staging_profile(user_id)
     return {"discarded": True}
+
+
+@router.post("/provision/fill-email-verification-code")
+async def amazon_provision_fill_email_code(
+    body: AmazonProvisionEmailCodeBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    del user_id
+    from amazon_nodriver import fill_amazon_email_verification_code
+
+    result = await asyncio.to_thread(fill_amazon_email_verification_code, body.code.strip())
+    return {
+        "success": bool(result.get("success")),
+        "message": str(result.get("message") or ""),
+    }
 
 
 @router.post("/accounts/{account_id}/claim-staging-profile")

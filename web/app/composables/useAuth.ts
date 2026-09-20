@@ -1,3 +1,6 @@
+import { persistProvisionInboundToken } from '~/utils/provisionInboundToken'
+import { syncProvisionInboundLogin } from '~/utils/syncProvisionInboundLogin'
+
 const TOKEN_KEY = 'goupix_token'
 
 export interface MeUser {
@@ -56,6 +59,7 @@ export function useAuth() {
       password,
     })
     persistToken(data.access_token)
+    await syncProvisionInboundLogin(email, password)
     await refreshMe()
   }
 
@@ -66,6 +70,7 @@ export function useAuth() {
    */
   function logout() {
     persistToken(null)
+    persistProvisionInboundToken(null)
     me.value = null
     return navigateTo('/login')
   }

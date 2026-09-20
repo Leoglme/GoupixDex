@@ -14,3 +14,10 @@ export function resolveProvisionInboundApiBase(apiBase: string, override?: strin
   }
   return base
 }
+
+/** True quand le poll OTP ne passe pas par la même base que le reste de l’app (dev local typique). */
+export function provisionInboundUsesSeparateApi(apiBase: string, override?: string): boolean {
+  const main = apiBase.replace(/\/$/, '')
+  const inbound = resolveProvisionInboundApiBase(apiBase, override)
+  return inbound !== main
+}

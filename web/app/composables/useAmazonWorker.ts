@@ -234,6 +234,18 @@ export function useAmazonWorker() {
   }
 
   /**
+   * Saisit le code OTP e-mail Amazon dans la fenêtre Chrome ouverte par le worker local.
+   */
+  async function fillProvisionEmailVerificationCode(code: string): Promise<{ success: boolean; message: string }> {
+    const { data } = await client.value.post<{ success: boolean; message: string }>(
+      '/amazon/provision/fill-email-verification-code',
+      { code },
+      { timeout: 60_000 },
+    )
+    return data
+  }
+
+  /**
    *
    */
   async function claimStagingProfile(accountId: number): Promise<{ ok: boolean; active_account_id: number }> {
@@ -277,6 +289,7 @@ export function useAmazonWorker() {
     activateVaultAccount,
     autoLoginVaultAccount,
     openProvisionRegister,
+    fillProvisionEmailVerificationCode,
     discardProvisionStaging,
     claimStagingProfile,
     openRegisterBrowser,

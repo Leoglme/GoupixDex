@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { resolveProvisionInboundApiBase } from '~/utils/provisionInboundApiBase'
+import { readProvisionInboundToken } from '~/utils/provisionInboundToken'
 
 const TOKEN_KEY = 'goupix_token'
 
@@ -23,7 +24,9 @@ export function useAmazonProvisionInbound() {
       headers: { Accept: 'application/json' },
     })
     client.interceptors.request.use((req) => {
-      const t = token.value ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
+      const inboundToken = readProvisionInboundToken()
+      const mainToken = token.value ?? (import.meta.client ? localStorage.getItem(TOKEN_KEY) : null)
+      const t = inboundToken || mainToken
       if (t) {
         req.headers.Authorization = `Bearer ${t}`
       }
@@ -58,6 +61,7 @@ export function useAmazonProvisionInbound() {
     onCode: (code: string) => void,
     intervalMs = 2500,
     maxMs = 20 * 60_000,
+    onPollError?: (err: unknown) => void,
   ): () => void {
     const started = Date.now()
     let stopped = false
@@ -69,10 +73,10 @@ export function useAmazonProvisionInbound() {
         const code = await fetchInboundCode(email)
         if (code) {
           onCode(code)
-          return
+          /* continue polling: Amazon peut renvoyer un autre OTP */
         }
-      } catch {
-        /* watch pas encore actif ou API indisponible */
+      } catch (err: unknown) {
+        onPollError?.(err)
       }
       if (!stopped) {
         window.setTimeout(tick, intervalMs)

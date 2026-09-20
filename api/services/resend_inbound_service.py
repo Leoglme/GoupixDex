@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 AMAZON_PROVISION_EMAIL_DOMAIN = "mail.goupixdex.dibodev.fr"
 
-_OTP_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?i)\bcode(?:\s*de\s*vérification|\s*verification)?\s*[:\s]+(\d{4,8})\b"),
-    re.compile(r"(?i)\bvotre\s+code\s+(?:est\s+)?[:\s]*(\d{4,8})\b"),
-    re.compile(r"\b(\d{6})\b"),
+_AMAZON_OTP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r'class="data">\s*(\d{6})\s*<'),
+    re.compile(r"(?i)mot de passe à usage unique \(OTP\) suivant[^\d]{0,120}(\d{6})"),
+    re.compile(r"(?i)OTP\)\s*suivant[^0-9]{0,40}:?\s*(\d{6})"),
+    re.compile(r"(?i)\b(\d{6})\b\s+est\s+votre\s+code"),
+    re.compile(r":(\d{6})(?:\s|$)"),
 )
 
 
@@ -33,11 +35,18 @@ def recipient_is_provision_inbox(address: str) -> bool:
 
 
 def extract_otp_from_content(*, text: str | None, html: str | None) -> str | None:
-    haystack = "\n".join(part for part in (text or "", html or "") if part)
-    if not haystack.strip():
-        return None
-    for pattern in _OTP_PATTERNS:
-        match = pattern.search(haystack)
+    """Amazon FR : OTP dans le texte (`:502122`) ou bloc HTML `class=\"data\"`."""
+    plain = (text or "").strip()
+    markup = (html or "").strip()
+    for haystack in (plain, markup):
+        if not haystack:
+            continue
+        for pattern in _AMAZON_OTP_PATTERNS:
+            match = pattern.search(haystack)
+            if match:
+                return match.group(1)
+    if plain:
+        match = re.search(r"\b(\d{6})\b", plain)
         if match:
             return match.group(1)
     return None

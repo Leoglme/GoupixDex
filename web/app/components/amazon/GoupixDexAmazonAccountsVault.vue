@@ -55,6 +55,17 @@
           </div>
         </form>
         <div v-else class="mt-3 space-y-3">
+          <UAlert
+            v-if="provisionRunning && provisionLiveEmail"
+            color="info"
+            variant="subtle"
+            :title="provisionLiveOtp ? `Code e-mail : ${provisionLiveOtp}` : 'En attente du code e-mail Amazon…'"
+            :description="
+              provisionLiveOtp
+                ? 'Saisie automatique dans Chrome si le worker est à jour.'
+                : `Surveillance ${provisionLiveEmail} via l’API prod.`
+            "
+          />
           <UFormField label="Nombre de comptes">
             <UInput v-model.number="provisionCount" type="number" min="1" max="10" class="w-full max-w-[8rem]" />
           </UFormField>
@@ -161,6 +172,7 @@
 </template>
 
 <script setup lang="ts">
+import axios from 'axios'
 import type { Ref } from 'vue'
 import type { AmazonVaultAccount } from '~/types/amazonAccounts'
 import { generateAmazonProvisionEmail, generateAmazonProvisionPassword } from '~/utils/amazonAccountProvision'
@@ -176,9 +188,15 @@ const { me } = useAuth()
 const { isDesktopApp } = useDesktopRuntime()
 const { fetchOverview, createAccount, updateAccount, deleteAccount, revealCredentials, setActiveAccount } =
   useAmazonAccounts()
-const { openProvisionRegister, discardProvisionStaging, claimStagingProfile, closeLoginBrowser, fetchWorkerMeta } =
-  useAmazonWorker()
-const { registerInboundWatch, pollInboundCode } = useAmazonProvisionInbound()
+const {
+  openProvisionRegister,
+  fillProvisionEmailVerificationCode,
+  discardProvisionStaging,
+  claimStagingProfile,
+  closeLoginBrowser,
+  fetchWorkerMeta,
+} = useAmazonWorker()
+const { registerInboundWatch, pollInboundCode, provisionInboundApiBase } = useAmazonProvisionInbound()
 const toast = useToast()
 
 const loading: Ref<boolean> = ref(false)
@@ -206,6 +224,8 @@ const provisionSaveDescription = ref('')
 const provisionSaveLoading = ref(false)
 let provisionSaveResolver: ((save: boolean) => void) | null = null
 let stopProvisionInboundPoll: (() => void) | null = null
+const provisionLiveEmail = ref('')
+const provisionLiveOtp = ref('')
 const deleteModalOpen = ref(false)
 const deleteTarget: Ref<AmazonVaultAccount | null> = ref(null)
 const deleteSubmitting = ref(false)
@@ -338,6 +358,54 @@ function withWorkerTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   })
 }
 
+function notifyProvisionInboundAuthError(err: unknown): void {
+  if (!axios.isAxiosError(err)) {
+    return
+  }
+  const status = err.response?.status
+  if (status !== 401 && status !== 403) {
+    return
+  }
+  toast.add({
+    title: 'Session OTP prod manquante',
+    description: `Déconnecte-toi puis reconnecte-toi (même e-mail/mot de passe sur l’API locale) pour activer le poll sur ${provisionInboundApiBase.value}.`,
+    color: 'warning',
+  })
+}
+
+function startProvisionOtpAssist(email: string): void {
+  provisionLiveEmail.value = email
+  provisionLiveOtp.value = ''
+  let lastFilledCode = ''
+  stopProvisionInboundPoll?.()
+  stopProvisionInboundPoll = pollInboundCode(
+    email,
+    async (code) => {
+      provisionLiveOtp.value = code
+      provisionSaveDescription.value = `${email} — code e-mail Amazon : ${code}`
+      if (code === lastFilledCode) {
+        return
+      }
+      lastFilledCode = code
+      try {
+        const res = await fillProvisionEmailVerificationCode(code)
+        if (!res.success) {
+          toast.add({ title: 'Saisie Chrome', description: res.message, color: 'warning' })
+        }
+      } catch (e: unknown) {
+        toast.add({
+          title: 'Worker Amazon',
+          description: e instanceof Error ? e.message : 'Impossible de saisir le code dans Chrome.',
+          color: 'warning',
+        })
+      }
+    },
+    2500,
+    20 * 60_000,
+    notifyProvisionInboundAuthError,
+  )
+}
+
 async function runProvision(): Promise<void> {
   if (!isDesktopApp.value) {
     toast.add({ title: 'Réservé à l’app desktop', color: 'warning' })
@@ -358,9 +426,10 @@ async function runProvision(): Promise<void> {
       const customer_name = resolveAmazonProvisionCustomerName(me.value?.full_name)
       try {
         await registerInboundWatch(email)
-      } catch {
-        /* prod pas à jour : la modale reste utilisable sans code auto */
+      } catch (e: unknown) {
+        notifyProvisionInboundAuthError(e)
       }
+      startProvisionOtpAssist(email)
       const res = await withWorkerTimeout(
         openProvisionRegister({ email, password, customer_name }),
         130_000,
@@ -429,6 +498,10 @@ async function runProvision(): Promise<void> {
     }
     toast.add({ title: 'Création impossible', description: provisionErrorMessage(e), color: 'error' })
   } finally {
+    stopProvisionInboundPoll?.()
+    stopProvisionInboundPoll = null
+    provisionLiveEmail.value = ''
+    provisionLiveOtp.value = ''
     provisionRunning.value = false
   }
 }
@@ -486,13 +559,8 @@ function resolveProvisionContinue(cont: boolean): void {
 }
 
 function askProvisionSaveToVault(email: string): Promise<boolean> {
-  stopProvisionInboundPoll?.()
-  stopProvisionInboundPoll = null
   provisionSaveDescription.value = `${email} — enregistrez ce compte seulement si vous arrivez à vous connecter sur Amazon.`
   provisionSaveOpen.value = true
-  stopProvisionInboundPoll = pollInboundCode(email, (code) => {
-    provisionSaveDescription.value = `${email} — code e-mail Amazon : ${code} (copiez-le dans Chrome si besoin).`
-  })
   return new Promise((resolve) => {
     provisionSaveResolver = resolve
   })
