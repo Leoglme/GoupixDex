@@ -7,7 +7,11 @@
     variant="link"
     :content="content"
     aria-label="Mode d'affichage"
-    :ui="{ list: 'gap-4', trigger: 'px-4 py-2.5 text-base font-medium', leadingIcon: 'size-5' }"
+    :ui="{
+      list: 'gap-4',
+      trigger: 'px-4 py-2.5 text-base font-medium',
+      leadingIcon: 'size-5',
+    }"
   />
 </template>
 
@@ -23,9 +27,9 @@ const model = defineModel<string>({ required: true })
 withDefaults(
   defineProps<{
     items: GoupixDexCollectionViewTabItem[]
-    /** Désactive les panneaux UTabs quand le contenu est géré en dehors (ex. classeurs). */
+    /** Désactive les panneaux UTabs quand le contenu est géré en dehors (collection, classeurs). */
     content?: boolean
   }>(),
-  { content: true },
+  { content: false },
 )
 </script>
