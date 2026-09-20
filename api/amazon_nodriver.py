@@ -1554,3 +1554,135 @@ async def register_to_amazon_async(
 
 def register_to_amazon(email: str, password: str, customer_name: str = "GoupixDex") -> Dict[str, Any]:
     return run_browser(register_to_amazon_async(email, password, customer_name), timeout=120)
+
+
+_EMAIL_VERIFY_CODE_SELECTORS: tuple[str, ...] = (
+    "#cvf_input_code",
+    'input[name="code"]',
+    'input[name="otpCode"]',
+    'input[autocomplete="one-time-code"]',
+    "#auth-mfa-otpcode",
+    'input[type="tel"][maxlength="6"]',
+    'input[type="text"][maxlength="6"]',
+)
+
+
+async def _click_amazon_email_verify_submit(tab: Any) -> bool:
+    """Bouton jaune « Vérifier » OTP (#cvf-submit-otp-button) — le submit n'a pas de value textuelle."""
+    browser = getattr(tab, "browser", None)
+    if browser is not None:
+        tab = _coerce_connection_to_tab(browser, tab) or tab
+    for sel in (
+        "#cvf-submit-otp-button input.a-button-input",
+        "#cvf-submit-otp-button input[type='submit']",
+        "#cvf-submit-otp-button",
+        "span.cvf-widget-btn-verify input.a-button-input",
+        'input.a-button-input[aria-label*="Vérifier"]',
+        'input.a-button-input[aria-label*="Verifier"]',
+    ):
+        try:
+            btn = await tab.select(sel, timeout=1.5)
+            if btn:
+                await btn.mouse_click()
+                _register_log(f"Clic Vérifier OTP ({sel})")
+                return True
+        except Exception:
+            continue
+    try:
+        clicked = await _tab_eval_value(
+            tab,
+            """
+            () => {
+              const isVisible = (el) => {
+                if (!el || el.disabled) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 4 && r.height > 4;
+              };
+              const tryClick = (el) => {
+                if (!isVisible(el)) return false;
+                el.focus();
+                el.click();
+                return true;
+              };
+              const root = document.querySelector('#cvf-submit-otp-button, .cvf-widget-btn-verify');
+              if (root) {
+                const input = root.querySelector('input.a-button-input, input[type="submit"]');
+                if (input && tryClick(input)) return true;
+                if (tryClick(root)) return true;
+              }
+              for (const el of document.querySelectorAll('input.a-button-input[type="submit"]')) {
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                if (aria.includes('vérifier') || aria.includes('verifier') || aria.includes('otp')) {
+                  if (tryClick(el)) return true;
+                }
+              }
+              return false;
+            }
+            """,
+        )
+        if clicked:
+            _register_log("Clic Vérifier OTP (JS cvf-submit)")
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def fill_amazon_email_verification_code_async(code: str) -> Dict[str, Any]:
+    """Saisie du code e-mail Amazon (page « Vérifiez l'adresse e-mail ») sur Chrome déjà ouvert."""
+    cleaned = "".join(ch for ch in (code or "").strip() if ch.isdigit())
+    if len(cleaned) < 4:
+        return {"success": False, "message": "Code invalide."}
+    browser = _browser_holder.get("browser")
+    if browser is None:
+        return {"success": False, "message": "Chrome Amazon non ouvert."}
+    seed = await _first_live_tab(browser, "")
+    tab = await _refresh_amazon_tab(browser, await _ensure_nodriver_tab(browser, seed))
+    filled = False
+    for sel in _EMAIL_VERIFY_CODE_SELECTORS:
+        if await _set_registration_input(tab, sel, cleaned):
+            filled = True
+            break
+    if not filled:
+        js = f"""
+        (() => {{
+          const code = {json.dumps(cleaned)};
+          const inputs = document.querySelectorAll('input');
+          for (const el of inputs) {{
+            const label = (el.labels && el.labels[0] && el.labels[0].textContent) || '';
+            const aria = el.getAttribute('aria-label') || '';
+            const hint = `${{label}} ${{aria}}`.toLowerCase();
+            if (!/code|sécurité|securite|verification|vérification/.test(hint)) continue;
+            if (el.offsetParent === null) continue;
+            el.focus();
+            el.value = code;
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return true;
+          }}
+          return false;
+        }})()
+        """
+        try:
+            filled = bool(await tab.evaluate(js))
+        except Exception:
+            filled = False
+    if not filled:
+        return {"success": False, "message": "Champ code introuvable sur la page Amazon."}
+    await asyncio.sleep(0.2)
+    clicked = False
+    for attempt in range(4):
+        if await _click_amazon_email_verify_submit(tab):
+            clicked = True
+            break
+        await asyncio.sleep(0.35)
+    if not clicked:
+        return {
+            "success": True,
+            "message": "Code saisi — cliquez « Vérifier » si la page ne bouge pas.",
+        }
+    return {"success": True, "message": "Code saisi et Vérifier cliqué dans Chrome."}
+
+
+def fill_amazon_email_verification_code(code: str) -> Dict[str, Any]:
+    return run_browser(fill_amazon_email_verification_code_async(code), timeout=45)

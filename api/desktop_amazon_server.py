@@ -492,7 +492,7 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
 
 # Bump when new local routes are added (UI can warn if the running sidecar is stale).
-AMAZON_WORKER_BUILD = "2026-03-20-provision-email-code-fill"
+AMAZON_WORKER_BUILD = "2026-03-20-cvf-submit-otp-click"
 
 
 @router.get("/meta")
