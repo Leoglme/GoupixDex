@@ -160,7 +160,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         s.ebay_oauth_configured === true &&
         s.ebay_connected === true &&
         s.ebay_listing_config_complete === true
-      leboncoinPublishAvailable.value = s.leboncoin_enabled === true && Boolean((s.sender_postal_code || '').trim())
+      leboncoinPublishAvailable.value = s.leboncoin_enabled === true && s.sender_address_complete === true
     } catch {
       vintedChannelEnabled.value = false
       ebayPublishAvailable.value = false
@@ -362,6 +362,34 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   function openBulkPublish(ids: number[]) {
     bulkPublishIds.value = ids
     bulkPublishOpen.value = true
+  }
+
+  const bulkPublishChannelDefaults = computed(() => {
+    const rows = bulkPublishIds.value.map((id) => articleById(id)).filter((a): a is Article => Boolean(a))
+    const wantVinted = rows.some((r) => !r.published_on_vinted)
+    const wantEbay = rows.some((r) => !r.published_on_ebay)
+    const wantLeboncoin = rows.some((r) => !r.published_on_leboncoin)
+    return { vinted: wantVinted, ebay: wantEbay, leboncoin: wantLeboncoin }
+  })
+
+  /** @returns true si l’adresse expéditeur permet une publication Leboncoin. */
+  async function ensureLeboncoinPublishReady(): Promise<boolean> {
+    try {
+      const settings = await getSettings()
+      if (settings.sender_address_complete) {
+        return true
+      }
+    } catch {
+      /* fall through */
+    }
+    toast.add({
+      title: 'Adresse expéditeur requise',
+      description: 'Complétez votre adresse dans Mon profil (menu compte) avant de publier sur Leboncoin.',
+      color: 'warning',
+    })
+    const { openProfileDrawer } = useProfileDrawer()
+    openProfileDrawer()
+    return false
   }
 
   /**
@@ -860,6 +888,9 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    * @param a
    */
   async function onBulkPublishLeboncoin(ids: number[]) {
+    if (!(await ensureLeboncoinPublishReady())) {
+      return
+    }
     const eligible = eligibleIdsForVintedBulk(ids)
     if (!eligible.length) {
       toast.add({
@@ -919,6 +950,9 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         color: 'warning',
       })
       await navigateTo('/downloads')
+      return
+    }
+    if (!(await ensureLeboncoinPublishReady())) {
       return
     }
     try {
@@ -1002,6 +1036,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     bulkDeleteIds,
     bulkPublishOpen,
     bulkPublishIds,
+    bulkPublishChannelDefaults,
     bulkPublishBusy,
     bulkDelistOpen,
     bulkDelistIds,

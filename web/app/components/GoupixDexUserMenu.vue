@@ -1,5 +1,5 @@
 <template>
-  <GoupixDexProfileDrawer :open="profileOpen" @close="profileOpen = false" />
+  <GoupixDexProfileDrawer :open="profileDrawerOpen" @close="closeProfileDrawer" />
 
   <UDropdownMenu
     :items="items"
@@ -32,7 +32,7 @@ defineProps<{
 const colorMode = useColorMode()
 const { me, logout } = useAuth()
 const { isDesktopApp } = useDesktopRuntime()
-const profileOpen = ref(false)
+const { profileDrawerOpen, openProfileDrawer, closeProfileDrawer } = useProfileDrawer()
 
 const accountLabel = computed(() => {
   const name = me.value?.full_name?.trim()
@@ -55,7 +55,7 @@ const items: ComputedRef<DropdownMenuItem[][]> = computed(() => [
       label: 'Mon profil',
       icon: 'i-lucide-user-pen',
       onSelect() {
-        profileOpen.value = true
+        openProfileDrawer()
       },
     },
     {

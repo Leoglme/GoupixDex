@@ -77,7 +77,9 @@
         </span>
         <span class="channel-row-body">
           <GoupixDexLeboncoinLogo class="channel-mark-lbc shrink-0" aria-hidden="true" />
-          <span class="channel-row-text text-xs leading-snug text-[#FF6E14]/90">Bientôt disponible.</span>
+          <span v-if="leboncoinHint" class="channel-row-text text-xs leading-snug text-[#FF6E14]/90">{{
+            leboncoinHint
+          }}</span>
         </span>
       </button>
 
@@ -125,8 +127,11 @@ const props = withDefaults(
     isDesktopApp: boolean
     loading?: boolean
     mode?: 'publish' | 'relist'
+    defaultVinted?: boolean
+    defaultEbay?: boolean
+    defaultLeboncoin?: boolean
   }>(),
-  { mode: 'publish' },
+  { mode: 'publish', defaultVinted: true, defaultEbay: true, defaultLeboncoin: true },
 )
 
 const open = defineModel<boolean>('open', { default: false })
@@ -203,7 +208,7 @@ const ebayHint = computed(() =>
 
 const leboncoinHint = computed(() => {
   if (!props.leboncoinPublishAvailable) {
-    return 'Activez Leboncoin et renseignez votre code postal expéditeur (Paramètres).'
+    return 'Activez Leboncoin et complétez l’adresse expéditeur (Mon profil).'
   }
   if (!props.isDesktopApp) {
     return 'Application desktop requise.'
@@ -246,9 +251,9 @@ watch(
     if (!isOpen) {
       return
     }
-    pickVinted.value = vintedAvailable.value
-    pickEbay.value = ebayAvailable.value
-    pickLeboncoin.value = leboncoinAvailable.value
+    pickVinted.value = vintedAvailable.value && props.defaultVinted
+    pickEbay.value = ebayAvailable.value && props.defaultEbay
+    pickLeboncoin.value = leboncoinAvailable.value && props.defaultLeboncoin
     refreshVinted.value = props.mode === 'relist'
   },
 )

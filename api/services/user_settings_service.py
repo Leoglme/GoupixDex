@@ -32,6 +32,26 @@ def effective_sender_full_name(user: User, ms: MarginSettings) -> str:
     return (user.full_name or ms.sender_full_name or "").strip()
 
 
+def normalize_phone_e164(raw: str | None) -> str | None:
+    """Keep + and digits only; require at least 10 digits (FR mobile and similar)."""
+    if not raw or not str(raw).strip():
+        return None
+    cleaned = "".join(c for c in str(raw).strip() if c.isdigit() or c == "+")
+    if cleaned.count("+") > 1 or (cleaned.startswith("+") and "+" in cleaned[1:]):
+        return None
+    digits = "".join(c for c in cleaned if c.isdigit())
+    if len(digits) < 10 or len(digits) > 15:
+        return None
+    if cleaned.startswith("+"):
+        return f"+{digits}"
+    return digits
+
+
+def amazon_provision_profile_complete(ms: MarginSettings, user: User) -> bool:
+    """Profil prêt pour « Créer sur Amazon » (nom + adresse ; mobile / inbox SMS optionnels)."""
+    return sender_address_complete(ms, user)
+
+
 def sender_address_complete(ms: MarginSettings, user: User | None = None) -> bool:
     """True when the envelope flap (return) address is filled in for label printing."""
     name = (

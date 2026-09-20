@@ -1,10 +1,13 @@
-"""Dry-run Leboncoin publish (opens Chrome, stops at login or form fill)."""
+"""Dry-run Leboncoin publish (opens Chrome, remplit l’assistant, sans envoi final)."""
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from decimal import Decimal
 from pathlib import Path
+
+os.environ.setdefault("LEBONCOIN_DRY_RUN", "1")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -19,7 +22,16 @@ async def main() -> None:
     a = Article()
     a.id = 99999
     a.title = "Carte Pokémon Dracaufeu Near Mint"
-    a.description = "Carte Pokémon en excellent état, envoi soigné sous sleeve."
+    a.description = (
+        "Langue : Français\n"
+        "Nom : Dracaufeu\n"
+        "Numéro : 006/165\n"
+        "État : Near Mint / Mint"
+    )
+    a.pokemon_name = "Dracaufeu"
+    a.set_code = "151"
+    a.card_number = "006/165"
+    a.condition = "Near Mint"
     a.purchase_price = Decimal("5")
     a.sell_price = Decimal("12")
 
@@ -39,6 +51,8 @@ async def main() -> None:
         a,
         sources,
         postal_code="35000",
+        sender_line1="1 rue du Test",
+        sender_city="Rennes",
         progress=progress,
     )
     print("RESULT:", result)

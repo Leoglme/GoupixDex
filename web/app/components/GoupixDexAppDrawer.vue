@@ -7,7 +7,7 @@
     <Transition name="goupix-drawer-panel">
       <div
         v-if="open"
-        class="goupix-drawer-panel border-default fixed top-0 right-0 z-50 flex h-dvh flex-col border-l bg-(--app-surface) pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] shadow-2xl"
+        class="goupix-drawer-panel border-default fixed inset-y-0 right-0 z-50 flex h-dvh flex-col border-l bg-(--app-surface) pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl"
         role="dialog"
         aria-modal="true"
       >
@@ -40,7 +40,10 @@
           <slot />
         </div>
 
-        <div v-if="$slots.footer" class="border-default flex shrink-0 gap-2 border-t px-5 py-4">
+        <div
+          v-if="$slots.footer"
+          class="border-default relative z-[60] flex shrink-0 gap-2 border-t bg-(--app-surface) px-5 py-4"
+        >
           <slot name="footer" />
         </div>
       </div>
@@ -95,7 +98,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .goupix-drawer-panel {
-  width: min(480px, 100dvw);
+  width: min(480px, 100%);
   max-width: 480px;
 }
 

@@ -97,7 +97,16 @@
             description="Profil Chromium local — connectez-vous une fois sur leboncoin.fr."
             body-ui="p-0"
           >
-            <GoupixDexLeboncoinSessionCard :enabled="s.leboncoin_enabled" embedded />
+            <template #trailing>
+              <UBadge :color="leboncoinBadge.color" variant="subtle" class="hidden sm:inline-flex">
+                {{ leboncoinBadge.label }}
+              </UBadge>
+            </template>
+            <GoupixDexLeboncoinSessionCard
+              :enabled="s.leboncoin_enabled"
+              embedded
+              @update:session="onLeboncoinSessionUpdate"
+            />
           </GoupixDexCollapsibleCard>
 
           <GoupixDexCollapsibleCard
@@ -160,23 +169,26 @@
                 >
                   <GoupixDexPhoneInput v-model="phone" name="phone" default-country-code="FR" class="w-full" />
                 </UFormField>
+                <p class="text-muted text-xs leading-snug sm:col-span-2">
+                  Même adresse que dans
+                  <strong class="text-highlighted font-medium">Mon profil</strong> (menu compte). Les champs ci-dessous
+                  sont préremplis depuis votre profil.
+                </p>
                 <UFormField label="Adresse ligne 1" class="sm:col-span-2" required>
-                  <UInput v-model="addressLine1" class="w-full" />
+                  <GoupixDexAddressAutocompleteInput
+                    v-model="addressLine1"
+                    placeholder="Numéro et voie"
+                    @select="onEbayAddressSelect"
+                  />
                 </UFormField>
                 <UFormField label="Adresse ligne 2 (optionnel)" class="sm:col-span-2">
                   <UInput v-model="addressLine2" class="w-full" />
                 </UFormField>
                 <UFormField label="Code postal" required>
-                  <UInput
-                    v-model="postalCode"
-                    class="w-full"
-                    inputmode="numeric"
-                    autocomplete="postal-code"
-                    maxlength="12"
-                  />
+                  <GoupixDexPostalCodeAutocompleteInput v-model="postalCode" @select="onEbayPostalCodeSelect" />
                 </UFormField>
                 <UFormField label="Ville" required>
-                  <UInput v-model="city" class="w-full" autocomplete="address-level2" />
+                  <GoupixDexCityAutocompleteInput v-model="city" />
                 </UFormField>
                 <UFormField label="Pays">
                   <p class="text-muted py-2 text-sm">France (FR)</p>
@@ -243,6 +255,10 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import type { AppSettings } from '~/composables/useSettings'
+import type { LeboncoinSessionResponse } from '~/composables/useLeboncoinWorker'
+import type { AddressSuggestion } from '~/types/AddressAutocompleteInput'
+import type { PostalCodeCitySuggestion } from '~/types/PostalCodeAutocompleteInput'
+import { leboncoinSessionBadge } from '~/utils/leboncoinConnectionUi'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -281,6 +297,14 @@ const openCardmarket: Ref<boolean> = ref(false)
 const openAmazon: Ref<boolean> = ref(false)
 
 const vintedLinked: ComputedRef<boolean> = computed(() => Boolean(me.value?.vinted_email))
+
+const leboncoinSession: Ref<LeboncoinSessionResponse | null> = ref(null)
+
+const leboncoinBadge = computed(() => leboncoinSessionBadge(leboncoinSession.value))
+
+function onLeboncoinSessionUpdate(next: LeboncoinSessionResponse | null) {
+  leboncoinSession.value = next
+}
 
 const ebayBadgeLabel: ComputedRef<string> = computed(() => {
   if (!s.value?.ebay_connected) {
@@ -325,11 +349,31 @@ function applyHashSections(): void {
   }
 }
 
+function syncShippingFieldsFromSettings(): void {
+  if (!s.value) {
+    return
+  }
+  addressLine1.value = s.value.sender_line1 ?? ''
+  addressLine2.value = s.value.sender_line2 ?? ''
+  postalCode.value = s.value.sender_postal_code ?? ''
+  city.value = s.value.sender_city ?? ''
+}
+
+function onEbayAddressSelect(suggestion: AddressSuggestion): void {
+  postalCode.value = suggestion.postcode
+  city.value = suggestion.city
+}
+
+function onEbayPostalCodeSelect(suggestion: PostalCodeCitySuggestion): void {
+  city.value = suggestion.nom
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
     s.value = await getSettings()
     margin.value = s.value.margin_percent ?? 20
+    syncShippingFieldsFromSettings()
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
   } finally {

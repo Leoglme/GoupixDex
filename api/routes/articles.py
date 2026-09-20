@@ -523,10 +523,12 @@ def publish_leboncoin_for_article(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Leboncoin est désactivé dans vos paramètres marketplace.",
         )
-    if not (ms.sender_postal_code or "").strip():
+    from services.user_settings_service import sender_address_complete
+
+    if not sender_address_complete(ms, user):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Renseignez votre code postal expéditeur (Paramètres → Expédition).",
+            detail="Renseignez votre adresse d’expédition (Paramètres → Adresse d’expédition).",
         )
     stream_path = f"/articles/{article_id}/listing-progress"
     return {

@@ -402,6 +402,12 @@ class AmazonProvisionEmailCodeBody(BaseModel):
     code: str = Field(min_length=4, max_length=12)
 
 
+class AmazonProvisionPhoneBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    phone_e164: str = Field(min_length=8, max_length=20)
+
+
 def _norm_q(q: str | None) -> str | None:
     if not q or not str(q).strip():
         return None
@@ -492,7 +498,7 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
 
 # Bump when new local routes are added (UI can warn if the running sidecar is stale).
-AMAZON_WORKER_BUILD = "2026-03-20-cvf-submit-otp-click"
+AMAZON_WORKER_BUILD = "2026-03-21-receive-sms-auto-allocate"
 
 
 @router.get("/meta")
@@ -503,6 +509,9 @@ async def amazon_worker_meta() -> dict[str, object]:
             "accounts-open-register",
             "provision-open-register",
             "provision-fill-email-code",
+            "provision-fill-cvf-phone",
+            "provision-receive-sms-inbox",
+            "provision-receive-sms-allocate",
             "invites-reverify",
         ],
     }
@@ -1000,6 +1009,78 @@ async def amazon_provision_fill_email_code(
     return {
         "success": bool(result.get("success")),
         "message": str(result.get("message") or ""),
+    }
+
+
+@router.post("/provision/fill-cvf-phone")
+async def amazon_provision_fill_cvf_phone(
+    body: AmazonProvisionPhoneBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    del user_id
+    from amazon_nodriver import fill_amazon_cvf_phone
+
+    result = await asyncio.to_thread(fill_amazon_cvf_phone, body.phone_e164.strip())
+    return {
+        "success": bool(result.get("success")),
+        "message": str(result.get("message") or ""),
+    }
+
+
+@router.post("/provision/receive-sms/allocate")
+async def amazon_provision_receive_sms_allocate(
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    count: int = 1,
+) -> dict[str, object]:
+    del user_id
+    from services.receive_sms_cc_catalog import allocate_clean_canada_inboxes
+
+    try:
+        items = await asyncio.to_thread(
+            allocate_clean_canada_inboxes,
+            max(1, min(10, int(count))),
+        )
+    except Exception as exc:
+        return {"ok": False, "message": str(exc), "inboxes": []}
+    return {
+        "ok": True,
+        "message": f"{len(items)} numéro(s) Canada (receive-sms.cc) sans Amazon visible.",
+        "inboxes": [
+            {
+                "inbox_url": i.inbox_url,
+                "phone_e164": i.phone_e164,
+                "message_count": i.message_count,
+            }
+            for i in items
+        ],
+    }
+
+
+@router.get("/provision/receive-sms/inbox")
+async def amazon_provision_receive_sms_inbox(
+    url: str,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    del user_id
+    from services.receive_sms_cc_fetch import fetch_receive_sms_cc_html
+    from services.receive_sms_cc_parser import (
+        amazon_history_on_inbox,
+        latest_amazon_otp,
+        parse_receive_sms_cc_html,
+    )
+
+    try:
+        html = await asyncio.to_thread(fetch_receive_sms_cc_html, url.strip())
+    except Exception as exc:
+        return {"ok": False, "message": str(exc), "amazon_history": False, "code": None, "message_count": 0}
+    messages = parse_receive_sms_cc_html(html)
+    code = latest_amazon_otp(messages)
+    return {
+        "ok": True,
+        "amazon_history": amazon_history_on_inbox(messages),
+        "code": code,
+        "message_count": len(messages),
+        "message": "OK",
     }
 
 

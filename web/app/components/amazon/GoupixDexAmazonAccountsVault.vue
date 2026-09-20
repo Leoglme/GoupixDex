@@ -66,6 +66,17 @@
                 : `Surveillance ${provisionLiveEmail} via l’API prod.`
             "
           />
+          <p class="text-muted text-xs leading-snug">
+            Un numéro Canada receive-sms.cc (sans SMS Amazon visible) est choisi automatiquement par compte, puis
+            prérempli dans Chrome ; le code SMS est lu sur la même inbox.
+          </p>
+          <UAlert
+            v-if="provisionRunning && provisionLiveSmsPhone"
+            color="neutral"
+            variant="subtle"
+            :title="`SMS : ${provisionLiveSmsPhone}`"
+            description="Numéro receive-sms.cc alloué pour ce compte."
+          />
           <UFormField label="Nombre de comptes">
             <UInput v-model.number="provisionCount" type="number" min="1" max="10" class="w-full max-w-[8rem]" />
           </UFormField>
@@ -191,12 +202,16 @@ const { fetchOverview, createAccount, updateAccount, deleteAccount, revealCreden
 const {
   openProvisionRegister,
   fillProvisionEmailVerificationCode,
+  fillProvisionCvfPhone,
+  inspectReceiveSmsInbox,
+  allocateReceiveSmsInboxes,
   discardProvisionStaging,
   claimStagingProfile,
   closeLoginBrowser,
   fetchWorkerMeta,
 } = useAmazonWorker()
 const { registerInboundWatch, pollInboundCode, provisionInboundApiBase } = useAmazonProvisionInbound()
+const { ensureAmazonProvisionProfileReady } = useAmazonProvisionProfileGate()
 const toast = useToast()
 
 const loading: Ref<boolean> = ref(false)
@@ -214,6 +229,7 @@ const createTabItems = [
   { label: 'Créer sur Amazon', value: 'provision' },
 ]
 const provisionCount = ref(1)
+const provisionLiveSmsPhone = ref('')
 const provisionRunning = ref(false)
 const provisionContinueOpen = ref(false)
 const provisionContinueDescription = ref('')
@@ -224,6 +240,8 @@ const provisionSaveDescription = ref('')
 const provisionSaveLoading = ref(false)
 let provisionSaveResolver: ((save: boolean) => void) | null = null
 let stopProvisionInboundPoll: (() => void) | null = null
+let stopProvisionPhonePoll: (() => void) | null = null
+let stopProvisionReceiveSmsPoll: (() => void) | null = null
 const provisionLiveEmail = ref('')
 const provisionLiveOtp = ref('')
 const deleteModalOpen = ref(false)
@@ -373,11 +391,80 @@ function notifyProvisionInboundAuthError(err: unknown): void {
   })
 }
 
-function startProvisionOtpAssist(email: string): void {
+function startProvisionReceiveSmsAssist(inboxUrl: string): void {
+  stopProvisionReceiveSmsPoll?.()
+  const url = inboxUrl.trim()
+  if (!url.startsWith('https://receive-sms.cc/')) {
+    return
+  }
+  let lastSmsCode = ''
+  const tick = async (): Promise<void> => {
+    try {
+      const inbox = await inspectReceiveSmsInbox(url)
+      if (!inbox.ok || !inbox.code) {
+        return
+      }
+      if (inbox.code === lastSmsCode) {
+        return
+      }
+      lastSmsCode = inbox.code
+      const res = await fillProvisionEmailVerificationCode(inbox.code)
+      if (!res.success) {
+        toast.add({ title: 'Code SMS Chrome', description: res.message, color: 'warning' })
+      }
+    } catch {
+      /* inbox pas prête */
+    }
+  }
+  void tick()
+  const intervalId = window.setInterval(() => void tick(), 4000)
+  stopProvisionReceiveSmsPoll = () => {
+    window.clearInterval(intervalId)
+  }
+}
+
+function startProvisionPhoneAssist(phoneE164: string): void {
+  stopProvisionPhonePoll?.()
+  const phone = phoneE164.trim()
+  if (!phone) {
+    return
+  }
+  let phoneStepDone = false
+  const tick = async (): Promise<void> => {
+    if (phoneStepDone) {
+      return
+    }
+    try {
+      const res = await fillProvisionCvfPhone(phone)
+      if (!res.success) {
+        return
+      }
+      if (res.message.toLowerCase().includes('introuvable')) {
+        return
+      }
+      if (res.message.includes('validation cliquée')) {
+        phoneStepDone = true
+        stopProvisionPhonePoll?.()
+        stopProvisionPhonePoll = null
+      }
+    } catch {
+      /* page pas encore affichée */
+    }
+  }
+  void tick()
+  const intervalId = window.setInterval(() => void tick(), 3500)
+  stopProvisionPhonePoll = () => {
+    window.clearInterval(intervalId)
+  }
+}
+
+function startProvisionOtpAssist(email: string, phoneE164: string, receiveSmsUrl: string): void {
   provisionLiveEmail.value = email
   provisionLiveOtp.value = ''
   let lastFilledCode = ''
   stopProvisionInboundPoll?.()
+  startProvisionPhoneAssist(phoneE164)
+  startProvisionReceiveSmsAssist(receiveSmsUrl)
   stopProvisionInboundPoll = pollInboundCode(
     email,
     async (code) => {
@@ -411,7 +498,14 @@ async function runProvision(): Promise<void> {
     toast.add({ title: 'Réservé à l’app desktop', color: 'warning' })
     return
   }
+  if (!(await ensureAmazonProvisionProfileReady())) {
+    return
+  }
   const meta = await fetchWorkerMeta()
+  if (!meta?.features?.includes('provision-receive-sms-allocate')) {
+    toast.add({ title: 'Worker à redémarrer', description: workerStaleMessage(), color: 'warning' })
+    return
+  }
   if (!meta?.features?.includes('provision-open-register')) {
     toast.add({ title: 'Worker à redémarrer', description: workerStaleMessage(), color: 'warning' })
     return
@@ -419,7 +513,18 @@ async function runProvision(): Promise<void> {
   const count = Math.min(10, Math.max(1, Math.round(provisionCount.value) || 1))
   provisionRunning.value = true
   try {
+    toast.add({
+      title: 'Numéros SMS',
+      description: `Recherche de ${count} numéro(s) Canada (receive-sms.cc)…`,
+      color: 'info',
+    })
+    const allocation = await allocateReceiveSmsInboxes(count)
+    if (!allocation.ok || allocation.inboxes.length < count) {
+      throw new Error(allocation.message || 'Impossible d’allouer assez de numéros SMS.')
+    }
     for (let i = 0; i < count; i++) {
+      const smsInbox = allocation.inboxes[i]
+      provisionLiveSmsPhone.value = smsInbox.phone_e164
       const email = generateAmazonProvisionEmail()
       const password = generateAmazonProvisionPassword()
 
@@ -429,7 +534,7 @@ async function runProvision(): Promise<void> {
       } catch (e: unknown) {
         notifyProvisionInboundAuthError(e)
       }
-      startProvisionOtpAssist(email)
+      startProvisionOtpAssist(email, smsInbox.phone_e164, smsInbox.inbox_url)
       const res = await withWorkerTimeout(
         openProvisionRegister({ email, password, customer_name }),
         130_000,
@@ -500,8 +605,13 @@ async function runProvision(): Promise<void> {
   } finally {
     stopProvisionInboundPoll?.()
     stopProvisionInboundPoll = null
+    stopProvisionPhonePoll?.()
+    stopProvisionPhonePoll = null
+    stopProvisionReceiveSmsPoll?.()
+    stopProvisionReceiveSmsPoll = null
     provisionLiveEmail.value = ''
     provisionLiveOtp.value = ''
+    provisionLiveSmsPhone.value = ''
     provisionRunning.value = false
   }
 }

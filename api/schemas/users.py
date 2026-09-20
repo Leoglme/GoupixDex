@@ -30,6 +30,7 @@ class ProfileUpdate(BaseModel):
     sender_line2: str | None = Field(default=None, max_length=180)
     sender_postal_code: str | None = Field(default=None, max_length=20)
     sender_city: str | None = Field(default=None, max_length=80)
+    phone_e164: str | None = Field(default=None, max_length=20)
 
 
 class ProfileResponse(BaseModel):
@@ -41,6 +42,8 @@ class ProfileResponse(BaseModel):
     sender_postal_code: str | None
     sender_city: str | None
     sender_address_complete: bool
+    phone_e164: str | None
+    amazon_provision_profile_complete: bool
 
 
 class UserResponse(BaseModel):

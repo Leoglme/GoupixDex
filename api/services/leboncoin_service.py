@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import nodriver as uc
 from nodriver import Element
+from nodriver.cdp import input_ as cdp_input
 
 from config import get_settings
 from services.os_service import get_project_root, resolve_leboncoin_nodriver_user_data_dir
@@ -52,13 +53,13 @@ CONFIRMED_URL_PATTERNS = (
 )
 
 # Autocomplete label for Pokémon singles (Loisirs → Collection).
-DEFAULT_CATEGORY_LABEL = os.environ.get("LEBONCOIN_CATEGORY", "Cartes à collectionner")
+DEFAULT_CATEGORY_LABEL = os.environ.get("LEBONCOIN_CATEGORY", "Collection")
 # Optional wizard clicks before the category autocomplete (comma-separated labels).
 _CATEGORY_WIZARD_LABELS = tuple(
     x.strip()
     for x in os.environ.get(
         "LEBONCOIN_CATEGORY_WIZARD",
-        "Loisirs,Collection,Cartes",
+        "Loisirs,Collection",
     ).split(",")
     if x.strip()
 )
@@ -70,25 +71,38 @@ _CATEGORY_INPUT_SELECTORS = (
     '[data-qa-id="category"] input',
 )
 _TITLE_SELECTORS = (
+    'input[aria-label*="titre" i]',
+    'input[placeholder*="titre" i]',
     'input[name="subject"]',
     'input[data-qa-id="input_subject"]',
     "input#subject",
 )
 _DESC_SELECTORS = (
+    'textarea[aria-label*="description" i]',
+    'textarea[placeholder*="description" i]',
     'textarea[name="body"]',
     'textarea[data-qa-id="textarea_body"]',
     "textarea#body",
 )
 _PRICE_SELECTORS = (
+    'input[aria-label*="prix" i]',
+    'input[placeholder*="prix" i]',
     'input[name="price"]',
     'input[data-qa-id="input_price"]',
     "input#price",
 )
 _ZIP_SELECTORS = (
-    'input[name="location"]',
     'input[name="zipcode"]',
     'input[data-qa-id="input_location"]',
     'input[placeholder*="code postal" i]',
+)
+_ADDRESS_LBC_SELECTORS = (
+    'div[data-rhf-name="location"] input[data-spark-component="combobox-input"]',
+    'input[data-spark-component="combobox-input"][name="location"]',
+    'input[name="location"][role="combobox"]',
+    'input[placeholder*="Adresse" i]',
+    'input[aria-label*="adresse" i]',
+    'input[aria-label*="Adresse" i]',
 )
 _SUGGESTION_SELECTORS = (
     '[role="option"]',
@@ -104,6 +118,12 @@ _PUBLISH_BUTTON_TEXT = (
     "Publier mon annonce",
     "Publier",
     "Valider",
+)
+
+_SESSION_RECONNECT_MSG = (
+    "Session Leboncoin expirée ou incomplète pour déposer une annonce. "
+    "Paramètres → Session Leboncoin → Ouvrir Chrome, connectez-vous, "
+    "attendez la fermeture automatique de Chrome, puis relancez la publication."
 )
 
 
@@ -153,6 +173,19 @@ class LeboncoinService:
             logger.debug("Leboncoin browser stop: %s", exc)
         cls._browser = None
         cls._tab = None
+
+    @classmethod
+    async def ping_browser(cls) -> bool:
+        """False if CDP is gone (Chrome closed/crashed) — clears stale handles."""
+        if cls._browser is None or cls._tab is None:
+            return False
+        try:
+            await asyncio.wait_for(cls._tab.evaluate("1+1", return_by_value=True), timeout=3.0)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Leboncoin CDP unreachable, clearing browser handle: %s", exc)
+            cls.close_browser()
+            return False
 
     @classmethod
     async def _set_input_value(cls, tab: Tab, css_selector: str, value: str) -> bool:
@@ -262,6 +295,509 @@ class LeboncoinService:
             await cls._pick_suggestion(tab, value)
             await tab.sleep(1.2)
         return True
+
+    @classmethod
+    async def _click_continue(cls, tab: Tab) -> bool:
+        return await cls._click_button_containing(tab, "Continuer")
+
+    @classmethod
+    async def _select_combobox_option(cls, tab: Tab, label_fragment: str, option_text: str) -> bool:
+        label_json = json.dumps(label_fragment)
+        option_json = json.dumps(option_text)
+        ok = await tab.evaluate(
+            f"""
+            (() => {{
+                const labelFrag = {label_json}.toLowerCase();
+                const want = {option_json}.toLowerCase();
+                const combos = [...document.querySelectorAll('[role="combobox"]')];
+                const combo = combos.find((c) => {{
+                    const al = (c.getAttribute('aria-label') || c.getAttribute('name') || '').toLowerCase();
+                    return al.includes(labelFrag);
+                }});
+                if (!combo) return false;
+                combo.click();
+                for (const opt of document.querySelectorAll('[role="option"]')) {{
+                    const t = (opt.textContent || '').trim().toLowerCase();
+                    if (t === want || t.includes(want) || want.includes(t)) {{
+                        opt.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        if ok is True:
+            await tab.sleep(0.45)
+        return ok is True
+
+    @classmethod
+    async def _click_category_suggestion(cls, tab: Tab, keyword: str) -> bool:
+        needle = json.dumps(keyword.lower())
+        clicked = await tab.evaluate(
+            f"""
+            (() => {{
+                const needle = {needle};
+                for (const el of document.querySelectorAll('button, [role="button"]')) {{
+                    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                    if (aria.includes('catégorie') && aria.includes(needle)) {{
+                        el.click();
+                        return true;
+                    }}
+                }}
+                for (const el of document.querySelectorAll('button, [role="button"]')) {{
+                    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                    const text = (el.textContent || '').trim().toLowerCase();
+                    if (aria.includes('choix') && aria.includes(needle)) {{
+                        el.click();
+                        return true;
+                    }}
+                    if (text.includes(needle) && (text.includes('loisirs') || text.includes('collection'))) {{
+                        el.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        if clicked is True:
+            await tab.sleep(0.55)
+        return clicked is True
+
+    @classmethod
+    async def _continue_button_visible(cls, tab: Tab) -> bool:
+        raw = await tab.evaluate(
+            """
+            (() => {
+              for (const b of document.querySelectorAll('button')) {
+                const t = (b.textContent || '').trim().toLowerCase();
+                if (t === 'continuer' && !b.disabled) return true;
+              }
+              return false;
+            })()
+            """,
+            return_by_value=True,
+        )
+        return raw is True
+
+    @classmethod
+    async def _fill_title_and_trigger_suggestions(cls, tab: Tab, title: str) -> None:
+        if not await cls._fill_first(tab, _TITLE_SELECTORS, title[:200]):
+            raise RuntimeError("Champ titre introuvable (assistant Leboncoin).")
+        await tab.evaluate(
+            """
+            (() => {
+              const sels = [
+                'input[aria-label*="titre" i]',
+                'input[placeholder*="titre" i]',
+                'input[name="subject"]',
+              ];
+              let el = null;
+              for (const s of sels) {
+                el = document.querySelector(s);
+                if (el) break;
+              }
+              if (!el) return false;
+              el.focus();
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            })()
+            """,
+            return_by_value=True,
+        )
+        await tab.sleep(2.0)
+
+    @classmethod
+    async def _category_is_collection(cls, tab: Tab) -> bool:
+        raw = await tab.evaluate(
+            """
+            (() => {
+              const nodes = [
+                document.querySelector('[data-qa-id="category"]'),
+                document.querySelector('input[name="category"]'),
+                ...document.querySelectorAll('button, [role="button"], nav, [class*="breadcrumb" i]'),
+              ].filter(Boolean);
+              const text = nodes.map((el) => (el.textContent || el.value || '')).join(' ').toLowerCase();
+              return text.includes('collection') && !text.includes('jeux & jouets');
+            })()
+            """,
+            return_by_value=True,
+        )
+        return raw is True
+
+    @classmethod
+    async def _wizard_step_title_and_category(cls, tab: Tab, title: str, category_keyword: str) -> None:
+        await cls._fill_title_and_trigger_suggestions(tab, title)
+        picked = await cls._click_category_suggestion(tab, category_keyword)
+        if not picked:
+            picked = await cls._click_category_suggestion(tab, "collection")
+        if not picked:
+            await cls._try_category_wizard(tab)
+            picked = await cls._click_category_suggestion(tab, "collection")
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            if await cls._continue_button_visible(tab) and (
+                picked or await cls._category_is_collection(tab)
+            ):
+                break
+            if not picked:
+                picked = await cls._click_category_suggestion(tab, category_keyword) or await cls._click_category_suggestion(
+                    tab, "collection"
+                )
+            await asyncio.sleep(0.45)
+        else:
+            raise RuntimeError("Catégorie Collection ou bouton « Continuer » introuvable après le titre.")
+        if not picked and not await cls._category_is_collection(tab):
+            raise RuntimeError(
+                "Catégorie « Collection » non sélectionnée — dépôt annulé pour éviter un refus Leboncoin."
+            )
+        if not await cls._click_continue(tab):
+            raise RuntimeError("Bouton « Continuer » introuvable après le titre.")
+
+    @classmethod
+    async def _wizard_fill_structured_attributes(
+        cls,
+        tab: Tab,
+        *,
+        produit: str,
+        etat: str,
+        conditionnement: str,
+        epoque: str | None,
+    ) -> None:
+        current_produit = await tab.evaluate(
+            """
+            (() => {
+              const c = [...document.querySelectorAll('[role="combobox"]')]
+                .find(x => (x.getAttribute('aria-label')||'').toLowerCase().includes('produit'));
+              return c ? (c.value || c.textContent || '').trim() : '';
+            })()
+            """,
+            return_by_value=True,
+        )
+        prod_str = str(current_produit or "")
+        if produit.lower() not in prod_str.lower():
+            await cls._select_combobox_option(tab, "produit", produit)
+        await cls._select_combobox_option(tab, "état", etat)
+        await cls._select_combobox_option(tab, "conditionnement", conditionnement)
+        if epoque:
+            await cls._select_combobox_option(tab, "époque", epoque)
+
+    @classmethod
+    async def _page_has_final_submit(cls, tab: Tab) -> bool:
+        for label in _PUBLISH_BUTTON_TEXT:
+            found = await tab.evaluate(
+                f"""
+                (() => {{
+                    const needle = {json.dumps(label.lower())};
+                    for (const b of document.querySelectorAll('button')) {{
+                        const t = (b.textContent || '').trim().toLowerCase();
+                        if (t === needle || t.includes(needle)) return true;
+                    }}
+                    return false;
+                }})()
+                """,
+                return_by_value=True,
+            )
+            if found is True:
+                return True
+        return False
+
+    @classmethod
+    async def _cdp_tap_key(cls, tab: Tab, *, key: str, code: str, modifiers: int = 0) -> None:
+        for type_ in ("keyDown", "keyUp"):
+            await tab.send(
+                cdp_input.dispatch_key_event(
+                    type_=type_,
+                    key=key,
+                    code=code,
+                    modifiers=modifiers,
+                )
+            )
+        await tab.sleep(0.08)
+
+    @classmethod
+    async def _pick_address_suggestion(cls, tab: Tab, postal_code: str, city: str) -> bool:
+        pc_json = json.dumps(postal_code.strip())
+        city_json = json.dumps(city.strip().lower())
+        picked = await tab.evaluate(
+            f"""
+            (() => {{
+                const pc = {pc_json};
+                const cityNeedle = {city_json};
+                const collect = (root) => {{
+                  const optionSelectors = [
+                    '[role="option"]',
+                    '[role="listbox"] [role="option"]',
+                    '[data-spark-component="combobox-item"]',
+                    'li[data-spark-component="combobox-item"]',
+                  ];
+                  const options = [];
+                  for (const sel of optionSelectors) {{
+                    for (const opt of root.querySelectorAll(sel)) {{
+                      if (!options.includes(opt)) options.push(opt);
+                    }}
+                  }}
+                  return options;
+                }};
+                let options = collect(document);
+                for (const wrap of document.querySelectorAll('[data-radix-popper-content-wrapper]')) {{
+                  for (const opt of collect(wrap)) {{
+                    if (!options.includes(opt)) options.push(opt);
+                  }}
+                }}
+                for (const opt of options) {{
+                    const t = (opt.textContent || '').trim().toLowerCase();
+                    if (!t) continue;
+                    const r = opt.getBoundingClientRect();
+                    if (r.width < 4 || r.height < 4) continue;
+                    if (pc && t.includes(pc) && (!cityNeedle || t.includes(cityNeedle))) {{
+                        opt.click();
+                        return true;
+                    }}
+                }}
+                for (const opt of options) {{
+                    const r = opt.getBoundingClientRect();
+                    if (r.width > 4 && r.height > 4) {{
+                        opt.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        if picked is True:
+            await tab.sleep(0.5)
+            return True
+        await cls._cdp_tap_key(tab, key="ArrowDown", code="ArrowDown")
+        await tab.sleep(0.25)
+        await cls._cdp_tap_key(tab, key="Enter", code="Enter")
+        await tab.sleep(0.45)
+        return await cls._location_field_looks_valid(tab)
+
+    @classmethod
+    async def _location_field_looks_valid(cls, tab: Tab) -> bool:
+        raw = await tab.evaluate(
+            """
+            (() => {
+              const el =
+                document.querySelector('div[data-rhf-name="location"] input[name="location"]')
+                || document.querySelector('input[data-spark-component="combobox-input"][name="location"]')
+                || document.querySelector('input[name="location"][role="combobox"]');
+              if (!el) return false;
+              const v = (el.value || '').trim();
+              if (v.length < 5) return false;
+              return el.getAttribute('aria-invalid') !== 'true';
+            })()
+            """,
+            return_by_value=True,
+        )
+        return raw is True
+
+    @classmethod
+    async def _type_lbc_location_combobox(cls, tab: Tab, text: str) -> bool:
+        for sel in _ADDRESS_LBC_SELECTORS:
+            el: Element | None = None
+            try:
+                el = await tab.select(sel, timeout=2.5)
+            except Exception:
+                el = None
+            if el is None:
+                continue
+            try:
+                await el.scroll_into_view()
+                await tab.sleep(0.35)
+                await el.click()
+                await tab.sleep(0.2)
+                try:
+                    await el.clear_input()
+                except Exception:
+                    pass
+                await cls._cdp_tap_key(tab, key="a", code="KeyA", modifiers=2)
+                await cls._cdp_tap_key(tab, key="Backspace", code="Backspace")
+                await tab.sleep(0.12)
+                await tab.send(cdp_input.insert_text(text))
+                await tab.sleep(0.35)
+                if await cls._input_value_matches(tab, sel, text):
+                    logger.info("Leboncoin adresse saisie (CDP insertText) via %s", sel)
+                    return True
+                await el.click()
+                await el.send_keys(text)
+                await tab.sleep(0.35)
+                if await cls._input_value_matches(tab, sel, text):
+                    logger.info("Leboncoin adresse saisie (send_keys) via %s", sel)
+                    return True
+            except Exception as exc:
+                logger.debug("Leboncoin saisie adresse %s: %s", sel, exc)
+        return False
+
+    @classmethod
+    async def _input_value_matches(cls, tab: Tab, css_selector: str, expected: str) -> bool:
+        sel_json = json.dumps(css_selector)
+        exp_json = json.dumps(expected.strip())
+        raw = await tab.evaluate(
+            f"""
+            (() => {{
+              const el = document.querySelector({sel_json});
+              if (!el) return false;
+              const v = (el.value || '').trim();
+              const exp = {exp_json};
+              return v.length >= 4 && (v === exp || v.includes(exp.slice(0, 12)));
+            }})()
+            """,
+            return_by_value=True,
+        )
+        return raw is True
+
+    @classmethod
+    async def _wait_for_address_suggestions(cls, tab: Tab, *, timeout_sec: float = 8.0) -> bool:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            found = await tab.evaluate(
+                """
+                (() => {
+                  const sels = [
+                    '[role="option"]',
+                    '[role="listbox"] [role="option"]',
+                    '[data-spark-component="combobox-item"]',
+                  ];
+                  for (const sel of sels) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                      const r = el.getBoundingClientRect();
+                      if (r.width > 4 && r.height > 4) return true;
+                    }
+                  }
+                  return false;
+                })()
+                """,
+                return_by_value=True,
+            )
+            if found is True:
+                return True
+            await tab.sleep(0.35)
+        return False
+
+    @classmethod
+    async def _fill_leboncoin_pickup_address(
+        cls,
+        tab: Tab,
+        *,
+        address_line1: str,
+        postal_code: str,
+        city: str,
+        progress: FormProgressFn | None,
+    ) -> bool:
+        line = address_line1.strip()
+        pc = postal_code.strip()
+        town = city.strip()
+        if not line or not pc or not town:
+            return False
+        query = f"{line}, {pc} {town}"
+        typed = await cls._type_lbc_location_combobox(tab, query)
+        if not typed:
+            sel = await cls._first_matching_selector(tab, _ADDRESS_LBC_SELECTORS)
+            if sel:
+                typed = await cls._set_input_value(tab, sel, query)
+        if not typed:
+            logger.warning("Leboncoin: impossible de saisir l’adresse de remise (%s).", query)
+            if progress:
+                await progress(
+                    {
+                        "type": "log",
+                        "step": "form",
+                        "message": "Adresse de remise : saisie automatique échouée.",
+                        "form_step": "pickup_address",
+                    }
+                )
+            return False
+        await tab.sleep(1.0)
+        await cls._wait_for_address_suggestions(tab, timeout_sec=10.0)
+        picked = await cls._pick_address_suggestion(tab, pc, town)
+        if not picked:
+            await tab.sleep(0.8)
+            picked = await cls._pick_address_suggestion(tab, pc, town)
+        valid = picked or await cls._location_field_looks_valid(tab)
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "form",
+                    "message": f"Adresse de remise : {line}, {pc} {town}"
+                    + (" (validée)" if valid else " (suggestion requise)"),
+                    "form_step": "pickup_address",
+                }
+            )
+        return valid
+
+    @classmethod
+    async def _wizard_fill_late_steps(
+        cls,
+        tab: Tab,
+        *,
+        description: str,
+        price_eur: float,
+        postal_code: str,
+        address_line1: str,
+        city: str,
+        progress: FormProgressFn | None,
+    ) -> None:
+        price_str = str(int(price_eur)) if price_eur == int(price_eur) else f"{price_eur:.2f}".replace(".", ",")
+        zip_clean = postal_code.strip()
+        for step in range(12):
+            if await cls._page_has_final_submit(tab):
+                break
+            await cls._fill_leboncoin_pickup_address(
+                tab,
+                address_line1=address_line1,
+                postal_code=postal_code,
+                city=city,
+                progress=progress,
+            )
+            if description and await cls._fill_first(tab, _DESC_SELECTORS, description[:4000]):
+                if progress:
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "form",
+                            "message": "Description renseignée.",
+                            "form_step": "description",
+                        }
+                    )
+            if await cls._fill_first(tab, _PRICE_SELECTORS, price_str):
+                if progress:
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "form",
+                            "message": f"Prix {price_str} € renseigné.",
+                            "form_step": "price",
+                        }
+                    )
+            if zip_clean and await cls._fill_first(tab, _ZIP_SELECTORS, zip_clean, pick_suggestion=True):
+                if progress:
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "form",
+                            "message": f"Localisation {zip_clean}.",
+                            "form_step": "location",
+                        }
+                    )
+            if await cls._page_has_final_submit(tab):
+                break
+            if not await cls._click_continue(tab):
+                await tab.sleep(0.6)
+                if await cls._page_has_final_submit(tab):
+                    break
+                logger.debug("Leboncoin wizard: pas de « Continuer » (étape %s).", step)
+                break
+            await tab.sleep(0.75)
 
     @classmethod
     async def _current_url(cls, tab: Tab) -> str:
@@ -522,19 +1058,45 @@ class LeboncoinService:
         return {"opened": True, "url": await cls._current_url(tab)}
 
     @classmethod
-    async def ensure_logged_in(cls, progress: FormProgressFn | None = None) -> None:
-        tab = cls._require_tab()
-        await tab.get(ACCOUNT_URL)
-        await tab.sleep(0.8)
-        await cls._accept_didomi_cookies(tab)
+    async def _clear_stale_session_marker(cls) -> None:
+        from services.leboncoin_profile_session_service import clear_leboncoin_session_info
+
+        profile = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
+        clear_leboncoin_session_info(profile)
+
+    @classmethod
+    async def _deposit_page_is_login_wall(cls, tab: Tab) -> bool:
+        """True when /deposer-une-annonce shows « Me connecter » instead of the wizard."""
         url = await cls._current_url(tab)
-        if LOGIN_URL_PATTERN.search(url) or await cls._page_shows_login_gate(tab):
-            raise RuntimeError(
-                "Session Leboncoin requise : Paramètres / Marketplace / Ouvrir Chrome, "
-                "puis relancez la publication."
-            )
-        if progress:
-            await progress({"type": "log", "step": "auth", "message": "Session Leboncoin OK.", "form_step": "auth_ok"})
+        if "auth.leboncoin.fr" in url.lower() or LOGIN_URL_PATTERN.search(url):
+            return True
+        raw = await tab.evaluate(
+            """
+            JSON.stringify((() => {
+              const hasTitle = !!document.querySelector(
+                'input[aria-label*="titre" i], input[placeholder*="titre" i], input[name="subject"]'
+              );
+              if (hasTitle) return false;
+              const body = (document.body && document.body.innerText) || '';
+              if (/connectez-vous ou créez un compte/i.test(body)) return true;
+              if (/me connecter/i.test(body) && /créer un compte/i.test(body)) return true;
+              for (const b of document.querySelectorAll('button')) {
+                const t = (b.textContent || '').trim().toLowerCase();
+                if (t === 'me connecter') return true;
+              }
+              return false;
+            })())
+            """,
+            return_by_value=True,
+        )
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() == "true"
+
+    @classmethod
+    async def ensure_logged_in(cls, progress: FormProgressFn | None = None) -> None:
+        """Vérifie la session sur la page de dépôt (pas seulement le JSON local)."""
+        await cls.open_deposit_form(progress)
 
     @classmethod
     async def open_deposit_form(cls, progress: FormProgressFn | None = None) -> None:
@@ -542,12 +1104,14 @@ class LeboncoinService:
         await tab.get(DEPOSIT_URL)
         await tab.sleep(0.9)
         await cls._accept_didomi_cookies(tab)
-        url = await cls._current_url(tab)
-        if LOGIN_URL_PATTERN.search(url) or await cls._page_shows_login_gate(tab):
-            raise RuntimeError(
-                "Connectez-vous a Leboncoin (Parametres / Marketplace / Ouvrir Chrome)."
-            )
+        if await cls._deposit_page_is_login_wall(tab):
+            await cls._clear_stale_session_marker()
+            raise RuntimeError(_SESSION_RECONNECT_MSG)
+        if not await cls._first_matching_selector(tab, _TITLE_SELECTORS):
+            await cls._clear_stale_session_marker()
+            raise RuntimeError(_SESSION_RECONNECT_MSG)
         if progress:
+            await progress({"type": "log", "step": "auth", "message": "Session Leboncoin OK.", "form_step": "auth_ok"})
             await progress(
                 {
                     "type": "log",
@@ -558,46 +1122,88 @@ class LeboncoinService:
             )
 
     @classmethod
-    async def fill_listing(
+    async def run_deposit_wizard(
         cls,
         *,
         title: str,
         description: str,
         price_eur: float,
         postal_code: str,
-        category_label: str = DEFAULT_CATEGORY_LABEL,
+        address_line1: str,
+        city: str,
+        photo_basenames: list[str],
+        listing_fields: Any,
         progress: FormProgressFn | None = None,
-    ) -> None:
+        submit_final: bool = True,
+    ) -> dict[str, Any]:
+        """Assistant Leboncoin (2025+) : titre → détails → prix / description → envoi ou brouillon."""
         tab = cls._require_tab()
+        category_kw = getattr(listing_fields, "category_suggestion", DEFAULT_CATEGORY_LABEL) or "Collection"
 
-        async def log(step: str, msg: str, form_step: str) -> None:
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "form",
+                    "message": "Étape 1 — titre et catégorie…",
+                    "form_step": "wizard_title",
+                }
+            )
+        await cls._wizard_step_title_and_category(tab, title, str(category_kw))
+
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "form",
+                    "message": "Étape 2 — photos et attributs carte…",
+                    "form_step": "wizard_details",
+                }
+            )
+        await cls.upload_photos(photo_basenames, progress)
+        await cls._wizard_fill_structured_attributes(
+            tab,
+            produit=getattr(listing_fields, "produit", "Jeux de cartes"),
+            etat=getattr(listing_fields, "etat", "Très bon état"),
+            conditionnement=getattr(listing_fields, "conditionnement", "Sans emballage"),
+            epoque=getattr(listing_fields, "epoque", None),
+        )
+        if not await cls._click_continue(tab):
+            raise RuntimeError("Bouton « Continuer » introuvable après les photos / attributs.")
+
+        if progress:
+            await progress(
+                {
+                    "type": "log",
+                    "step": "form",
+                    "message": "Étape 3 — description, prix, localisation…",
+                    "form_step": "wizard_late",
+                }
+            )
+        await cls._wizard_fill_late_steps(
+            tab,
+            description=description,
+            price_eur=price_eur,
+            postal_code=postal_code,
+            address_line1=address_line1,
+            city=city,
+            progress=progress,
+        )
+
+        if not submit_final:
+            url = await cls._current_url(tab)
             if progress:
-                await progress({"type": "log", "step": step, "message": msg, "form_step": form_step})
+                await progress(
+                    {
+                        "type": "log",
+                        "step": "dry_run",
+                        "message": "Brouillon prêt — envoi final désactivé (vérifiez dans Chrome).",
+                        "form_step": "dry_run_ready",
+                    }
+                )
+            return {"published": False, "dry_run": True, "url": url}
 
-        await log("form", f"Catégorie : {category_label}…", "category")
-        await cls._try_category_wizard(tab)
-        if not await cls._fill_first(tab, _CATEGORY_INPUT_SELECTORS, category_label, pick_suggestion=True):
-            await cls._try_category_wizard(tab)
-            if not await cls._fill_first(tab, _CATEGORY_INPUT_SELECTORS, category_label, pick_suggestion=True):
-                logger.warning("Leboncoin category field not found — pick category manually in Chrome if needed.")
-        await TimerService.wait(400)
-
-        await log("form", "Titre et description…", "title_desc")
-        if not await cls._fill_first(tab, _TITLE_SELECTORS, title[:200]):
-            raise RuntimeError("Champ titre introuvable sur le formulaire Leboncoin.")
-        if not await cls._fill_first(tab, _DESC_SELECTORS, description[:4000]):
-            raise RuntimeError("Champ description introuvable sur le formulaire Leboncoin.")
-
-        price_str = str(int(price_eur)) if price_eur == int(price_eur) else f"{price_eur:.2f}".replace(".", ",")
-        await log("form", f"Prix : {price_str} €…", "price")
-        if not await cls._fill_first(tab, _PRICE_SELECTORS, price_str):
-            raise RuntimeError("Champ prix introuvable sur le formulaire Leboncoin.")
-
-        zip_clean = postal_code.strip()
-        if zip_clean:
-            await log("form", f"Localisation : {zip_clean}…", "location")
-            if not await cls._fill_first(tab, _ZIP_SELECTORS, zip_clean, pick_suggestion=True):
-                logger.warning("Leboncoin location field not found — verify city in browser.")
+        return await cls.submit_and_wait(progress)
 
     @classmethod
     async def upload_photos(cls, photo_basenames: list[str], progress: FormProgressFn | None = None) -> None:
@@ -610,18 +1216,7 @@ class LeboncoinService:
 
         file_sel = await cls._first_matching_selector(tab, _FILE_INPUT_SELECTORS)
         if not file_sel:
-            await tab.evaluate(
-                """
-                (() => {
-                  for (const b of document.querySelectorAll('button')) {
-                    const t = (b.textContent || '').toLowerCase();
-                    if (t.includes('ajouter') && t.includes('photo')) { b.click(); return true; }
-                  }
-                  return false;
-                })()
-                """,
-                return_by_value=True,
-            )
+            await cls._click_button_containing(tab, "photo")
             await tab.sleep(0.8)
             file_sel = await cls._first_matching_selector(tab, _FILE_INPUT_SELECTORS)
         if not file_sel:
@@ -708,6 +1303,8 @@ class LeboncoinService:
             if any(p.search(url) for p in CONFIRMED_URL_PATTERNS):
                 listing_id = cls._extract_listing_id(url)
                 return {"published": True, "listing_id": listing_id, "url": url}
+            if re.search(r"/mes-annonces|/compte/part/mes-annonces", url, re.I):
+                return {"published": True, "listing_id": cls._extract_listing_id(url), "url": url}
             if "datadome" in url.lower() and progress:
                 await progress(
                     {
@@ -729,19 +1326,24 @@ class LeboncoinService:
         description: str,
         price_eur: float,
         postal_code: str,
+        address_line1: str,
+        city: str,
         photo_basenames: list[str],
+        listing_fields: Any,
         progress: FormProgressFn | None = None,
+        submit_final: bool = True,
     ) -> dict[str, Any]:
-        """Full flow: session check → form → photos → submit."""
-        await cls.ensure_logged_in(progress)
+        """Session → assistant dépôt → (optionnel) envoi final."""
         await cls.open_deposit_form(progress)
-        await cls.fill_listing(
+        return await cls.run_deposit_wizard(
             title=title,
             description=description,
             price_eur=price_eur,
             postal_code=postal_code,
+            address_line1=address_line1,
+            city=city,
+            photo_basenames=photo_basenames,
+            listing_fields=listing_fields,
             progress=progress,
+            submit_final=submit_final,
         )
-        await cls.upload_photos(photo_basenames, progress)
-        result = await cls.submit_and_wait(progress)
-        return result

@@ -19,6 +19,12 @@
     </template>
 
     <div class="space-y-4">
+      <div v-if="embedded" class="flex items-center justify-end">
+        <UBadge :color="badge.color" variant="subtle">
+          {{ badge.label }}
+        </UBadge>
+      </div>
+
       <UAlert
         v-if="!isDesktopApp"
         color="info"
@@ -103,6 +109,10 @@ const props = withDefaults(
   { embedded: false },
 )
 
+const emit = defineEmits<{
+  'update:session': [LeboncoinSessionResponse | null]
+}>()
+
 const cardUi = computed(() =>
   props.embedded
     ? {
@@ -126,6 +136,22 @@ let pollHandle: ReturnType<typeof setInterval> | null = null
 
 const badge = computed(() => leboncoinSessionBadge(session.value))
 
+function isWorkerUnreachableError(e: unknown): boolean {
+  const err = e as { code?: string; message?: string; response?: { status?: number } }
+  if (err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
+    return false
+  }
+  if (err?.code === 'ERR_NETWORK' || err?.code === 'ECONNREFUSED') {
+    return true
+  }
+  const status = err?.response?.status
+  if (status != null && status >= 500) {
+    return true
+  }
+  const msg = String(err?.message || '')
+  return msg.includes('Network Error') || msg.includes('ECONNREFUSED')
+}
+
 async function refresh() {
   if (!import.meta.client || !isDesktopApp.value) {
     return
@@ -134,12 +160,22 @@ async function refresh() {
   workerError.value = false
   try {
     session.value = await fetchSession()
+    emit('update:session', session.value)
     if (session.value?.state === 'ready' && !session.value.browser_open) {
       stopPolling()
     }
   } catch (e) {
-    workerError.value = true
-    toast.add({ title: 'Worker Leboncoin', description: apiErrorMessage(e), color: 'error' })
+    if (isWorkerUnreachableError(e)) {
+      workerError.value = true
+      toast.add({ title: 'Worker Leboncoin', description: apiErrorMessage(e), color: 'error' })
+    } else {
+      session.value = {
+        state: 'busy',
+        browser_open: true,
+        message: 'Chrome ouvert — connexion en cours (worker occupé).',
+      }
+      emit('update:session', session.value)
+    }
   } finally {
     loading.value = false
   }

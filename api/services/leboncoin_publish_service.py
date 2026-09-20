@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from models.article import Article
+from services.leboncoin_listing_copy import build_leboncoin_listing_copy
+from services.leboncoin_listing_maps import leboncoin_listing_fields_from_article
 from services.leboncoin_service import LeboncoinService
 from services.os_service import get_project_root
 from services.timer_service import TimerService
@@ -15,6 +18,11 @@ from services.vinted_publish_service import _materialize_listing_images
 logger = logging.getLogger(__name__)
 
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+def _submit_final_enabled() -> bool:
+    """``LEBONCOIN_DRY_RUN=1`` remplit l’assistant sans cliquer sur « Déposer mon annonce »."""
+    return os.environ.get("LEBONCOIN_DRY_RUN", "").strip().lower() not in ("1", "true", "yes", "on")
 
 
 async def _emit(progress: ProgressFn | None, step: str, message: str, *, form_step: str | None = None) -> None:
@@ -31,18 +39,36 @@ async def publish_article_to_leboncoin(
     stored_image_sources: list[str],
     *,
     postal_code: str,
+    sender_line1: str,
+    sender_city: str,
     progress: ProgressFn | None = None,
+    submit_final: bool | None = None,
 ) -> dict[str, Any]:
     """
     List one article on Leboncoin using a logged-in Chromium profile.
     Does not raise on failure; returns a status dict for SSE ``done``.
     """
-    if not postal_code.strip():
-        await _emit(progress, "config", "Code postal expéditeur manquant (Paramètres → Expédition).", form_step="postal_missing")
-        return {"published": False, "detail": "missing_postal_code"}
+    line1 = sender_line1.strip()
+    pc = postal_code.strip()
+    town = sender_city.strip()
+
+    if not pc or not line1 or not town:
+        await _emit(
+            progress,
+            "config",
+            "Adresse expéditeur incomplète (Paramètres → Adresse d’expédition).",
+            form_step="address_missing",
+        )
+        return {"published": False, "detail": "missing_sender_address"}
+
+    if submit_final is None:
+        submit_final = _submit_final_enabled()
 
     root = get_project_root()
     images_dir = root / "images"
+
+    title, description = build_leboncoin_listing_copy(article)
+    listing_fields = leboncoin_listing_fields_from_article(article)
 
     await _emit(progress, "start", "Préparation des photos…", form_step="prep")
     basenames = await _materialize_listing_images(article.id, stored_image_sources, images_dir)
@@ -58,13 +84,23 @@ async def publish_article_to_leboncoin(
         await TimerService.wait(100)
 
         result = await LeboncoinService.publish_pokemon_listing(
-            title=article.title or "Carte Pokémon",
-            description=article.description or "",
+            title=title,
+            description=description,
             price_eur=price,
-            postal_code=postal_code.strip(),
+            postal_code=pc,
+            address_line1=line1,
+            city=town,
             photo_basenames=basenames,
+            listing_fields=listing_fields,
             progress=progress,
+            submit_final=submit_final,
         )
+        if result.get("dry_run"):
+            return {
+                "published": False,
+                "detail": "dry_run_ready",
+                "url": result.get("url"),
+            }
         listing_id = result.get("listing_id")
         return {
             "published": True,
@@ -79,7 +115,6 @@ async def publish_article_to_leboncoin(
     finally:
         if browser_started:
             LeboncoinService.close_browser()
-        # Best-effort cleanup of temp listing files
         for name in basenames:
             try:
                 p = images_dir / name

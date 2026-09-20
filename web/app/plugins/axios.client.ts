@@ -33,6 +33,7 @@ export default defineNuxtPlugin(() => {
   const leboncoinLocal = axios.create({
     baseURL: (config.public.leboncoinLocalBase as string).replace(/\/$/, ''),
     headers: { Accept: 'application/json' },
+    timeout: 30_000,
   })
 
   const attachAuth = (req: import('axios').InternalAxiosRequestConfig) => {

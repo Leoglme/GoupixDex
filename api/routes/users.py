@@ -23,8 +23,10 @@ from schemas.users import (
 )
 from services import auth_service
 from services.user_settings_service import (
+    amazon_provision_profile_complete,
     effective_sender_full_name,
     get_or_create_user_settings,
+    normalize_phone_e164,
     sender_address_complete,
 )
 
@@ -117,6 +119,8 @@ def _serialize_profile(db: Session, user: User) -> ProfileResponse:
         sender_postal_code=(ms.sender_postal_code or "").strip() or None,
         sender_city=(ms.sender_city or "").strip() or None,
         sender_address_complete=sender_address_complete(ms, user),
+        phone_e164=normalize_phone_e164(user.phone_e164),
+        amazon_provision_profile_complete=amazon_provision_profile_complete(ms, user),
     )
 
 
@@ -141,6 +145,18 @@ def update_my_profile(
     if "full_name" in data:
         current.full_name = (data["full_name"] or "").strip() or None
         ms.sender_full_name = current.full_name
+    if "phone_e164" in data:
+        raw = data["phone_e164"]
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            current.phone_e164 = None
+        else:
+            normalized = normalize_phone_e164(str(raw))
+            if not normalized:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Numéro de téléphone invalide (10 à 15 chiffres, ex. 06 12 34 56 78 ou +33 6 12 34 56 78).",
+                )
+            current.phone_e164 = normalized
     for key in ("sender_line1", "sender_line2", "sender_postal_code", "sender_city"):
         if key in data:
             val = data[key]

@@ -1616,6 +1616,13 @@ async def _click_amazon_email_verify_submit(tab: Any) -> bool:
                   if (tryClick(el)) return true;
                 }
               }
+              const createLabels = ['créez votre compte', 'creer votre compte', 'create your account'];
+              for (const root of document.querySelectorAll('.a-button-primary, .cvf-widget-btn-primary')) {
+                const text = (root.textContent || '').trim().toLowerCase();
+                if (!createLabels.some((l) => text.includes(l))) continue;
+                const input = root.querySelector('input.a-button-input, input[type="submit"]');
+                if (input && tryClick(input)) return true;
+              }
               return false;
             }
             """,
@@ -1686,3 +1693,242 @@ async def fill_amazon_email_verification_code_async(code: str) -> Dict[str, Any]
 
 def fill_amazon_email_verification_code(code: str) -> Dict[str, Any]:
     return run_browser(fill_amazon_email_verification_code_async(code), timeout=45)
+
+
+def amazon_cvf_phone_parts(phone_e164: str | None) -> tuple[str, str] | None:
+    """
+    Chiffres locaux pour le champ Amazon + indicatif pays du select (FR/BE/CA/US…).
+
+    Amazon FR (+33) attend en général **9 chiffres sans 0** (642193812), pas 0642…
+    (sinon affichage +330642… et rejet « numéro invalide »).
+    """
+    raw = (phone_e164 or "").strip()
+    if not raw:
+        return None
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) == 11 and digits.startswith("33"):
+        return ("FR", digits[2:11])
+    if len(digits) == 10 and digits.startswith("0") and digits[1] in "67":
+        return ("FR", digits[1:])
+    if len(digits) == 9 and digits[0] in "67":
+        return ("FR", digits)
+    if len(digits) == 11 and digits.startswith("32"):
+        return ("BE", digits[2:])
+    if len(digits) == 10 and digits.startswith("0"):
+        return ("BE", digits[1:])
+    if len(digits) == 11 and digits.startswith("1"):
+        return ("CA", digits[1:])
+    if len(digits) == 10:
+        return ("CA", digits)
+    return None
+
+
+async def _set_amazon_cvf_country(tab: Any, country_iso: str) -> None:
+    iso = (country_iso or "FR").upper()
+    dial = {"FR": "+33", "BE": "+32", "CA": "+1", "US": "+1"}.get(iso, "+33")
+    script = f"""
+    (() => {{
+      const iso = {json.dumps(iso)};
+      const dial = {json.dumps(dial)};
+      for (const sel of document.querySelectorAll('select')) {{
+        const opts = [...sel.options];
+        const hit = opts.find((o) => (o.value || '').toUpperCase() === iso)
+          || opts.find((o) => (o.textContent || '').includes(dial));
+        if (!hit) continue;
+        sel.value = hit.value;
+        sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        return true;
+      }}
+      return false;
+    }})()
+    """
+    try:
+        await tab.evaluate(script)
+    except Exception:
+        pass
+
+
+_PHONE_CVF_INPUT_SELECTORS = (
+    "#cvfPhoneNumber",
+    'input[name="cvfPhoneNumber"]',
+    'input[name="phoneNumber"]',
+    'input[type="tel"]',
+    "#ap_phone_number",
+    'input[id*="PhoneNumber"]',
+    'input[id*="phone"]',
+)
+
+
+async def _click_amazon_cvf_add_phone_submit(tab: Any) -> bool:
+    browser = getattr(tab, "browser", None)
+    if browser is not None:
+        tab = _coerce_connection_to_tab(browser, tab) or tab
+    for sel in (
+        "#cvf-submit-otp-button input.a-button-input",
+        "#cvf-submit-otp-button",
+        'input[aria-label*="Ajouter un numéro de téléphone"]',
+        'input[aria-label*="Ajouter un numero de telephone"]',
+        'input[aria-label*="Ajouter un numéro"]',
+        'input[aria-label*="Ajouter un numero"]',
+        "span.cvf-widget-btn-primary input.a-button-input",
+        ".cvf-widget-btn-primary input.a-button-input",
+        ".a-button-primary input.a-button-input",
+    ):
+        try:
+            btn = await tab.select(sel, timeout=1.2)
+            if btn:
+                await btn.mouse_click()
+                _register_log(f"Clic ajout téléphone CVF ({sel})")
+                return True
+        except Exception:
+            continue
+    try:
+        clicked = await _tab_eval_value(
+            tab,
+            """
+            () => {
+              const isVisible = (el) => {
+                if (!el || el.disabled) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 4 && r.height > 4;
+              };
+              const tryClick = (el) => {
+                if (!isVisible(el)) return false;
+                el.focus();
+                el.click();
+                return true;
+              };
+              const labels = ['ajouter un numéro', 'ajouter un numero', 'add mobile'];
+              for (const root of document.querySelectorAll('.cvf-widget-btn-primary, .a-button-primary')) {
+                const text = (root.textContent || '').trim().toLowerCase();
+                if (!labels.some((l) => text.includes(l))) continue;
+                const input = root.querySelector('input.a-button-input, input[type="submit"]');
+                if (input && tryClick(input)) return true;
+                if (tryClick(root)) return true;
+              }
+              return false;
+            }
+            """,
+        )
+        if clicked:
+            _register_log("Clic ajout téléphone CVF (JS)")
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def _page_is_amazon_cvf_add_phone(tab: Any) -> bool:
+    try:
+        kind = await _tab_eval_value(
+            tab,
+            """
+            () => {
+              const body = (document.body && document.body.innerText) || '';
+              const t = body.toLowerCase();
+              if (t.includes('ajouter un numéro de téléphone') || t.includes('ajouter un numero de telephone')) {
+                return true;
+              }
+              if (t.includes('numéro de téléphone portable') && !t.includes('whatsapp')) {
+                return true;
+              }
+              return false;
+            }
+            """,
+        )
+        return bool(kind)
+    except Exception:
+        return False
+
+
+async def _click_amazon_cvf_send_sms_instead(tab: Any) -> bool:
+    try:
+        clicked = await _tab_eval_value(
+            tab,
+            """
+            () => {
+              const labels = ['envoyer le code par sms', 'send code by sms'];
+              for (const el of document.querySelectorAll('a, button, input[type="submit"], span.a-button-text')) {
+                const t = (el.textContent || el.value || '').trim().toLowerCase();
+                if (!labels.some((l) => t.includes(l))) continue;
+                el.click();
+                return true;
+              }
+              return false;
+            }
+            """,
+        )
+        if clicked:
+            _register_log("Clic « Envoyer le code par SMS »")
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def fill_amazon_cvf_phone_async(phone_e164: str) -> Dict[str, Any]:
+    """Étape « Ajouter un numéro de téléphone portable » (CVF) — sans saisie WhatsApp/SMS."""
+    parts = amazon_cvf_phone_parts(phone_e164)
+    if not parts:
+        return {"success": False, "message": "Numéro mobile invalide (FR/BE/CA/+1…)."}
+    country_iso, national = parts
+    browser = _browser_holder.get("browser")
+    if browser is None:
+        return {"success": False, "message": "Chrome Amazon non ouvert."}
+    seed = await _first_live_tab(browser, "")
+    tab = await _refresh_amazon_tab(browser, await _ensure_nodriver_tab(browser, seed))
+    if not await _page_is_amazon_cvf_add_phone(tab):
+        return {"success": False, "message": "Page « Ajouter un téléphone » introuvable."}
+    await _set_amazon_cvf_country(tab, country_iso)
+    await asyncio.sleep(0.15)
+    filled = False
+    for sel in _PHONE_CVF_INPUT_SELECTORS:
+        if await _fill_amazon_field(tab, sel, national, timeout=2):
+            if await _input_value_matches(tab, sel, national):
+                filled = True
+                _register_log(f"Téléphone saisi ({sel})")
+                break
+    if not filled:
+        js = f"""
+        (() => {{
+          const national = {json.dumps(national)};
+          for (const el of document.querySelectorAll('input[type="tel"], input[name*="phone" i], input[id*="phone" i]')) {{
+            if (el.offsetParent === null) continue;
+            el.focus();
+            const proto = window.HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+            if (setter) setter.call(el, national);
+            else el.value = national;
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return true;
+          }}
+          return false;
+        }})()
+        """
+        try:
+            filled = bool(await tab.evaluate(js))
+        except Exception:
+            filled = False
+    if not filled:
+        return {"success": False, "message": "Champ téléphone introuvable sur la page Amazon."}
+    await asyncio.sleep(0.25)
+    clicked = False
+    for _ in range(6):
+        if await _click_amazon_cvf_add_phone_submit(tab):
+            clicked = True
+            break
+        await asyncio.sleep(0.35)
+    if clicked:
+        await asyncio.sleep(1.2)
+        await _click_amazon_cvf_send_sms_instead(tab)
+    if not clicked:
+        return {
+            "success": True,
+            "message": "Numéro saisi — cliquez « Ajouter un numéro » si la page ne bouge pas.",
+        }
+    return {"success": True, "message": "Numéro saisi et validation cliquée dans Chrome."}
+
+
+def fill_amazon_cvf_phone(phone_e164: str) -> Dict[str, Any]:
+    return run_browser(fill_amazon_cvf_phone_async(phone_e164), timeout=45)

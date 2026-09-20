@@ -245,6 +245,48 @@ export function useAmazonWorker() {
     return data
   }
 
+  /** Préremplit l’étape CVF « Ajouter un numéro de téléphone » si la page est affichée. */
+  async function fillProvisionCvfPhone(phone_e164: string): Promise<{ success: boolean; message: string }> {
+    const { data } = await client.value.post<{ success: boolean; message: string }>(
+      '/amazon/provision/fill-cvf-phone',
+      { phone_e164 },
+      { timeout: 60_000 },
+    )
+    return data
+  }
+
+  /** @returns Inboxes Receive SMS allouées pour la provision Amazon. */
+  async function allocateReceiveSmsInboxes(count: number): Promise<{
+    ok: boolean
+    message: string
+    inboxes: { inbox_url: string; phone_e164: string; message_count: number }[]
+  }> {
+    const { data } = await client.value.post<{
+      ok: boolean
+      message: string
+      inboxes: { inbox_url: string; phone_e164: string; message_count: number }[]
+    }>('/amazon/provision/receive-sms/allocate', null, { params: { count }, timeout: 180_000 })
+    return data
+  }
+
+  /** @returns Détails d’une inbox Receive SMS (code OTP éventuel). */
+  async function inspectReceiveSmsInbox(url: string): Promise<{
+    ok: boolean
+    amazon_history: boolean
+    code: string | null
+    message_count: number
+    message: string
+  }> {
+    const { data } = await client.value.get<{
+      ok: boolean
+      amazon_history: boolean
+      code: string | null
+      message_count: number
+      message: string
+    }>('/amazon/provision/receive-sms/inbox', { params: { url }, timeout: 45_000 })
+    return data
+  }
+
   /**
    *
    */
@@ -290,6 +332,9 @@ export function useAmazonWorker() {
     autoLoginVaultAccount,
     openProvisionRegister,
     fillProvisionEmailVerificationCode,
+    fillProvisionCvfPhone,
+    inspectReceiveSmsInbox,
+    allocateReceiveSmsInboxes,
     discardProvisionStaging,
     claimStagingProfile,
     openRegisterBrowser,

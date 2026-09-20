@@ -22,6 +22,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     #: Optional display name (Amazon account creation, UI profile drawer).
     full_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    #: Mobile for Amazon CVF (SMS/WhatsApp); stored as digits with optional leading + (e.g. +33612345678).
+    phone_e164: Mapped[str | None] = mapped_column(String(20), nullable=True)
     #: Bcrypt hash. ``None`` while the user has only requested access (no password yet).
     password: Mapped[str | None] = mapped_column("password", String(255), nullable=True)
     vinted_email: Mapped[str | None] = mapped_column(String(255), nullable=True)

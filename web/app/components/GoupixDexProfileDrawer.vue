@@ -2,9 +2,9 @@
   <GoupixDexAppDrawer
     :open="open"
     title="Mon profil"
-    subtitle="Nom, adresse expéditeur et compte Amazon"
+    subtitle="Nom et adresse expéditeur"
     icon="i-lucide-user"
-    @close="emit('close')"
+    @close="onCancel"
   >
     <div v-if="loading" class="text-muted text-sm">Chargement…</div>
     <form v-else id="goupix-profile-form" class="space-y-5" @submit.prevent="save">
@@ -25,29 +25,39 @@
             {{ profile?.sender_address_complete ? 'Prête' : 'Incomplète' }}
           </UBadge>
         </div>
-        <p class="text-muted text-xs leading-snug">
-          Étiquettes d’envoi (vignette sous le destinataire) et nom sur Amazon lors de la création de compte.
-        </p>
         <div class="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
           <UFormField label="Adresse" class="min-w-0 sm:col-span-2" required>
-            <UInput v-model="form.sender_line1" autocomplete="address-line1" class="w-full" />
+            <GoupixDexAddressAutocompleteInput
+              v-model="form.sender_line1"
+              placeholder="Numéro et voie"
+              :teleport-to-body="false"
+              @select="onAddressSelect"
+            />
           </UFormField>
           <UFormField label="Complément d'adresse" class="min-w-0 sm:col-span-2">
             <UInput v-model="form.sender_line2" autocomplete="address-line2" class="w-full" />
           </UFormField>
           <UFormField label="Code postal" class="min-w-0" required>
-            <UInput v-model="form.sender_postal_code" autocomplete="postal-code" class="w-full" />
+            <GoupixDexPostalCodeAutocompleteInput
+              v-model="form.sender_postal_code"
+              :teleport-to-body="false"
+              @select="onPostalCodeSelect"
+            />
           </UFormField>
           <UFormField label="Ville" class="min-w-0" required>
-            <UInput v-model="form.sender_city" autocomplete="address-level2" class="w-full" />
+            <GoupixDexCityAutocompleteInput
+              v-model="form.sender_city"
+              :teleport-to-body="false"
+              @select="onCitySelect"
+            />
           </UFormField>
         </div>
       </div>
     </form>
 
     <template #footer>
-      <button type="button" class="dialog-btn-secondary" :disabled="saving" @click="emit('close')">Annuler</button>
-      <button type="submit" form="goupix-profile-form" class="dialog-btn-primary" :disabled="loading || saving">
+      <button type="button" class="dialog-btn-secondary" :disabled="saving" @click="onCancel">Annuler</button>
+      <button type="button" class="dialog-btn-primary" :disabled="loading || saving" @click="save">
         <UIcon v-if="saving" name="i-lucide-loader-circle" class="size-4 animate-spin" />
         {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
       </button>
@@ -56,16 +66,11 @@
 </template>
 
 <script setup lang="ts">
-export interface UserProfilePayload {
-  id: number
-  email: string
-  full_name: string | null
-  sender_line1: string | null
-  sender_line2: string | null
-  sender_postal_code: string | null
-  sender_city: string | null
-  sender_address_complete: boolean
-}
+import type { AddressSuggestion } from '~/types/AddressAutocompleteInput'
+import type { PostalCodeCitySuggestion } from '~/types/PostalCodeAutocompleteInput'
+import type { CitySuggestion } from '~/types/CityAutocompleteInput'
+
+import type { UserProfilePayload } from '~/types/userProfile'
 
 const props = defineProps<{
   open: boolean
@@ -76,6 +81,7 @@ const emit = defineEmits<{
 }>()
 
 const { me, refreshMe } = useAuth()
+const { closeProfileDrawer } = useProfileDrawer()
 const { $api } = useNuxtApp()
 const toast = useToast()
 
@@ -90,6 +96,27 @@ const form = reactive({
   sender_postal_code: '',
   sender_city: '',
 })
+
+function onCancel(): void {
+  closeProfileDrawer()
+  emit('close')
+}
+
+function onAddressSelect(suggestion: AddressSuggestion): void {
+  form.sender_postal_code = suggestion.postcode
+  form.sender_city = suggestion.city
+}
+
+function onPostalCodeSelect(suggestion: PostalCodeCitySuggestion): void {
+  form.sender_city = suggestion.nom
+}
+
+function onCitySelect(suggestion: CitySuggestion): void {
+  const cp = suggestion.codesPostaux?.[0]
+  if (cp && !form.sender_postal_code.trim()) {
+    form.sender_postal_code = cp
+  }
+}
 
 function applyProfile(data: UserProfilePayload): void {
   profile.value = data
@@ -151,6 +178,7 @@ async function save(): Promise<void> {
     applyProfile(data)
     await refreshMe()
     toast.add({ title: 'Profil enregistré', color: 'success' })
+    closeProfileDrawer()
     emit('close')
   } catch (e: unknown) {
     toast.add({

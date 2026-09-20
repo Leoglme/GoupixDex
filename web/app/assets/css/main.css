@@ -317,13 +317,18 @@ html.dark {
 
   /* Modales & drawers téléportés — même pattern que DevLeadHunter */
   .dialog-btn-primary {
-    @apply flex h-9 min-h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-45;
+    @apply flex h-9 min-h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition-[transform,opacity,filter] disabled:cursor-not-allowed disabled:opacity-45;
     background-color: var(--app-accent);
     color: var(--color-primary-950, #3c1408);
   }
 
   .dialog-btn-primary:not(:disabled):hover {
     opacity: 0.92;
+  }
+
+  .dialog-btn-primary:not(:disabled):active {
+    transform: scale(0.98);
+    filter: brightness(0.95);
   }
 
   .dialog-btn-secondary {
@@ -336,6 +341,10 @@ html.dark {
   .dialog-btn-secondary:not(:disabled):hover {
     border-color: var(--app-ink-soft);
     background-color: var(--app-surface-2);
+  }
+
+  .dialog-btn-secondary:not(:disabled):active {
+    transform: scale(0.98);
   }
 
   .dialog-btn-danger {

@@ -39,6 +39,8 @@ class DesktopLeboncoinRunnerService:
                 sr.raise_for_status()
                 settings_d = sr.json()
                 postal = (settings_d.get("sender_postal_code") or "").strip()
+                line1 = (settings_d.get("sender_line1") or "").strip()
+                city = (settings_d.get("sender_city") or "").strip()
 
             article = DesktopStubsService.article_from_api_dict(article_d)
             image_urls = [im["image_url"] for im in article_d.get("images") or []]
@@ -50,6 +52,8 @@ class DesktopLeboncoinRunnerService:
                 article,
                 image_urls,
                 postal_code=postal,
+                sender_line1=line1,
+                sender_city=city,
                 progress=on_progress,
             )
             if bool(result.get("published")):

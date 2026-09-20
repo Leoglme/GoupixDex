@@ -169,6 +169,9 @@
     :leboncoin-publish-available="leboncoinPublishAvailable"
     :is-desktop-app="isDesktopApp"
     :loading="bulkPublishBusy"
+    :default-vinted="bulkPublishChannelDefaults.vinted"
+    :default-ebay="bulkPublishChannelDefaults.ebay"
+    :default-leboncoin="bulkPublishChannelDefaults.leboncoin"
     @confirm="confirmBulkPublish"
   />
 
@@ -259,6 +262,7 @@ const {
   openBulkDelete,
   confirmBulkDelete,
   openBulkPublish,
+  bulkPublishChannelDefaults,
   openBulkDelist,
   openBulkRelist,
   confirmBulkPublish,

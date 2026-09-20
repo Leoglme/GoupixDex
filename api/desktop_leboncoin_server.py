@@ -35,6 +35,7 @@ from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.desktop_leboncoin_runner_service import DesktopLeboncoinRunnerService
 from services.leboncoin_profile_session_service import (
+    clear_leboncoin_session_info,
     detect_leboncoin_session_from_profile,
     persisted_session_is_ready,
     write_leboncoin_session_info,
@@ -195,7 +196,7 @@ async def _cancel_lbc_login_polling() -> None:
 
 async def _lbc_login_polling_loop() -> None:
     """Detect signed-in DOM, dismiss consent, then close Chrome to flush cookies."""
-    from services.leboncoin_service import LeboncoinService
+    from services.leboncoin_service import DEPOSIT_URL, LeboncoinService, _TITLE_SELECTORS
 
     started = time.monotonic()
     first = True
@@ -208,10 +209,19 @@ async def _lbc_login_polling_loop() -> None:
         if LeboncoinService._browser is None or LeboncoinService._tab is None:
             return
         tab = LeboncoinService._tab
+        ready = False
         try:
-            ready = await LeboncoinService.try_confirm_session_on_current_page(tab)
+            if not await LeboncoinService.ping_browser():
+                return
+            ready = await asyncio.wait_for(
+                LeboncoinService.try_confirm_session_on_current_page(tab),
+                timeout=8.0,
+            )
             if not ready:
-                ready = await LeboncoinService.confirm_session_ready(tab)
+                ready = await asyncio.wait_for(
+                    LeboncoinService.confirm_session_ready(tab),
+                    timeout=20.0,
+                )
             if not ready:
                 url = await LeboncoinService._current_url(tab)
                 dom = await LeboncoinService.read_login_state_from_tab(tab)
@@ -224,11 +234,31 @@ async def _lbc_login_polling_loop() -> None:
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("lbc login poll confirm failed: %s", exc)
+            if not await LeboncoinService.ping_browser():
+                return
             continue
         if not ready:
             continue
+        if not await LeboncoinService._cdp_has_auth_cookie():
+            logger.debug("lbc login poll: auth cookie not visible yet")
+            continue
+        try:
+            await asyncio.wait_for(tab.get(DEPOSIT_URL), timeout=25.0)
+            await tab.sleep(1.0)
+            await LeboncoinService._accept_didomi_cookies(tab)
+            if await LeboncoinService._deposit_page_is_login_wall(tab):
+                logger.info("Leboncoin: session DOM OK but deposit page requires login — waiting")
+                continue
+            if not await LeboncoinService._first_matching_selector(tab, _TITLE_SELECTORS):
+                logger.info("Leboncoin: deposit wizard not visible yet — waiting")
+                continue
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("lbc deposit probe before persist: %s", exc)
+            if not await LeboncoinService.ping_browser():
+                return
+            continue
         profile = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
-        write_leboncoin_session_info(profile, {"logged_in": True, "source": "mes_annonces_probe"})
+        write_leboncoin_session_info(profile, {"logged_in": True, "source": "deposit_wizard_probe"})
         logger.info("Leboncoin session confirmed — closing helper browser")
         async with _lbc_browser_lock:
             await LeboncoinService.safe_close_browser_graceful()
@@ -237,22 +267,44 @@ async def _lbc_login_polling_loop() -> None:
 
 @lbc_router.get("/session")
 async def leboncoin_session_state() -> dict[str, object]:
+    """
+    Cardmarket-style: persisted ``goupix-leboncoin-session.json`` is the source of truth for « ready ».
+    Live DOM probe only refreshes state while the helper browser is open (never blocks on a stale handle).
+    """
     from services.leboncoin_service import LeboncoinService
 
     profile = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
     browser_open = LeboncoinService._browser is not None
+    if browser_open:
+        browser_open = await LeboncoinService.ping_browser()
+    cookie_state = detect_leboncoin_session_from_profile(profile)
+    persisted_ready = persisted_session_is_ready(profile)
 
+    if cookie_state == "needs_login" and persisted_ready:
+        clear_leboncoin_session_info(profile)
+        persisted_ready = False
+
+    live_ready = False
     if browser_open and LeboncoinService._tab is not None:
         try:
-            if await LeboncoinService.try_confirm_session_on_current_page(LeboncoinService._tab):
-                return {
-                    "state": "ready",
-                    "profile_dir": str(profile),
-                    "browser_open": True,
-                    "message": "Session détectée dans Chrome.",
-                }
+            live_ready = await asyncio.wait_for(
+                LeboncoinService.try_confirm_session_on_current_page(LeboncoinService._tab),
+                timeout=6.0,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug("lbc session live read: %s", exc)
+
+    session_ready = cookie_state == "ready" or live_ready or (
+        persisted_ready and cookie_state != "needs_login"
+    )
+
+    if session_ready:
+        return {
+            "state": "ready",
+            "profile_dir": str(profile),
+            "browser_open": browser_open,
+            "message": "Session détectée dans Chrome." if browser_open and live_ready else None,
+        }
 
     if browser_open:
         return {
@@ -262,22 +314,6 @@ async def leboncoin_session_state() -> dict[str, object]:
             "message": "Chrome ouvert — connectez-vous (la détection est automatique).",
         }
 
-    if persisted_session_is_ready(profile):
-        return {
-            "state": "ready",
-            "profile_dir": str(profile),
-            "browser_open": False,
-            "message": None,
-        }
-
-    cookie_state = detect_leboncoin_session_from_profile(profile)
-    if cookie_state == "ready":
-        return {
-            "state": "ready",
-            "profile_dir": str(profile),
-            "browser_open": False,
-            "message": None,
-        }
     return {
         "state": cookie_state,
         "profile_dir": str(profile),
