@@ -46,6 +46,29 @@ export default defineAppConfig({
         trigger: 'cursor-pointer',
       },
     },
+    select: {
+      slots: {
+        base: 'cursor-pointer',
+        item: 'cursor-pointer',
+      },
+    },
+    selectMenu: {
+      slots: {
+        base: 'cursor-pointer',
+        item: 'cursor-pointer',
+      },
+    },
+    inputMenu: {
+      slots: {
+        base: 'cursor-pointer',
+        item: 'cursor-pointer',
+      },
+    },
+    dropdownMenu: {
+      slots: {
+        item: 'cursor-pointer',
+      },
+    },
     progress: {
       slots: {
         root: 'flex w-full flex-col gap-2',

@@ -133,6 +133,14 @@ html.dark {
     cursor: pointer;
   }
 
+  [role='option']:not([aria-disabled='true']):not([data-disabled]) {
+    cursor: pointer;
+  }
+
+  [role='menuitem']:not([aria-disabled='true']):not([data-disabled]) {
+    cursor: pointer;
+  }
+
   /* Hide Edge / WebView2 native password reveal on `<input type="password">` (Tauri Windows),
      so only the custom toggle from PasswordInput.vue remains visible. */
   input[type='password']::-ms-reveal,
