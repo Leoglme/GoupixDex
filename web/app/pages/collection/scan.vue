@@ -338,14 +338,14 @@
 
                 <Transition name="fade">
                   <div
-                    v-if="latestOutcome"
+                    v-if="scanFiche"
                     class="absolute right-3 bottom-[max(4.75rem,env(safe-area-inset-bottom))] left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
                   >
                     <div class="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-white/10">
                       <img
-                        v-if="thumbUrl(latestOutcome)"
-                        :src="thumbUrl(latestOutcome) ?? undefined"
-                        :alt="cardTitle(latestOutcome)"
+                        v-if="scanFiche.image"
+                        :src="scanFiche.image"
+                        :alt="scanFiche.title"
                         class="h-full w-full object-cover"
                         referrerpolicy="no-referrer"
                         decoding="async"
@@ -356,32 +356,32 @@
                     </div>
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-semibold">
-                        {{ cardTitle(latestOutcome) }}
-                        <span v-if="marketPriceLabel(latestOutcome)" class="ml-1 text-emerald-300 tabular-nums">
-                          {{ marketPriceLabel(latestOutcome) }}
+                        {{ scanFiche.title }}
+                        <span v-if="scanFiche.price" class="ml-1 text-emerald-300 tabular-nums">
+                          {{ scanFiche.price }}
                         </span>
                       </p>
                       <p class="truncate text-xs text-white/70">
-                        {{ subtitle(latestOutcome) }}
+                        {{ scanFiche.subtitle }}
                       </p>
-                      <p class="mt-0.5 text-xs" :class="outcomeLineClass(latestOutcome)">
-                        {{ outcomeLine(latestOutcome) }}
+                      <p class="mt-0.5 text-xs" :class="scanFiche.lineClass">
+                        {{ scanFiche.line }}
                       </p>
                     </div>
                     <div class="flex shrink-0 flex-col gap-1">
                       <UButton
-                        v-if="latestOutcome.collection_card"
+                        v-if="scanFiche.collectionId"
                         size="xs"
                         color="neutral"
                         variant="solid"
                         icon="i-lucide-external-link"
                         class="bg-white/15"
-                        :to="`/collection/${latestOutcome.collection_card.id}`"
+                        :to="`/collection/${scanFiche.collectionId}`"
                       >
                         Ouvrir
                       </UButton>
                       <UButton
-                        v-else-if="latestOutcome.status === 'needs_review'"
+                        v-else-if="scanFiche.needsReview"
                         size="xs"
                         color="primary"
                         variant="solid"
@@ -397,7 +397,7 @@
                         icon="i-lucide-x"
                         class="text-white"
                         aria-label="Masquer"
-                        @click.prevent="dismissedOutcomeId = latestOutcome?.event_id ?? null"
+                        @click.prevent="dismissFiche"
                       />
                     </div>
                   </div>
@@ -644,6 +644,7 @@ const SCAN_LANGUAGE = 'auto'
 // falls back to the photo pipeline below.
 const scanEmbed = useScanEmbedIndex()
 const scanPhash = useScanPhash()
+const scanCardImage = useScanCardImage()
 
 const SCAN_CARD_LANGUAGE_STORAGE_KEY = 'goupixdex-scan-card-language'
 const SCAN_CARD_LANGUAGE_OPTIONS: { value: ScanCardLanguage; label: string }[] = [
@@ -1762,6 +1763,20 @@ function commitScanDecision(decision: ScanMatchDecision): void {
   lastInstantCommit = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
   reportIdentifyOutcome(true)
   flashInstantMatch(decision.name)
+  // Vignette + nom AFFICHÉS TOUT DE SUITE (URL locale) — le prix et le lien
+  // collection se rempliront au retour de l'API, sans bloquer l'image.
+  pendingCard.value = {
+    image: scanCardImage.cardImageUrl(decision),
+    name: decision.name,
+    setId: decision.setId,
+    localId: decision.localId,
+  }
+  if (pendingCardTimer !== null) {
+    clearTimeout(pendingCardTimer)
+  }
+  pendingCardTimer = setTimeout((): void => {
+    pendingCard.value = null
+  }, 8000)
   if (scanDirection.value === 'out') {
     playRemoveBeep()
     vibrate([40, 60, 40])
@@ -1883,6 +1898,54 @@ const latestOutcome = computed(() => {
   }
   return ev
 })
+
+/** Carte reconnue affichée AVANT le retour de l'API (vignette + nom instantanés). */
+const pendingCard: Ref<{ image: string; name: string; setId: string; localId: string } | null> = ref(null)
+let pendingCardTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Données de la fiche : le retour API (prix, lien collection) dès qu'il arrive,
+ * sinon la carte reconnue en attente. La vignette vient toujours de `pendingCard`
+ * quand elle existe (URL locale fiable, y compris pour les JA récentes que l'API
+ * n'illustre pas) — plus de délai entre « reconnue » et l'image affichée.
+ */
+const scanFiche = computed(() => {
+  const ev = latestOutcome.value
+  const p = pendingCard.value
+  if (ev) {
+    return {
+      image: p?.image ?? thumbUrl(ev),
+      title: cardTitle(ev),
+      price: marketPriceLabel(ev),
+      subtitle: subtitle(ev),
+      line: outcomeLine(ev),
+      lineClass: outcomeLineClass(ev),
+      collectionId: ev.collection_card?.id ?? null,
+      needsReview: ev.status === 'needs_review',
+      eventId: ev.event_id,
+    }
+  }
+  if (p) {
+    return {
+      image: p.image,
+      title: p.name,
+      price: null as string | null,
+      subtitle: `${p.setId} · ${p.localId}`,
+      line: 'Ajout en cours…',
+      lineClass: 'text-white/60',
+      collectionId: null as string | null,
+      needsReview: false,
+      eventId: null as string | null,
+    }
+  }
+  return null
+})
+
+/** Masque la fiche : ignore l'événement API et efface la carte en attente. */
+function dismissFiche(): void {
+  dismissedOutcomeId.value = scanFiche.value?.eventId ?? null
+  pendingCard.value = null
+}
 
 watch(latestOutcome, (ev): void => {
   if (outcomeAutoHideTimer !== null) {
@@ -2072,6 +2135,7 @@ onMounted(async () => {
   if (!isDesktopApp.value && liveCameraSupported.value) {
     void scanEmbed.load()
     void scanPhash.load()
+    void scanCardImage.loadStoredImages()
     await startWebcam()
   }
 })
@@ -2089,6 +2153,10 @@ onBeforeUnmount(() => {
   if (outcomeAutoHideTimer !== null) {
     clearTimeout(outcomeAutoHideTimer)
     outcomeAutoHideTimer = null
+  }
+  if (pendingCardTimer !== null) {
+    clearTimeout(pendingCardTimer)
+    pendingCardTimer = null
   }
   stopWebcam()
   disconnect()

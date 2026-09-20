@@ -45,6 +45,11 @@ def main() -> None:
     meta: list[list[str]] = []
     blob = bytearray()
     skipped = 0
+    # URL d'image STOCKÉE quand TCGdex n'a pas l'image (JA récentes, CDN
+    # limitless) : sert à afficher la carte instantanément à la reconnaissance,
+    # sans attendre l'API. Les autres cartes sont construites côté client depuis
+    # l'id TCGdex. Petit fichier séparé (~10k cartes) pour ne pas alourdir l'index.
+    images: dict[str, str] = {}
     for row in rows:
         card_id, locale, name, set_id, hashes_b64 = row[0], row[1], row[2], row[3], row[4]
         raw = base64.b64decode(hashes_b64)
@@ -53,6 +58,9 @@ def main() -> None:
             continue
         blob += raw
         meta.append([card_id, locale, name or "", set_id or "", local_id(card_id, set_id or "")])
+        stored = row[5] if len(row) > 5 else ""
+        if stored:
+            images[card_id] = stored
 
     count = len(meta)
     header = b"GPXH" + struct.pack("<III", VERSION, count, 0)
@@ -62,8 +70,11 @@ def main() -> None:
         json.dumps({"version": VERSION, "count": count, "cards": meta}, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
+    (OUT_DIR / "phash-images.json").write_text(
+        json.dumps(images, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
     size_bin = (16 + count * 64) / 1_000_000
-    print(f"phash-v1: {count} cartes, {skipped} ignorées | bin {size_bin:.1f} Mo")
+    print(f"phash-v1: {count} cartes, {skipped} ignorées | bin {size_bin:.1f} Mo | images stockées {len(images)}")
 
 
 if __name__ == "__main__":
