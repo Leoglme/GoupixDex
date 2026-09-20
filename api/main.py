@@ -31,8 +31,10 @@ from routes import binders_route
 from routes import collection_route
 from routes import ebay_market_route
 from routes import ebay_route
+from routes import portfolio_route
 from routes import pricing_route
 from routes import scan as scan_routes
+from routes import sealed_route
 from routes import scan_stream_route
 from routes import settings_route
 from routes import shipping_route
@@ -189,6 +191,8 @@ app.include_router(ebay_market_route.router)
 app.include_router(pricing_route.router)
 app.include_router(catalog_route.router)
 app.include_router(collection_route.router)
+app.include_router(sealed_route.router)
+app.include_router(portfolio_route.router)
 app.include_router(binders_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)

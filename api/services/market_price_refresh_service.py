@@ -29,7 +29,8 @@ from config import get_settings
 from core.database import SessionLocal
 from models.article import Article
 from models.collection_card import CollectionCard
-from services import collection_card_service
+from models.sealed_product import SealedProduct
+from services import collection_card_service, portfolio_value_service, sealed_product_service
 from services.article_market_reference_service import revalue_all_articles
 from services.cardmarket_local_price_service import (
     fetch_pricing_block_for_card,
@@ -57,8 +58,10 @@ def refresh_market_prices() -> dict[str, Any]:
     db = SessionLocal()
     try:
         revaluation = _revalue_all_collection_cards()
+        sealed_revaluation = _revalue_all_sealed_products()
         articles_reval = revalue_all_articles(db)
         db.commit()
+        snapshot_count = portfolio_value_service.snapshot_all_users(db)
     finally:
         db.close()
     result = {
@@ -67,7 +70,9 @@ def refresh_market_prices() -> dict[str, Any]:
         "guide_row_count": report.row_count,
         "guide_created_at": report.created_at,
         **revaluation,
+        **sealed_revaluation,
         **articles_reval,
+        "portfolio_snapshots": snapshot_count,
     }
     logger.info("Cardmarket market refresh done: %s", result)
     return result
@@ -112,6 +117,34 @@ def _revalue_all_collection_cards() -> dict[str, int]:
         "cards_newly_mapped": newly_mapped,
         "cards_unpriced": unpriced,
     }
+
+
+def _revalue_all_sealed_products() -> dict[str, int]:
+    """Re-price chaque produit scellé depuis le guide local (idProduct uniquement, pas de TCGdex)."""
+    db = SessionLocal()
+    repriced = 0
+    unpriced = 0
+    try:
+        rows = db.query(SealedProduct).all()
+        for row in rows:
+            id_product = row.cardmarket_id_product
+            if id_product is None:
+                unpriced += 1
+                continue
+            price = resolve_market_price_eur(id_product, None)
+            if price is None:
+                unpriced += 1
+                continue
+            sealed_product_service.apply_market_price(
+                row,
+                cardmarket_id_product=id_product,
+                market_price_eur=price,
+            )
+            repriced += 1
+        db.commit()
+    finally:
+        db.close()
+    return {"sealed_repriced": repriced, "sealed_unpriced": unpriced}
 
 
 def _bootstrap_article_market_references_if_needed() -> None:

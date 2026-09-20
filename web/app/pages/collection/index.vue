@@ -40,6 +40,8 @@
           </template>
         </GoupixDexPageHeader>
 
+        <GoupixDexCollectionSectionTabs active="cartes" />
+
         <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
           <GoupixDexStatsCard
             title="Valeur estimée"

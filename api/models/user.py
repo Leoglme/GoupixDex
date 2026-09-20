@@ -64,6 +64,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    sealed_products: Mapped[list["SealedProduct"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     amazon_accounts: Mapped[list["AmazonAccount"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

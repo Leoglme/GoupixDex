@@ -153,7 +153,12 @@
               />
 
               <div v-if="prefill">
-                <ArticleForm ref="formRef" mode="create" :loading="submitting" @submit-create="onSubmitCreate" />
+                <GoupixDexArticleForm
+                  ref="formRef"
+                  mode="create"
+                  :loading="submitting"
+                  @submit-create="onSubmitCreate"
+                />
               </div>
               <div
                 v-else

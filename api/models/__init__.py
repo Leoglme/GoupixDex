@@ -10,6 +10,8 @@ from models.cardmarket_search import CardmarketSearch, CardmarketSearchResult, C
 from models.collection_card import CollectionCard
 from models.image import Image
 from models.margin_settings import MarginSettings
+from models.portfolio_value_snapshot import PortfolioValueSnapshot
+from models.sealed_product import SealedProduct
 from models.user import User
 
 __all__ = [
@@ -26,5 +28,7 @@ __all__ = [
     "CollectionCard",
     "Image",
     "MarginSettings",
+    "PortfolioValueSnapshot",
+    "SealedProduct",
     "User",
 ]

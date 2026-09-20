@@ -211,7 +211,15 @@ const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavG
   ]
 
   const collectionItems: NavigationMenuItem[] = [
-    navLink('Ma collection', 'i-lucide-album', '/collection', ['/collection'], ['/collection/scan']),
+    navLink(
+      'Ma collection',
+      'i-lucide-album',
+      '/collection',
+      ['/collection'],
+      ['/collection/scan', '/collection/produits', '/collection/valeur'],
+    ),
+    navLink('Produits scellés', 'i-lucide-box', '/collection/produits', ['/collection/produits']),
+    navLink('Valeur', 'i-lucide-line-chart', '/collection/valeur', ['/collection/valeur']),
     navLink('Classeurs', 'i-lucide-book-open', '/classeurs', ['/classeurs']),
     // Scanner = phone → web flow; on desktop the page shows a QR code to open it on the phone.
     navLink('Scanner mes cartes', 'i-lucide-scan-line', '/collection/scan', ['/collection/scan']),
