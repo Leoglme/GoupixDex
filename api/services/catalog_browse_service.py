@@ -39,7 +39,7 @@ from services.catalog_limitless_ja_service import (
 from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService
 
 _CACHE_TTL_SEC = 600.0
-_CACHE_VERSION = "latin-labels-v7"
+_CACHE_VERSION = "latin-labels-v8"
 _CACHE_TTL_BROWSE_SEC = 3600.0
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 

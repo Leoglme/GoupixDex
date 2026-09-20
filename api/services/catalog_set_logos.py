@@ -1,8 +1,11 @@
 """
 Set logo/symbol resolution beyond raw TCGdex API fields.
 
-Limitless TCG hosts many JP (and some EN promo) set logos on S3 — see
-``https://s3.limitlesstcg.com/sets/jp/{code}.png`` and ``…/sets/en/{CODE}.png``.
+Japanese expansion art uses Pokécardex CDN (full logos), e.g.
+``https://pokecardex.b-cdn.net/assets/images/logos_jp/M4.png``.
+
+Limitless S3 (``…/sets/jp/{code}.png``) is a fallback only — many files are tiny placeholders.
+EN promos may use ``…/sets/en/{CODE}.png``.
 """
 
 from __future__ import annotations
@@ -43,6 +46,39 @@ def _head_ok(url: str) -> bool:
     return ok
 
 
+_POKECARDEX_JP_BASE = "https://pokecardex.b-cdn.net/assets/images/logos_jp"
+
+
+def _pokecardex_jp_code_candidates(set_id: str) -> list[str]:
+    """TCGdex id variants (``M2a`` → ``M2A``, ``M-P`` → ``MP``)."""
+    sid = (set_id or "").strip()
+    if not sid:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(code: str) -> None:
+        c = code.strip()
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+
+    add(sid)
+    add(sid.upper())
+    if "-" in sid:
+        add(sid.replace("-", ""))
+    return out
+
+
+def pokecardex_jp_set_logo_url(set_id: str) -> str | None:
+    """Return Pokécardex JP logo URL when the PNG exists."""
+    for code in _pokecardex_jp_code_candidates(set_id):
+        url = f"{_POKECARDEX_JP_BASE}/{code}.png"
+        if _head_ok(url):
+            return url
+    return None
+
+
 def limitless_set_logo_url(locale: str, set_id: str) -> str | None:
     """Return a Limitless CDN logo URL when the asset exists, else ``None``."""
     loc = (locale or "").strip().lower()
@@ -56,14 +92,19 @@ def limitless_set_logo_url(locale: str, set_id: str) -> str | None:
     return url if _head_ok(url) else None
 
 
-def apply_limitless_logo_to_row(row: dict[str, Any], locale: str) -> None:
-    """Set ``logo`` from Limitless when TCGdex omitted it."""
+def apply_external_logo_to_row(row: dict[str, Any], locale: str) -> None:
+    """Set ``logo`` from Pokécardex (JA) or Limitless when TCGdex omitted it."""
     if row.get("logo"):
         return
     sid = row.get("id")
     if not isinstance(sid, str):
         return
-    url = limitless_set_logo_url(locale, sid)
+    loc = (locale or "").strip().lower()
+    url: str | None = None
+    if loc == "ja":
+        url = pokecardex_jp_set_logo_url(sid)
+    if url is None:
+        url = limitless_set_logo_url(loc, sid)
     if url:
         row["logo"] = url
         row.pop("cover", None)
@@ -77,9 +118,9 @@ def enrich_set_visuals_row(
     verify_limitless: bool = True,
 ) -> None:
     """
-    Full visual enrichment for a set brief: TCGdex normalize → Limitless logo → CDN fallbacks.
+    Full visual enrichment: TCGdex → Pokécardex (JA) / Limitless → CDN fallbacks.
 
-    When ``verify_limitless`` is false, Limitless URLs are applied without HEAD (build-time speed).
+    When ``verify_limitless`` is false, external URLs are applied without HEAD (build-time only).
     """
     loc = (locale or "").strip().lower()
     sid = row.get("id")
@@ -100,14 +141,14 @@ def enrich_set_visuals_row(
 
     if not row.get("logo"):
         if verify_limitless:
-            apply_limitless_logo_to_row(row, loc)
+            apply_external_logo_to_row(row, loc)
+        elif loc == "ja":
+            codes = _pokecardex_jp_code_candidates(sid)
+            row["logo"] = f"{_POKECARDEX_JP_BASE}/{codes[0]}.png" if codes else ""
+            if not row["logo"]:
+                row.pop("logo", None)
         else:
-            url = (
-                f"https://s3.limitlesstcg.com/sets/jp/{sid}.png"
-                if loc == "ja"
-                else f"https://s3.limitlesstcg.com/sets/en/{sid.upper()}.png"
-            )
-            row["logo"] = url
+            row["logo"] = f"https://s3.limitlesstcg.com/sets/en/{sid.upper()}.png"
 
     if not row.get("logo"):
         fill_missing_set_visuals(row, locale=loc, serie_id=serie_id)

@@ -23,7 +23,7 @@ API_DIR = SCRIPT_DIR.parent
 REPO_ROOT = API_DIR.parent
 OUT_DIR = REPO_ROOT / "web" / "public" / "catalog-index"
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 LOCALES = ("fr", "en", "ja")
 
 
