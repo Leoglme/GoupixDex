@@ -112,13 +112,22 @@ def add_from_catalog(
     Idempotent : recliquer le même produit incrémente la quantité (comme les cartes).
     Prix marché résolu depuis le guide local via l'``idProduct``.
     """
-    market_price = resolve_market_price_eur(body.cardmarket_id_product, None)
-    existing = sealed_product_service.find_by_cardmarket_id_product(db, user.id, body.cardmarket_id_product)
+    market_price: float | None = None
+    if body.cardmarket_id_product is not None:
+        market_price = resolve_market_price_eur(body.cardmarket_id_product, None)
+    if market_price is None:
+        market_price = body.market_price_eur
+    existing = (
+        sealed_product_service.find_by_cardmarket_id_product(db, user.id, body.cardmarket_id_product)
+        if body.cardmarket_id_product is not None
+        else None
+    )
     if existing is not None:
         product = sealed_product_service.update_sealed_product(
             db,
             existing,
             quantity=int(existing.quantity) + body.quantity,
+            image_url=body.image_url or existing.image_url,
             market_price_eur=market_price,
         )
         created = False
@@ -133,7 +142,7 @@ def add_from_catalog(
             quantity=body.quantity,
             purchase_price_eur=None,
             notes=None,
-            image_url=None,
+            image_url=body.image_url,
             cardmarket_id_product=body.cardmarket_id_product,
             cardmarket_url=None,
             market_price_eur=market_price,

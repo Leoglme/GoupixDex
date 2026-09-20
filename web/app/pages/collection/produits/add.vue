@@ -18,7 +18,7 @@
       <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Ajouter un produit scellé"
-          description="Parcourez une extension ou recherchez un produit, puis cliquez pour l'ajouter."
+          description="Choisis une extension ou recherche un produit, puis clique pour l'ajouter."
         >
           <template #actions>
             <UButton color="neutral" variant="ghost" icon="i-lucide-arrow-left" to="/collection/produits">
@@ -31,7 +31,7 @@
           v-model="query"
           icon="i-lucide-search"
           :placeholder="
-            openExpansion ? `Filtrer dans ${openExpansion.label}…` : 'Rechercher un produit (ex. surging sparks etb)…'
+            openExpansion ? `Filtrer dans ${openExpansion.name}…` : 'Rechercher un produit (ex. surging sparks etb)…'
           "
           size="lg"
           class="w-full"
@@ -42,7 +42,7 @@
           <UIcon name="i-lucide-loader-2" class="text-primary size-9 animate-spin" />
         </div>
 
-        <!-- Produits d'une extension ouverte, ou résultats de recherche globale -->
+        <!-- Produits d'une extension ouverte, ou recherche globale -->
         <template v-else-if="openExpansion || query.trim().length >= 2">
           <div class="flex items-center gap-2">
             <UButton
@@ -56,7 +56,7 @@
               Extensions
             </UButton>
             <p class="text-muted text-sm tabular-nums">
-              <span v-if="openExpansion" class="text-highlighted font-medium">{{ openExpansion.label }} · </span>
+              <span v-if="openExpansion" class="text-highlighted font-medium">{{ openExpansion.name }} · </span>
               {{ visibleProducts.length }} produit(s)
             </p>
           </div>
@@ -64,71 +64,85 @@
           <UCard v-if="visibleProducts.length === 0" :ui="{ body: 'p-8 text-center space-y-2' }">
             <UIcon name="i-lucide-search-x" class="text-muted mx-auto size-8" />
             <p class="text-highlighted text-sm font-medium">Aucun produit pour « {{ query.trim() }} ».</p>
-            <p class="text-muted text-sm">Essayez le nom de l'extension (ex. « Cosmic Eclipse ») ou un autre terme.</p>
+            <p class="text-muted text-sm">Essaie le nom de l'extension (ex. « Surging Sparks ») ou un autre terme.</p>
           </UCard>
 
-          <div v-else class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             <button
-              v-for="product in visibleProducts"
-              :key="product.p"
+              v-for="hit in visibleProducts"
+              :key="hit.product.tp"
               type="button"
-              class="border-default bg-elevated/30 focus-visible:ring-primary group flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-(--app-accent) focus-visible:ring-2 focus-visible:outline-none"
-              :disabled="pendingId === product.p"
-              @click="addProduct(product)"
+              class="border-default bg-elevated/30 focus-visible:ring-primary group flex flex-col overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+              :disabled="pendingTp === hit.product.tp"
+              @click="addProduct(hit.product, hit.expansionName)"
             >
-              <span
-                class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-(--app-accent-soft) text-(--app-accent-ink)"
+              <div
+                class="bg-muted/20 relative flex aspect-square w-full items-center justify-center overflow-hidden p-2"
               >
-                <UIcon
-                  :name="pendingId === product.p ? 'i-lucide-loader-2' : sealedProductTypeIcon(product.c)"
-                  class="size-5"
-                  :class="pendingId === product.p ? 'animate-spin' : ''"
+                <img
+                  v-if="hit.product.img"
+                  :src="hit.product.img"
+                  :alt="hit.product.full"
+                  class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                  referrerpolicy="no-referrer"
+                  loading="lazy"
+                  decoding="async"
                 />
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="text-highlighted block truncate text-sm font-medium">{{ product.n }}</span>
-                <span class="text-muted flex items-center gap-1.5 text-xs">
-                  {{ sealedProductTypeLabel(product.c) }}
-                  <span v-if="priceOf(product.p) != null" class="text-highlighted tabular-nums">
-                    · {{ eur.format(priceOf(product.p) as number) }}
-                  </span>
+                <UIcon v-else :name="sealedProductTypeIcon(hit.product.c)" class="text-muted size-8" />
+                <span
+                  v-if="ownedOf(hit.product.p) > 0"
+                  class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                >
+                  ×{{ ownedOf(hit.product.p) }}
                 </span>
-              </span>
-              <span
-                v-if="ownedOf(product.p) > 0"
-                class="bg-success/90 text-inverted shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
-                title="Déjà dans ta collection"
-              >
-                ×{{ ownedOf(product.p) }}
-              </span>
-              <UIcon
-                v-else
-                name="i-lucide-plus"
-                class="text-muted size-4 shrink-0 group-hover:text-(--app-accent)"
-                aria-hidden="true"
-              />
+                <span
+                  class="bg-elevated/95 text-highlighted absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-full backdrop-blur-sm transition-colors group-hover:bg-(--app-accent) group-hover:text-white"
+                >
+                  <UIcon
+                    :name="pendingTp === hit.product.tp ? 'i-lucide-loader-2' : 'i-lucide-plus'"
+                    class="size-3.5"
+                    :class="pendingTp === hit.product.tp ? 'animate-spin' : ''"
+                  />
+                </span>
+              </div>
+              <div class="min-w-0 space-y-0.5 p-2">
+                <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ hit.product.n }}</p>
+                <p class="text-muted flex items-center justify-between gap-1 text-[10px]">
+                  <span class="truncate">{{ sealedProductTypeLabel(hit.product.c) }}</span>
+                  <span v-if="hit.product.price != null" class="text-highlighted shrink-0 tabular-nums">
+                    {{ eur.format(hit.product.price) }}
+                  </span>
+                </p>
+              </div>
             </button>
           </div>
         </template>
 
-        <!-- Liste des extensions (par défaut) -->
+        <!-- Séries vers extensions (par défaut) -->
         <template v-else>
-          <p class="text-muted text-sm tabular-nums">{{ expansions.length }} extensions</p>
-          <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            <button
-              v-for="expansion in expansions"
-              :key="expansion.id"
-              type="button"
-              class="border-default bg-elevated/30 focus-visible:ring-primary group flex items-center justify-between gap-2 rounded-xl border px-3 py-3 text-left transition-colors hover:border-(--app-accent) focus-visible:ring-2 focus-visible:outline-none"
-              @click="openExp(expansion)"
-            >
-              <span class="min-w-0">
-                <span class="text-highlighted block truncate text-sm font-medium">{{ expansion.label }}</span>
-                <span class="text-muted text-xs tabular-nums">{{ expansion.count }} produit(s)</span>
-              </span>
-              <UIcon name="i-lucide-chevron-right" class="text-muted size-4 shrink-0 group-hover:text-(--app-accent)" />
-            </button>
-          </div>
+          <section v-for="serie in series" :key="serie.name" class="space-y-3">
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-highlighted text-sm font-semibold">{{ serie.name }}</h2>
+              <span class="text-muted text-xs tabular-nums">{{ serie.expansions.length }} extensions</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              <button
+                v-for="expansion in serie.expansions"
+                :key="expansion.id"
+                type="button"
+                class="border-default bg-elevated/30 focus-visible:ring-primary group flex flex-col items-center gap-2 rounded-xl border p-3 text-center transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+                @click="openExp(expansion)"
+              >
+                <div class="flex h-14 w-full items-center justify-center">
+                  <GoupixDexCatalogSetLogo :logo="expansion.logo ?? undefined" :name="expansion.name" large />
+                </div>
+                <div class="min-w-0">
+                  <p class="text-highlighted truncate text-xs font-medium">{{ expansion.name }}</p>
+                  <p class="text-muted text-[10px] tabular-nums">{{ expansion.count }} produit(s)</p>
+                </div>
+              </button>
+            </div>
+          </section>
         </template>
       </div>
     </template>
@@ -137,26 +151,30 @@
 
 <script setup lang="ts">
 import type { SealedProductType } from '~/composables/useSealed'
-import type { SealedCatalogExpansion, SealedCatalogProduct } from '~/composables/useSealedCatalog'
+import type {
+  SealedCatalogExpansion,
+  SealedCatalogProduct,
+  SealedCatalogSearchHit,
+  SealedCatalogSerie,
+} from '~/composables/useSealedCatalog'
 import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
   'Ajouter un produit scellé',
-  'Parcourez le catalogue Cardmarket des produits scellés et ajoutez-les en un clic.',
+  'Parcourez le catalogue des produits scellés (vraies images) et ajoutez-les en un clic.',
 )
 
-const { loadExpansions, quotePrices } = useSealedCatalog()
+const { loadSeries } = useSealedCatalog()
 const { catalogAdd, listSealed } = useSealed()
 const toast = useToast()
 
-const expansions = ref<SealedCatalogExpansion[]>([])
+const series = ref<SealedCatalogSerie[]>([])
 const openExpansion = ref<SealedCatalogExpansion | null>(null)
 const query = ref('')
 const loading = ref(true)
-const pendingId = ref<number | null>(null)
-const priceMap = ref<Map<number, number | null>>(new Map())
+const pendingTp = ref<number | null>(null)
 const ownedMap = ref<Map<number, number>>(new Map())
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -167,22 +185,27 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 
 const SEARCH_LIMIT = 80
 
-const visibleProducts = computed<SealedCatalogProduct[]>(() => {
+const visibleProducts = computed<SealedCatalogSearchHit[]>(() => {
   const q = query.value.trim().toLowerCase()
   if (openExpansion.value) {
-    const products = openExpansion.value.products
-    return q ? products.filter((p) => p.n.toLowerCase().includes(q)) : products
+    const name = openExpansion.value.name
+    const products = q
+      ? openExpansion.value.products.filter((p) => p.full.toLowerCase().includes(q))
+      : openExpansion.value.products
+    return products.map((product) => ({ product, expansionName: name }))
   }
   if (q.length < 2) {
     return []
   }
-  const hits: SealedCatalogProduct[] = []
-  for (const expansion of expansions.value) {
-    for (const product of expansion.products) {
-      if (product.n.toLowerCase().includes(q)) {
-        hits.push(product)
-        if (hits.length >= SEARCH_LIMIT) {
-          return hits
+  const hits: SealedCatalogSearchHit[] = []
+  for (const serie of series.value) {
+    for (const expansion of serie.expansions) {
+      for (const product of expansion.products) {
+        if (product.full.toLowerCase().includes(q)) {
+          hits.push({ product, expansionName: expansion.name })
+          if (hits.length >= SEARCH_LIMIT) {
+            return hits
+          }
         }
       }
     }
@@ -191,43 +214,12 @@ const visibleProducts = computed<SealedCatalogProduct[]>(() => {
 })
 
 /**
- * Prix marché connu pour un idProduct (ou `null`/`undefined` si non coté / non chargé).
- * @param idProduct - idProduct Cardmarket.
- * @returns Le prix, ou null/undefined.
+ * Quantité déjà possédée pour un idProduct Cardmarket.
+ * @param idProduct - idProduct Cardmarket du produit catalogue (peut être null).
+ * @returns La quantité possédée (0 si aucune ou non apparié).
  */
-function priceOf(idProduct: number): number | null | undefined {
-  return priceMap.value.get(idProduct)
-}
-
-/**
- * Quantité déjà possédée pour un idProduct.
- * @param idProduct - idProduct Cardmarket.
- * @returns La quantité possédée (0 si aucune).
- */
-function ownedOf(idProduct: number): number {
-  return ownedMap.value.get(idProduct) ?? 0
-}
-
-/**
- * Récupère les prix marché manquants pour les produits affichés (cotation en lot).
- * @param products - Produits actuellement visibles.
- * @returns Résolue après mise à jour du cache de prix.
- */
-async function ensurePrices(products: SealedCatalogProduct[]): Promise<void> {
-  const missing = products.map((p) => p.p).filter((id) => !priceMap.value.has(id))
-  if (!missing.length) {
-    return
-  }
-  try {
-    const prices = await quotePrices(missing)
-    const next = new Map(priceMap.value)
-    for (const id of missing) {
-      next.set(id, prices[String(id)] ?? null)
-    }
-    priceMap.value = next
-  } catch {
-    /* best-effort : la fiche reste ajoutable sans prix affiché */
-  }
+function ownedOf(idProduct: number | null): number {
+  return idProduct != null ? (ownedMap.value.get(idProduct) ?? 0) : 0
 }
 
 /**
@@ -240,7 +232,7 @@ function openExp(expansion: SealedCatalogExpansion): void {
 }
 
 /**
- * Referme l'extension ouverte (retour à la liste des extensions).
+ * Referme l'extension ouverte (retour aux séries).
  */
 function closeExpansion(): void {
   openExpansion.value = null
@@ -248,39 +240,44 @@ function closeExpansion(): void {
 }
 
 /**
- * Ajoute un produit du catalogue à la collection (idempotent : incrémente si déjà possédé).
+ * Ajoute un produit du catalogue à la collection (idempotent si apparié à Cardmarket).
  * @param product - Produit catalogue cliqué.
+ * @param expansionName - Nom de l'extension (stocké comme set).
  * @returns Résolue après ajout.
  */
-async function addProduct(product: SealedCatalogProduct): Promise<void> {
-  if (pendingId.value) {
+async function addProduct(product: SealedCatalogProduct, expansionName: string): Promise<void> {
+  if (pendingTp.value) {
     return
   }
-  pendingId.value = product.p
+  pendingTp.value = product.tp
   try {
     const res = await catalogAdd({
-      cardmarket_id_product: product.p,
       name: product.n,
       product_type: product.c as SealedProductType,
-      set_name: openExpansion.value?.label ?? null,
+      set_name: expansionName,
+      cardmarket_id_product: product.p,
+      image_url: product.img,
+      market_price_eur: product.price,
     })
-    const next = new Map(ownedMap.value)
-    next.set(product.p, res.product.quantity)
-    ownedMap.value = next
+    if (product.p != null) {
+      const next = new Map(ownedMap.value)
+      next.set(product.p, res.product.quantity)
+      ownedMap.value = next
+    }
     toast.add({
       title: res.created ? 'Ajouté à ta collection' : `Quantité ×${res.product.quantity}`,
-      description: product.n,
+      description: product.full,
       color: 'success',
     })
   } catch (e) {
     toast.add({ title: 'Ajout impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
-    pendingId.value = null
+    pendingTp.value = null
   }
 }
 
 /**
- * Charge l'index des produits déjà possédés (pour le badge « déjà en collection »).
+ * Charge l'index des produits déjà possédés (badge « déjà en collection »).
  * @returns Résolue après chargement (best-effort).
  */
 async function loadOwned(): Promise<void> {
@@ -298,16 +295,10 @@ async function loadOwned(): Promise<void> {
   }
 }
 
-watch(visibleProducts, (products) => {
-  void ensurePrices(products)
-})
-
 onMounted(async () => {
   loading.value = true
   try {
-    const list = await loadExpansions()
-    // Extensions récentes d'abord (idExpansion croissant avec le temps chez Cardmarket).
-    expansions.value = [...list].sort((a, b) => b.id - a.id)
+    series.value = await loadSeries()
   } finally {
     loading.value = false
   }

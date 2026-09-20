@@ -100,12 +100,14 @@ export interface SealedArticlePrefillResponse extends CatalogCardPreviewResponse
 }
 
 export interface SealedCatalogAddBody {
-  cardmarket_id_product: number
   name: string
   product_type: SealedProductType
   set_name?: string | null
   language?: string
   quantity?: number
+  cardmarket_id_product?: number | null
+  image_url?: string | null
+  market_price_eur?: number | null
 }
 
 export interface SealedPriceHistoryPoint {

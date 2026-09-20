@@ -1,25 +1,45 @@
-/** Catalogue statique des produits scellés Cardmarket (parcours par extension + recherche). */
+/** Catalogue statique des produits scellés (série vers extension vers produits, images réelles). */
 
 export interface SealedCatalogProduct {
-  /** idProduct Cardmarket. */
-  p: number
-  /** Nom du produit. */
+  /** idProduct TCGplayer (image + identité catalogue). */
+  tp: number
+  /** idProduct Cardmarket (prix € + revalorisation nocturne) — ``null`` si non apparié. */
+  p: number | null
+  /** Nom court (sans le nom de l'extension). */
   n: string
-  /** Type normalisé (booster, display, etb…). */
+  /** Nom complet d'origine. */
+  full: string
+  /** Type normalisé (etb, display, tin…). */
   c: string
+  /** URL de l'image réelle (TCGplayer CDN) — ``null`` si absente. */
+  img: string | null
+  /** Prix de référence en € — ``null`` si inconnu. */
+  price: number | null
 }
 
 export interface SealedCatalogExpansion {
-  id: number
-  label: string
+  id: string
+  name: string
+  logo: string | null
   count: number
   products: SealedCatalogProduct[]
+}
+
+export interface SealedCatalogSerie {
+  name: string
+  logo: string | null
+  expansions: SealedCatalogExpansion[]
 }
 
 export interface SealedCatalog {
   version: number
   generated_at: string
-  expansions: SealedCatalogExpansion[]
+  series: SealedCatalogSerie[]
+}
+
+export interface SealedCatalogSearchHit {
+  product: SealedCatalogProduct
+  expansionName: string
 }
 
 let catalogPromise: Promise<SealedCatalog | null> | null = null
@@ -30,7 +50,7 @@ let catalogPromise: Promise<SealedCatalog | null> | null = null
  */
 function fetchCatalogOnce(): Promise<SealedCatalog | null> {
   if (!catalogPromise) {
-    catalogPromise = fetch('/sealed-catalog/sealed-v1.json')
+    catalogPromise = fetch('/sealed-catalog/sealed-v2.json')
       .then((r) => (r.ok ? (r.json() as Promise<SealedCatalog>) : null))
       .catch((): null => null)
   }
@@ -38,28 +58,26 @@ function fetchCatalogOnce(): Promise<SealedCatalog | null> {
 }
 
 /**
- * Composable du catalogue des produits scellés (chargement, recherche, cotation).
+ * Composable du catalogue des produits scellés (chargement, recherche globale).
  * @returns Helpers du catalogue scellé.
  */
 export function useSealedCatalog() {
-  const { $api } = useNuxtApp()
-
   /**
-   * Charge et renvoie la liste des extensions du catalogue.
-   * @returns {Promise<SealedCatalogExpansion[]>} Extensions triées, ou tableau vide.
+   * Charge et renvoie les séries du catalogue (chaque série contient ses extensions).
+   * @returns {Promise<SealedCatalogSerie[]>} Séries, ou tableau vide.
    */
-  async function loadExpansions() {
+  async function loadSeries() {
     const catalog = await fetchCatalogOnce()
-    return catalog?.expansions ?? []
+    return catalog?.series ?? []
   }
 
   /**
    * Recherche globale de produits par nom (toutes extensions confondues).
    * @param query - Terme de recherche (>= 2 caractères).
    * @param limit - Nombre maximum de résultats.
-   * @returns {Promise<SealedCatalogProduct[]>} Produits correspondants.
+   * @returns {Promise<SealedCatalogSearchHit[]>} Produits correspondants + leur extension.
    */
-  async function searchProducts(query: string, limit = 60) {
+  async function searchProducts(query: string, limit = 80) {
     const needle = query.trim().toLowerCase()
     if (needle.length < 2) {
       return []
@@ -68,13 +86,15 @@ export function useSealedCatalog() {
     if (!catalog) {
       return []
     }
-    const hits: SealedCatalogProduct[] = []
-    for (const expansion of catalog.expansions) {
-      for (const product of expansion.products) {
-        if (product.n.toLowerCase().includes(needle)) {
-          hits.push(product)
-          if (hits.length >= limit) {
-            return hits
+    const hits: SealedCatalogSearchHit[] = []
+    for (const serie of catalog.series) {
+      for (const expansion of serie.expansions) {
+        for (const product of expansion.products) {
+          if (product.full.toLowerCase().includes(needle)) {
+            hits.push({ product, expansionName: expansion.name })
+            if (hits.length >= limit) {
+              return hits
+            }
           }
         }
       }
@@ -82,21 +102,5 @@ export function useSealedCatalog() {
     return hits
   }
 
-  /**
-   * POST `/sealed/quote` — prix marché en lot pour des idProduct (guide local, sans quota).
-   *
-   * @param idProducts - Liste d'idProduct Cardmarket.
-   * @returns {Promise<Record<string, number | null>>} Table idProduct vers prix EUR (ou null).
-   */
-  async function quotePrices(idProducts: number[]) {
-    if (!idProducts.length) {
-      return {}
-    }
-    const { data } = await $api.post<{ prices: Record<string, number | null> }>('/sealed/quote', {
-      cardmarket_id_products: idProducts.slice(0, 400),
-    })
-    return data.prices
-  }
-
-  return { loadExpansions, searchProducts, quotePrices }
+  return { loadSeries, searchProducts }
 }
