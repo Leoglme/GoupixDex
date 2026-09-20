@@ -8,13 +8,13 @@ from pydantic import BaseModel, Field
 
 #: Types acceptés en entrée (miroir de :data:`models.sealed_product.SEALED_PRODUCT_TYPES`).
 SealedProductType = Literal[
-    "etb",
-    "upc",
-    "coffret",
-    "tripack",
-    "pokebox",
-    "mini_tin",
+    "booster",
     "display",
+    "theme_deck",
+    "trainer_kit",
+    "tin",
+    "box_set",
+    "etb",
     "blister",
     "autre",
 ]
@@ -57,6 +57,23 @@ class CardmarketResolveBody(BaseModel):
     """``POST /sealed/resolve-cardmarket`` — pré-remplit un scellé depuis une fiche Cardmarket."""
 
     url: str = Field(..., min_length=8, max_length=1024)
+
+
+class SealedCatalogAddBody(BaseModel):
+    """``POST /sealed/catalog-add`` — ajoute un produit choisi dans le catalogue Cardmarket."""
+
+    cardmarket_id_product: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=255)
+    product_type: SealedProductType = "autre"
+    set_name: str | None = Field(default=None, max_length=255)
+    language: str = Field("fr", min_length=2, max_length=8)
+    quantity: int = Field(1, ge=1, le=999)
+
+
+class SealedQuoteBody(BaseModel):
+    """``POST /sealed/quote`` — prix marché en lot pour des ``idProduct`` du catalogue."""
+
+    cardmarket_id_products: list[int] = Field(..., min_length=1, max_length=400)
 
 
 class SealedProductPrepareSaleBody(BaseModel):

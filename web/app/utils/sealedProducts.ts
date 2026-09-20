@@ -2,17 +2,39 @@
 
 import type { SealedProductType } from '~/composables/useSealed'
 
-/** Libellé français par type de produit scellé (ordre d'affichage inclus). */
+/** Libellé français par type de produit scellé (aligné sur les catégories Cardmarket). */
 export const SEALED_TYPE_LABELS: Record<string, string> = {
   etb: 'ETB',
-  upc: 'UPC',
-  coffret: 'Coffret',
-  tripack: 'Tripack',
-  pokebox: 'Pokébox',
-  mini_tin: 'Mini tin',
   display: 'Display',
+  box_set: 'Coffret',
+  booster: 'Booster',
+  tin: 'Tin',
   blister: 'Blister',
+  theme_deck: 'Deck',
+  trainer_kit: 'Trainer Kit',
   autre: 'Autre',
+}
+
+/** Icône Lucide par type de produit scellé (repli : boîte générique). */
+export const SEALED_TYPE_ICONS: Record<string, string> = {
+  etb: 'i-lucide-box',
+  display: 'i-lucide-boxes',
+  box_set: 'i-lucide-gift',
+  booster: 'i-lucide-package',
+  tin: 'i-lucide-cylinder',
+  blister: 'i-lucide-credit-card',
+  theme_deck: 'i-lucide-layers',
+  trainer_kit: 'i-lucide-graduation-cap',
+  autre: 'i-lucide-box',
+}
+
+/**
+ * Icône Lucide d'un type de produit scellé.
+ * @param type - Valeur `product_type`.
+ * @returns Le nom d'icône, ou une boîte générique.
+ */
+export function sealedProductTypeIcon(type: string): string {
+  return SEALED_TYPE_ICONS[type] ?? 'i-lucide-box'
 }
 
 /** Options `{ label, value }` pour un `USelect` de type de produit. */

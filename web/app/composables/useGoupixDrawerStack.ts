@@ -1,5 +1,9 @@
 import type { Ref } from 'vue'
-import type { GoupixArticleMutationNotice, GoupixDrawerStackEntry } from '~/types/GoupixDrawerStack'
+import type {
+  GoupixArticleMutationNotice,
+  GoupixDrawerStackEntry,
+  GoupixSealedMutationNotice,
+} from '~/types/GoupixDrawerStack'
 
 const DRAWER_STACK_STORAGE_KEY = 'goupix-drawer-stack'
 
@@ -13,6 +17,8 @@ export function useGoupixDrawerStack() {
   const articleBrowseIds: Ref<number[]> = useState<number[]>('goupix-drawer-article-browse', () => [])
   const articleMutationCounter = useState<number>('goupix-drawer-article-mutation-counter', () => 0)
   const lastArticleMutation = useState<GoupixArticleMutationNotice | null>('goupix-drawer-article-mutation', () => null)
+  const sealedMutationCounter = useState<number>('goupix-drawer-sealed-mutation-counter', () => 0)
+  const lastSealedMutation = useState<GoupixSealedMutationNotice | null>('goupix-drawer-sealed-mutation', () => null)
 
   /**
    *
@@ -74,6 +80,14 @@ export function useGoupixDrawerStack() {
   }
 
   /**
+   * Ouvre (ou remplace le sommet par) la fiche d'un produit scellé.
+   * @param sealedId - Identifiant du produit scellé.
+   */
+  function pushSealed(sealedId: number): void {
+    push({ kind: 'sealed', sealedId })
+  }
+
+  /**
    *
    */
   function back(): void {
@@ -103,6 +117,24 @@ export function useGoupixDrawerStack() {
     articleMutationCounter.value += 1
   }
 
+  /**
+   * Signale qu'un produit scellé a été modifié (les listes ouvertes se resynchronisent).
+   * @param sealedId - Identifiant du produit scellé.
+   */
+  function notifySealedUpdated(sealedId: number): void {
+    lastSealedMutation.value = { type: 'updated', sealedId }
+    sealedMutationCounter.value += 1
+  }
+
+  /**
+   * Signale qu'un produit scellé a été supprimé.
+   * @param sealedId - Identifiant du produit scellé.
+   */
+  function notifySealedDeleted(sealedId: number): void {
+    lastSealedMutation.value = { type: 'deleted', sealedId }
+    sealedMutationCounter.value += 1
+  }
+
   return {
     stack,
     topEntry,
@@ -110,12 +142,17 @@ export function useGoupixDrawerStack() {
     articleBrowseIds,
     articleMutationCounter,
     lastArticleMutation,
+    sealedMutationCounter,
+    lastSealedMutation,
     push,
     pushArticle,
+    pushSealed,
     back,
     closeAll,
     setArticleBrowseList,
     notifyArticleUpdated,
+    notifySealedUpdated,
+    notifySealedDeleted,
     restoreStackFromSession,
   }
 }

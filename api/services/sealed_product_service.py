@@ -63,6 +63,15 @@ def get_sealed_product(
     return q.first()
 
 
+def find_by_cardmarket_id_product(db: Session, user_id: int, id_product: int) -> SealedProduct | None:
+    """Ligne existante pour ce produit Cardmarket, afin d'incrémenter la quantité à l'ajout catalogue."""
+    return (
+        db.query(SealedProduct)
+        .filter(SealedProduct.user_id == user_id, SealedProduct.cardmarket_id_product == id_product)
+        .first()
+    )
+
+
 def _gain_fields(
     market_price_eur: Decimal | None,
     purchase_price_eur: Decimal | None,

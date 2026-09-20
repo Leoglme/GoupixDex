@@ -26,11 +26,14 @@ jobs:
       - name: Build catalog browse index
         run: python api/scripts/build_catalog_browse_index.py
 
+      - name: Build sealed products catalog
+        run: python api/scripts/build_sealed_catalog.py
+
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/public/catalog-index/
+          git add web/public/catalog-index/ web/public/sealed-catalog/
           if git diff --staged --quiet; then
             echo "Catalog index already up to date."
             exit 0

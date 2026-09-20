@@ -18,11 +18,13 @@ from models.margin_settings import MarginSettings
 from models.user import User
 from schemas.sealed import (
     CardmarketResolveBody,
+    SealedCatalogAddBody,
     SealedProductCreateBody,
     SealedProductPrepareSaleBody,
     SealedProductUpdateBody,
+    SealedQuoteBody,
 )
-from services import sealed_product_service
+from services import sealed_price_history_service, sealed_product_service
 from services.cardmarket_local_price_service import resolve_market_price_eur
 from services.cardmarket_product_resolve_service import resolve_cardmarket_product
 
@@ -92,7 +94,67 @@ def add_sealed_product(
         cardmarket_url=body.cardmarket_url,
         market_price_eur=_price_for_new_product(body),
     )
+    if product.market_price_eur is not None:
+        sealed_price_history_service.record_snapshot(db, product.id, float(product.market_price_eur))
+        db.commit()
     return {"created": True, "product": sealed_product_service.sealed_product_to_dict(product)}
+
+
+@router.post("/catalog-add", status_code=status.HTTP_201_CREATED)
+def add_from_catalog(
+    body: SealedCatalogAddBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Ajoute un produit choisi dans le catalogue Cardmarket (parcours par extension).
+
+    Idempotent : recliquer le même produit incrémente la quantité (comme les cartes).
+    Prix marché résolu depuis le guide local via l'``idProduct``.
+    """
+    market_price = resolve_market_price_eur(body.cardmarket_id_product, None)
+    existing = sealed_product_service.find_by_cardmarket_id_product(db, user.id, body.cardmarket_id_product)
+    if existing is not None:
+        product = sealed_product_service.update_sealed_product(
+            db,
+            existing,
+            quantity=int(existing.quantity) + body.quantity,
+            market_price_eur=market_price,
+        )
+        created = False
+    else:
+        product = sealed_product_service.create_sealed_product(
+            db,
+            user.id,
+            name=body.name,
+            product_type=body.product_type,
+            set_name=body.set_name,
+            language=body.language,
+            quantity=body.quantity,
+            purchase_price_eur=None,
+            notes=None,
+            image_url=None,
+            cardmarket_id_product=body.cardmarket_id_product,
+            cardmarket_url=None,
+            market_price_eur=market_price,
+        )
+        created = True
+    if product.market_price_eur is not None:
+        sealed_price_history_service.record_snapshot(db, product.id, float(product.market_price_eur))
+        db.commit()
+    return {"created": created, "product": sealed_product_service.sealed_product_to_dict(product)}
+
+
+@router.post("/quote")
+def quote_prices(
+    body: SealedQuoteBody,
+    _user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Prix marché en lot pour des ``idProduct`` du catalogue (guide local, sans quota)."""
+    prices: dict[str, float | None] = {}
+    for id_product in dict.fromkeys(body.cardmarket_id_products):
+        prices[str(id_product)] = resolve_market_price_eur(id_product, None)
+    return {"prices": prices}
 
 
 @router.post("/resolve-cardmarket")
@@ -114,6 +176,19 @@ def get_sealed_product(
     if row is None:
         raise HTTPException(status_code=404, detail="Produit scellé introuvable.")
     return sealed_product_service.sealed_product_to_dict(row)
+
+
+@router.get("/{sealed_id}/price-history")
+def get_price_history(
+    sealed_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Courbe d'évolution du prix marché du produit (historique réel + amorce approximative)."""
+    row = sealed_product_service.get_sealed_product(db, sealed_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Produit scellé introuvable.")
+    return sealed_price_history_service.price_history(db, row)
 
 
 @router.patch("/{sealed_id}")

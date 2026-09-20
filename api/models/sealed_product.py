@@ -10,15 +10,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
 
-#: Types de produits scellés reconnus (valeur ``product_type`` en base).
+#: Types de produits scellés (valeur ``product_type`` en base), alignés sur les catégories Cardmarket.
 SEALED_PRODUCT_TYPES: tuple[str, ...] = (
-    "etb",
-    "upc",
-    "coffret",
-    "tripack",
-    "pokebox",
-    "mini_tin",
+    "booster",
     "display",
+    "theme_deck",
+    "trainer_kit",
+    "tin",
+    "box_set",
+    "etb",
     "blister",
     "autre",
 )

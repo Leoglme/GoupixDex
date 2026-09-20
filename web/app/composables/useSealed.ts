@@ -3,13 +3,13 @@
 import type { CatalogCardPreviewResponse } from '~/composables/useCardCatalog'
 
 export type SealedProductType =
-  | 'etb'
-  | 'upc'
-  | 'coffret'
-  | 'tripack'
-  | 'pokebox'
-  | 'mini_tin'
+  | 'booster'
   | 'display'
+  | 'theme_deck'
+  | 'trainer_kit'
+  | 'tin'
+  | 'box_set'
+  | 'etb'
   | 'blister'
   | 'autre'
 
@@ -99,6 +99,25 @@ export interface SealedArticlePrefillResponse extends CatalogCardPreviewResponse
   physical_language: string
 }
 
+export interface SealedCatalogAddBody {
+  cardmarket_id_product: number
+  name: string
+  product_type: SealedProductType
+  set_name?: string | null
+  language?: string
+  quantity?: number
+}
+
+export interface SealedPriceHistoryPoint {
+  date: string
+  price_eur: number
+}
+
+export interface SealedPriceHistoryResponse {
+  points: SealedPriceHistoryPoint[]
+  approximate: boolean
+}
+
 /**
  * Composable « Produits scellés » (proxy GoupixDex authentifié).
  *
@@ -153,6 +172,17 @@ export function useSealed() {
   }
 
   /**
+   * POST `/sealed/catalog-add` — ajoute un produit choisi dans le catalogue (idempotent).
+   *
+   * @param body - Produit catalogue (idProduct, nom, type, langue, quantité).
+   * @returns {Promise<SealedCreateResponse>} `{ created, product }`.
+   */
+  async function catalogAdd(body: SealedCatalogAddBody) {
+    const { data } = await $api.post<SealedCreateResponse>('/sealed/catalog-add', body)
+    return data
+  }
+
+  /**
    * GET `/sealed/:id` — détail d'un produit scellé.
    *
    * @param id - Identifiant du produit scellé.
@@ -160,6 +190,17 @@ export function useSealed() {
    */
   async function getSealed(id: number) {
     const { data } = await $api.get<SealedProduct>(`/sealed/${id}`)
+    return data
+  }
+
+  /**
+   * GET `/sealed/:id/price-history` — courbe d'évolution du prix marché.
+   *
+   * @param id - Identifiant du produit scellé.
+   * @returns {Promise<SealedPriceHistoryResponse>} Points datés + drapeau approximatif.
+   */
+  async function getPriceHistory(id: number) {
+    const { data } = await $api.get<SealedPriceHistoryResponse>(`/sealed/${id}/price-history`)
     return data
   }
 
@@ -216,8 +257,10 @@ export function useSealed() {
   return {
     listSealed,
     createSealed,
+    catalogAdd,
     resolveCardmarket,
     getSealed,
+    getPriceHistory,
     patchSealed,
     deleteSealed,
     prepareArticlePrefill,

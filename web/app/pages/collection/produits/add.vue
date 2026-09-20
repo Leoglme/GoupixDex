@@ -15,10 +15,10 @@
     </template>
 
     <template #body>
-      <div class="app-dashboard-page mx-auto w-full max-w-2xl">
+      <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Ajouter un produit scellé"
-          description="Collez un lien Cardmarket pour pré-remplir, ou saisissez les champs à la main."
+          description="Parcourez une extension ou recherchez un produit, puis cliquez pour l'ajouter."
         >
           <template #actions>
             <UButton color="neutral" variant="ghost" icon="i-lucide-arrow-left" to="/collection/produits">
@@ -27,83 +27,109 @@
           </template>
         </GoupixDexPageHeader>
 
-        <UCard :ui="{ body: 'p-4 sm:p-6 space-y-5' }">
-          <UFormField
-            label="Lien Cardmarket (optionnel)"
-            help="Récupère automatiquement le nom, l'image, l'identifiant produit et le prix marché."
-          >
-            <div class="flex gap-2">
-              <UInput
-                v-model="cardmarketUrl"
-                icon="i-lucide-link"
-                placeholder="https://www.cardmarket.com/fr/Pokemon/Products/…"
-                class="w-full"
-                @keydown.enter.prevent="resolve"
-              />
-              <UButton
-                color="neutral"
-                variant="soft"
-                icon="i-lucide-wand-2"
-                :loading="resolving"
-                :disabled="!cardmarketUrl.trim()"
-                @click="resolve"
-              >
-                Récupérer
-              </UButton>
-            </div>
-          </UFormField>
+        <UInput
+          v-model="query"
+          icon="i-lucide-search"
+          :placeholder="
+            openExpansion ? `Filtrer dans ${openExpansion.label}…` : 'Rechercher un produit (ex. surging sparks etb)…'
+          "
+          size="lg"
+          class="w-full"
+          autofocus
+        />
 
-          <div v-if="imageUrl" class="flex justify-center">
-            <div class="bg-muted/30 h-40 w-40 overflow-hidden rounded-lg">
-              <img
-                :src="imageUrl"
-                :alt="name || 'Produit'"
-                class="h-full w-full object-contain"
-                referrerpolicy="no-referrer"
-              />
-            </div>
-          </div>
+        <div v-if="loading" class="flex items-center justify-center py-24">
+          <UIcon name="i-lucide-loader-2" class="text-primary size-9 animate-spin" />
+        </div>
 
-          <UFormField label="Nom du produit" required>
-            <UInput v-model="name" placeholder="ETB Étincelles Déferlantes" class="w-full" />
-          </UFormField>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <UFormField label="Type">
-              <USelect v-model="productType" :items="typeOptions" value-key="value" label-key="label" class="w-full" />
-            </UFormField>
-            <UFormField label="Langue">
-              <USelect v-model="language" :items="languageItems" value-key="value" label-key="label" class="w-full" />
-            </UFormField>
-          </div>
-
-          <UFormField label="Set / édition (optionnel)">
-            <UInput v-model="setName" placeholder="Écarlate et Violet — Étincelles Déferlantes" class="w-full" />
-          </UFormField>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <UFormField label="Quantité">
-              <UInput v-model="quantityText" type="number" min="1" step="1" class="w-full" />
-            </UFormField>
-            <UFormField label="Prix d'achat (€)" help="Base du % de plus-value.">
-              <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
-            </UFormField>
-            <UFormField label="Prix marché (€)" :help="marketPriceHelp">
-              <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
-            </UFormField>
-          </div>
-
-          <UFormField label="Notes (optionnel)">
-            <UTextarea v-model="notes" :rows="2" placeholder="État, provenance…" class="w-full" />
-          </UFormField>
-
-          <div class="flex items-center justify-end gap-2 pt-1">
-            <UButton color="neutral" variant="ghost" to="/collection/produits">Annuler</UButton>
-            <UButton color="primary" icon="i-lucide-check" :loading="saving" :disabled="!name.trim()" @click="submit">
-              Ajouter à ma collection
+        <!-- Produits d'une extension ouverte, ou résultats de recherche globale -->
+        <template v-else-if="openExpansion || query.trim().length >= 2">
+          <div class="flex items-center gap-2">
+            <UButton
+              v-if="openExpansion"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-lucide-arrow-left"
+              @click="closeExpansion"
+            >
+              Extensions
             </UButton>
+            <p class="text-muted text-sm tabular-nums">
+              <span v-if="openExpansion" class="text-highlighted font-medium">{{ openExpansion.label }} · </span>
+              {{ visibleProducts.length }} produit(s)
+            </p>
           </div>
-        </UCard>
+
+          <UCard v-if="visibleProducts.length === 0" :ui="{ body: 'p-8 text-center space-y-2' }">
+            <UIcon name="i-lucide-search-x" class="text-muted mx-auto size-8" />
+            <p class="text-highlighted text-sm font-medium">Aucun produit pour « {{ query.trim() }} ».</p>
+            <p class="text-muted text-sm">Essayez le nom de l'extension (ex. « Cosmic Eclipse ») ou un autre terme.</p>
+          </UCard>
+
+          <div v-else class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            <button
+              v-for="product in visibleProducts"
+              :key="product.p"
+              type="button"
+              class="border-default bg-elevated/30 focus-visible:ring-primary group flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-(--app-accent) focus-visible:ring-2 focus-visible:outline-none"
+              :disabled="pendingId === product.p"
+              @click="addProduct(product)"
+            >
+              <span
+                class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-(--app-accent-soft) text-(--app-accent-ink)"
+              >
+                <UIcon
+                  :name="pendingId === product.p ? 'i-lucide-loader-2' : sealedProductTypeIcon(product.c)"
+                  class="size-5"
+                  :class="pendingId === product.p ? 'animate-spin' : ''"
+                />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="text-highlighted block truncate text-sm font-medium">{{ product.n }}</span>
+                <span class="text-muted flex items-center gap-1.5 text-xs">
+                  {{ sealedProductTypeLabel(product.c) }}
+                  <span v-if="priceOf(product.p) != null" class="text-highlighted tabular-nums">
+                    · {{ eur.format(priceOf(product.p) as number) }}
+                  </span>
+                </span>
+              </span>
+              <span
+                v-if="ownedOf(product.p) > 0"
+                class="bg-success/90 text-inverted shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
+                title="Déjà dans ta collection"
+              >
+                ×{{ ownedOf(product.p) }}
+              </span>
+              <UIcon
+                v-else
+                name="i-lucide-plus"
+                class="text-muted size-4 shrink-0 group-hover:text-(--app-accent)"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </template>
+
+        <!-- Liste des extensions (par défaut) -->
+        <template v-else>
+          <p class="text-muted text-sm tabular-nums">{{ expansions.length }} extensions</p>
+          <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <button
+              v-for="expansion in expansions"
+              :key="expansion.id"
+              type="button"
+              class="border-default bg-elevated/30 focus-visible:ring-primary group flex items-center justify-between gap-2 rounded-xl border px-3 py-3 text-left transition-colors hover:border-(--app-accent) focus-visible:ring-2 focus-visible:outline-none"
+              @click="openExp(expansion)"
+            >
+              <span class="min-w-0">
+                <span class="text-highlighted block truncate text-sm font-medium">{{ expansion.label }}</span>
+                <span class="text-muted text-xs tabular-nums">{{ expansion.count }} produit(s)</span>
+              </span>
+              <UIcon name="i-lucide-chevron-right" class="text-muted size-4 shrink-0 group-hover:text-(--app-accent)" />
+            </button>
+          </div>
+        </template>
       </div>
     </template>
   </UDashboardPanel>
@@ -111,111 +137,180 @@
 
 <script setup lang="ts">
 import type { SealedProductType } from '~/composables/useSealed'
-import { SEALED_TYPE_OPTIONS, parseEuroAmount } from '~/utils/sealedProducts'
+import type { SealedCatalogExpansion, SealedCatalogProduct } from '~/composables/useSealedCatalog'
+import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
 definePageMeta({ middleware: 'auth' })
 
-useGoupixPageSeo('Ajouter un produit scellé', 'Ajoutez un ETB, un coffret ou un display à votre collection GoupixDex.')
-
-const { resolveCardmarket, createSealed } = useSealed()
-const toast = useToast()
-
-const typeOptions = SEALED_TYPE_OPTIONS
-const languageItems = [
-  { label: 'Français', value: 'fr' },
-  { label: 'Anglais', value: 'en' },
-  { label: 'Japonais', value: 'ja' },
-]
-
-const cardmarketUrl = ref('')
-const resolving = ref(false)
-const saving = ref(false)
-
-const name = ref('')
-const productType = ref<SealedProductType>('etb')
-const setName = ref('')
-const language = ref('fr')
-const quantityText = ref('1')
-const purchaseText = ref('')
-const marketText = ref('')
-const imageUrl = ref('')
-const cardmarketIdProduct = ref<number | null>(null)
-
-const notes = ref('')
-
-const marketPriceHelp = computed<string>(() =>
-  cardmarketIdProduct.value != null
-    ? 'Rafraîchi chaque nuit depuis Cardmarket.'
-    : 'Saisi manuellement (aucun idProduct).',
+useGoupixPageSeo(
+  'Ajouter un produit scellé',
+  'Parcourez le catalogue Cardmarket des produits scellés et ajoutez-les en un clic.',
 )
 
+const { loadExpansions, quotePrices } = useSealedCatalog()
+const { catalogAdd, listSealed } = useSealed()
+const toast = useToast()
+
+const expansions = ref<SealedCatalogExpansion[]>([])
+const openExpansion = ref<SealedCatalogExpansion | null>(null)
+const query = ref('')
+const loading = ref(true)
+const pendingId = ref<number | null>(null)
+const priceMap = ref<Map<number, number | null>>(new Map())
+const ownedMap = ref<Map<number, number>>(new Map())
+
+const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+const SEARCH_LIMIT = 80
+
+const visibleProducts = computed<SealedCatalogProduct[]>(() => {
+  const q = query.value.trim().toLowerCase()
+  if (openExpansion.value) {
+    const products = openExpansion.value.products
+    return q ? products.filter((p) => p.n.toLowerCase().includes(q)) : products
+  }
+  if (q.length < 2) {
+    return []
+  }
+  const hits: SealedCatalogProduct[] = []
+  for (const expansion of expansions.value) {
+    for (const product of expansion.products) {
+      if (product.n.toLowerCase().includes(q)) {
+        hits.push(product)
+        if (hits.length >= SEARCH_LIMIT) {
+          return hits
+        }
+      }
+    }
+  }
+  return hits
+})
+
 /**
- * Pré-remplit le formulaire depuis une fiche produit Cardmarket (best-effort).
- * @returns Résolue quand la récupération a abouti ou échoué proprement.
+ * Prix marché connu pour un idProduct (ou `null`/`undefined` si non coté / non chargé).
+ * @param idProduct - idProduct Cardmarket.
+ * @returns Le prix, ou null/undefined.
  */
-async function resolve(): Promise<void> {
-  const url = cardmarketUrl.value.trim()
-  if (!url) {
+function priceOf(idProduct: number): number | null | undefined {
+  return priceMap.value.get(idProduct)
+}
+
+/**
+ * Quantité déjà possédée pour un idProduct.
+ * @param idProduct - idProduct Cardmarket.
+ * @returns La quantité possédée (0 si aucune).
+ */
+function ownedOf(idProduct: number): number {
+  return ownedMap.value.get(idProduct) ?? 0
+}
+
+/**
+ * Récupère les prix marché manquants pour les produits affichés (cotation en lot).
+ * @param products - Produits actuellement visibles.
+ * @returns Résolue après mise à jour du cache de prix.
+ */
+async function ensurePrices(products: SealedCatalogProduct[]): Promise<void> {
+  const missing = products.map((p) => p.p).filter((id) => !priceMap.value.has(id))
+  if (!missing.length) {
     return
   }
-  resolving.value = true
   try {
-    const data = await resolveCardmarket(url)
-    if (data.name) {
-      name.value = data.name
+    const prices = await quotePrices(missing)
+    const next = new Map(priceMap.value)
+    for (const id of missing) {
+      next.set(id, prices[String(id)] ?? null)
     }
-    if (data.image_url) {
-      imageUrl.value = data.image_url
-    }
-    if (data.id_product != null) {
-      cardmarketIdProduct.value = data.id_product
-    }
-    if (data.market_price_eur != null) {
-      marketText.value = String(data.market_price_eur)
-    }
-    if (data.error) {
-      toast.add({ title: 'Fiche Cardmarket', description: data.error, color: 'warning' })
-    } else {
-      toast.add({ title: 'Fiche récupérée', description: 'Vérifiez et complétez les champs.', color: 'success' })
-    }
-  } catch (e) {
-    toast.add({ title: 'Fiche Cardmarket', description: apiErrorMessage(e), color: 'error' })
-  } finally {
-    resolving.value = false
+    priceMap.value = next
+  } catch {
+    /* best-effort : la fiche reste ajoutable sans prix affiché */
   }
 }
 
 /**
- * Crée le produit scellé puis revient à la liste.
- * @returns Résolue après création (ou en cas d'erreur affichée).
+ * Ouvre une extension pour lister ses produits.
+ * @param expansion - Extension choisie.
  */
-async function submit(): Promise<void> {
-  const trimmedName = name.value.trim()
-  if (!trimmedName) {
+function openExp(expansion: SealedCatalogExpansion): void {
+  openExpansion.value = expansion
+  query.value = ''
+}
+
+/**
+ * Referme l'extension ouverte (retour à la liste des extensions).
+ */
+function closeExpansion(): void {
+  openExpansion.value = null
+  query.value = ''
+}
+
+/**
+ * Ajoute un produit du catalogue à la collection (idempotent : incrémente si déjà possédé).
+ * @param product - Produit catalogue cliqué.
+ * @returns Résolue après ajout.
+ */
+async function addProduct(product: SealedCatalogProduct): Promise<void> {
+  if (pendingId.value) {
     return
   }
-  saving.value = true
+  pendingId.value = product.p
   try {
-    const quantity = Math.max(1, Math.trunc(Number.parseInt(quantityText.value, 10) || 1))
-    await createSealed({
-      name: trimmedName,
-      product_type: productType.value,
-      set_name: setName.value.trim() || null,
-      language: language.value,
-      quantity,
-      purchase_price_eur: parseEuroAmount(purchaseText.value),
-      market_price_eur: parseEuroAmount(marketText.value),
-      image_url: imageUrl.value.trim() || null,
-      cardmarket_id_product: cardmarketIdProduct.value,
-      cardmarket_url: cardmarketUrl.value.trim() || null,
-      notes: notes.value.trim() || null,
+    const res = await catalogAdd({
+      cardmarket_id_product: product.p,
+      name: product.n,
+      product_type: product.c as SealedProductType,
+      set_name: openExpansion.value?.label ?? null,
     })
-    toast.add({ title: 'Produit ajouté', description: trimmedName, color: 'success' })
-    void navigateTo('/collection/produits')
+    const next = new Map(ownedMap.value)
+    next.set(product.p, res.product.quantity)
+    ownedMap.value = next
+    toast.add({
+      title: res.created ? 'Ajouté à ta collection' : `Quantité ×${res.product.quantity}`,
+      description: product.n,
+      color: 'success',
+    })
   } catch (e) {
-    toast.add({ title: 'Ajout du produit', description: apiErrorMessage(e), color: 'error' })
+    toast.add({ title: 'Ajout impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
-    saving.value = false
+    pendingId.value = null
   }
 }
+
+/**
+ * Charge l'index des produits déjà possédés (pour le badge « déjà en collection »).
+ * @returns Résolue après chargement (best-effort).
+ */
+async function loadOwned(): Promise<void> {
+  try {
+    const res = await listSealed()
+    const map = new Map<number, number>()
+    for (const item of res.items) {
+      if (item.cardmarket_id_product != null) {
+        map.set(item.cardmarket_id_product, item.quantity)
+      }
+    }
+    ownedMap.value = map
+  } catch {
+    /* best-effort */
+  }
+}
+
+watch(visibleProducts, (products) => {
+  void ensurePrices(products)
+})
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    const list = await loadExpansions()
+    // Extensions récentes d'abord (idExpansion croissant avec le temps chez Cardmarket).
+    expansions.value = [...list].sort((a, b) => b.id - a.id)
+  } finally {
+    loading.value = false
+  }
+  void loadOwned()
+})
 </script>

@@ -30,7 +30,12 @@ from core.database import SessionLocal
 from models.article import Article
 from models.collection_card import CollectionCard
 from models.sealed_product import SealedProduct
-from services import collection_card_service, portfolio_value_service, sealed_product_service
+from services import (
+    collection_card_service,
+    portfolio_value_service,
+    sealed_price_history_service,
+    sealed_product_service,
+)
 from services.article_market_reference_service import revalue_all_articles
 from services.cardmarket_local_price_service import (
     fetch_pricing_block_for_card,
@@ -62,6 +67,7 @@ def refresh_market_prices() -> dict[str, Any]:
         articles_reval = revalue_all_articles(db)
         db.commit()
         snapshot_count = portfolio_value_service.snapshot_all_users(db)
+        sealed_points = sealed_price_history_service.snapshot_all_sealed(db)
     finally:
         db.close()
     result = {
@@ -73,6 +79,7 @@ def refresh_market_prices() -> dict[str, Any]:
         **sealed_revaluation,
         **articles_reval,
         "portfolio_snapshots": snapshot_count,
+        "sealed_price_points": sealed_points,
     }
     logger.info("Cardmarket market refresh done: %s", result)
     return result

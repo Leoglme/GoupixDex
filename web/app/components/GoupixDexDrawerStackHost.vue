@@ -14,14 +14,28 @@
     @browse-next="browseArticle(1)"
     @updated="onArticleUpdated"
   />
+
+  <GoupixDexSealedProductDrawer
+    :open="sealedEntry !== null"
+    :sealed-id="sealedEntry?.sealedId ?? null"
+    :header-title="sealedHeaderTitle"
+    :header-subtitle="sealedHeaderSubtitle"
+    :show-back="hasPrevious"
+    @close="drawerStack.closeAll()"
+    @back="drawerStack.back()"
+    @updated="onSealedUpdated"
+    @deleted="onSealedDeleted"
+  />
 </template>
 
 <script setup lang="ts">
 import type { Article } from '~/composables/useArticles'
-import type { GoupixArticleDrawerEntry } from '~/types/GoupixDrawerStack'
+import type { SealedProduct } from '~/composables/useSealed'
+import type { GoupixArticleDrawerEntry, GoupixSealedDrawerEntry } from '~/types/GoupixDrawerStack'
 
 const drawerStack = useGoupixDrawerStack()
 const { getArticle } = useArticles()
+const { getSealed } = useSealed()
 
 const topEntry = computed(() => drawerStack.topEntry.value)
 const hasPrevious = computed(() => drawerStack.hasPrevious.value)
@@ -105,6 +119,57 @@ watch(
           title: row.pokemon_name || row.title || 'Article',
           subtitle: row.title || '',
         })
+      })
+      .catch(() => {})
+  },
+  { immediate: true },
+)
+
+const sealedEntry = computed((): GoupixSealedDrawerEntry | null => {
+  const top = topEntry.value
+  return top?.kind === 'sealed' ? top : null
+})
+
+const sealedHeaderCache = ref<Map<number, { title: string; subtitle: string }>>(new Map())
+
+const sealedHeaderTitle = computed((): string => {
+  const id = sealedEntry.value?.sealedId
+  if (!id) {
+    return 'Produit scellé'
+  }
+  return sealedHeaderCache.value.get(id)?.title ?? 'Produit scellé'
+})
+
+const sealedHeaderSubtitle = computed((): string => {
+  const id = sealedEntry.value?.sealedId
+  if (!id) {
+    return ''
+  }
+  return sealedHeaderCache.value.get(id)?.subtitle ?? ''
+})
+
+function onSealedUpdated(product: SealedProduct): void {
+  sealedHeaderCache.value.set(product.id, {
+    title: product.name || 'Produit scellé',
+    subtitle: product.set_name || '',
+  })
+  drawerStack.notifySealedUpdated(product.id)
+}
+
+function onSealedDeleted(sealedId: number): void {
+  drawerStack.notifySealedDeleted(sealedId)
+  drawerStack.back()
+}
+
+watch(
+  () => sealedEntry.value?.sealedId,
+  (id) => {
+    if (id == null || sealedHeaderCache.value.has(id)) {
+      return
+    }
+    void getSealed(id)
+      .then((row) => {
+        sealedHeaderCache.value.set(id, { title: row.name || 'Produit scellé', subtitle: row.set_name || '' })
       })
       .catch(() => {})
   },
