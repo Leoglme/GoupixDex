@@ -30,19 +30,19 @@ import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { VisXYContainer, VisLine, VisArea, VisAxis, VisCrosshair, VisTooltip } from '@unovis/vue'
 import type { ComputedRef, PropType } from 'vue'
-import type { SealedPriceHistoryPoint } from '~/composables/useSealed'
+import type { GoupixPriceHistoryPoint } from '~/types/PriceHistory'
 
-interface SealedPricePoint {
+interface PriceHistoryDatum {
   date: Date
   price: number
 }
 
 /**
- * Mini-courbe d'évolution du prix marché d'un produit scellé.
+ * Mini-courbe d'évolution du prix marché (partagée cartes / produits scellés).
  */
 const props = defineProps({
   points: {
-    type: Array as PropType<SealedPriceHistoryPoint[]>,
+    type: Array as PropType<GoupixPriceHistoryPoint[]>,
     required: true,
   },
 })
@@ -56,12 +56,12 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0,
 })
 
-const data: ComputedRef<SealedPricePoint[]> = computed(() =>
+const data: ComputedRef<PriceHistoryDatum[]> = computed(() =>
   props.points.map((p) => ({ date: new Date(p.date), price: p.price_eur })),
 )
 
-const x = (_: SealedPricePoint, i: number): number => i
-const y = (d: SealedPricePoint): number => d.price
+const x = (_: PriceHistoryDatum, i: number): number => i
+const y = (d: PriceHistoryDatum): number => d.price
 
 const xTicks = (i: number): string => {
   const record = data.value[i]
@@ -73,6 +73,6 @@ const xTicks = (i: number): string => {
 
 const yTicks = (value: number): string => eur.format(value)
 
-const template = (d: SealedPricePoint): string =>
+const template = (d: PriceHistoryDatum): string =>
   `${format(d.date, 'd MMM yyyy', { locale: fr })} — ${eur.format(d.price)}`
 </script>

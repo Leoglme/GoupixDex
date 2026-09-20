@@ -26,16 +26,45 @@
     @updated="onSealedUpdated"
     @deleted="onSealedDeleted"
   />
+
+  <GoupixDexCollectionCardDrawer
+    :open="cardEntry !== null"
+    :card-id="cardEntry?.cardId ?? null"
+    :header-title="cardHeaderTitle"
+    :header-subtitle="cardHeaderSubtitle"
+    :show-back="hasPrevious"
+    @close="drawerStack.closeAll()"
+    @back="drawerStack.back()"
+    @updated="onCardUpdated"
+    @deleted="onCardDeleted"
+  />
+
+  <GoupixDexSealedCatalogPreviewDrawer
+    :open="catalogEntry !== null"
+    :product="catalogEntry?.product ?? null"
+    :expansion-name="catalogEntry?.expansionName ?? ''"
+    :show-back="hasPrevious"
+    @close="drawerStack.closeAll()"
+    @back="drawerStack.back()"
+    @added="onCatalogAdded"
+  />
 </template>
 
 <script setup lang="ts">
 import type { Article } from '~/composables/useArticles'
+import type { CollectionCard } from '~/composables/useCollection'
 import type { SealedProduct } from '~/composables/useSealed'
-import type { GoupixArticleDrawerEntry, GoupixSealedDrawerEntry } from '~/types/GoupixDrawerStack'
+import type {
+  GoupixArticleDrawerEntry,
+  GoupixCardDrawerEntry,
+  GoupixSealedCatalogDrawerEntry,
+  GoupixSealedDrawerEntry,
+} from '~/types/GoupixDrawerStack'
 
 const drawerStack = useGoupixDrawerStack()
 const { getArticle } = useArticles()
 const { getSealed } = useSealed()
+const { getCollectionCard } = useCollection()
 
 const topEntry = computed(() => drawerStack.topEntry.value)
 const hasPrevious = computed(() => drawerStack.hasPrevious.value)
@@ -175,6 +204,69 @@ watch(
   },
   { immediate: true },
 )
+
+const cardEntry = computed((): GoupixCardDrawerEntry | null => {
+  const top = topEntry.value
+  return top?.kind === 'card' ? top : null
+})
+
+const cardHeaderCache = ref<Map<number, { title: string; subtitle: string }>>(new Map())
+
+const cardHeaderTitle = computed((): string => {
+  const id = cardEntry.value?.cardId
+  if (!id) {
+    return 'Carte de collection'
+  }
+  return cardHeaderCache.value.get(id)?.title ?? 'Carte de collection'
+})
+
+const cardHeaderSubtitle = computed((): string => {
+  const id = cardEntry.value?.cardId
+  if (!id) {
+    return ''
+  }
+  return cardHeaderCache.value.get(id)?.subtitle ?? ''
+})
+
+function onCardUpdated(card: CollectionCard): void {
+  cardHeaderCache.value.set(card.id, {
+    title: card.display_name || 'Carte de collection',
+    subtitle: card.set_name || card.tcgdex_set_id || '',
+  })
+  drawerStack.notifyCardUpdated(card.id)
+}
+
+function onCardDeleted(cardId: number): void {
+  drawerStack.notifyCardDeleted(cardId)
+  drawerStack.back()
+}
+
+watch(
+  () => cardEntry.value?.cardId,
+  (id) => {
+    if (id == null || cardHeaderCache.value.has(id)) {
+      return
+    }
+    void getCollectionCard(id)
+      .then((row) => {
+        cardHeaderCache.value.set(id, {
+          title: row.display_name || 'Carte de collection',
+          subtitle: row.set_name || row.tcgdex_set_id || '',
+        })
+      })
+      .catch(() => {})
+  },
+  { immediate: true },
+)
+
+const catalogEntry = computed((): GoupixSealedCatalogDrawerEntry | null => {
+  const top = topEntry.value
+  return top?.kind === 'catalog-sealed' ? top : null
+})
+
+function onCatalogAdded(product: SealedProduct): void {
+  drawerStack.notifySealedUpdated(product.id)
+}
 
 function onEscape(event: KeyboardEvent): void {
   if (event.key === 'Escape' && !event.defaultPrevented && topEntry.value) {

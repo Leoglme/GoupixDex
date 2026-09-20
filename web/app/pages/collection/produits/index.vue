@@ -117,25 +117,22 @@
 
         <div
           v-else-if="viewMode === 'grid'"
-          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
         >
-          <UCard
+          <button
             v-for="product in filteredItems"
             :key="product.id"
-            variant="subtle"
-            :ui="{ body: 'p-0' }"
-            class="group focus-within:ring-primary cursor-pointer overflow-hidden transition-all focus-within:ring-2 hover:shadow-md"
-            tabindex="0"
-            role="link"
+            type="button"
+            class="border-default bg-elevated/30 group focus-visible:ring-primary block overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
             @click="onProductClick(product.id, $event)"
             @keydown.enter.prevent="openSealed(product.id)"
           >
-            <div class="bg-muted/20 relative aspect-square w-full overflow-hidden">
+            <div class="bg-muted/20 relative aspect-[3/4] w-full overflow-hidden">
               <img
                 v-if="product.image_url"
                 :src="product.image_url"
                 :alt="product.name"
-                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 referrerpolicy="no-referrer"
                 decoding="async"
                 loading="lazy"
@@ -168,85 +165,86 @@
                 {{ formatSignedPercent(product.gain_percent) }}
               </span>
             </div>
-            <div class="space-y-0.5 p-2">
+            <div class="p-2">
               <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ product.name }}</p>
               <p class="text-muted truncate text-[10px]">{{ product.set_name || '—' }}</p>
             </div>
-          </UCard>
+          </button>
         </div>
 
-        <UCard v-else class="overflow-hidden" :ui="{ body: 'p-0' }">
-          <table class="goupix-card-table w-full border-separate border-spacing-0 text-sm">
-            <thead class="sticky top-0 z-10">
-              <tr class="bg-elevated/95 border-default border-y backdrop-blur">
-                <th class="text-muted px-3 py-2.5 text-left font-medium first:rounded-tl-lg">Produit</th>
-                <th class="text-muted px-3 py-2.5 text-left font-medium">Type</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Qté</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Prix marché</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Achat</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Plus-value</th>
-                <th class="w-12 last:rounded-tr-lg" />
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in filteredItems"
-                :key="row.id"
-                class="border-default hover:bg-elevated/40 cursor-pointer border-b transition-colors last:border-b-0"
-                @click="onProductClick(row.id, $event)"
-              >
-                <td class="goupix-card-table__lead px-3 py-2.5">
-                  <div class="flex min-w-0 items-center gap-3">
-                    <div class="bg-muted/30 size-12 shrink-0 overflow-hidden rounded-md">
-                      <img
-                        v-if="row.image_url"
-                        :src="row.image_url"
-                        :alt="row.name"
-                        class="h-full w-full object-contain"
-                        referrerpolicy="no-referrer"
-                        decoding="async"
-                        loading="lazy"
-                      />
-                    </div>
-                    <div class="min-w-0">
-                      <p class="text-highlighted min-w-0 truncate text-sm font-medium">{{ row.name }}</p>
-                      <p class="text-muted truncate text-xs">{{ row.set_name || '—' }}</p>
-                    </div>
+        <div v-else class="app-card overflow-hidden">
+          <GoupixDexBaseTable min-width="720px">
+            <template #head>
+              <GoupixDexBaseTableTh class="goupix-card-table__name-col">Produit</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh>Type</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Qté</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Prix marché</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Achat</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Plus-value</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="center" sr-only>Ouvrir</GoupixDexBaseTableTh>
+            </template>
+
+            <GoupixDexBaseTableTr
+              v-for="row in filteredItems"
+              :key="row.id"
+              class="cursor-pointer"
+              @click="onProductClick(row.id, $event)"
+            >
+              <GoupixDexBaseTableTd class="goupix-card-table__lead">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div class="size-11 shrink-0 overflow-hidden rounded-md bg-[var(--app-surface-2)]">
+                    <img
+                      v-if="row.image_url"
+                      :src="row.image_url"
+                      :alt="row.name"
+                      class="h-full w-full object-cover"
+                      referrerpolicy="no-referrer"
+                      decoding="async"
+                      loading="lazy"
+                    />
                   </div>
-                </td>
-                <td class="px-3 py-2.5" data-label="Type">
-                  <UBadge color="neutral" variant="subtle" size="sm">{{
-                    sealedProductTypeLabel(row.product_type)
-                  }}</UBadge>
-                </td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Qté">×{{ row.quantity }}</td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Prix marché">
-                  <span v-if="row.market_price_eur != null" class="text-highlighted font-medium">
-                    {{ eur.format(row.market_price_eur) }}
-                  </span>
-                  <span v-else class="text-muted text-xs">—</span>
-                </td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Achat">
-                  <span v-if="row.purchase_price_eur != null">{{ eur.format(row.purchase_price_eur) }}</span>
-                  <span v-else class="text-muted text-xs">—</span>
-                </td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Plus-value">
-                  <span
-                    v-if="row.gain_percent != null"
-                    class="font-medium"
-                    :class="row.gain_percent >= 0 ? 'text-success' : 'text-error'"
-                  >
-                    {{ formatSignedPercent(row.gain_percent) }}
-                  </span>
-                  <span v-else class="text-muted text-xs">—</span>
-                </td>
-                <td class="goupix-card-table__actions px-2 py-2.5 text-right">
-                  <UIcon name="i-lucide-chevron-right" class="text-muted size-4" aria-hidden="true" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </UCard>
+                  <div class="min-w-0">
+                    <p class="min-w-0 truncate text-sm font-medium text-[var(--app-ink)]">{{ row.name }}</p>
+                    <p class="truncate text-xs text-[var(--app-ink-soft)]">{{ row.set_name || '—' }}</p>
+                  </div>
+                </div>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Type">
+                <UBadge color="neutral" variant="subtle" size="sm">{{
+                  sealedProductTypeLabel(row.product_type)
+                }}</UBadge>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Qté" align="right" class="tabular-nums"
+                >×{{ row.quantity }}</GoupixDexBaseTableTd
+              >
+              <GoupixDexBaseTableTd label="Prix marché" align="right" class="tabular-nums">
+                <span v-if="row.market_price_eur != null" class="font-medium text-[var(--app-ink)]">
+                  {{ eur.format(row.market_price_eur) }}
+                </span>
+                <span v-else class="text-xs text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Achat" align="right" class="tabular-nums">
+                <span v-if="row.purchase_price_eur != null" class="text-[var(--app-ink-soft)]">
+                  {{ eur.format(row.purchase_price_eur) }}
+                </span>
+                <span v-else class="text-xs text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Plus-value" align="right" class="tabular-nums">
+                <span
+                  v-if="row.gain_percent != null"
+                  class="font-medium"
+                  :class="row.gain_percent >= 0 ? 'text-success' : 'text-error'"
+                >
+                  {{ formatSignedPercent(row.gain_percent) }}
+                </span>
+                <span v-else class="text-xs text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd class="goupix-card-table__actions" align="center">
+                <UIcon name="i-lucide-chevron-right" class="size-4 text-[var(--app-faint)]" aria-hidden="true" />
+              </GoupixDexBaseTableTd>
+            </GoupixDexBaseTableTr>
+          </GoupixDexBaseTable>
+        </div>
       </div>
     </template>
   </UDashboardPanel>

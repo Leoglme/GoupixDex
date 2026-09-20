@@ -1,6 +1,8 @@
 import type { Ref } from 'vue'
+import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
 import type {
   GoupixArticleMutationNotice,
+  GoupixCardMutationNotice,
   GoupixDrawerStackEntry,
   GoupixSealedMutationNotice,
 } from '~/types/GoupixDrawerStack'
@@ -19,6 +21,8 @@ export function useGoupixDrawerStack() {
   const lastArticleMutation = useState<GoupixArticleMutationNotice | null>('goupix-drawer-article-mutation', () => null)
   const sealedMutationCounter = useState<number>('goupix-drawer-sealed-mutation-counter', () => 0)
   const lastSealedMutation = useState<GoupixSealedMutationNotice | null>('goupix-drawer-sealed-mutation', () => null)
+  const cardMutationCounter = useState<number>('goupix-drawer-card-mutation-counter', () => 0)
+  const lastCardMutation = useState<GoupixCardMutationNotice | null>('goupix-drawer-card-mutation', () => null)
 
   /**
    *
@@ -88,6 +92,23 @@ export function useGoupixDrawerStack() {
   }
 
   /**
+   * Ouvre (ou remplace le sommet par) la fiche d'une carte de collection.
+   * @param cardId - Identifiant de la carte de collection.
+   */
+  function pushCard(cardId: number): void {
+    push({ kind: 'card', cardId })
+  }
+
+  /**
+   * Ouvre l'aperçu d'un produit du catalogue scellé (avant ajout à la collection).
+   * @param product - Produit du catalogue scellé.
+   * @param expansionName - Nom de l'extension d'origine.
+   */
+  function pushSealedCatalog(product: SealedCatalogProduct, expansionName: string): void {
+    push({ kind: 'catalog-sealed', product, expansionName })
+  }
+
+  /**
    *
    */
   function back(): void {
@@ -135,6 +156,24 @@ export function useGoupixDrawerStack() {
     sealedMutationCounter.value += 1
   }
 
+  /**
+   * Signale qu'une carte de collection a été modifiée (les listes ouvertes se resynchronisent).
+   * @param cardId - Identifiant de la carte de collection.
+   */
+  function notifyCardUpdated(cardId: number): void {
+    lastCardMutation.value = { type: 'updated', cardId }
+    cardMutationCounter.value += 1
+  }
+
+  /**
+   * Signale qu'une carte de collection a été supprimée.
+   * @param cardId - Identifiant de la carte de collection.
+   */
+  function notifyCardDeleted(cardId: number): void {
+    lastCardMutation.value = { type: 'deleted', cardId }
+    cardMutationCounter.value += 1
+  }
+
   return {
     stack,
     topEntry,
@@ -144,15 +183,21 @@ export function useGoupixDrawerStack() {
     lastArticleMutation,
     sealedMutationCounter,
     lastSealedMutation,
+    cardMutationCounter,
+    lastCardMutation,
     push,
     pushArticle,
     pushSealed,
+    pushCard,
+    pushSealedCatalog,
     back,
     closeAll,
     setArticleBrowseList,
     notifyArticleUpdated,
     notifySealedUpdated,
     notifySealedDeleted,
+    notifyCardUpdated,
+    notifyCardDeleted,
     restoreStackFromSession,
   }
 }

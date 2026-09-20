@@ -125,17 +125,14 @@
 
         <div
           v-else-if="viewMode === 'grid'"
-          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8"
+          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
         >
-          <UCard
+          <button
             v-for="card in filteredItems"
             :key="card.id"
-            variant="subtle"
-            :ui="{ body: 'p-0' }"
-            class="group focus-within:ring-primary cursor-pointer overflow-hidden transition-all focus-within:ring-2 hover:shadow-md"
-            tabindex="0"
-            role="link"
-            @click="openCard(card.id)"
+            type="button"
+            class="border-default bg-elevated/30 group focus-visible:ring-primary block overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+            @click="openCardFromClick(card.id, $event)"
             @keydown.enter.prevent="openCard(card.id)"
           >
             <div class="bg-muted/20 relative aspect-[63/88] w-full overflow-hidden">
@@ -180,75 +177,74 @@
               <p class="text-highlighted truncate text-xs leading-snug font-medium">
                 {{ card.display_name }}
               </p>
-              <p class="text-muted text-[10px]">{{ card.set_code || card.tcgdex_set_id }} · #{{ card.card_number }}</p>
+              <p class="text-muted truncate text-[10px]">
+                {{ card.set_code || card.tcgdex_set_id }} · #{{ card.card_number }}
+              </p>
             </div>
-          </UCard>
+          </button>
         </div>
 
-        <UCard v-else class="overflow-hidden" :ui="{ body: 'p-0' }">
-          <table class="goupix-card-table w-full border-separate border-spacing-0 text-sm">
-            <thead class="sticky top-0 z-10">
-              <tr class="bg-elevated/95 border-default border-y backdrop-blur">
-                <th class="text-muted px-3 py-2.5 text-left font-medium first:rounded-tl-lg">Carte</th>
-                <th class="text-muted px-3 py-2.5 text-left font-medium">Extension</th>
-                <th class="text-muted px-3 py-2.5 text-left font-medium">Langue</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Qté</th>
-                <th class="text-muted px-3 py-2.5 text-right font-medium">Prix marché</th>
-                <th class="text-muted px-3 py-2.5 text-left font-medium">Statut</th>
-                <th class="w-12 last:rounded-tr-lg" />
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in filteredItems"
-                :key="row.id"
-                class="border-default hover:bg-elevated/40 cursor-pointer border-b transition-colors last:border-b-0"
-                @click="openCard(row.id)"
-              >
-                <td class="goupix-card-table__lead px-3 py-2.5">
-                  <div class="flex min-w-0 items-center gap-3">
-                    <div class="bg-muted/30 size-12 shrink-0 overflow-hidden rounded-md">
-                      <img
-                        v-if="row.image_url"
-                        :src="row.image_url"
-                        :alt="row.display_name"
-                        class="h-full w-full object-contain"
-                        referrerpolicy="no-referrer"
-                        decoding="async"
-                        loading="lazy"
-                      />
-                    </div>
-                    <p class="text-highlighted min-w-0 truncate text-sm font-medium">{{ row.display_name }}</p>
+        <div v-else class="app-card overflow-hidden">
+          <GoupixDexBaseTable min-width="640px">
+            <template #head>
+              <GoupixDexBaseTableTh class="goupix-card-table__name-col">Carte</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh>Extension</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh>Langue</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Qté</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="right">Prix marché</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh>Statut</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableTh align="center" sr-only>Ouvrir</GoupixDexBaseTableTh>
+            </template>
+
+            <GoupixDexBaseTableTr
+              v-for="row in filteredItems"
+              :key="row.id"
+              class="cursor-pointer"
+              @click="openCard(row.id)"
+            >
+              <GoupixDexBaseTableTd class="goupix-card-table__lead">
+                <div class="flex min-w-0 items-center gap-3">
+                  <div class="size-11 shrink-0 overflow-hidden rounded-md bg-[var(--app-surface-2)]">
+                    <img
+                      v-if="row.image_url"
+                      :src="row.image_url"
+                      :alt="row.display_name"
+                      class="h-full w-full object-contain"
+                      referrerpolicy="no-referrer"
+                      decoding="async"
+                      loading="lazy"
+                    />
                   </div>
-                </td>
-                <td class="text-muted px-3 py-2.5 text-xs" data-label="Extension">
-                  {{ row.set_name || row.tcgdex_set_id }} · #{{ row.card_number }}
-                </td>
-                <td class="px-3 py-2.5" data-label="Langue">
-                  <UBadge color="neutral" variant="subtle" size="sm">
-                    {{ languageLabel(row.language) }}
-                  </UBadge>
-                </td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Qté">×{{ row.quantity }}</td>
-                <td class="px-3 py-2.5 text-right tabular-nums" data-label="Prix marché">
-                  <span v-if="row.market_price_eur != null" class="text-highlighted font-medium">
-                    {{ eur.format(row.market_price_eur) }}
-                  </span>
-                  <span v-else class="text-muted text-xs">—</span>
-                </td>
-                <td class="px-3 py-2.5" data-label="Statut">
-                  <UBadge v-if="row.article_id" color="success" variant="subtle" size="sm" icon="i-lucide-tag">
-                    Article #{{ row.article_id }}
-                  </UBadge>
-                  <span v-else class="text-muted text-xs">—</span>
-                </td>
-                <td class="goupix-card-table__actions px-2 py-2.5 text-right">
-                  <UIcon name="i-lucide-chevron-right" class="text-muted size-4" aria-hidden="true" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </UCard>
+                  <p class="min-w-0 truncate text-sm font-medium text-[var(--app-ink)]">{{ row.display_name }}</p>
+                </div>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Extension" class="text-xs text-[var(--app-ink-soft)]">
+                {{ row.set_name || row.tcgdex_set_id }} · #{{ row.card_number }}
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Langue">
+                <UBadge color="neutral" variant="subtle" size="sm">{{ languageLabel(row.language) }}</UBadge>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Qté" align="right" class="tabular-nums"
+                >×{{ row.quantity }}</GoupixDexBaseTableTd
+              >
+              <GoupixDexBaseTableTd label="Prix marché" align="right" class="tabular-nums">
+                <span v-if="row.market_price_eur != null" class="font-medium text-[var(--app-ink)]">
+                  {{ eur.format(row.market_price_eur) }}
+                </span>
+                <span v-else class="text-xs text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="Statut">
+                <UBadge v-if="row.article_id" color="success" variant="subtle" size="sm" icon="i-lucide-tag">
+                  Article #{{ row.article_id }}
+                </UBadge>
+                <span v-else class="text-xs text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd class="goupix-card-table__actions" align="center">
+                <UIcon name="i-lucide-chevron-right" class="size-4 text-[var(--app-faint)]" aria-hidden="true" />
+              </GoupixDexBaseTableTd>
+            </GoupixDexBaseTableTr>
+          </GoupixDexBaseTable>
+        </div>
       </div>
     </template>
   </UDashboardPanel>
@@ -267,6 +263,8 @@ useGoupixPageSeo(
 
 const { listCollection } = useCollection()
 const { isDesktopApp } = useDesktopRuntime()
+const { openCard, openCardFromClick } = useOpenCardDrawer()
+const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
 const payload = ref<CollectionListResponse | null>(null)
@@ -365,10 +363,6 @@ async function load(): Promise<void> {
   }
 }
 
-function openCard(id: number): void {
-  void navigateTo(`/collection/${id}`)
-}
-
 /**
  * Insert (or refresh) a card freshly added via scan-stream into the local list
  * without re-hitting `/collection`. We dedupe on `id` so multiple events for
@@ -402,6 +396,13 @@ watch(
     }
   },
   { deep: true },
+)
+
+watch(
+  () => drawerStack.cardMutationCounter.value,
+  () => {
+    void load()
+  },
 )
 
 onMounted(() => {

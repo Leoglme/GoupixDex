@@ -1,0 +1,139 @@
+<template>
+  <div class="space-y-5">
+    <!-- Aperçu -->
+    <div class="flex gap-4">
+      <div class="bg-muted/20 flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+        <img
+          v-if="product.img"
+          :src="product.img"
+          :alt="product.full"
+          class="h-full w-full object-contain"
+          referrerpolicy="no-referrer"
+          decoding="async"
+        />
+        <UIcon v-else :name="sealedProductTypeIcon(product.c)" class="text-muted size-9" />
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="text-highlighted text-base leading-snug font-semibold">{{ product.n }}</p>
+        <p class="text-muted mt-0.5 truncate text-sm">{{ expansionName }}</p>
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          <UBadge color="primary" variant="subtle" size="sm">{{ sealedProductTypeLabel(product.c) }}</UBadge>
+          <UBadge v-if="ownedQuantity > 0" color="success" variant="subtle" size="sm" icon="i-lucide-check">
+            Déjà ×{{ ownedQuantity }}
+          </UBadge>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prix marché -->
+    <div class="border-default rounded-xl border p-3">
+      <p class="app-label">Prix marché</p>
+      <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
+        {{ product.price != null ? eur.format(product.price) : '—' }}
+      </p>
+    </div>
+
+    <!-- Évolution du prix -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <p class="app-label">Évolution du prix</p>
+        <span v-if="priceHistory?.approximate" class="text-muted text-[10px]">tendance approximative</span>
+      </div>
+      <GoupixDexPriceHistoryChart :points="priceHistory?.points ?? []" />
+    </section>
+
+    <!-- Ajout -->
+    <UButton color="primary" variant="solid" size="lg" icon="i-lucide-plus" block :loading="adding" @click="onAdd">
+      {{ ownedQuantity > 0 ? 'Ajouter un exemplaire' : 'Ajouter à ma collection' }}
+    </UButton>
+  </div>
+</template>
+
+<script setup lang="ts">
+import type { PropType } from 'vue'
+import type { SealedProduct, SealedProductType } from '~/composables/useSealed'
+import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
+import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
+import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
+
+/**
+ * Aperçu d'un produit du catalogue scellé (avant ajout) : prix, courbe, bouton d'ajout.
+ */
+const props = defineProps({
+  product: {
+    type: Object as PropType<SealedCatalogProduct>,
+    required: true,
+  },
+  expansionName: {
+    type: String,
+    required: true,
+  },
+})
+
+const emit = defineEmits<{
+  added: [product: SealedProduct]
+}>()
+
+const { catalogAdd, catalogPriceHistory } = useSealed()
+const toast = useToast()
+
+const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
+const adding = ref(false)
+const ownedQuantity = ref(0)
+
+const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+/**
+ * Charge la courbe approximative depuis le guide (best-effort, par idProduct).
+ * @returns Résolue quand la courbe est chargée ou l'échec acté.
+ */
+async function loadPriceHistory(): Promise<void> {
+  try {
+    priceHistory.value = await catalogPriceHistory(props.product.p)
+  } catch {
+    priceHistory.value = null
+  }
+}
+
+/**
+ * Ajoute le produit à la collection (idempotent si apparié à Cardmarket).
+ * @returns Résolue après ajout.
+ */
+async function onAdd(): Promise<void> {
+  adding.value = true
+  try {
+    const res = await catalogAdd({
+      name: props.product.n,
+      product_type: props.product.c as SealedProductType,
+      set_name: props.expansionName,
+      cardmarket_id_product: props.product.p,
+      image_url: props.product.img,
+      market_price_eur: props.product.price,
+    })
+    ownedQuantity.value = res.product.quantity
+    emit('added', res.product)
+    toast.add({
+      title: res.created ? 'Ajouté à ta collection' : `Quantité ×${res.product.quantity}`,
+      description: props.product.full,
+      color: 'success',
+    })
+  } catch (e) {
+    toast.add({ title: 'Ajout impossible', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    adding.value = false
+  }
+}
+
+watch(
+  () => props.product.tp,
+  () => {
+    ownedQuantity.value = 0
+    void loadPriceHistory()
+  },
+  { immediate: true },
+)
+</script>

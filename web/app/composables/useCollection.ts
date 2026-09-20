@@ -1,6 +1,7 @@
 /** Personal Pokémon card collection (decoupled from sale articles). */
 
 import type { CatalogCardPreviewResponse } from '~/composables/useCardCatalog'
+import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 
 export type CollectionLanguage = 'fr' | 'en' | 'ja'
 
@@ -120,6 +121,17 @@ export function useCollection() {
   }
 
   /**
+   * GET `/collection/:id/price-history` — courbe d'évolution du prix marché de la carte.
+   *
+   * @param id - Collection card id.
+   * @returns {Promise<GoupixPriceHistoryResponse>} Points datés + drapeau approximatif.
+   */
+  async function getCardPriceHistory(id: number) {
+    const { data } = await $api.get<GoupixPriceHistoryResponse>(`/collection/${id}/price-history`)
+    return data
+  }
+
+  /**
    * PATCH `/collection/:id` — partial update (quantity, language, notes).
    *
    * @param id - Collection card id.
@@ -173,6 +185,7 @@ export function useCollection() {
     listCollection,
     addToCollection,
     getCollectionCard,
+    getCardPriceHistory,
     patchCollectionCard,
     deleteCollectionCard,
     prepareArticlePrefill,

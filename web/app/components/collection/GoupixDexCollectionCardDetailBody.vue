@@ -4,57 +4,49 @@
       <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
     </div>
 
-    <div v-else-if="!product" class="space-y-3 py-16 text-center">
-      <UIcon name="i-lucide-box" class="text-muted mx-auto size-10" />
-      <p class="text-highlighted text-sm font-medium">Produit introuvable.</p>
+    <div v-else-if="!card" class="space-y-3 py-16 text-center">
+      <UIcon name="i-lucide-album-x" class="text-muted mx-auto size-10" />
+      <p class="text-highlighted text-sm font-medium">Carte introuvable.</p>
     </div>
 
     <div v-else class="space-y-5">
       <!-- Aperçu -->
       <div class="flex gap-4">
-        <div class="bg-muted/20 flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+        <div class="bg-muted/20 aspect-[63/88] w-24 shrink-0 overflow-hidden rounded-xl">
           <img
-            v-if="product.image_url"
-            :src="product.image_url"
-            :alt="product.name"
+            v-if="card.image_url"
+            :src="card.image_url"
+            :alt="card.display_name"
             class="h-full w-full object-contain"
             referrerpolicy="no-referrer"
             decoding="async"
           />
-          <UIcon v-else :name="sealedProductTypeIcon(product.product_type)" class="text-muted size-9" />
+          <div v-else class="flex h-full items-center justify-center">
+            <UIcon name="i-lucide-image-off" class="text-muted size-8" />
+          </div>
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-highlighted text-base leading-snug font-semibold">{{ product.name }}</p>
-          <p v-if="product.set_name" class="text-muted mt-0.5 truncate text-sm">{{ product.set_name }}</p>
+          <p class="text-highlighted text-base leading-snug font-semibold">{{ card.display_name }}</p>
+          <p class="text-muted mt-0.5 truncate text-sm">
+            {{ card.set_name || card.tcgdex_set_id }} · #{{ card.card_number }}
+          </p>
           <div class="mt-2 flex flex-wrap items-center gap-1.5">
-            <UBadge color="primary" variant="subtle" size="sm">{{
-              sealedProductTypeLabel(product.product_type)
-            }}</UBadge>
-            <UBadge color="neutral" variant="subtle" size="sm">{{ languageLabel(product.language) }}</UBadge>
-            <UBadge color="neutral" variant="soft" size="sm">×{{ product.quantity }}</UBadge>
+            <UBadge color="primary" variant="subtle" size="sm">{{ languageLabel(card.language) }}</UBadge>
+            <UBadge v-if="card.rarity" color="warning" variant="subtle" size="sm">{{ card.rarity }}</UBadge>
+            <UBadge color="neutral" variant="soft" size="sm">×{{ card.quantity }}</UBadge>
           </div>
         </div>
       </div>
 
-      <!-- Prix + plus-value -->
-      <div class="border-default grid grid-cols-2 gap-3 rounded-xl border p-3">
-        <div>
-          <p class="app-label">Prix marché</p>
-          <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
-            {{ product.market_price_eur != null ? eur.format(product.market_price_eur) : '—' }}
-          </p>
-        </div>
-        <div>
-          <p class="app-label">Plus-value</p>
-          <p
-            v-if="product.gain_percent != null"
-            class="mt-0.5 text-xl font-semibold tabular-nums"
-            :class="product.gain_percent >= 0 ? 'text-(--app-green)' : 'text-(--app-red)'"
-          >
-            {{ formatSignedPercent(product.gain_percent) }}
-          </p>
-          <p v-else class="text-muted mt-0.5 text-xl">—</p>
-        </div>
+      <!-- Prix marché -->
+      <div class="border-default rounded-xl border p-3">
+        <p class="app-label">Prix marché</p>
+        <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
+          {{ card.market_price_eur != null ? eur.format(card.market_price_eur) : '—' }}
+        </p>
+        <p v-if="card.market_price_eur != null" class="text-muted mt-0.5 text-xs">
+          Cardmarket · {{ eur.format(lineMarketEur) }} pour {{ card.quantity }} exemplaire(s)
+        </p>
       </div>
 
       <!-- Évolution du prix -->
@@ -66,31 +58,14 @@
         <GoupixDexPriceHistoryChart :points="priceHistory?.points ?? []" />
       </section>
 
-      <UButton
-        v-if="product.cardmarket_url"
-        :to="product.cardmarket_url"
-        target="_blank"
-        external
-        color="neutral"
-        variant="ghost"
-        size="sm"
-        icon="i-lucide-external-link"
-        class="w-full"
-      >
-        Voir sur Cardmarket
-      </UButton>
-
       <!-- Détails éditables -->
       <section class="border-default space-y-3 border-t pt-4">
         <p class="app-label">Détails</p>
-        <UFormField label="Nom">
-          <UInput v-model="nameDraft" class="w-full" />
-        </UFormField>
         <div class="grid grid-cols-2 gap-2">
-          <UFormField label="Type">
-            <USelect v-model="typeDraft" :items="typeOptions" value-key="value" label-key="label" class="w-full" />
+          <UFormField label="Quantité">
+            <UInputNumber v-model="quantityDraft" :min="1" :max="999" class="w-full" />
           </UFormField>
-          <UFormField label="Langue">
+          <UFormField label="Langue physique">
             <USelect
               v-model="languageDraft"
               :items="languageItems"
@@ -98,20 +73,6 @@
               label-key="label"
               class="w-full"
             />
-          </UFormField>
-        </div>
-        <UFormField label="Set / édition">
-          <UInput v-model="setNameDraft" class="w-full" />
-        </UFormField>
-        <div class="grid grid-cols-3 gap-2">
-          <UFormField label="Quantité">
-            <UInputNumber v-model="quantityDraft" :min="1" :max="999" class="w-full" />
-          </UFormField>
-          <UFormField label="Achat (€)">
-            <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
-          </UFormField>
-          <UFormField label="Marché (€)">
-            <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
           </UFormField>
         </div>
         <UFormField label="Notes">
@@ -162,10 +123,10 @@
           </UButton>
         </div>
 
-        <UAlert v-if="product.article_id" color="success" variant="subtle" icon="i-lucide-tag" title="Article créé">
+        <UAlert v-if="card.article_id" color="success" variant="subtle" icon="i-lucide-tag" title="Article créé">
           <template #description>
-            <NuxtLink :to="`/articles/${product.article_id}`" class="text-primary text-sm underline underline-offset-2">
-              Voir l'article #{{ product.article_id }}
+            <NuxtLink :to="`/articles/${card.article_id}`" class="text-primary text-sm underline underline-offset-2">
+              Voir l'article #{{ card.article_id }}
             </NuxtLink>
           </template>
         </UAlert>
@@ -173,7 +134,7 @@
         <div v-if="prefill">
           <GoupixDexArticleForm ref="formRef" mode="create" :loading="submitting" @submit-create="onSubmitCreate" />
         </div>
-        <p v-else-if="!product.article_id" class="text-muted text-sm">
+        <p v-else-if="!card.article_id" class="text-muted text-sm">
           Génère un article prérempli (titre, prix suggéré) à publier sur tes marketplaces.
         </p>
       </section>
@@ -182,67 +143,57 @@
 </template>
 
 <script setup lang="ts">
-import type {
-  SealedArticlePrefillResponse,
-  SealedPriceHistoryResponse,
-  SealedProduct,
-  SealedProductType,
-} from '~/composables/useSealed'
-import {
-  formatSignedPercent,
-  parseEuroAmount,
-  sealedProductTypeIcon,
-  sealedProductTypeLabel,
-  SEALED_TYPE_OPTIONS,
-} from '~/utils/sealedProducts'
+import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
+import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 
 /**
- * Corps de fiche d'un produit scellé, partagé entre le drawer et la page.
+ * Corps de fiche d'une carte de collection, partagé entre le drawer et la page.
  */
 const props = defineProps({
-  sealedId: {
+  cardId: {
     type: Number,
     required: true,
   },
 })
 
 const emit = defineEmits<{
-  updated: [product: SealedProduct]
-  deleted: [sealedId: number]
+  updated: [card: CollectionCard]
+  deleted: [cardId: number]
 }>()
 
-const { getSealed, getPriceHistory, patchSealed, deleteSealed, prepareArticlePrefill, attachArticle } = useSealed()
+const {
+  getCollectionCard,
+  getCardPriceHistory,
+  patchCollectionCard,
+  deleteCollectionCard,
+  prepareArticlePrefill,
+  attachArticle,
+} = useCollection()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { isDesktopApp } = useDesktopRuntime()
 const toast = useToast()
 
-const product = ref<SealedProduct | null>(null)
-const priceHistory = ref<SealedPriceHistoryResponse | null>(null)
+const card = ref<CollectionCard | null>(null)
+const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
 const loading = ref(true)
 const savingDraft = ref(false)
 const deleting = ref(false)
-const prefill = ref<SealedArticlePrefillResponse | null>(null)
+const prefill = ref<CollectionArticlePrefillResponse | null>(null)
 const loadingPrefill = ref(false)
 const submitting = ref(false)
 const formRef = ref<{
-  applyCatalogPrefill: (p: SealedArticlePrefillResponse) => Promise<void>
+  applyCatalogPrefill: (p: CollectionArticlePrefillResponse) => Promise<void>
   buildCreateFormData: () => FormData
 } | null>(null)
 
-const typeOptions = SEALED_TYPE_OPTIONS
 const languageItems = [
   { label: 'Français', value: 'fr' },
   { label: 'Anglais', value: 'en' },
   { label: 'Japonais', value: 'ja' },
 ]
 
-const nameDraft = ref('')
-const typeDraft = ref<SealedProductType>('autre')
-const setNameDraft = ref('')
-const languageDraft = ref('fr')
 const quantityDraft = ref(1)
-const purchaseText = ref('')
-const marketText = ref('')
+const languageDraft = ref('fr')
 const notesDraft = ref('')
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -251,20 +202,22 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2,
 })
 
+const lineMarketEur = computed<number>(() => {
+  const price = card.value?.market_price_eur
+  if (price == null) {
+    return 0
+  }
+  return price * (card.value?.quantity ?? 1)
+})
+
 const isDirty = computed<boolean>(() => {
-  const current = product.value
+  const current = card.value
   if (!current) {
     return false
   }
   return (
-    nameDraft.value.trim() !== current.name ||
-    typeDraft.value !== current.product_type ||
-    setNameDraft.value.trim() !== (current.set_name ?? '') ||
-    languageDraft.value !== current.language ||
     quantityDraft.value !== current.quantity ||
-    (purchaseText.value.trim() || '') !==
-      (current.purchase_price_eur != null ? String(current.purchase_price_eur) : '') ||
-    (marketText.value.trim() || '') !== (current.market_price_eur != null ? String(current.market_price_eur) : '') ||
+    languageDraft.value !== current.language ||
     notesDraft.value.trim() !== (current.notes ?? '')
   )
 })
@@ -272,7 +225,7 @@ const isDirty = computed<boolean>(() => {
 /**
  * Libellé de langue physique.
  * @param code - Code langue.
- * @returns Le nom de la langue.
+ * @returns Le nom complet de la langue.
  */
 function languageLabel(code: string): string {
   switch (code) {
@@ -288,35 +241,30 @@ function languageLabel(code: string): string {
 }
 
 /**
- * Recopie les valeurs du produit dans les brouillons d'édition.
- * @param p - Produit chargé.
+ * Recopie les valeurs de la carte dans les brouillons d'édition.
+ * @param c - Carte chargée.
  */
-function syncDrafts(p: SealedProduct): void {
-  nameDraft.value = p.name
-  typeDraft.value = (p.product_type as SealedProductType) ?? 'autre'
-  setNameDraft.value = p.set_name ?? ''
-  languageDraft.value = p.language
-  quantityDraft.value = p.quantity
-  purchaseText.value = p.purchase_price_eur != null ? String(p.purchase_price_eur) : ''
-  marketText.value = p.market_price_eur != null ? String(p.market_price_eur) : ''
-  notesDraft.value = p.notes ?? ''
+function syncDrafts(c: CollectionCard): void {
+  quantityDraft.value = c.quantity
+  languageDraft.value = c.language
+  notesDraft.value = c.notes ?? ''
 }
 
 /**
- * Charge le produit et son historique de prix.
- * @returns Résolue quand le produit est chargé.
+ * Charge la carte et son historique de prix.
+ * @returns Résolue quand la carte est chargée.
  */
 async function load(): Promise<void> {
   loading.value = true
   prefill.value = null
   try {
-    const data = await getSealed(props.sealedId)
-    product.value = data
+    const data = await getCollectionCard(props.cardId)
+    card.value = data
     syncDrafts(data)
     void loadPriceHistory()
   } catch (e) {
-    toast.add({ title: 'Produit scellé', description: apiErrorMessage(e), color: 'error' })
-    product.value = null
+    toast.add({ title: 'Carte de collection', description: apiErrorMessage(e), color: 'error' })
+    card.value = null
   } finally {
     loading.value = false
   }
@@ -328,7 +276,7 @@ async function load(): Promise<void> {
  */
 async function loadPriceHistory(): Promise<void> {
   try {
-    priceHistory.value = await getPriceHistory(props.sealedId)
+    priceHistory.value = await getCardPriceHistory(props.cardId)
   } catch {
     priceHistory.value = null
   }
@@ -339,25 +287,20 @@ async function loadPriceHistory(): Promise<void> {
  * @returns Résolue après enregistrement.
  */
 async function onSaveDraft(): Promise<void> {
-  if (!product.value) {
+  if (!card.value) {
     return
   }
   savingDraft.value = true
   try {
-    const updated = await patchSealed(product.value.id, {
-      name: nameDraft.value.trim(),
-      product_type: typeDraft.value,
-      set_name: setNameDraft.value.trim() || null,
-      language: languageDraft.value,
+    const updated = await patchCollectionCard(card.value.id, {
       quantity: quantityDraft.value,
-      purchase_price_eur: parseEuroAmount(purchaseText.value),
-      market_price_eur: parseEuroAmount(marketText.value),
+      language: languageDraft.value,
       notes: notesDraft.value.trim() || null,
     })
-    product.value = updated
+    card.value = updated
     syncDrafts(updated)
     emit('updated', updated)
-    toast.add({ title: 'Produit mis à jour', color: 'success' })
+    toast.add({ title: 'Carte mise à jour', color: 'success' })
   } catch (e) {
     toast.add({ title: 'Mise à jour impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -366,19 +309,19 @@ async function onSaveDraft(): Promise<void> {
 }
 
 /**
- * Supprime le produit de la collection.
+ * Supprime la carte de la collection.
  * @returns Résolue après suppression.
  */
 async function onDelete(): Promise<void> {
-  if (!product.value) {
+  if (!card.value) {
     return
   }
   deleting.value = true
   try {
-    const id = product.value.id
-    await deleteSealed(id)
+    const id = card.value.id
+    await deleteCollectionCard(id)
     emit('deleted', id)
-    toast.add({ title: 'Produit retiré', color: 'success' })
+    toast.add({ title: 'Carte retirée', color: 'success' })
   } catch (e) {
     toast.add({ title: 'Suppression impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -393,16 +336,15 @@ async function onDelete(): Promise<void> {
  */
 async function onPreparePrefill(refreshPricing: boolean | Event = true): Promise<void> {
   const refresh = typeof refreshPricing === 'boolean' ? refreshPricing : true
-  if (!product.value) {
+  if (!card.value) {
     return
   }
   loadingPrefill.value = true
   try {
-    const data = await prepareArticlePrefill(product.value.id, refresh)
+    const data = await prepareArticlePrefill(card.value.id, refresh)
     prefill.value = data
     await nextTick()
     await formRef.value?.applyCatalogPrefill(data)
-    await load()
   } catch (e) {
     toast.add({ title: 'Préremplissage impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -411,12 +353,12 @@ async function onPreparePrefill(refreshPricing: boolean | Event = true): Promise
 }
 
 /**
- * Crée l'article depuis le formulaire, le relie au produit et publie si desktop.
+ * Crée l'article depuis le formulaire, le relie à la carte et publie si desktop.
  * @param fd - Corps multipart de l'article.
  * @returns Résolue après création.
  */
 async function onSubmitCreate(fd: FormData): Promise<void> {
-  if (!product.value) {
+  if (!card.value) {
     return
   }
   if (!isDesktopApp.value) {
@@ -426,7 +368,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
   try {
     const { article, vinted } = await createArticle(fd)
     try {
-      await attachArticle(product.value.id, article.id)
+      await attachArticle(card.value.id, article.id)
     } catch {
       /* lien best-effort */
     }
@@ -441,7 +383,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
       await navigateTo({ path: '/articles/listing-logs', query: { article: String(article.id), progress: 'local' } })
       return
     }
-    toast.add({ title: 'Article créé depuis le produit', color: 'success' })
+    toast.add({ title: 'Article créé depuis la carte', color: 'success' })
     await navigateTo(`/articles/${article.id}`)
   } catch (e) {
     toast.add({ title: 'Création impossible', description: apiErrorMessage(e), color: 'error' })
@@ -451,7 +393,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
 }
 
 watch(
-  () => props.sealedId,
+  () => props.cardId,
   () => {
     void load()
   },

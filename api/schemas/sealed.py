@@ -81,6 +81,12 @@ class SealedQuoteBody(BaseModel):
     cardmarket_id_products: list[int] = Field(..., min_length=1, max_length=400)
 
 
+class SealedCatalogPriceHistoryBody(BaseModel):
+    """``POST /sealed/catalog-price-history`` — courbe approximative d'un produit catalogue par ``idProduct``."""
+
+    cardmarket_id_product: int | None = Field(default=None, ge=1)
+
+
 class SealedProductPrepareSaleBody(BaseModel):
     """``POST /sealed/{id}/prepare-article-prefill`` — passerelle vers un prefill ``ArticleForm``."""
 

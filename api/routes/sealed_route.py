@@ -19,6 +19,7 @@ from models.user import User
 from schemas.sealed import (
     CardmarketResolveBody,
     SealedCatalogAddBody,
+    SealedCatalogPriceHistoryBody,
     SealedProductCreateBody,
     SealedProductPrepareSaleBody,
     SealedProductUpdateBody,
@@ -164,6 +165,15 @@ def quote_prices(
     for id_product in dict.fromkeys(body.cardmarket_id_products):
         prices[str(id_product)] = resolve_market_price_eur(id_product, None)
     return {"prices": prices}
+
+
+@router.post("/catalog-price-history")
+def catalog_price_history(
+    body: SealedCatalogPriceHistoryBody,
+    _user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Courbe approximative d'un produit du catalogue (amorce guide par ``idProduct``, avant l'ajout)."""
+    return sealed_price_history_service.catalog_price_history(body.cardmarket_id_product)
 
 
 @router.post("/resolve-cardmarket")

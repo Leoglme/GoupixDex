@@ -207,6 +207,19 @@ export function useSealed() {
   }
 
   /**
+   * POST `/sealed/catalog-price-history` — courbe approximative d'un produit catalogue (avant l'ajout).
+   *
+   * @param cardmarketIdProduct - idProduct Cardmarket du produit catalogue (peut être null).
+   * @returns {Promise<SealedPriceHistoryResponse>} Points datés + drapeau approximatif.
+   */
+  async function catalogPriceHistory(cardmarketIdProduct: number | null) {
+    const { data } = await $api.post<SealedPriceHistoryResponse>('/sealed/catalog-price-history', {
+      cardmarket_id_product: cardmarketIdProduct,
+    })
+    return data
+  }
+
+  /**
    * PATCH `/sealed/:id` — mise à jour partielle (seuls les champs fournis).
    *
    * @param id - Identifiant du produit scellé.
@@ -263,6 +276,7 @@ export function useSealed() {
     resolveCardmarket,
     getSealed,
     getPriceHistory,
+    catalogPriceHistory,
     patchSealed,
     deleteSealed,
     prepareArticlePrefill,

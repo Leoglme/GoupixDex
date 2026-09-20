@@ -67,24 +67,27 @@
             <p class="text-muted text-sm">Essaie le nom de l'extension (ex. « Surging Sparks ») ou un autre terme.</p>
           </UCard>
 
-          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            <button
+          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div
               v-for="hit in visibleProducts"
               :key="hit.product.tp"
-              type="button"
-              class="border-default bg-elevated/30 focus-visible:ring-primary group flex flex-col overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
-              :class="ownedOf(hit.product.p) > 0 ? 'border-(--app-green) ring-2 ring-(--app-green)' : ''"
-              :disabled="pendingTp === hit.product.tp"
-              @click="addProduct(hit.product, hit.expansionName)"
+              role="button"
+              tabindex="0"
+              class="border-default bg-elevated/30 focus-visible:ring-primary group flex cursor-pointer flex-col overflow-hidden rounded-xl border text-left transition-all hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+              :class="
+                ownedOf(hit.product.p) > 0
+                  ? 'border-(--app-green) ring-2 ring-(--app-green)'
+                  : 'hover:border-(--app-accent)'
+              "
+              @click="openCatalogPreview(hit)"
+              @keydown.enter.prevent="openCatalogPreview(hit)"
             >
-              <div
-                class="bg-muted/20 relative flex aspect-square w-full items-center justify-center overflow-hidden p-2"
-              >
+              <div class="bg-muted/20 relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden">
                 <img
                   v-if="hit.product.img"
                   :src="hit.product.img"
                   :alt="hit.product.full"
-                  class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                  class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                   referrerpolicy="no-referrer"
                   loading="lazy"
                   decoding="async"
@@ -96,15 +99,19 @@
                 >
                   <UIcon name="i-lucide-check" class="size-3" />{{ ownedOf(hit.product.p) }}
                 </span>
-                <span
-                  class="bg-elevated/95 text-highlighted absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-full backdrop-blur-sm transition-colors group-hover:bg-(--app-accent) group-hover:text-white"
+                <button
+                  type="button"
+                  class="bg-elevated/95 text-highlighted focus-visible:ring-primary absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-full backdrop-blur-sm transition-colors hover:bg-(--app-accent) hover:text-white focus-visible:ring-2 focus-visible:outline-none"
+                  :disabled="pendingTp === hit.product.tp"
+                  :aria-label="`Ajouter ${hit.product.n} directement`"
+                  @click.stop="addProduct(hit.product, hit.expansionName)"
                 >
                   <UIcon
                     :name="pendingTp === hit.product.tp ? 'i-lucide-loader-2' : 'i-lucide-plus'"
                     class="size-3.5"
                     :class="pendingTp === hit.product.tp ? 'animate-spin' : ''"
                   />
-                </span>
+                </button>
               </div>
               <div class="min-w-0 space-y-0.5 p-2">
                 <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ hit.product.n }}</p>
@@ -115,7 +122,7 @@
                   </span>
                 </p>
               </div>
-            </button>
+            </div>
           </div>
         </template>
 
@@ -169,6 +176,7 @@ useGoupixPageSeo(
 
 const { loadSeries } = useSealedCatalog()
 const { catalogAdd, listSealed } = useSealed()
+const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
 const series = ref<SealedCatalogSerie[]>([])
@@ -221,6 +229,14 @@ const visibleProducts = computed<SealedCatalogSearchHit[]>(() => {
  */
 function ownedOf(idProduct: number | null): number {
   return idProduct != null ? (ownedMap.value.get(idProduct) ?? 0) : 0
+}
+
+/**
+ * Ouvre l'aperçu d'un produit (prix, courbe, ajout) dans le drawer, sans l'ajouter directement.
+ * @param hit - Produit catalogue + nom d'extension.
+ */
+function openCatalogPreview(hit: SealedCatalogSearchHit): void {
+  drawerStack.pushSealedCatalog(hit.product, hit.expansionName)
 }
 
 /**
@@ -295,6 +311,13 @@ async function loadOwned(): Promise<void> {
     /* best-effort */
   }
 }
+
+watch(
+  () => drawerStack.sealedMutationCounter.value,
+  () => {
+    void loadOwned()
+  },
+)
 
 onMounted(async () => {
   loading.value = true
