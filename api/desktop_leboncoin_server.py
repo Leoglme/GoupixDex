@@ -34,7 +34,11 @@ from fastapi.responses import StreamingResponse
 from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.desktop_leboncoin_runner_service import DesktopLeboncoinRunnerService
-from services.leboncoin_profile_session_service import detect_leboncoin_session_from_profile
+from services.leboncoin_profile_session_service import (
+    detect_leboncoin_session_from_profile,
+    persisted_session_is_ready,
+    write_leboncoin_session_info,
+)
 from services.os_service import resolve_leboncoin_nodriver_user_data_dir
 from services.vinted_progress_session_service import VintedProgressSessionService as progress_hub
 
@@ -76,6 +80,12 @@ def _configure_logging() -> None:
 
 _configure_logging()
 logger = logging.getLogger("goupixdex.leboncoin_local")
+
+LEBONCOIN_LOGIN_POLL_INTERVAL_SEC = 2.5
+LEBONCOIN_LOGIN_POLL_MAX_SEC = 900.0
+
+_lbc_login_task: asyncio.Task | None = None
+_lbc_browser_lock = asyncio.Lock()
 
 _INTROSPECT_CACHE_TTL_SEC = 120.0
 _introspect_cache: dict[str, tuple[float, int]] = {}
@@ -168,11 +178,101 @@ def leboncoin_meta() -> dict[str, str]:
     return {"service": "goupix-leboncoin-worker", "version": "1"}
 
 
+async def _cancel_lbc_login_polling() -> None:
+    global _lbc_login_task
+    if _lbc_login_task is None:
+        return
+    if not _lbc_login_task.done():
+        _lbc_login_task.cancel()
+        try:
+            await asyncio.wait_for(_lbc_login_task, timeout=3.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cancel lbc login polling: %s", exc)
+    _lbc_login_task = None
+
+
+async def _lbc_login_polling_loop() -> None:
+    """Detect signed-in DOM, dismiss consent, then close Chrome to flush cookies."""
+    from services.leboncoin_service import LeboncoinService
+
+    started = time.monotonic()
+    first = True
+    while True:
+        if time.monotonic() - started > LEBONCOIN_LOGIN_POLL_MAX_SEC:
+            return
+        if not first:
+            await asyncio.sleep(LEBONCOIN_LOGIN_POLL_INTERVAL_SEC)
+        first = False
+        if LeboncoinService._browser is None or LeboncoinService._tab is None:
+            return
+        tab = LeboncoinService._tab
+        try:
+            ready = await LeboncoinService.confirm_session_ready(tab)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("lbc login poll confirm failed: %s", exc)
+            continue
+        if not ready:
+            continue
+        profile = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
+        write_leboncoin_session_info(profile, {"logged_in": True, "source": "mes_annonces_probe"})
+        logger.info("Leboncoin session confirmed — closing helper browser")
+        async with _lbc_browser_lock:
+            await LeboncoinService.safe_close_browser_graceful()
+        return
+
+
 @lbc_router.get("/session")
-def leboncoin_session_state() -> dict[str, str]:
+async def leboncoin_session_state() -> dict[str, object]:
+    from services.leboncoin_service import LeboncoinService
+
     profile = resolve_leboncoin_nodriver_user_data_dir(os.environ.get("LEBONCOIN_USER_DATA_DIR"))
-    state = detect_leboncoin_session_from_profile(profile)
-    return {"state": state, "profile_dir": str(profile)}
+    browser_open = LeboncoinService._browser is not None
+
+    if browser_open and LeboncoinService._tab is not None:
+        try:
+            live = await LeboncoinService.read_login_state_from_tab(LeboncoinService._tab)
+            if live.get("logged_in"):
+                return {
+                    "state": "ready",
+                    "profile_dir": str(profile),
+                    "browser_open": True,
+                    "message": "Session détectée dans Chrome.",
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("lbc session live read: %s", exc)
+
+    if browser_open:
+        return {
+            "state": "busy",
+            "profile_dir": str(profile),
+            "browser_open": True,
+            "message": "Chrome ouvert — connectez-vous (la détection est automatique).",
+        }
+
+    if persisted_session_is_ready(profile):
+        return {
+            "state": "ready",
+            "profile_dir": str(profile),
+            "browser_open": False,
+            "message": None,
+        }
+
+    cookie_state = detect_leboncoin_session_from_profile(profile)
+    if cookie_state == "ready":
+        return {
+            "state": "ready",
+            "profile_dir": str(profile),
+            "browser_open": False,
+            "message": None,
+        }
+    return {
+        "state": cookie_state,
+        "profile_dir": str(profile),
+        "browser_open": False,
+        "message": None,
+    }
 
 
 @lbc_router.post("/open-login")
@@ -180,10 +280,25 @@ async def leboncoin_open_login(
     _: Annotated[int, Depends(get_user_id_introspected)],
 ) -> dict[str, object]:
     """Ouvre Chrome sur la page de connexion Leboncoin (profil persistant)."""
+    global _lbc_login_task
     from services.leboncoin_service import LeboncoinService
 
     try:
-        return await LeboncoinService.open_login_browser()
+        async with _lbc_browser_lock:
+            await _cancel_lbc_login_polling()
+            if LeboncoinService._browser is not None:
+                await LeboncoinService.safe_close_browser_graceful()
+            result = await LeboncoinService.open_login_browser()
+            new_task = asyncio.create_task(_lbc_login_polling_loop())
+            _lbc_login_task = new_task
+
+            def _cleanup(t: asyncio.Task) -> None:
+                global _lbc_login_task
+                if _lbc_login_task is t:
+                    _lbc_login_task = None
+
+            new_task.add_done_callback(_cleanup)
+        return result
     except Exception as exc:  # noqa: BLE001
         logger.exception("leboncoin open-login failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

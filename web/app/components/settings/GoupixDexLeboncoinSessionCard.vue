@@ -42,16 +42,28 @@
       </p>
 
       <UAlert
-        v-else-if="session?.state === 'busy' || session?.state === 'unreadable'"
+        v-else-if="session?.state === 'busy' || session?.browser_open"
         color="info"
         variant="subtle"
         icon="i-lucide-chrome"
-        title="Fenêtre Chrome"
-        description="Si une fenêtre Leboncoin est ouverte, fermez-la puis cliquez sur « Actualiser l’état ». Sinon, ouvrez Chrome et connectez-vous."
+        title="Chrome ouvert"
+        :description="
+          session?.message ||
+          'Connectez-vous sur leboncoin.fr. GoupixDex ferme Chrome automatiquement une fois la session détectée.'
+        "
+      />
+
+      <UAlert
+        v-else-if="session?.state === 'unreadable'"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-lock"
+        title="Profil verrouillé"
+        description="Fermez toutes les fenêtres Chrome Leboncoin, puis actualisez l’état."
       />
 
       <p v-else class="text-muted text-sm">
-        Aucune session détectée. Ouvrez Chrome et identifiez-vous sur leboncoin.fr, puis fermez la fenêtre.
+        Aucune session détectée. Ouvrez Chrome et identifiez-vous sur leboncoin.fr.
       </p>
 
       <div class="flex flex-wrap items-center gap-2">
@@ -110,6 +122,8 @@ const opening = ref(false)
 const workerError = ref(false)
 const session = ref<LeboncoinSessionResponse | null>(null)
 
+let pollHandle: ReturnType<typeof setInterval> | null = null
+
 const badge = computed(() => leboncoinSessionBadge(session.value))
 
 async function refresh() {
@@ -120,6 +134,9 @@ async function refresh() {
   workerError.value = false
   try {
     session.value = await fetchSession()
+    if (session.value?.state === 'ready' && !session.value.browser_open) {
+      stopPolling()
+    }
   } catch (e) {
     workerError.value = true
     toast.add({ title: 'Worker Leboncoin', description: apiErrorMessage(e), color: 'error' })
@@ -128,16 +145,34 @@ async function refresh() {
   }
 }
 
+function startPolling() {
+  stopPolling()
+  if (!isDesktopApp.value) {
+    return
+  }
+  pollHandle = setInterval(() => {
+    void refresh()
+  }, 3000)
+}
+
+function stopPolling() {
+  if (pollHandle) {
+    clearInterval(pollHandle)
+    pollHandle = null
+  }
+}
+
 async function onOpenChrome() {
   opening.value = true
   try {
     await openLoginBrowser()
     toast.add({
-      title: 'Chrome Leboncoin',
-      description: 'Connectez-vous, fermez la fenêtre, puis actualisez l’état.',
-      color: 'neutral',
+      title: 'Chrome ouvert',
+      description: 'Connectez-vous sur Leboncoin. La détection et la fermeture de Chrome sont automatiques.',
+      color: 'success',
     })
-    setTimeout(() => void refresh(), 4000)
+    await refresh()
+    startPolling()
   } catch (e) {
     toast.add({ title: 'Impossible d’ouvrir Chrome', description: apiErrorMessage(e), color: 'error' })
   } finally {
@@ -150,8 +185,14 @@ watch(
   (on) => {
     if (on) {
       void refresh()
+    } else {
+      stopPolling()
     }
   },
   { immediate: true },
 )
+
+onBeforeUnmount(() => {
+  stopPolling()
+})
 </script>

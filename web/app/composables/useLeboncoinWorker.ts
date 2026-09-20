@@ -5,6 +5,8 @@ export type LeboncoinSessionState = 'ready' | 'needs_login' | 'busy' | 'unreadab
 export interface LeboncoinSessionResponse {
   state: LeboncoinSessionState
   profile_dir?: string
+  browser_open?: boolean
+  message?: string | null
 }
 
 /**
@@ -15,7 +17,7 @@ export function useLeboncoinWorker() {
   const client = computed(() => $leboncoinLocal)
 
   /**
-   *
+   * @returns État de session Chromium Leboncoin (profil local desktop).
    */
   async function fetchSession(): Promise<LeboncoinSessionResponse> {
     const { data } = await client.value.get<LeboncoinSessionResponse>('/leboncoin/session')
@@ -23,7 +25,7 @@ export function useLeboncoinWorker() {
   }
 
   /**
-   *
+   * @returns Indique si Chrome a été ouvert sur la page de connexion Leboncoin.
    */
   async function openLoginBrowser(): Promise<{ opened: boolean; url: string }> {
     const { data } = await client.value.post<{ opened: boolean; url: string }>('/leboncoin/open-login')

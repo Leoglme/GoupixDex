@@ -2,27 +2,89 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
+SESSION_FILE_NAME = "goupix-leboncoin-session.json"
+
+
+def session_file_path(profile_dir: Path) -> Path:
+    return profile_dir / SESSION_FILE_NAME
+
+
+def read_leboncoin_session_info(profile_dir: Path) -> dict[str, Any] | None:
+    path = session_file_path(profile_dir)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:  # noqa: BLE001
+        logger.debug("read_leboncoin_session_info: %s", exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_leboncoin_session_info(profile_dir: Path, info: dict[str, Any]) -> None:
+    payload = dict(info)
+    payload.setdefault("last_seen", dt.datetime.now(dt.UTC).isoformat())
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        session_file_path(profile_dir).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:  # noqa: BLE001
+        logger.warning("write_leboncoin_session_info: %s", exc)
+
+
+def clear_leboncoin_session_info(profile_dir: Path) -> None:
+    try:
+        session_file_path(profile_dir).unlink(missing_ok=True)
+    except OSError as exc:  # noqa: BLE001
+        logger.debug("clear_leboncoin_session_info: %s", exc)
+
+
+def persisted_session_is_ready(profile_dir: Path) -> bool:
+    data = read_leboncoin_session_info(profile_dir)
+    return bool(data and data.get("logged_in"))
+
 LeboncoinDetectState = Literal["ready", "needs_login", "busy", "unreadable"]
 
-# Session JWT cookie name (see community reverse-engineering of Leboncoin auth).
-_LBC_AUTH_COOKIE_NAMES = frozenset({"luat", "access_token", "lbc_session"})
+# Auth cookies on .leboncoin.fr / auth.leboncoin.fr (names evolve; keep several heuristics).
+_LBC_AUTH_COOKIE_NAMES = frozenset(
+    {
+        "luat",
+        "access_token",
+        "lbc_session",
+        "login",
+        "id_token",
+        "__Secure-login",
+    }
+)
 
 
 def is_signed_in_leboncoin_cookie(name: str, domain: str, value: str | None) -> bool:
     dom = (domain or "").lower().lstrip(".")
     if "leboncoin" not in dom:
         return False
-    cookie_name = (name or "").strip()
-    if cookie_name not in _LBC_AUTH_COOKIE_NAMES or value is None:
+    if value is None:
         return False
+    cookie_name = (name or "").strip()
     val = str(value).strip()
-    return len(val) >= 24
+    if not val:
+        return False
+    if cookie_name in _LBC_AUTH_COOKIE_NAMES:
+        min_len = 8 if cookie_name in ("__Secure-login", "login") else 16
+        return len(val) >= min_len
+    lower = cookie_name.lower()
+    if lower.endswith("-login") or lower.endswith("_login"):
+        return len(val) >= 8
+    return False
 
 
 def detect_leboncoin_session_from_profile(profile_dir: Path) -> LeboncoinDetectState:

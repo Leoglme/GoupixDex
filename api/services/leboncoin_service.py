@@ -287,6 +287,13 @@ class LeboncoinService:
                       return 'text';
                     }
                   }
+                  for (const a of document.querySelectorAll('a, button, [role="button"]')) {
+                    const t = (a.textContent || '').trim().toLowerCase();
+                    if (t.includes('continuer sans accepter')) {
+                      a.click();
+                      return 'skip';
+                    }
+                  }
                   return '';
                 })()
                 """,
@@ -298,6 +305,135 @@ class LeboncoinService:
                 return
             await asyncio.sleep(0.15)
         logger.debug("Leboncoin Didomi banner not found (may already be accepted).")
+
+    @classmethod
+    async def read_login_state_from_tab(cls, tab: Tab) -> dict[str, Any]:
+        """Best-effort DOM probe (used while the login helper Chrome is open)."""
+        await cls._accept_didomi_cookies(tab)
+        raw = await tab.evaluate(
+            """
+            JSON.stringify((() => {
+              const url = location.href || '';
+              if (/auth\\.leboncoin\\.fr/i.test(url)) {
+                return { logged_in: false, reason: 'auth_host' };
+              }
+              const body = (document.body && document.body.innerText) || '';
+              if (/\\bse déconnecter\\b/i.test(body)) {
+                return { logged_in: true, reason: 'logout_link' };
+              }
+              let loginCta = false;
+              for (const el of document.querySelectorAll('a, button, [role="button"]')) {
+                const t = (el.textContent || '').trim().toLowerCase();
+                if (t === 'se connecter' || t === 'me connecter') {
+                  loginCta = true;
+                  break;
+                }
+              }
+              const onAccount =
+                /\\/account\\//i.test(url) ||
+                /mes-annonces/i.test(url) ||
+                /mon-compte/i.test(url);
+              const hasDeposit = !!document.querySelector('a[href*="deposer-une-annonce"]');
+              if (hasDeposit && !loginCta) {
+                return { logged_in: true, reason: 'deposit_nav' };
+              }
+              if (/mes-annonces/i.test(url) && !loginCta) {
+                return { logged_in: true, reason: 'mes_annonces' };
+              }
+              return { logged_in: false, reason: loginCta ? 'login_cta' : 'unknown' };
+            })())
+            """,
+            return_by_value=True,
+        )
+        try:
+            data = json.loads(str(raw or "{}"))
+        except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {"logged_in": bool(data.get("logged_in")), "reason": data.get("reason")}
+
+    @classmethod
+    async def _cdp_has_auth_cookie(cls) -> bool:
+        browser = cls._browser
+        if browser is None:
+            return False
+        conn = getattr(browser, "connection", None)
+        if conn is None:
+            return False
+        try:
+            import nodriver.cdp.storage as cdp_storage  # type: ignore
+
+            cookies = await asyncio.wait_for(conn.send(cdp_storage.get_cookies()), timeout=10.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Leboncoin CDP get_cookies: %s", exc)
+            return False
+        for item in cookies or []:
+            name = getattr(item, "name", None)
+            domain = getattr(item, "domain", None)
+            value = getattr(item, "value", None)
+            if name is None and isinstance(item, dict):
+                name = item.get("name")
+                domain = item.get("domain")
+                value = item.get("value")
+            from services.leboncoin_profile_session_service import is_signed_in_leboncoin_cookie
+
+            if is_signed_in_leboncoin_cookie(str(name or ""), str(domain or ""), value):
+                return True
+        return False
+
+    @classmethod
+    async def confirm_session_ready(cls, tab: Tab) -> bool:
+        """
+        Validate a real session: « Mes annonces » must load without auth redirect.
+        Prefer an auth cookie via CDP when available (HttpOnly).
+        """
+        await tab.get(ACCOUNT_URL)
+        await tab.sleep(1.4)
+        await cls._accept_didomi_cookies(tab)
+        url = await cls._current_url(tab)
+        if "auth.leboncoin.fr" in url.lower():
+            return False
+        if LOGIN_URL_PATTERN.search(url):
+            return False
+        if await cls._page_shows_login_gate(tab):
+            return False
+        dom = await cls.read_login_state_from_tab(tab)
+        if not dom.get("logged_in"):
+            return False
+        if await cls._cdp_has_auth_cookie():
+            return True
+        return "mes-annonces" in url.lower()
+
+    @classmethod
+    async def safe_close_browser_graceful(cls) -> None:
+        """CDP Browser.close so Chromium flushes cookies to the profile (Cardmarket pattern)."""
+        browser = cls._browser
+        tab = cls._tab
+        if browser is None:
+            return
+        if tab is not None:
+            try:
+                await asyncio.wait_for(tab.get("about:blank"), timeout=5.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Leboncoin pre-close about:blank: %s", exc)
+        try:
+            import nodriver.cdp.browser as cdp_browser  # type: ignore
+
+            connection = getattr(browser, "connection", None)
+            if connection is not None:
+                try:
+                    await asyncio.wait_for(connection.send(cdp_browser.close()), timeout=5.0)
+                    logger.info("Leboncoin browser: graceful CDP Browser.close sent")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Leboncoin CDP Browser.close: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Leboncoin CDP import: %s", exc)
+        try:
+            await asyncio.sleep(2.5)
+        except asyncio.CancelledError:
+            pass
+        cls.close_browser()
 
     @classmethod
     async def _page_shows_login_gate(cls, tab: Tab) -> bool:

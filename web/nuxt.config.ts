@@ -139,7 +139,6 @@ export default defineNuxtConfig({
         'lucide:flame',
         'simple-icons:amazon',
         'simple-icons:vinted',
-        'simple-icons:leboncoin',
       ],
     },
   },
