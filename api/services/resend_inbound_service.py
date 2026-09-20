@@ -78,8 +78,16 @@ def process_email_received_event(*, api_key: str, email_id: str, to_addresses: l
         return {"stored": False, "reason": "not_provision_domain"}
 
     received = fetch_received_email_body(api_key=api_key, email_id=email_id)
-    text = getattr(received, "text", None) or getattr(received, "body", None)
-    html = getattr(received, "html", None)
+    if isinstance(received, dict):
+        text = received.get("text") or received.get("body")
+        html = received.get("html")
+        from_addr = received.get("from") or ""
+        subject = received.get("subject")
+    else:
+        text = getattr(received, "text", None) or getattr(received, "body", None)
+        html = getattr(received, "html", None)
+        from_addr = getattr(received, "from", "") or ""
+        subject = getattr(received, "subject", None)
     otp = extract_otp_from_content(text=text if isinstance(text, str) else None, html=html if isinstance(html, str) else None)
 
     from services.amazon_provision_inbound_service import upsert_inbound_message
@@ -87,8 +95,8 @@ def process_email_received_event(*, api_key: str, email_id: str, to_addresses: l
     row = upsert_inbound_message(
         resend_email_id=email_id,
         to_address=_normalize_recipient(provision_recipients[0]),
-        from_address=_normalize_recipient(getattr(received, "from", "") or ""),
-        subject=(getattr(received, "subject", None) or "")[:512] or None,
+        from_address=_normalize_recipient(str(from_addr)),
+        subject=(str(subject or ""))[:512] or None,
         body_text=text if isinstance(text, str) else None,
         otp_code=otp,
     )
