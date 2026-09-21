@@ -305,36 +305,123 @@ class LeboncoinService:
         return await cls._click_button_containing(tab, "Continuer")
 
     @classmethod
+    async def _wait_for_combobox_options(cls, tab: Tab, *, timeout_sec: float = 6.0) -> bool:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            found = await tab.evaluate(
+                """
+                (() => {
+                  const sels = [
+                    '[role="listbox"] [role="option"]',
+                    '[role="option"]',
+                    '[data-spark-component="combobox-item"]',
+                  ];
+                  for (const sel of sels) {
+                    for (const el of document.querySelectorAll(sel)) {
+                      const r = el.getBoundingClientRect();
+                      if (r.width > 2 && r.height > 2) return true;
+                    }
+                  }
+                  return false;
+                })()
+                """,
+                return_by_value=True,
+            )
+            if found is True:
+                return True
+            await tab.sleep(0.25)
+        return False
+
+    @classmethod
     async def _select_combobox_option(cls, tab: Tab, label_fragment: str, option_text: str) -> bool:
         label_json = json.dumps(label_fragment)
         option_json = json.dumps(option_text)
         ok = await tab.evaluate(
             f"""
             (() => {{
-                const labelFrag = {label_json}.toLowerCase();
-                const want = {option_json}.toLowerCase();
-                const combos = [...document.querySelectorAll('[role="combobox"]')];
-                const combo = combos.find((c) => {{
-                    const al = (c.getAttribute('aria-label') || c.getAttribute('name') || '').toLowerCase();
-                    return al.includes(labelFrag);
-                }});
+                const norm = (s) => String(s || '')
+                  .normalize('NFD').replace(/\\p{{M}}/gu, '')
+                  .replace(/[''´`]/g, "'")
+                  .toLowerCase()
+                  .trim();
+                const labelFrag = norm({label_json});
+                const want = norm({option_json});
+
+                const findCombo = () => {{
+                  for (const lab of document.querySelectorAll('label, legend, p, span')) {{
+                    const t = norm(lab.textContent || '');
+                    if (!t || (!t.startsWith(labelFrag) && t !== labelFrag)) continue;
+                    const root = lab.closest('div, fieldset, section') || lab.parentElement;
+                    if (!root) continue;
+                    const cb = root.querySelector(
+                      '[role="combobox"], button[data-spark-component*="combobox"], input[data-spark-component="combobox-input"]'
+                    );
+                    if (cb) return cb;
+                  }}
+                  for (const c of document.querySelectorAll('[role="combobox"]')) {{
+                    const al = norm(c.getAttribute('aria-label') || c.getAttribute('name') || '');
+                    if (al.includes(labelFrag)) return c;
+                  }}
+                  return null;
+                }};
+
+                const combo = findCombo();
                 if (!combo) return false;
+                combo.scrollIntoView({{ block: 'center', behavior: 'instant' }});
                 combo.click();
-                for (const opt of document.querySelectorAll('[role="option"]')) {{
-                    const t = (opt.textContent || '').trim().toLowerCase();
+                combo.focus?.();
+
+                const pickOption = () => {{
+                  const opts = [
+                    ...document.querySelectorAll('[role="listbox"] [role="option"]'),
+                    ...document.querySelectorAll('[role="option"]'),
+                    ...document.querySelectorAll('[data-spark-component="combobox-item"]'),
+                  ];
+                  for (const opt of opts) {{
+                    const t = norm(opt.textContent || '');
+                    if (!t) continue;
                     if (t === want || t.includes(want) || want.includes(t)) {{
-                        opt.click();
-                        return true;
+                      opt.click();
+                      return true;
                     }}
-                }}
+                  }}
+                  return false;
+                }};
+                if (pickOption()) return true;
                 return false;
             }})()
             """,
             return_by_value=True,
         )
+        if ok is not True:
+            await tab.sleep(0.35)
+            await cls._wait_for_combobox_options(tab, timeout_sec=4.0)
+            ok = await tab.evaluate(
+                f"""
+                (() => {{
+                  const norm = (s) => String(s || '')
+                    .normalize('NFD').replace(/\\p{{M}}/gu, '')
+                    .replace(/[''´`]/g, "'")
+                    .toLowerCase()
+                    .trim();
+                  const want = norm({option_json});
+                  for (const opt of document.querySelectorAll('[role="option"], [data-spark-component="combobox-item"]')) {{
+                    const t = norm(opt.textContent || '');
+                    if (t && (t === want || t.includes(want) || want.includes(t))) {{
+                      opt.click();
+                      return true;
+                    }}
+                  }}
+                  return false;
+                }})()
+                """,
+                return_by_value=True,
+            )
         if ok is True:
             await tab.sleep(0.45)
-        return ok is True
+            return True
+        logger.warning("Leboncoin combobox « %s » → « %s » non sélectionné.", label_fragment, option_text)
+        return False
 
     @classmethod
     async def _click_category_suggestion(cls, tab: Tab, keyword: str) -> bool:
@@ -485,10 +572,19 @@ class LeboncoinService:
         prod_str = str(current_produit or "")
         if produit.lower() not in prod_str.lower():
             await cls._select_combobox_option(tab, "produit", produit)
-        await cls._select_combobox_option(tab, "état", etat)
-        await cls._select_combobox_option(tab, "conditionnement", conditionnement)
+        for label_frag, value in (
+            ("état", etat),
+            ("conditionnement", conditionnement),
+        ):
+            for _ in range(2):
+                if await cls._select_combobox_option(tab, label_frag, value):
+                    break
+                await tab.sleep(0.5)
         if epoque:
-            await cls._select_combobox_option(tab, "époque", epoque)
+            for _ in range(2):
+                if await cls._select_combobox_option(tab, "époque", epoque):
+                    break
+                await tab.sleep(0.5)
 
     @classmethod
     async def _page_has_final_submit(cls, tab: Tab) -> bool:
@@ -1263,6 +1359,7 @@ class LeboncoinService:
                 }
             )
         await cls.upload_photos(photo_basenames, progress)
+        await tab.sleep(0.8)
         await cls._wizard_fill_structured_attributes(
             tab,
             produit=getattr(listing_fields, "produit", "Jeux de cartes"),

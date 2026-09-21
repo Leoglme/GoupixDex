@@ -29,7 +29,7 @@ LEBONCOIN_ETATS: Final[tuple[str, ...]] = (
 )
 
 LEBONCOIN_COND_BLISTER: Final[str] = "Sous blister / scellé"
-LEBONCOIN_COND_BOITE: Final[str] = "Avec boîte d’origine"
+LEBONCOIN_COND_BOITE: Final[str] = "Avec boîte d'origine"
 LEBONCOIN_COND_SANS: Final[str] = "Sans emballage"
 LEBONCOIN_COND_LOT: Final[str] = "Lot / collection groupée"
 

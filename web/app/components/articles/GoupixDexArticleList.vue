@@ -104,27 +104,13 @@
                 <span class="text-[var(--app-ink-soft)]">Réalisé </span>
                 <span class="font-medium text-[var(--app-ink)]">{{ eur.format(realizedSalePrice(row)!) }}</span>
               </span>
-              <span class="mt-2 flex flex-wrap gap-1.5">
-                <span v-if="row.published_on_vinted ?? false" class="app-badge app-badge--success py-0 text-[10px]">
-                  Vinted
-                </span>
-                <span v-else-if="vintedChannelEnabled" class="app-badge py-0 text-[10px] text-[var(--app-faint)]">
-                  Vinted
-                </span>
-                <span
-                  v-if="showEbayColumn && (row.published_on_ebay ?? false)"
-                  class="app-badge app-badge--success py-0 text-[10px]"
-                >
-                  eBay
-                </span>
-                <span v-else-if="showEbayColumn" class="app-badge py-0 text-[10px]"> eBay </span>
-                <span
-                  v-if="row.published_on_leboncoin ?? false"
-                  class="app-badge py-0 text-[10px]"
-                  style="background-color: rgb(255 110 20 / 0.15); color: #c44d00"
-                >
-                  Leboncoin
-                </span>
+              <span class="mt-2 flex flex-wrap items-center gap-2">
+                <GoupixDexArticleListedMarketplaces
+                  :row="row"
+                  :show-vinted="vintedChannelEnabled"
+                  :show-ebay="showEbayColumn"
+                  :show-leboncoin="leboncoinPublishAvailable"
+                />
                 <span
                   v-if="showSaleOutcomeColumns && row.is_sold"
                   class="app-badge app-badge--success py-0 text-[10px]"
@@ -219,8 +205,7 @@
               :direction="sortDirection"
               @sort="toggleSort('realized')"
             />
-            <GoupixDexBaseTableTh align="center">Vinted</GoupixDexBaseTableTh>
-            <GoupixDexBaseTableTh v-if="showEbayColumn" align="center">eBay</GoupixDexBaseTableTh>
+            <GoupixDexBaseTableTh align="center" title="Vinted, eBay, Leboncoin">En ligne</GoupixDexBaseTableTh>
             <GoupixDexBaseTableSortTh
               label="Créé"
               title="Date de création"
@@ -297,20 +282,13 @@
                   <span class="text-[var(--app-faint)]">→</span>
                   {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
                 </p>
-                <div class="mt-1.5 flex flex-wrap gap-1.5">
-                  <span v-if="row.published_on_vinted ?? false" class="app-badge app-badge--success py-0 text-[10px]">
-                    Vinted
-                  </span>
-                  <span v-else-if="vintedChannelEnabled" class="app-badge py-0 text-[10px] text-[var(--app-faint)]">
-                    Vinted
-                  </span>
-                  <span
-                    v-if="showEbayColumn && (row.published_on_ebay ?? false)"
-                    class="app-badge app-badge--success py-0 text-[10px]"
-                  >
-                    eBay
-                  </span>
-                  <span v-else-if="showEbayColumn" class="app-badge py-0 text-[10px]"> eBay </span>
+                <div class="mt-1.5">
+                  <GoupixDexArticleListedMarketplaces
+                    :row="row"
+                    :show-vinted="vintedChannelEnabled"
+                    :show-ebay="showEbayColumn"
+                    :show-leboncoin="leboncoinPublishAvailable"
+                  />
                 </div>
               </div>
             </GoupixDexBaseTableTd>
@@ -386,20 +364,13 @@
               <span v-else class="text-[var(--app-faint)]">—</span>
             </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd label="Vinted" align="center" class="hidden md:table-cell">
-              <span v-if="row.published_on_vinted ?? false" class="app-badge app-badge--success">
-                <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
-                Oui
-              </span>
-              <span v-else class="text-[var(--app-faint)]">—</span>
-            </GoupixDexBaseTableTd>
-
-            <GoupixDexBaseTableTd v-if="showEbayColumn" label="eBay" align="center" class="hidden md:table-cell">
-              <span v-if="row.published_on_ebay ?? false" class="app-badge app-badge--success">
-                <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
-                Oui
-              </span>
-              <span v-else class="app-badge">Non</span>
+            <GoupixDexBaseTableTd label="En ligne" align="center" class="hidden md:table-cell">
+              <GoupixDexArticleListedMarketplaces
+                :row="row"
+                :show-vinted="vintedChannelEnabled"
+                :show-ebay="showEbayColumn"
+                :show-leboncoin="leboncoinPublishAvailable"
+              />
             </GoupixDexBaseTableTd>
 
             <GoupixDexBaseTableTd
