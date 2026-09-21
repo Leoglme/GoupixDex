@@ -119,6 +119,10 @@ _PUBLISH_BUTTON_TEXT = (
     "Publier",
     "Valider",
 )
+_SKIP_BOOST_BUTTON_TEXT = (
+    "Déposer sans booster mon annonce",
+    "Déposer sans booster",
+)
 
 _SESSION_RECONNECT_MSG = (
     "Session Leboncoin expirée ou incomplète pour déposer une annonce. "
@@ -1335,7 +1339,50 @@ class LeboncoinService:
         await tab.sleep(1.2)
 
     @classmethod
+    async def _on_boost_options_page(cls, tab: Tab) -> bool:
+        url = (await cls._current_url(tab)).lower()
+        return "/deposer-une-annonce/options" in url
+
+    @classmethod
+    async def _click_skip_boost(cls, tab: Tab) -> bool:
+        """Page « Boostez votre annonce » — sticky bar en bas."""
+        clicked = await tab.evaluate(
+            """
+            (() => {
+              const bar = document.querySelector('[data-qa-id="stickyBarElement"]');
+              if (bar) {
+                bar.scrollIntoView({ block: 'end', behavior: 'instant' });
+                const btn = bar.querySelector('button');
+                if (btn) {
+                  btn.click();
+                  return true;
+                }
+              }
+              for (const b of document.querySelectorAll('button')) {
+                const t = (b.textContent || '').trim().toLowerCase();
+                if (t.includes('sans booster')) {
+                  b.scrollIntoView({ block: 'center', behavior: 'instant' });
+                  b.click();
+                  return true;
+                }
+              }
+              return false;
+            })()
+            """,
+            return_by_value=True,
+        )
+        if clicked is True:
+            await tab.sleep(0.55)
+            return True
+        for label in _SKIP_BOOST_BUTTON_TEXT:
+            if await cls._click_button_containing(tab, label):
+                return True
+        return False
+
+    @classmethod
     async def _click_publish(cls, tab: Tab) -> bool:
+        if await cls._on_boost_options_page(tab):
+            return await cls._click_skip_boost(tab)
         for css in _PUBLISH_BUTTON_CSS:
             btn = await tab.select(css, timeout=4)
             if isinstance(btn, Element):
@@ -1403,6 +1450,19 @@ class LeboncoinService:
                 return {"published": True, "listing_id": listing_id, "url": url}
             if re.search(r"/mes-annonces|/compte/part/mes-annonces", url, re.I):
                 return {"published": True, "listing_id": cls._extract_listing_id(url), "url": url}
+            if await cls._on_boost_options_page(tab):
+                if progress:
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "publish",
+                            "message": "Options de boost — clic « Déposer sans booster »…",
+                            "form_step": "skip_boost",
+                        }
+                    )
+                await cls._click_skip_boost(tab)
+            elif await cls._page_has_final_submit(tab):
+                await cls._click_publish(tab)
             if "datadome" in url.lower() and progress:
                 await progress(
                     {
