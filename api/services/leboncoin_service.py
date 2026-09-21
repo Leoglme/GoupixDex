@@ -617,35 +617,18 @@ class LeboncoinService:
         return False
 
     @classmethod
-    async def _location_satisfies_profile(cls, tab: Tab, *, address_line1: str, postal_code: str, city: str) -> bool:
+    async def _location_keep_leboncoin_prefill(cls, tab: Tab, postal_code: str = "") -> bool:
+        """
+        Leboncoin préremplit souvent l’adresse (cache compte).
+        Si le champ contient déjà une adresse non dupliquée, on ne la touche pas.
+        """
         value = await cls._read_lbc_location_value(tab)
-        if not value or len(value) < 5:
-            return False
-        if cls._location_value_looks_duplicated(value, postal_code):
+        if len(value) < 5:
             return False
         pc = postal_code.strip()
-        town = cls._normalize_address_token(city)
-        low = cls._normalize_address_token(value)
-        if pc not in value:
+        if pc and cls._location_value_looks_duplicated(value, pc):
             return False
-        if town and town not in low:
-            return False
-        street_num = re.match(r"^(\d+)", address_line1.strip())
-        if street_num and street_num.group(1) not in value:
-            return False
-        invalid = await tab.evaluate(
-            """
-            (() => {
-              const el =
-                document.querySelector('div[data-rhf-name="location"] input[name="location"]')
-                || document.querySelector('input[data-spark-component="combobox-input"][name="location"]')
-                || document.querySelector('input[name="location"][role="combobox"]');
-              return el ? el.getAttribute('aria-invalid') === 'true' : true;
-            })()
-            """,
-            return_by_value=True,
-        )
-        return invalid is not True
+        return True
 
     @classmethod
     async def _clear_lbc_location_input(cls, tab: Tab, el: Element, css_selector: str) -> None:
@@ -670,10 +653,8 @@ class LeboncoinService:
             return_by_value=True,
         )
         await el.click()
-        for _ in range(3):
-            await cls._cdp_tap_key(tab, key="a", code="KeyA", modifiers=2)
-            await cls._cdp_tap_key(tab, key="Backspace", code="Backspace")
-            await tab.sleep(0.08)
+        await cls._cdp_tap_key(tab, key="a", code="KeyA", modifiers=2)
+        await cls._cdp_tap_key(tab, key="Backspace", code="Backspace")
         try:
             await el.clear_input()
         except Exception:
@@ -701,6 +682,11 @@ class LeboncoinService:
 
     @classmethod
     async def _type_lbc_location_combobox(cls, tab: Tab, text: str) -> bool:
+        pc_in_query = re.search(r"\b(\d{5})\b", text)
+        pc = pc_in_query.group(1) if pc_in_query else ""
+        if await cls._location_keep_leboncoin_prefill(tab, pc):
+            logger.info("Leboncoin: adresse préremplie conservée (pas de saisie)")
+            return True
         for sel in _ADDRESS_LBC_SELECTORS:
             el: Element | None = None
             try:
@@ -711,30 +697,25 @@ class LeboncoinService:
                 continue
             try:
                 await el.scroll_into_view()
-                await tab.sleep(0.35)
+                await tab.sleep(0.25)
                 current = await cls._read_lbc_location_value(tab)
-                pc_in_query = re.search(r"\b(\d{5})\b", text)
-                pc = pc_in_query.group(1) if pc_in_query else ""
-                duplicated = bool(pc and cls._location_value_looks_duplicated(current, pc))
-                if current and not duplicated and cls._input_value_matches(tab, sel, text):
-                    logger.info("Leboncoin adresse déjà renseignée via %s", sel)
+                if current and cls._location_value_looks_duplicated(current, pc):
+                    await cls._clear_lbc_location_input(tab, el, sel)
+                elif current and len(current) >= 5:
+                    logger.info("Leboncoin: adresse déjà dans le champ, pas d’effacement")
                     return True
-                await cls._clear_lbc_location_input(tab, el, sel)
-                after_clear = await cls._read_lbc_location_value(tab)
-                if after_clear:
-                    logger.debug("Leboncoin adresse: champ non vide après clear (%r)", after_clear[:80])
                 await el.click()
-                await tab.sleep(0.12)
+                await tab.sleep(0.15)
+                await el.send_keys(text)
+                await tab.sleep(0.45)
+                if await cls._input_value_matches(tab, sel, text):
+                    logger.info("Leboncoin adresse saisie (send_keys) via %s", sel)
+                    return True
+                await el.click()
                 await tab.send(cdp_input.insert_text(text))
                 await tab.sleep(0.35)
                 if await cls._input_value_matches(tab, sel, text):
                     logger.info("Leboncoin adresse saisie (CDP insertText) via %s", sel)
-                    return True
-                await el.click()
-                await el.send_keys(text)
-                await tab.sleep(0.35)
-                if await cls._input_value_matches(tab, sel, text):
-                    logger.info("Leboncoin adresse saisie (send_keys) via %s", sel)
                     return True
             except Exception as exc:
                 logger.debug("Leboncoin saisie adresse %s: %s", sel, exc)
@@ -803,13 +784,14 @@ class LeboncoinService:
         if not line or not pc or not town:
             return False
         query = f"{line}, {pc} {town}"
-        if await cls._location_satisfies_profile(tab, address_line1=line, postal_code=pc, city=town):
+        if await cls._location_keep_leboncoin_prefill(tab, pc):
+            existing = await cls._read_lbc_location_value(tab)
             if progress:
                 await progress(
                     {
                         "type": "log",
                         "step": "form",
-                        "message": f"Adresse de remise déjà valide : {line}, {pc} {town}",
+                        "message": f"Adresse de remise (Leboncoin) : {existing[:80]}",
                         "form_step": "pickup_address",
                     }
                 )
@@ -867,12 +849,7 @@ class LeboncoinService:
         for step in range(12):
             if await cls._page_has_final_submit(tab):
                 break
-            if not await cls._location_satisfies_profile(
-                tab,
-                address_line1=address_line1,
-                postal_code=postal_code,
-                city=city,
-            ):
+            if not await cls._location_keep_leboncoin_prefill(tab, postal_code.strip()):
                 await cls._fill_leboncoin_pickup_address(
                     tab,
                     address_line1=address_line1,
