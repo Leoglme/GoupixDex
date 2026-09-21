@@ -396,44 +396,54 @@ class AmazonScraper:
 
         print(f"\n{'='*60}")
         cap_note = f", max {item_cap} items" if item_cap else ""
-        print(f"[search] '{amazon_q}' - up to {max_pages} pages{cap_note} (HTTP + nodriver if needed)")
+        print(
+            f"[search] browse '{DEFAULT_INVITE_SEARCH_QUERY}' - up to {max_pages} pages{cap_note} "
+            f"(HTTP + nodriver if needed)"
+        )
         if user_filter:
-            print(f"[search] title filter: '{user_filter}'")
+            print(f"[search] title filter: '{user_filter}' (widen to '{amazon_q}' only if empty)")
         print(f"{'='*60}\n")
 
+        primary_message = (
+            f"Recherche des invitations Pokémon (filtre « {user_filter} »)…"
+            if user_filter
+            else f"Recherche des invitations Pokémon (jusqu’à {max_pages} pages)…"
+        )
         if progress_callback:
             progress_callback(
                 current_page=0,
                 total_pages=max_pages,
                 items_found=0,
                 status="starting",
-                message=f"Starting search for '{amazon_q}' (up to {max_pages} pages)...",
+                message=primary_message,
             )
 
+        # Passage principal : la browse vendeur Amazon.fr fiable (c'est là que le badge
+        # « Disponible sur invitation » apparaît), avec la requête utilisateur appliquée en
+        # filtre de titre côté client. Une requête étroite comme « 30 » n'est PAS injectée dans
+        # la recherche Amazon : ça renvoie des listings génériques et, surtout, un second scan
+        # par-dessus cramerait la session Amazon et ferait bloquer le passage productif.
         self._scan_search_pages_for_invites(
-            amazon_q, max_pages, item_cap, "", progress_callback, all_items, seen_asins
+            DEFAULT_INVITE_SEARCH_QUERY, max_pages, item_cap, user_filter,
+            progress_callback, all_items, seen_asins,
         )
 
-        if user_filter and (not all_items or (item_cap is not None and len(all_items) < item_cap)):
-            print(
-                f"[search] Fallback '{DEFAULT_INVITE_SEARCH_QUERY}' + title filter '{user_filter}'"
-            )
+        # Fallback : uniquement si la browse fiable n'a rien renvoyé pour une requête précise, on
+        # élargit côté Amazon (« pokemon <requête> »), toujours filtré sur le titre pour garder
+        # l'intention de l'utilisateur.
+        if user_filter and not all_items and amazon_q != DEFAULT_INVITE_SEARCH_QUERY:
+            print(f"[search] Widen '{amazon_q}' + title filter '{user_filter}'")
             if progress_callback:
                 progress_callback(
                     current_page=0,
                     total_pages=max_pages,
-                    items_found=len(all_items),
+                    items_found=0,
                     status="starting",
-                    message=f"Recherche élargie + filtre « {user_filter} »…",
+                    message=f"Recherche élargie « {amazon_q} »…",
                 )
             self._scan_search_pages_for_invites(
-                DEFAULT_INVITE_SEARCH_QUERY,
-                max_pages,
-                item_cap,
-                user_filter,
-                progress_callback,
-                all_items,
-                seen_asins,
+                amazon_q, max_pages, item_cap, user_filter,
+                progress_callback, all_items, seen_asins,
             )
 
         print(f"\n{'='*60}")
