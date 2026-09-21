@@ -1,13 +1,13 @@
 <template>
   <div ref="chartRef" class="w-full space-y-2">
-    <div v-if="allData.length >= 2" class="flex flex-wrap gap-1">
+    <div v-if="visibleRanges.length > 1" class="flex flex-wrap gap-1">
       <button
-        v-for="range in RANGES"
+        v-for="range in visibleRanges"
         :key="range.key"
         type="button"
         class="rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors"
         :class="
-          selectedRangeKey === range.key
+          currentRange?.key === range.key
             ? 'bg-(--app-accent) text-white'
             : 'text-(--app-ink-soft) hover:bg-(--app-surface-2)'
         "
@@ -65,8 +65,9 @@ interface PriceHistoryRange {
 }
 
 /**
- * Mini-courbe d'évolution du prix marché (partagée cartes / produits scellés),
- * avec sélecteurs de période façon Pikacheck (7 j, 1 mois, 3 mois, 6 mois, Tout).
+ * Mini-courbe d'évolution du prix marché (partagée cartes / produits scellés).
+ * Les périodes (7 j, 1 mois, 3 mois, 6 mois, Tout) façon Pikacheck n'apparaissent
+ * que quand l'historique réel les couvre — elles se révèlent au fil des snapshots.
  */
 const props = defineProps({
   points: {
@@ -75,13 +76,15 @@ const props = defineProps({
   },
 })
 
-const RANGES: PriceHistoryRange[] = [
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const FIXED_RANGES: PriceHistoryRange[] = [
   { key: '7d', label: '7 j', days: 7 },
   { key: '1m', label: '1 mois', days: 30 },
   { key: '3m', label: '3 mois', days: 90 },
   { key: '6m', label: '6 mois', days: 180 },
-  { key: 'all', label: 'Tout', days: null },
 ]
+const ALL_RANGE: PriceHistoryRange = { key: 'all', label: 'Tout', days: null }
 
 const chartRef = useTemplateRef<HTMLElement | null>('chartRef')
 const { width } = useElementSize(chartRef)
@@ -97,12 +100,49 @@ const allData: ComputedRef<PriceHistoryDatum[]> = computed(() =>
   props.points.map((p) => ({ date: new Date(p.date), price: p.price_eur })),
 )
 
+/** Étendue de l'historique en jours (0 quand il y a moins de deux points). */
+const dataSpanDays: ComputedRef<number> = computed(() => {
+  if (allData.value.length < 2) {
+    return 0
+  }
+  const oldest = allData.value[0]?.date.getTime() ?? Date.now()
+  return (Date.now() - oldest) / DAY_MS
+})
+
+/** Périodes réellement couvertes par les données : chaque cran apparaît quand l'historique le dépasse. */
+const visibleRanges: ComputedRef<PriceHistoryRange[]> = computed(() => {
+  if (allData.value.length < 2) {
+    return []
+  }
+  const span = dataSpanDays.value
+  const ranges: PriceHistoryRange[] = []
+  FIXED_RANGES.forEach((range, index) => {
+    const previousDays = index === 0 ? 0 : (FIXED_RANGES[index - 1]?.days ?? 0)
+    if (index === 0 || span > previousDays) {
+      ranges.push(range)
+    }
+  })
+  if (span > 180) {
+    ranges.push(ALL_RANGE)
+  }
+  return ranges
+})
+
+/** Période effective : le choix de l'utilisateur s'il est visible, sinon la plus large disponible. */
+const currentRange: ComputedRef<PriceHistoryRange | null> = computed(() => {
+  const ranges = visibleRanges.value
+  if (ranges.length === 0) {
+    return null
+  }
+  return ranges.find((r) => r.key === selectedRangeKey.value) ?? ranges[ranges.length - 1] ?? null
+})
+
 const data: ComputedRef<PriceHistoryDatum[]> = computed(() => {
-  const range = RANGES.find((r) => r.key === selectedRangeKey.value)
+  const range = currentRange.value
   if (!range || range.days == null) {
     return allData.value
   }
-  const cutoff = Date.now() - range.days * 24 * 60 * 60 * 1000
+  const cutoff = Date.now() - range.days * DAY_MS
   return allData.value.filter((d) => d.date.getTime() >= cutoff)
 })
 
