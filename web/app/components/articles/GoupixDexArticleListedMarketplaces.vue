@@ -1,32 +1,34 @@
 <template>
-  <div class="inline-flex items-center justify-center gap-1.5" :title="tooltip" :aria-label="tooltip">
+  <div class="inline-flex items-center justify-center gap-1" :title="tooltip" :aria-label="tooltip">
     <span
       v-if="showVinted"
-      class="inline-flex size-7 items-center justify-center rounded-full ring-2 transition-colors"
+      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
       :class="
-        row.published_on_vinted ? 'bg-[#09B1BA]/25 ring-[#09B1BA]' : 'bg-[var(--app-surface-2)] ring-[#09B1BA]/70'
+        row.published_on_vinted ? 'bg-[#09B1BA]/22 ring-[#09B1BA]' : 'bg-[var(--app-surface-2)] ring-[#09B1BA]/55'
       "
     >
-      <UIcon name="i-simple-icons-vinted" class="size-4 text-[#09B1BA]" aria-hidden="true" />
+      <UIcon name="i-simple-icons-vinted" class="size-3 text-[#09B1BA]" aria-hidden="true" />
     </span>
     <span
       v-if="showEbay"
-      class="inline-flex size-7 items-center justify-center rounded-full ring-2 transition-colors"
-      :class="row.published_on_ebay ? 'bg-[#86b817]/20 ring-[#86b817]' : 'bg-[var(--app-surface-2)] ring-[#86b817]/65'"
+      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
+      :class="row.published_on_ebay ? 'bg-[#86b817]/18 ring-[#86b817]' : 'bg-[var(--app-surface-2)] ring-[#86b817]/50'"
     >
-      <span class="text-[9px] leading-none font-black tracking-tighter select-none" aria-hidden="true">
-        <span class="text-[#E53238]">e</span><span class="text-[#0064D2]">b</span><span class="text-[#F5AF02]">a</span
-        ><span class="text-[#86B817]">y</span>
+      <span
+        class="flex h-3 w-[1.125rem] items-center justify-center overflow-hidden rounded-[2px] bg-white/95 px-px shadow-[0_0_0_1px_rgba(255,255,255,0.35)]"
+        aria-hidden="true"
+      >
+        <GoupixDexEbayLogoGradient tight class="h-2.5 w-full" />
       </span>
     </span>
     <span
       v-if="showLeboncoin"
-      class="inline-flex size-7 items-center justify-center rounded-full ring-2 transition-colors"
+      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
       :class="
-        row.published_on_leboncoin ? 'bg-[#FF6E14]/25 ring-[#FF6E14]' : 'bg-[var(--app-surface-2)] ring-[#FF6E14]/70'
+        row.published_on_leboncoin ? 'bg-[#FF6E14]/20 ring-[#FF6E14]' : 'bg-[var(--app-surface-2)] ring-[#FF6E14]/55'
       "
     >
-      <span class="text-xs leading-none font-black text-[#FF6E14] select-none" aria-hidden="true">L</span>
+      <GoupixDexLeboncoinMark class="size-3.5 rounded-[3px]" aria-hidden="true" />
     </span>
   </div>
 </template>
