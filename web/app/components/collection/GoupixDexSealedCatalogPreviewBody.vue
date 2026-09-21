@@ -29,7 +29,7 @@
     <div class="border-default rounded-xl border p-3">
       <p class="app-label">Prix marché</p>
       <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
-        {{ product.price != null ? eur.format(product.price) : '—' }}
+        {{ displayPriceEur != null ? eur.format(displayPriceEur) : '—' }}
       </p>
     </div>
 
@@ -74,10 +74,11 @@ const emit = defineEmits<{
   added: [product: SealedProduct]
 }>()
 
-const { catalogAdd, catalogPriceHistory } = useSealed()
+const { catalogAdd, catalogPriceHistory, quoteCatalogPrices } = useSealed()
 const toast = useToast()
 
 const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
+const marketPriceEur = ref<number | null>(null)
 const adding = ref(false)
 const ownedQuantity = ref(0)
 
@@ -86,6 +87,9 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   currency: 'EUR',
   maximumFractionDigits: 2,
 })
+
+/** Prix marché Cardmarket (aligné sur les produits possédés), avec repli sur le prix catalogue. */
+const displayPriceEur = computed<number | null>(() => marketPriceEur.value ?? props.product.price)
 
 /**
  * Charge la courbe approximative depuis le guide (best-effort, par idProduct).
@@ -96,6 +100,23 @@ async function loadPriceHistory(): Promise<void> {
     priceHistory.value = await catalogPriceHistory(props.product.p)
   } catch {
     priceHistory.value = null
+  }
+}
+
+/**
+ * Résout le prix marché Cardmarket réel du produit (même source que les produits possédés).
+ * @returns Résolue quand le prix est connu ou l'échec acté (repli catalogue).
+ */
+async function loadMarketPrice(): Promise<void> {
+  if (props.product.p == null) {
+    marketPriceEur.value = null
+    return
+  }
+  try {
+    const prices = await quoteCatalogPrices([props.product.p])
+    marketPriceEur.value = prices[String(props.product.p)] ?? null
+  } catch {
+    marketPriceEur.value = null
   }
 }
 
@@ -132,7 +153,9 @@ watch(
   () => props.product.tp,
   () => {
     ownedQuantity.value = 0
+    marketPriceEur.value = null
     void loadPriceHistory()
+    void loadMarketPrice()
   },
   { immediate: true },
 )

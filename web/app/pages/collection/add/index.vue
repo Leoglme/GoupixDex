@@ -16,13 +16,7 @@
 
     <template #body>
       <div class="app-dashboard-page w-full space-y-4 sm:space-y-5">
-        <NuxtLink
-          to="/collection"
-          class="inline-flex w-fit items-center gap-1 text-sm font-medium text-(--app-accent) underline-offset-4 transition hover:text-(--app-accent) hover:underline"
-        >
-          <UIcon name="i-lucide-arrow-left" class="size-4 shrink-0" aria-hidden />
-          Retour
-        </NuxtLink>
+        <GoupixDexBackLink to="/collection" />
 
         <GoupixDexPageHeader
           title="Catalogue Pokémon"

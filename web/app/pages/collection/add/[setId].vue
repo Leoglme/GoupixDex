@@ -11,16 +11,13 @@
             Collection
           </span>
         </template>
-        <template #right>
-          <UButton :to="backToCatalogLink" color="neutral" variant="ghost" icon="i-lucide-arrow-left">
-            Extensions
-          </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page w-full space-y-4 sm:space-y-5">
+        <GoupixDexBackLink :to="backToCatalogLink" />
+
         <div v-if="setLoading" class="flex items-center justify-center py-24">
           <UIcon name="i-lucide-loader-2" class="text-primary size-10 animate-spin" />
         </div>

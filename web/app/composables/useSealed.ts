@@ -207,6 +207,25 @@ export function useSealed() {
   }
 
   /**
+   * POST `/sealed/quote` — prix marché **Cardmarket** en lot pour des idProduct du catalogue.
+   *
+   * Même source que les produits possédés (guide local), pour que le catalogue affiche le
+   * prix € réel et non le repli TCGplayer (USD) figé dans le catalogue statique.
+   *
+   * @param cardmarketIdProducts - idProduct Cardmarket à coter.
+   * @returns {Promise<Record<string, number | null>>} Prix € par idProduct (clé = idProduct en string).
+   */
+  async function quoteCatalogPrices(cardmarketIdProducts: number[]) {
+    if (cardmarketIdProducts.length === 0) {
+      return {} as Record<string, number | null>
+    }
+    const { data } = await $api.post<{ prices: Record<string, number | null> }>('/sealed/quote', {
+      cardmarket_id_products: cardmarketIdProducts,
+    })
+    return data.prices
+  }
+
+  /**
    * POST `/sealed/catalog-price-history` — courbe approximative d'un produit catalogue (avant l'ajout).
    *
    * @param cardmarketIdProduct - idProduct Cardmarket du produit catalogue (peut être null).
@@ -276,6 +295,7 @@ export function useSealed() {
     resolveCardmarket,
     getSealed,
     getPriceHistory,
+    quoteCatalogPrices,
     catalogPriceHistory,
     patchSealed,
     deleteSealed,

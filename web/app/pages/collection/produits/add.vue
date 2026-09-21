@@ -16,16 +16,12 @@
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/collection/produits" />
+
         <GoupixDexPageHeader
           title="Ajouter un produit scellé"
           description="Choisis une extension ou recherche un produit, puis clique pour l'ajouter."
-        >
-          <template #actions>
-            <UButton color="neutral" variant="ghost" icon="i-lucide-arrow-left" to="/collection/produits">
-              Retour
-            </UButton>
-          </template>
-        </GoupixDexPageHeader>
+        />
 
         <UInput
           v-model="query"
@@ -119,8 +115,8 @@
                 <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ hit.product.n }}</p>
                 <p class="text-muted flex items-center justify-between gap-1 text-[10px]">
                   <span class="truncate">{{ sealedProductTypeLabel(hit.product.c) }}</span>
-                  <span v-if="hit.product.price != null" class="text-highlighted shrink-0 tabular-nums">
-                    {{ eur.format(hit.product.price) }}
+                  <span v-if="displayPriceEur(hit.product) != null" class="text-highlighted shrink-0 tabular-nums">
+                    {{ eur.format(displayPriceEur(hit.product)!) }}
                   </span>
                 </p>
               </div>
@@ -177,7 +173,7 @@ useGoupixPageSeo(
 )
 
 const { loadSeries } = useSealedCatalog()
-const { catalogAdd, listSealed } = useSealed()
+const { catalogAdd, listSealed, quoteCatalogPrices } = useSealed()
 const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
@@ -187,6 +183,7 @@ const query = ref('')
 const loading = ref(true)
 const pendingTp = ref<number | null>(null)
 const ownedMap = ref<Map<number, number>>(new Map())
+const marketPriceCache = ref<Map<number, number | null>>(new Map())
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -231,6 +228,45 @@ const visibleProducts = computed<SealedCatalogSearchHit[]>(() => {
  */
 function ownedOf(idProduct: number | null): number {
   return idProduct != null ? (ownedMap.value.get(idProduct) ?? 0) : 0
+}
+
+/**
+ * Prix marché à afficher : Cardmarket réel si résolu, sinon repli catalogue (TCGplayer).
+ * @param product - Produit catalogue.
+ * @returns Le prix € à afficher, ou null si inconnu.
+ */
+function displayPriceEur(product: SealedCatalogProduct): number | null {
+  if (product.p != null && marketPriceCache.value.has(product.p)) {
+    return marketPriceCache.value.get(product.p) ?? product.price
+  }
+  return product.price
+}
+
+/**
+ * Cote au prix marché Cardmarket (en lot) les produits visibles pas encore en cache.
+ * @param hits - Produits actuellement affichés.
+ * @returns Résolue après mise à jour du cache (best-effort).
+ */
+async function ensureMarketPrices(hits: SealedCatalogSearchHit[]): Promise<void> {
+  const missing = new Set<number>()
+  for (const { product } of hits) {
+    if (product.p != null && !marketPriceCache.value.has(product.p)) {
+      missing.add(product.p)
+    }
+  }
+  if (missing.size === 0) {
+    return
+  }
+  try {
+    const prices = await quoteCatalogPrices([...missing])
+    const next = new Map(marketPriceCache.value)
+    for (const [idProduct, value] of Object.entries(prices)) {
+      next.set(Number(idProduct), value)
+    }
+    marketPriceCache.value = next
+  } catch {
+    /* best-effort : on garde le prix catalogue */
+  }
 }
 
 /**
@@ -319,6 +355,14 @@ watch(
   () => {
     void loadOwned()
   },
+)
+
+watch(
+  visibleProducts,
+  (hits) => {
+    void ensureMarketPrices(hits)
+  },
+  { immediate: true },
 )
 
 onMounted(async () => {
