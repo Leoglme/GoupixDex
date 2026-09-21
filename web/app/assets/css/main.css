@@ -879,17 +879,15 @@ html.dark {
     table-layout: fixed;
   }
 
-  .goupix-articles-table .goupix-card-table__lead {
-    width: 3.25rem;
-    max-width: 3.25rem;
-    padding-right: 0.25rem;
-    padding-left: 0.5rem;
-    vertical-align: middle;
+  .goupix-articles-table .goupix-articles-table__article-cell {
+    padding-right: 0.5rem;
+    padding-left: 0.75rem;
   }
 
-  .goupix-articles-table .goupix-card-table thead th:nth-child(2) {
-    width: 3.25rem;
-    max-width: 3.25rem;
+  .goupix-articles-table .goupix-articles-table__article-col {
+    width: auto;
+    min-width: 10rem;
+    max-width: 32vw;
   }
 
   .goupix-card-table__name-col {

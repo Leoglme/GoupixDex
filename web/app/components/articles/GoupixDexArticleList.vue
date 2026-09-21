@@ -149,11 +149,10 @@
                 @change="onToggleSelectAllNative"
               />
             </GoupixDexBaseTableTh>
-            <GoupixDexBaseTableTh class="w-14" sr-only>Visuel</GoupixDexBaseTableTh>
             <GoupixDexBaseTableSortTh
               label="Nom"
               title="Nom de l'article"
-              th-class="goupix-card-table__name-col"
+              th-class="goupix-card-table__name-col goupix-articles-table__article-col"
               :active="sortColumn === 'name'"
               :direction="sortDirection"
               @sort="toggleSort('name')"
@@ -240,76 +239,48 @@
               />
             </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd class="goupix-card-table__lead w-14 align-middle">
-              <a
-                :href="articleDetailHref(row.id)"
-                class="relative block size-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)] md:size-11"
-                :aria-label="row.pokemon_name || row.title"
-                @click="onOpenArticle(row.id, $event)"
-              >
-                <img
-                  v-if="row.images?.length"
-                  :src="imageSrc(row.images[0]?.image_url)"
-                  :alt="row.title"
-                  loading="lazy"
-                  decoding="async"
-                  class="absolute inset-0 h-full w-full object-cover"
-                />
-                <span
-                  v-else
-                  class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
-                >
-                  {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
-                </span>
-              </a>
-              <div class="min-w-0 flex-1 md:hidden">
+            <GoupixDexBaseTableTd
+              class="goupix-card-table__lead goupix-articles-table__article-cell min-w-0 align-middle"
+            >
+              <div class="flex min-w-0 items-center gap-2.5">
                 <a
                   :href="articleDetailHref(row.id)"
-                  class="block truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
+                  class="relative block size-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
+                  :aria-label="row.pokemon_name || row.title"
                   @click="onOpenArticle(row.id, $event)"
                 >
-                  {{ row.pokemon_name || row.title || '—' }}
-                </a>
-                <p
-                  v-if="articleTableSecondaryLine(row)"
-                  class="truncate text-xs text-[var(--app-ink-soft)]"
-                  :title="row.title"
-                >
-                  {{ articleTableSecondaryLine(row) }}
-                </p>
-                <p class="mt-1 text-xs text-[var(--app-ink-soft)] tabular-nums">
-                  {{ eur.format(row.purchase_price) }}
-                  <span class="text-[var(--app-faint)]">→</span>
-                  {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
-                </p>
-                <div class="mt-1.5">
-                  <GoupixDexArticleListedMarketplaces
-                    :row="row"
-                    :show-vinted="vintedChannelEnabled"
-                    :show-ebay="showEbayColumn"
-                    :show-leboncoin="leboncoinPublishAvailable"
+                  <img
+                    v-if="row.images?.length"
+                    :src="imageSrc(row.images[0]?.image_url)"
+                    :alt="row.title"
+                    loading="lazy"
+                    decoding="async"
+                    class="absolute inset-0 h-full w-full object-cover"
                   />
-                </div>
-              </div>
-            </GoupixDexBaseTableTd>
-
-            <GoupixDexBaseTableTd class="goupix-card-table__name-col hidden min-w-0 align-middle md:table-cell">
-              <div class="flex min-w-0 flex-col gap-0.5">
-                <a
-                  :href="articleDetailHref(row.id)"
-                  class="truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
-                  :title="row.pokemon_name || row.title || undefined"
-                  @click="onOpenArticle(row.id, $event)"
-                >
-                  {{ row.pokemon_name || row.title || '—' }}
+                  <span
+                    v-else
+                    class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
+                  >
+                    {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
+                  </span>
                 </a>
-                <span
-                  v-if="articleTableSecondaryLine(row)"
-                  class="truncate text-xs text-[var(--app-ink-soft)]"
-                  :title="row.title"
-                >
-                  {{ articleTableSecondaryLine(row) }}
-                </span>
+                <div class="min-w-0 flex-1">
+                  <a
+                    :href="articleDetailHref(row.id)"
+                    class="block truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
+                    :title="row.pokemon_name || row.title || undefined"
+                    @click="onOpenArticle(row.id, $event)"
+                  >
+                    {{ row.pokemon_name || row.title || '—' }}
+                  </a>
+                  <span
+                    v-if="articleTableSecondaryLine(row)"
+                    class="block truncate text-xs text-[var(--app-ink-soft)]"
+                    :title="row.title"
+                  >
+                    {{ articleTableSecondaryLine(row) }}
+                  </span>
+                </div>
               </div>
             </GoupixDexBaseTableTd>
 
