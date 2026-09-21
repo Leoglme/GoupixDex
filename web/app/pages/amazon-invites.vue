@@ -134,13 +134,27 @@
           </div>
 
           <div
+            v-else-if="!refreshing && !loading && !error && items.length"
+            class="border-default/60 bg-elevated/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center"
+          >
+            <UIcon name="i-lucide-filter" class="text-primary size-8" />
+            <p class="text-highlighted text-sm font-medium">
+              {{ items.length }} invitation{{ items.length > 1 ? 's' : '' }} trouvée{{ items.length > 1 ? 's' : '' }},
+              masquée{{ items.length > 1 ? 's' : '' }} par le filtre « {{ activeStatusFilterLabel }} »
+            </p>
+            <p class="text-muted max-w-md text-xs">
+              Choisissez « Tous les statuts » dans le filtre ci-dessus pour voir la liste récupérée.
+            </p>
+          </div>
+
+          <div
             v-else-if="!refreshing && !loading && !error"
             class="border-default/60 bg-elevated/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center"
           >
             <UIcon name="i-lucide-inbox" class="text-primary size-8" />
             <p class="text-highlighted text-sm font-medium">Aucune invitation à afficher</p>
             <p class="text-muted max-w-md text-xs">
-              Ajustez la recherche ou le nombre de pages ci-dessus, puis appuyez sur « Actualiser » pour charger vos
+              Ajustez la recherche ou le nombre de produits ci-dessus, puis appuyez sur « Actualiser » pour charger vos
               invitations Amazon.
             </p>
           </div>
@@ -155,7 +169,15 @@
 <script setup lang="ts">
 import type { ComputedRef } from 'vue'
 import type { AmazonConnectionBadge } from '~/utils/amazonConnectionUi'
+import type { AmazonStatusFilter } from '~/types/amazonInvites'
 import { amazonSessionBadge } from '~/utils/amazonConnectionUi'
+
+const STATUS_FILTER_LABELS: Record<AmazonStatusFilter, string> = {
+  all: 'Tous les statuts',
+  accepted: 'Commandable',
+  requested: 'Invitation demandée',
+  not_requested: 'Non demandée',
+}
 
 definePageMeta({ middleware: 'auth' })
 
@@ -196,6 +218,8 @@ const {
   requestProductInvite,
   switchActiveAccount,
 } = useAmazonInvitesPage()
+
+const activeStatusFilterLabel: ComputedRef<string> = computed(() => STATUS_FILTER_LABELS[statusFilter.value])
 
 async function onAccountChange(id: number | null | undefined): Promise<void> {
   if (id == null) {

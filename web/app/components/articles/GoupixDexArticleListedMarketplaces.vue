@@ -1,34 +1,25 @@
 <template>
-  <div class="inline-flex items-center justify-center gap-1" :title="tooltip" :aria-label="tooltip">
+  <div class="inline-flex items-center justify-center gap-1.5" :title="tooltip" :aria-label="tooltip">
     <span
       v-if="showVinted"
-      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
-      :class="
-        row.published_on_vinted ? 'bg-[#09B1BA]/22 ring-[#09B1BA]' : 'bg-[var(--app-surface-2)] ring-[#09B1BA]/55'
-      "
+      class="flex size-6 items-center justify-center overflow-hidden rounded-md bg-linear-to-tr from-[#186E72] via-[#2E9599] to-[#4CB6BA] transition"
+      :class="{ 'opacity-40 grayscale': !row.published_on_vinted }"
     >
-      <UIcon name="i-simple-icons-vinted" class="size-3 text-[#09B1BA]" aria-hidden="true" />
+      <UIcon name="i-simple-icons-vinted" class="size-4 text-white" aria-hidden="true" />
     </span>
     <span
       v-if="showEbay"
-      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
-      :class="row.published_on_ebay ? 'bg-[#86b817]/18 ring-[#86b817]' : 'bg-[var(--app-surface-2)] ring-[#86b817]/50'"
+      class="flex size-6 items-center justify-center overflow-hidden rounded-md bg-white px-0.5 transition"
+      :class="{ 'opacity-40 grayscale': !row.published_on_ebay }"
     >
-      <span
-        class="flex h-3 w-[1.125rem] items-center justify-center overflow-hidden rounded-[2px] bg-white/95 px-px shadow-[0_0_0_1px_rgba(255,255,255,0.35)]"
-        aria-hidden="true"
-      >
-        <GoupixDexEbayLogoGradient tight class="h-2.5 w-full" />
-      </span>
+      <GoupixDexEbayLogoGradient tight aria-hidden="true" />
     </span>
     <span
       v-if="showLeboncoin"
-      class="inline-flex size-5 items-center justify-center rounded-full ring-1 transition-colors"
-      :class="
-        row.published_on_leboncoin ? 'bg-[#FF6E14]/20 ring-[#FF6E14]' : 'bg-[var(--app-surface-2)] ring-[#FF6E14]/55'
-      "
+      class="flex size-6 overflow-hidden rounded-md transition"
+      :class="{ 'opacity-40 grayscale': !row.published_on_leboncoin }"
     >
-      <GoupixDexLeboncoinMark class="size-3.5 rounded-[3px]" aria-hidden="true" />
+      <GoupixDexLeboncoinMark aria-hidden="true" />
     </span>
   </div>
 </template>
