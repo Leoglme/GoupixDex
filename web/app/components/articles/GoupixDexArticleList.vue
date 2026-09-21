@@ -136,7 +136,7 @@
         </li>
       </ul>
 
-      <div class="hidden md:block">
+      <div class="goupix-articles-table hidden md:block">
         <GoupixDexBaseTable :min-width="tableMinWidth">
           <template #head>
             <GoupixDexBaseTableTh class="w-12">

@@ -879,6 +879,19 @@ html.dark {
     table-layout: fixed;
   }
 
+  .goupix-articles-table .goupix-card-table__lead {
+    width: 3.25rem;
+    max-width: 3.25rem;
+    padding-right: 0.25rem;
+    padding-left: 0.5rem;
+    vertical-align: middle;
+  }
+
+  .goupix-articles-table .goupix-card-table thead th:nth-child(2) {
+    width: 3.25rem;
+    max-width: 3.25rem;
+  }
+
   .goupix-card-table__name-col {
     width: 11rem;
     max-width: 28vw;

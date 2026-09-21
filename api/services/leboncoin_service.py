@@ -933,6 +933,74 @@ class LeboncoinService:
         return valid
 
     @classmethod
+    async def _select_leboncoin_parcel_size_small(cls, tab: Tab) -> bool:
+        """Carte Pokémon → « Colis petit » (≤ 100 g), pas « Colis moyen »."""
+        raw = await tab.evaluate(
+            """
+            (() => {
+              const norm = (s) => String(s || '')
+                .normalize('NFD').replace(/\\p{M}/gu, '')
+                .replace(/[''´`]/g, "'")
+                .toLowerCase();
+
+              const body = norm(document.body.innerText || '');
+              const looksSmall =
+                body.includes('colis petit') ||
+                (body.includes('jusqu') && body.includes('100 g') && !body.includes('250 g'));
+              if (looksSmall && !body.includes('colis moyen')) {
+                return 'already';
+              }
+
+              const clickEl = (el) => {
+                if (!el) return false;
+                el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                el.click();
+                return true;
+              };
+
+              for (const el of document.querySelectorAll('button, [role="button"], [role="radio"], label, li, div')) {
+                const t = norm(el.textContent || '');
+                if (!t || t.length > 120) continue;
+                if (
+                  t.includes('colis petit') ||
+                  (t.includes('petit') && t.includes('colis') && t.includes('100'))
+                ) {
+                  if (clickEl(el.closest('button, [role="radio"], label') || el)) {
+                    return 'picked';
+                  }
+                }
+              }
+
+              for (const el of document.querySelectorAll('button, [role="button"], div, span')) {
+                const t = norm(el.textContent || '');
+                if (t.includes('colis moyen') && t.length < 90) {
+                  clickEl(el.closest('button, [role="button"]') || el);
+                  break;
+                }
+              }
+
+              for (const btn of document.querySelectorAll('button[aria-label*="colis" i], button[aria-label*="Colis" i]')) {
+                if (clickEl(btn)) break;
+              }
+
+              for (const el of document.querySelectorAll('[role="radio"], [role="option"], button, label')) {
+                const t = norm(el.textContent || '');
+                if (!t || t.length > 100) continue;
+                if (t.includes('colis petit') || (t.includes('petit') && t.includes('100'))) {
+                  if (clickEl(el)) return 'picked';
+                }
+              }
+              return 'miss';
+            })()
+            """,
+            return_by_value=True,
+        )
+        if raw in ("already", "picked"):
+            await tab.sleep(0.5)
+            return True
+        return False
+
+    @classmethod
     async def _wizard_fill_late_steps(
         cls,
         tab: Tab,
@@ -985,6 +1053,16 @@ class LeboncoinService:
                             "step": "form",
                             "message": f"Localisation {zip_clean}.",
                             "form_step": "location",
+                        }
+                    )
+            if await cls._select_leboncoin_parcel_size_small(tab):
+                if progress:
+                    await progress(
+                        {
+                            "type": "log",
+                            "step": "form",
+                            "message": "Livraison : colis petit (≤ 100 g).",
+                            "form_step": "parcel_small",
                         }
                     )
             if await cls._page_has_final_submit(tab):
