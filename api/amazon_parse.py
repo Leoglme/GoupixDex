@@ -104,13 +104,21 @@ def parse_product_page(
         invitation_status = "needs_login" if signed_out else "unknown"
         invitation_requested = False
     else:
+        # Le widget rend souvent ses deux états dans le HTML (bloc « demandée » caché tant qu'on n'a pas cliqué) :
+        # la présence du bouton prime sur le texte. Dans Chrome, l'état visible corrige ensuite ce verdict.
+        has_invite_button = bool(
+            soup.find("input", {"name": "submit.inviteButton"}) or soup.find(id="hdp-invite-button")
+        )
         already_requested = bool(
             soup.find("div", id="hdp-detail-requested-id")
             or "Invitation demandée" in page_source
             or "invitation a été demandée" in page_source.lower()
         )
         has_invite_button_text = "Demander une invitation" in page_source
-        if already_requested:
+        if has_invite_button:
+            invitation_status = "not_requested"
+            invitation_requested = False
+        elif already_requested:
             invitation_status = "requested"
             invitation_requested = True
         elif has_invite_button_text:

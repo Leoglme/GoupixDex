@@ -248,6 +248,53 @@ async def fetch_html_via_tab(url: str) -> str:
     return await tab.get_content()
 
 
+_INVITE_STATE_JS = """
+() => {
+  const visible = (el) => {
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const anyVisible = (sels) => sels.some((sel) => Array.from(document.querySelectorAll(sel)).some(visible));
+  const text = (document.body && document.body.innerText) || '';
+  const signedEl = document.querySelector('#hdp-ib-signedIn');
+  return {
+    cart: anyVisible(['#add-to-cart-button', 'input[name="submit.add-to-cart"]']),
+    inviteButton: anyVisible(['input[name="submit.inviteButton"]', '#hdp-invite-button input', '#hdp-invite-button']),
+    inviteText: /demander une invitation/i.test(text),
+    requestedBlock: anyVisible(['#hdp-detail-requested-id']),
+    requestedText: /invitation demand[ée]e|invitation a été demandée/i.test(text),
+    signedIn: signedEl ? String(signedEl.value || '').toLowerCase() : null,
+  };
+}
+"""
+
+
+async def read_invite_state_via_tab(tab: Any) -> Dict[str, Any]:
+    """État du widget « invitation » tel que l'utilisateur le voit (les blocs cachés du HTML ne comptent pas)."""
+    try:
+        raw = await _tab_eval_value(tab, _INVITE_STATE_JS)
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+async def fetch_product_page_via_tab(url: str) -> Dict[str, Any]:
+    """Fiche produit via l'onglet : HTML + état visible du widget invitation."""
+    browser = await _ensure_browser_async()
+    tab = await browser.get(url)
+    await browser.sleep(1.5)
+    if await _accept_amazon_cookie_consent(tab, browser):
+        tab = await browser.get(url)
+        await browser.sleep(1.2)
+    await tab
+    html = await tab.get_content()
+    state = await read_invite_state_via_tab(tab)
+    return {"html": html, "state": state}
+
+
 _GREETING_JS = (
     "(() => { const el = document.querySelector('#nav-link-accountList-nav-line-1');"
     " return el && el.textContent ? el.textContent.trim() : ''; })()"
@@ -292,6 +339,16 @@ async def click_request_invite_async(dp_url: str) -> Dict[str, Any]:
         await browser.sleep(1.5)
     await tab
     before = await tab.get_content()
+    state_before = await read_invite_state_via_tab(tab)
+    not_clicked = {
+        "clicked": False,
+        "html_before": before,
+        "html_after": before,
+        "state_before": state_before,
+        "state_after": state_before,
+    }
+    if not (state_before.get("inviteButton") or state_before.get("inviteText")):
+        return not_clicked
 
     clicked = False
     for selector in _INVITE_BUTTON_SELECTORS:
@@ -304,14 +361,21 @@ async def click_request_invite_async(dp_url: str) -> Dict[str, Any]:
             clicked = True
             break
     if not clicked:
-        return {"clicked": False, "html_before": before, "html_after": before}
+        return not_clicked
 
     await browser.sleep(3)
     tab = await browser.get(dp_url)
     await browser.sleep(2)
     await tab
     after = await tab.get_content()
-    return {"clicked": True, "html_before": before, "html_after": after}
+    state_after = await read_invite_state_via_tab(tab)
+    return {
+        "clicked": True,
+        "html_before": before,
+        "html_after": after,
+        "state_before": state_before,
+        "state_after": state_after,
+    }
 
 
 async def _input_value_matches(tab: Any, selector: str, expected: str) -> bool:

@@ -32,6 +32,7 @@ from amazon_nodriver import (
     close_browser_sync,
     export_cookies_requests_format,
     fetch_html_via_tab,
+    fetch_product_page_via_tab,
     login_to_amazon as nodriver_login_session,
     prime_session_and_export_cookies_async,
     run_browser,
@@ -82,6 +83,31 @@ def _effective_invite_search_query(q: str) -> str:
     if _query_already_pokemon_scoped(n):
         return n
     return f"pokemon {n}"
+
+
+def _status_from_visible_state(state: Dict) -> Optional[str]:
+    """Statut d'invitation d'après ce que Chrome affiche réellement ; ``None`` si l'état n'est pas lisible."""
+    if not state:
+        return None
+    if state.get("signedIn") == "false":
+        return "needs_login"
+    if state.get("cart"):
+        return "accepted"
+    if state.get("inviteButton") or state.get("inviteText"):
+        return "not_requested"
+    if state.get("requestedBlock") or state.get("requestedText"):
+        return "requested"
+    return None
+
+
+def _apply_visible_state(item: Dict, state: Dict) -> Dict:
+    """Aligne un item parsé sur l'état visible du widget (autorité quand la fiche est lue dans Chrome)."""
+    st = _status_from_visible_state(state)
+    if st:
+        item["invitation_status"] = st
+        item["invitation_requested"] = st in ("accepted", "requested")
+        item["can_order"] = st == "accepted"
+    return item
 
 
 def _title_matches_user_filter(title: str, user_q: str) -> bool:
@@ -490,12 +516,19 @@ class AmazonScraper:
 
             try:
                 url = f"{self.base_url}/dp/{asin}"
-                page_source = self._fetch_html(url)
+                visible_state: Dict = {}
+                if self.prefer_browser:
+                    fetched = run_browser(fetch_product_page_via_tab(url))
+                    page_source = str(fetched.get("html") or "")
+                    visible_state = dict(fetched.get("state") or {})
+                else:
+                    page_source = self._fetch_html(url)
 
                 item_data = parse_product_page(page_source, asin, self.base_url)
                 if item_data is None:
                     print("   [warn] Item skipped (not invite sale / filtered out)")
                     continue
+                item_data = _apply_visible_state(item_data, visible_state)
 
                 results.append(item_data)
 
@@ -650,19 +683,22 @@ class AmazonScraper:
 
         before = parse_product_page(str(res.get("html_before") or ""), t, self.base_url)
         if before is not None:
-            if before.get("can_order"):
-                return {
-                    "success": False,
-                    "message": "This product is already orderable; no invitation to request.",
-                }
-            st = before.get("invitation_status")
-            if st == "requested":
-                return {"success": False, "message": "Invitation already recorded or status changed."}
-            if st == "needs_login":
-                return {
-                    "success": False,
-                    "message": "Ce compte n'est pas connecté à Amazon dans Chrome. Reconnectez-le puis réessayez.",
-                }
+            before = _apply_visible_state(before, dict(res.get("state_before") or {}))
+        st_before = _status_from_visible_state(dict(res.get("state_before") or {})) or (
+            before.get("invitation_status") if before else None
+        )
+        if st_before == "accepted":
+            return {
+                "success": False,
+                "message": "This product is already orderable; no invitation to request.",
+            }
+        if st_before == "requested":
+            return {"success": False, "message": "Invitation already recorded or status changed."}
+        if st_before == "needs_login":
+            return {
+                "success": False,
+                "message": "Ce compte n'est pas connecté à Amazon dans Chrome. Reconnectez-le puis réessayez.",
+            }
         if not res.get("clicked"):
             return {
                 "success": False,
@@ -670,8 +706,16 @@ class AmazonScraper:
             }
 
         after = parse_product_page(str(res.get("html_after") or ""), t, self.base_url)
-        if after is not None and after.get("invitation_status") == "requested":
-            return {"success": True, "message": "Invitation requested.", "item": after}
+        if after is not None:
+            after = _apply_visible_state(after, dict(res.get("state_after") or {}))
+        st_after = _status_from_visible_state(dict(res.get("state_after") or {})) or (
+            after.get("invitation_status") if after else None
+        )
+        if st_after == "requested":
+            item = dict(after or before or {"asin": t, "title": "Product", "url": dp_url})
+            item["invitation_status"] = "requested"
+            item["invitation_requested"] = True
+            return {"success": True, "message": "Invitation requested.", "item": item}
         item = dict(after or before or {"asin": t, "title": "Product", "url": dp_url})
         item["invitation_status"] = "unknown"
         item["invitation_requested"] = False
