@@ -48,6 +48,15 @@
     @back="drawerStack.back()"
     @added="onCatalogAdded"
   />
+
+  <GoupixDexCardCatalogPreviewDrawer
+    :open="catalogCardEntry !== null"
+    :card="catalogCardEntry?.card ?? null"
+    :show-back="hasPrevious"
+    @close="drawerStack.closeAll()"
+    @back="drawerStack.back()"
+    @added="onCatalogCardAdded"
+  />
 </template>
 
 <script setup lang="ts">
@@ -57,6 +66,7 @@ import type { SealedProduct } from '~/composables/useSealed'
 import type {
   GoupixArticleDrawerEntry,
   GoupixCardDrawerEntry,
+  GoupixCatalogCardDrawerEntry,
   GoupixSealedCatalogDrawerEntry,
   GoupixSealedDrawerEntry,
 } from '~/types/GoupixDrawerStack'
@@ -266,6 +276,15 @@ const catalogEntry = computed((): GoupixSealedCatalogDrawerEntry | null => {
 
 function onCatalogAdded(product: SealedProduct): void {
   drawerStack.notifySealedUpdated(product.id)
+}
+
+const catalogCardEntry = computed((): GoupixCatalogCardDrawerEntry | null => {
+  const top = topEntry.value
+  return top?.kind === 'catalog-card' ? top : null
+})
+
+function onCatalogCardAdded(card: CollectionCard): void {
+  drawerStack.notifyCardUpdated(card.id)
 }
 
 function onEscape(event: KeyboardEvent): void {

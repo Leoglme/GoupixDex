@@ -53,7 +53,8 @@
             :owned-by-card-id="ownedCards"
             :pending-card-id="pendingCardId"
             :scans-missing="scansMissing"
-            @pick="onPickCard"
+            @preview="onPreviewCard"
+            @add="onAddCard"
           />
         </template>
 
@@ -80,6 +81,7 @@ const toast = useToast()
 const { getSet } = useCardCatalog()
 const { addToCollection, listCollection } = useCollection()
 const { catalogLanguage } = useCatalogLanguage()
+const drawerStack = useGoupixDrawerStack()
 
 const setId = computed(() => String(route.params.setId ?? ''))
 
@@ -163,6 +165,13 @@ watch(catalogLanguage, () => {
   void refreshOwnedIndex()
 })
 
+watch(
+  () => drawerStack.cardMutationCounter.value,
+  () => {
+    void refreshOwnedIndex()
+  },
+)
+
 async function loadSet(): Promise<void> {
   setLoading.value = true
   setDetail.value = null
@@ -178,7 +187,23 @@ async function loadSet(): Promise<void> {
   }
 }
 
-async function onPickCard(c: CatalogSetCardRow): Promise<void> {
+/**
+ * Ouvre l'aperçu (drawer) d'une carte de l'extension : image, prix, ajout.
+ * @param c - Ligne de carte du set.
+ * @returns {void}
+ */
+function onPreviewCard(c: CatalogSetCardRow): void {
+  drawerStack.pushCatalogCard({
+    id: c.id,
+    name: c.displayName,
+    setName: setDisplayName.value,
+    localId: c.localId,
+    image: c.thumbUrl ?? null,
+    locale: catalogLocale.value,
+  })
+}
+
+async function onAddCard(c: CatalogSetCardRow): Promise<void> {
   if (pendingCardId.value) {
     return
   }
@@ -186,7 +211,7 @@ async function onPickCard(c: CatalogSetCardRow): Promise<void> {
   try {
     const res = await addToCollection({
       tcgdex_card_id: c.id,
-      language: catalogLanguage.value,
+      language: catalogLocale.value,
       quantity: 1,
     })
     ownedCards.value.set(c.id, res.card.quantity)

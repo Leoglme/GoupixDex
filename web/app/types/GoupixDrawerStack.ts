@@ -1,4 +1,15 @@
+import type { CatalogLocale } from '~/composables/useCardCatalog'
 import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
+
+/** Carte du catalogue TCGdex prévisualisée dans un drawer avant ajout à la collection. */
+export type GoupixCatalogCardRef = {
+  id: string
+  name: string
+  setName: string
+  localId: string
+  image: string | null
+  locale: CatalogLocale
+}
 
 export type GoupixArticleDrawerEntry = {
   kind: 'article'
@@ -21,11 +32,17 @@ export type GoupixSealedCatalogDrawerEntry = {
   expansionName: string
 }
 
+export type GoupixCatalogCardDrawerEntry = {
+  kind: 'catalog-card'
+  card: GoupixCatalogCardRef
+}
+
 export type GoupixDrawerStackEntry =
   | GoupixArticleDrawerEntry
   | GoupixSealedDrawerEntry
   | GoupixCardDrawerEntry
   | GoupixSealedCatalogDrawerEntry
+  | GoupixCatalogCardDrawerEntry
 
 export type GoupixArticleMutationNotice = {
   type: 'updated'

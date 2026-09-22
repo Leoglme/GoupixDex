@@ -99,36 +99,45 @@
           </p>
           <ul class="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             <li v-for="card in searchHits" :key="card.id">
-              <button
-                type="button"
-                class="group w-full text-left"
-                :disabled="pendingCardId === card.id"
-                @click="onPickSearchCard(card)"
+              <div
+                role="button"
+                tabindex="0"
+                class="group focus-visible:ring-primary block cursor-pointer rounded-xl text-left focus-visible:ring-2 focus-visible:outline-none"
+                @click="openCardPreview(card)"
+                @keydown.enter.prevent="openCardPreview(card)"
               >
                 <div class="border-default bg-elevated/30 relative aspect-[63/88] overflow-hidden rounded-xl border">
-                  <img
-                    v-if="cardThumb(card)"
-                    :src="cardThumb(card)"
+                  <GoupixDexCardImage
+                    :image-url="cardThumb(card)"
+                    :tcgdex-card-id="card.id"
                     :alt="cardLabel(card)"
-                    class="h-full w-full object-contain transition group-hover:scale-[1.03]"
-                    referrerpolicy="no-referrer"
-                    loading="lazy"
+                    img-class="h-full w-full object-contain transition group-hover:scale-[1.03]"
                   />
-                  <div v-else class="flex h-full items-center justify-center">
-                    <UIcon name="i-lucide-image-off" class="text-muted size-8" />
-                  </div>
                   <span
                     v-if="ownedCount(card.id) > 0"
-                    class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                    class="bg-success/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
                   >
                     ×{{ ownedCount(card.id) }}
                   </span>
+                  <button
+                    type="button"
+                    class="bg-elevated/95 text-highlighted focus-visible:ring-primary absolute right-1.5 bottom-1.5 flex size-7 items-center justify-center rounded-full backdrop-blur-sm transition-colors hover:bg-(--app-accent) hover:text-white focus-visible:ring-2 focus-visible:outline-none"
+                    :disabled="pendingCardId === card.id"
+                    :aria-label="`Ajouter ${cardLabel(card)} directement`"
+                    @click.stop="addCard(card.id, cardLabel(card))"
+                  >
+                    <UIcon
+                      :name="pendingCardId === card.id ? 'i-lucide-loader-2' : 'i-lucide-plus'"
+                      class="size-4"
+                      :class="pendingCardId === card.id ? 'animate-spin' : ''"
+                    />
+                  </button>
                 </div>
                 <p class="text-highlighted group-hover:text-primary mt-2 truncate text-sm font-medium">
                   {{ cardLabel(card) }}
                 </p>
                 <p class="text-muted truncate text-xs">{{ card.set_name }} · #{{ card.localId }}</p>
-              </button>
+              </div>
             </li>
           </ul>
         </template>
@@ -150,6 +159,7 @@ const toast = useToast()
 const { browseCatalog, searchCatalogCards } = useCardCatalog()
 const { addToCollection, listCollection } = useCollection()
 const { catalogLanguage, catalogLanguageItems } = useCatalogLanguage()
+const drawerStack = useGoupixDrawerStack()
 const { read: readBrowseCache, write: writeBrowseCache } = useCatalogBrowseCache()
 const { isDesktopApp } = useDesktopRuntime()
 
@@ -289,8 +299,20 @@ function languageLabel(code: string): string {
   }
 }
 
-function onPickSearchCard(card: CatalogSearchCardHit): void {
-  void addCard(card.id, cardLabel(card))
+/**
+ * Ouvre l'aperçu (drawer) d'une carte du catalogue : image, prix, ajout.
+ * @param card - Carte trouvée en recherche.
+ * @returns {void}
+ */
+function openCardPreview(card: CatalogSearchCardHit): void {
+  drawerStack.pushCatalogCard({
+    id: card.id,
+    name: cardLabel(card),
+    setName: card.set_name,
+    localId: card.localId,
+    image: cardThumb(card) ?? null,
+    locale: catalogLanguage.value,
+  })
 }
 
 async function refreshOwnedIndex(): Promise<void> {
@@ -303,6 +325,13 @@ async function refreshOwnedIndex(): Promise<void> {
     /* best-effort */
   }
 }
+
+watch(
+  () => drawerStack.cardMutationCounter.value,
+  () => {
+    void refreshOwnedIndex()
+  },
+)
 
 onMounted(() => {
   const qLoc = route.query.locale

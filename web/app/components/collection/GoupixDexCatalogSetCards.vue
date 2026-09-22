@@ -21,43 +21,50 @@
     </p>
 
     <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
-      <button
+      <div
         v-for="c in visibleCards"
         :key="c.id"
-        type="button"
-        class="group bg-elevated/30 border-default focus-visible:ring-primary relative overflow-hidden rounded-xl border text-left transition-shadow hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
-        :class="{ 'pointer-events-none opacity-60': pendingCardId === c.id }"
-        @click="emit('pick', c)"
+        role="button"
+        tabindex="0"
+        class="group bg-elevated/30 border-default focus-visible:ring-primary relative cursor-pointer overflow-hidden rounded-xl border text-left transition-shadow hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
+        @click="emit('preview', c)"
+        @keydown.enter.prevent="emit('preview', c)"
       >
         <div class="bg-muted/30 relative aspect-[63/88] w-full">
-          <img
-            v-if="c.thumbUrl"
-            :src="c.thumbUrl"
+          <GoupixDexCardImage
+            :image-url="c.thumbUrl"
+            :tcgdex-card-id="c.id"
             :alt="c.displayName"
-            class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.03]"
-            referrerpolicy="no-referrer"
-            decoding="async"
-            loading="lazy"
+            img-class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.03]"
           />
-          <div v-else class="flex h-full flex-col items-center justify-center gap-1 px-2">
-            <UIcon name="i-lucide-image-off" class="text-muted size-6" />
-            <span class="text-muted text-center text-[10px] leading-tight">{{ c.displayName }}</span>
-          </div>
           <div v-if="pendingCardId === c.id" class="absolute inset-0 flex items-center justify-center bg-black/40">
             <UIcon name="i-lucide-loader-2" class="size-7 animate-spin text-white" />
           </div>
           <span
             v-if="ownedQty(c.id) > 0"
-            class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+            class="bg-success/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
           >
             ×{{ ownedQty(c.id) }}
           </span>
+          <button
+            type="button"
+            class="bg-elevated/95 text-highlighted focus-visible:ring-primary absolute right-1.5 bottom-1.5 flex size-7 items-center justify-center rounded-full backdrop-blur-sm transition-colors hover:bg-(--app-accent) hover:text-white focus-visible:ring-2 focus-visible:outline-none"
+            :disabled="pendingCardId === c.id"
+            :aria-label="`Ajouter ${c.displayName} directement`"
+            @click.stop="emit('add', c)"
+          >
+            <UIcon
+              :name="pendingCardId === c.id ? 'i-lucide-loader-2' : 'i-lucide-plus'"
+              class="size-4"
+              :class="pendingCardId === c.id ? 'animate-spin' : ''"
+            />
+          </button>
         </div>
         <div class="space-y-0.5 px-2 py-1.5">
           <p class="text-highlighted truncate text-xs font-medium">{{ c.displayName }}</p>
           <p class="text-muted text-[10px]">#{{ c.localId }}</p>
         </div>
-      </button>
+      </div>
     </div>
 
     <p v-if="!visibleCards.length" class="text-muted py-8 text-center text-sm">Aucune carte pour ce filtre.</p>
@@ -80,7 +87,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  pick: [CatalogSetCardRow]
+  preview: [CatalogSetCardRow]
+  add: [CatalogSetCardRow]
 }>()
 
 const ownFilter = ref<'all' | 'owned' | 'missing'>('all')

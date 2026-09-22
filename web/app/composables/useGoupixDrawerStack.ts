@@ -3,6 +3,7 @@ import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
 import type {
   GoupixArticleMutationNotice,
   GoupixCardMutationNotice,
+  GoupixCatalogCardRef,
   GoupixDrawerStackEntry,
   GoupixSealedMutationNotice,
 } from '~/types/GoupixDrawerStack'
@@ -109,6 +110,14 @@ export function useGoupixDrawerStack() {
   }
 
   /**
+   * Ouvre l'aperçu d'une carte du catalogue TCGdex (avant ajout à la collection).
+   * @param card - Carte du catalogue (id TCGdex, nom, set, langue).
+   */
+  function pushCatalogCard(card: GoupixCatalogCardRef): void {
+    push({ kind: 'catalog-card', card })
+  }
+
+  /**
    *
    */
   function back(): void {
@@ -190,6 +199,7 @@ export function useGoupixDrawerStack() {
     pushSealed,
     pushCard,
     pushSealedCatalog,
+    pushCatalogCard,
     back,
     closeAll,
     setArticleBrowseList,
