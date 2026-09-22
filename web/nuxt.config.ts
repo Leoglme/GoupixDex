@@ -63,6 +63,8 @@ export default defineNuxtConfig({
     '/api/**': {
       cors: true,
     },
+    // Catalogue scellé + relevés de prix : lus aussi depuis l'app desktop (origine tauri), rafraîchis chaque nuit.
+    '/sealed-catalog/**': { cors: true, headers: { 'cache-control': 'public, max-age=3600' } },
     // Moteur de scan (modèles + index + wasm) : fichiers versionnés par nom →
     // cache navigateur d'un an, téléchargés UNE fois puis servis localement.
     '/scan-model/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },

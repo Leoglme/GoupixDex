@@ -51,17 +51,34 @@ let catalogPromise: Promise<SealedCatalog | null> | null = null
 const historyShardPromises: Map<number, Promise<GoupixSealedCatalogPriceHistoryShard | null>> = new Map()
 
 /**
- * Charge un fichier d'historique de prix du catalogue une seule fois par jour et par shard.
+ * Lit un fichier d'historique de prix, `null` s'il n'existe pas ou n'est pas joignable.
+ * @param url - URL du shard (relative à l'app, ou absolue sur le site publié).
+ * @returns {Promise<GoupixSealedCatalogPriceHistoryShard | null>} Le shard lu, ou `null`.
+ */
+function fetchHistoryShard(url: string): Promise<GoupixSealedCatalogPriceHistoryShard | null> {
+  return fetch(url)
+    .then((r) => (r.ok ? (r.json() as Promise<GoupixSealedCatalogPriceHistoryShard>) : null))
+    .catch((): null => null)
+}
+
+/**
+ * Charge un fichier d'historique de prix une seule fois par jour et par shard : le site publié d'abord
+ * quand une base est fournie (app desktop, dont les fichiers embarqués datent du build), sinon le fichier local.
  * @param shard - Index du fichier (`tp % PRICE_HISTORY_SHARDS`).
+ * @param publishedSiteBaseUrl - Origine du site publié à interroger en priorité, vide pour ne lire que le fichier local.
  * @returns {Promise<GoupixSealedCatalogPriceHistoryShard | null>} Le shard, ou `null` s'il n'existe pas encore.
  */
-function fetchHistoryShardOnce(shard: number): Promise<GoupixSealedCatalogPriceHistoryShard | null> {
+function fetchHistoryShardOnce(
+  shard: number,
+  publishedSiteBaseUrl: string,
+): Promise<GoupixSealedCatalogPriceHistoryShard | null> {
   let promise = historyShardPromises.get(shard)
   if (!promise) {
     const today: string = new Date().toISOString().slice(0, 10)
-    promise = fetch(`/sealed-catalog/history/${shard}.json?d=${today}`)
-      .then((r) => (r.ok ? (r.json() as Promise<GoupixSealedCatalogPriceHistoryShard>) : null))
-      .catch((): null => null)
+    const path: string = `/sealed-catalog/history/${shard}.json?d=${today}`
+    promise = publishedSiteBaseUrl
+      ? fetchHistoryShard(`${publishedSiteBaseUrl}${path}`).then((remote) => remote ?? fetchHistoryShard(path))
+      : fetchHistoryShard(path)
     historyShardPromises.set(shard, promise)
   }
   return promise
@@ -85,6 +102,9 @@ function fetchCatalogOnce(): Promise<SealedCatalog | null> {
  * @returns Helpers du catalogue scellé.
  */
 export function useSealedCatalog() {
+  const { isDesktopApp } = useDesktopRuntime()
+  const siteUrl: string = String(useRuntimeConfig().public.siteUrl ?? '').replace(/\/$/, '')
+
   /**
    * Charge et renvoie les séries du catalogue (chaque série contient ses extensions).
    * @returns {Promise<SealedCatalogSerie[]>} Séries, ou tableau vide.
@@ -131,7 +151,7 @@ export function useSealedCatalog() {
    * @returns {Promise<GoupixPriceHistoryPoint[]>} Points datés croissants, vide sans historique.
    */
   async function loadProductPriceHistory(tp: number): Promise<GoupixPriceHistoryPoint[]> {
-    const shard = await fetchHistoryShardOnce(tp % PRICE_HISTORY_SHARDS)
+    const shard = await fetchHistoryShardOnce(tp % PRICE_HISTORY_SHARDS, isDesktopApp.value ? siteUrl : '')
     const series = shard?.products[String(tp)] ?? []
     return series.map(([date, priceEur]: [string, number]): GoupixPriceHistoryPoint => ({ date, price_eur: priceEur }))
   }

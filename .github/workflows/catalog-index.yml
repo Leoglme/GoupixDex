@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   rebuild:
@@ -30,6 +31,7 @@ jobs:
         run: python api/scripts/build_sealed_catalog.py
 
       - name: Commit and push if changed
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -40,3 +42,11 @@ jobs:
           fi
           git commit -m "chore(catalog): refresh static browse index"
           git push
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # Un push fait avec GITHUB_TOKEN ne déclenche aucun workflow : on lance le déploiement web explicitement.
+      - name: Deploy web with the refreshed catalog
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-web.yml --ref main
