@@ -136,18 +136,12 @@
             @keydown.enter.prevent="openCard(card.id)"
           >
             <div class="bg-muted/20 relative aspect-[63/88] w-full overflow-hidden">
-              <img
-                v-if="card.image_url"
-                :src="card.image_url"
+              <GoupixDexCardImage
+                :image-url="card.image_url"
+                :tcgdex-card-id="card.tcgdex_card_id"
                 :alt="card.display_name"
-                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                referrerpolicy="no-referrer"
-                decoding="async"
-                loading="lazy"
+                img-class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
               />
-              <div v-else class="flex h-full items-center justify-center">
-                <UIcon name="i-lucide-image-off" class="text-muted size-8" />
-              </div>
               <span
                 class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
               >

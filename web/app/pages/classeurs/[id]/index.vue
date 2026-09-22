@@ -64,7 +64,12 @@
           </div>
 
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <GoupixDexCollectionViewTabs v-model="viewMode" :items="viewTabItems" class="shrink-0" />
+            <GoupixDexCollectionViewTabs
+              v-model="viewMode"
+              :items="viewTabItems"
+              stretch-mobile
+              class="max-sm:w-full"
+            />
             <div v-if="viewMode !== 'valeurs'" class="flex shrink-0 items-center gap-2">
               <UButton
                 :to="`/classeurs/${id}/editeur`"
