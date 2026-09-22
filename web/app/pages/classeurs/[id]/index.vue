@@ -121,16 +121,19 @@
                 <GoupixDexBinderCardImage
                   v-if="cell.item"
                   :src="cell.item.image_url"
-                  :alt="cell.item.card_name"
-                  :fallback-src="fallbackArtFor(cell.item)"
+                  :alt="cell.dex ? cell.dex.pokemonName : cell.item.card_name"
+                  :fallback-src="cell.dex?.artworkUrl ?? null"
                 />
-                <GoupixDexBinderPokedexPlaceholder v-else-if="cell.placeholder" :placeholder="cell.placeholder" />
+                <GoupixDexBinderPokedexPlaceholder v-else-if="cell.dex" :placeholder="cell.dex" />
                 <span v-if="cell.item && cell.item.quantity > 1" class="tile-badge num top-1.5 right-1.5">
                   ×{{ cell.item.quantity }}
                 </span>
               </div>
-              <p class="mt-1 truncate text-xs" :class="cell.item ? 'font-medium' : 'text-(--app-faint)'">
-                {{ cell.item ? cell.item.card_name : cell.placeholder?.pokemonName }}
+              <p class="mt-1 truncate text-xs font-medium" :class="cell.item ? '' : 'font-normal text-(--app-faint)'">
+                {{ cell.dex ? cell.dex.pokemonName : cell.item?.card_name }}
+              </p>
+              <p v-if="cell.item && cell.dex" class="truncate text-[10px] leading-tight text-(--app-faint)">
+                {{ cell.item.card_name }}
               </p>
             </component>
           </div>
@@ -221,12 +224,14 @@ const isCompletionBinder = computed(() => !!binder.value?.pokedex_region)
 interface CompletionCell {
   key: string
   item: BinderPocketItem | null
-  placeholder: ReturnType<typeof pokedexPlaceholderAt>
+  dex: ReturnType<typeof pokedexPlaceholderAt>
 }
 
 /**
  * Cellules de la grille en mode complétion : une par numéro de la région (carte
- * rangée ou placeholder), suivies des cartes hors plage (bonus).
+ * rangée ou placeholder), suivies des cartes hors plage (bonus). `dex` porte le
+ * nom FR + l'artwork du Pokémon de la position, présent même sur une case remplie
+ * (nom français affiché sous la carte, artwork de repli si la carte n'a pas d'image).
  */
 const completionCells = computed<CompletionCell[]>(() => {
   const detail = binder.value
@@ -248,26 +253,13 @@ const completionCells = computed<CompletionCell[]>(() => {
   const cells: CompletionCell[] = []
   for (let position = 0; position < size; position++) {
     const item = byPosition.get(position) ?? null
-    cells.push({
-      key: item ? item.id : `ph-${position}`,
-      item,
-      placeholder: item ? null : pokedexPlaceholderAt(region, position),
-    })
+    cells.push({ key: item ? item.id : `ph-${position}`, item, dex: pokedexPlaceholderAt(region, position) })
   }
   for (const item of extras) {
-    cells.push({ key: item.id, item, placeholder: null })
+    cells.push({ key: item.id, item, dex: null })
   }
   return cells
 })
-
-/**
- * Artwork Pokédex de repli pour une carte rangée sans image (ex. sets récents non
- * encore illustrés sur TCGdex).
- * @param item Carte rangée dans une pochette.
- */
-function fallbackArtFor(item: BinderPocketItem): string | null {
-  return pokedexPlaceholderAt(binder.value?.pokedex_region ?? null, item.position ?? -1)?.artworkUrl ?? null
-}
 
 const binderMetaLine = computed(() => {
   if (!binder.value) {
