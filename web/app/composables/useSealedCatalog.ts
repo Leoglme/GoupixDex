@@ -1,5 +1,7 @@
 /** Catalogue statique des produits scellés (série vers extension vers produits, images réelles). */
 
+import type { GoupixPriceHistoryPoint, GoupixSealedCatalogPriceHistoryShard } from '~/types/PriceHistory'
+
 export interface SealedCatalogProduct {
   /** idProduct TCGplayer (image + identité catalogue). */
   tp: number
@@ -42,7 +44,28 @@ export interface SealedCatalogSearchHit {
   expansionName: string
 }
 
+/** Nombre de fichiers `history/{n}.json` ; doit rester égal à `HISTORY_SHARDS` de `api/scripts/build_sealed_catalog.py`. */
+const PRICE_HISTORY_SHARDS: number = 64
+
 let catalogPromise: Promise<SealedCatalog | null> | null = null
+const historyShardPromises: Map<number, Promise<GoupixSealedCatalogPriceHistoryShard | null>> = new Map()
+
+/**
+ * Charge un fichier d'historique de prix du catalogue une seule fois par jour et par shard.
+ * @param shard - Index du fichier (`tp % PRICE_HISTORY_SHARDS`).
+ * @returns {Promise<GoupixSealedCatalogPriceHistoryShard | null>} Le shard, ou `null` s'il n'existe pas encore.
+ */
+function fetchHistoryShardOnce(shard: number): Promise<GoupixSealedCatalogPriceHistoryShard | null> {
+  let promise = historyShardPromises.get(shard)
+  if (!promise) {
+    const today: string = new Date().toISOString().slice(0, 10)
+    promise = fetch(`/sealed-catalog/history/${shard}.json?d=${today}`)
+      .then((r) => (r.ok ? (r.json() as Promise<GoupixSealedCatalogPriceHistoryShard>) : null))
+      .catch((): null => null)
+    historyShardPromises.set(shard, promise)
+  }
+  return promise
+}
 
 /**
  * Charge le catalogue statique une seule fois (mémoïsé pour la session).
@@ -102,5 +125,16 @@ export function useSealedCatalog() {
     return hits
   }
 
-  return { loadSeries, searchProducts }
+  /**
+   * Relevés quotidiens du prix TCGplayer (converti en €) d'un produit du catalogue, écrits par la CI nocturne.
+   * @param tp - idProduct TCGplayer du produit.
+   * @returns {Promise<GoupixPriceHistoryPoint[]>} Points datés croissants, vide sans historique.
+   */
+  async function loadProductPriceHistory(tp: number): Promise<GoupixPriceHistoryPoint[]> {
+    const shard = await fetchHistoryShardOnce(tp % PRICE_HISTORY_SHARDS)
+    const series = shard?.products[String(tp)] ?? []
+    return series.map(([date, priceEur]: [string, number]): GoupixPriceHistoryPoint => ({ date, price_eur: priceEur }))
+  }
+
+  return { loadSeries, searchProducts, loadProductPriceHistory }
 }

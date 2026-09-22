@@ -23,12 +23,17 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 OUT_DIR = REPO_ROOT / "web" / "public" / "sealed-catalog"
+HISTORY_DIR = OUT_DIR / "history"
+HISTORY_VERSION = 1
+HISTORY_SHARDS = 64  # doit rester égal à PRICE_HISTORY_SHARDS de web/app/composables/useSealedCatalog.ts
+HISTORY_MAX_DAYS = 730
 UA = {"User-Agent": "Mozilla/5.0 (compatible; GoupixDex/1.0; +https://goupixdex.dibodev.fr)"}
 CATALOG_VERSION = 2
 POKEMON_CATEGORY = 3  # TCGplayer / TCGCSV
@@ -372,6 +377,46 @@ def build() -> dict[str, Any]:
     return {"version": CATALOG_VERSION, "generated_at": generated_at, "series": ordered}
 
 
+def history_shard(tp: int) -> int:
+    """Index du fichier ``history/{n}.json`` qui porte un idProduct TCGplayer."""
+    return int(tp) % HISTORY_SHARDS
+
+
+def append_history_point(series: list[list[Any]], day: str, price_eur: float) -> list[list[Any]]:
+    """Ajoute (ou remplace) le point d'une journée dans une série ``[date, prix]`` triée, plafonnée à ``HISTORY_MAX_DAYS`` points."""
+    kept = [point for point in series if isinstance(point, list) and len(point) == 2 and point[0] != day]
+    kept.append([day, round(float(price_eur), 2)])
+    kept.sort(key=lambda point: str(point[0]))
+    return kept[-HISTORY_MAX_DAYS:]
+
+
+def update_price_history(payload: dict[str, Any], day: str, history_dir: Path = HISTORY_DIR) -> int:
+    """Relève le prix du jour de chaque produit du catalogue dans ``history/{n}.json`` ; renvoie le nombre de produits relevés."""
+    by_shard: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for serie in payload["series"]:
+        for expansion in serie["expansions"]:
+            for product in expansion["products"]:
+                if product.get("price") is not None:
+                    by_shard[history_shard(product["tp"])].append((product["tp"], product["price"]))
+    history_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for shard, products in sorted(by_shard.items()):
+        path = history_dir / f"{shard}.json"
+        data: dict[str, Any] = {"v": HISTORY_VERSION, "products": {}}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                loaded = None
+            if isinstance(loaded, dict) and isinstance(loaded.get("products"), dict):
+                data = {"v": HISTORY_VERSION, "products": loaded["products"]}
+        for tp, price in products:
+            data["products"][str(tp)] = append_history_point(data["products"].get(str(tp)) or [], day, price)
+            written += 1
+        path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return written
+
+
 def main() -> int:
     payload = build()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -381,6 +426,9 @@ def main() -> int:
     exps = sum(len(s["expansions"]) for s in payload["series"])
     size_kb = out_path.stat().st_size // 1024
     print(f"sealed-v2: {exps} extensions, {total} produits | {size_kb} KiB -> {out_path}")
+    day = datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
+    recorded = update_price_history(payload, day)
+    print(f"historique prix: {recorded} produits relevés pour {day} -> {HISTORY_DIR}")
     return 0
 
 

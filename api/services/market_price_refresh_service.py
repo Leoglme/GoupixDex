@@ -181,6 +181,16 @@ def _bootstrap_article_market_references_if_needed() -> None:
         db.close()
 
 
+def _bootstrap_sealed_catalog_snapshot() -> None:
+    """Relevé du jour de tous les scellés du guide dès le démarrage (idempotent), sans attendre la nuit."""
+    db = SessionLocal()
+    try:
+        written = sealed_catalog_price_history_service.snapshot_all_sealed_catalog(db)
+        logger.info("Sealed catalog price snapshot at startup: %s point(s) written.", written)
+    finally:
+        db.close()
+
+
 async def bootstrap_market_prices_async() -> None:
     """Startup task: make the local guide usable without waiting for the night."""
     api = get_price_api()
@@ -192,6 +202,10 @@ async def bootstrap_market_prices_async() -> None:
             age,
         )
         await asyncio.to_thread(_bootstrap_article_market_references_if_needed)
+        try:
+            await asyncio.to_thread(_bootstrap_sealed_catalog_snapshot)
+        except Exception:
+            logger.exception("Sealed catalog price snapshot at startup crashed")
         return
     try:
         await asyncio.to_thread(refresh_market_prices)

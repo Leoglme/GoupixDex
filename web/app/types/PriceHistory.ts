@@ -9,3 +9,9 @@ export interface GoupixPriceHistoryResponse {
   points: GoupixPriceHistoryPoint[]
   approximate: boolean
 }
+
+/** Fichier `sealed-catalog/history/{n}.json` : par idProduct TCGplayer, points `[date ISO, prix €]` croissants. */
+export type GoupixSealedCatalogPriceHistoryShard = {
+  v: number
+  products: Record<string, [string, number][]>
+}

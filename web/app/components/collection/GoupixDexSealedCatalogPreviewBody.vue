@@ -37,7 +37,7 @@
     <section class="space-y-2">
       <div class="flex items-center justify-between">
         <p class="app-label">Évolution du prix</p>
-        <span v-if="priceHistory?.approximate" class="text-muted text-[10px]">tendance approximative</span>
+        <span v-if="priceHistorySourceLabel" class="text-muted text-[10px]">{{ priceHistorySourceLabel }}</span>
       </div>
       <GoupixDexPriceHistoryChart :points="priceHistory?.points ?? []" />
     </section>
@@ -50,9 +50,10 @@
 </template>
 
 <script setup lang="ts">
-import type { PropType } from 'vue'
+import type { ComputedRef, PropType, Ref } from 'vue'
 import type { SealedProduct, SealedProductType } from '~/composables/useSealed'
 import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
+import type { GoupixDexSealedCatalogPriceHistorySource } from '~/types/GoupixDexSealedCatalogPreviewBody'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
@@ -75,9 +76,11 @@ const emit = defineEmits<{
 }>()
 
 const { catalogAdd, catalogPriceHistory, quoteCatalogPrices } = useSealed()
+const { loadProductPriceHistory } = useSealedCatalog()
 const toast = useToast()
 
 const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
+const priceHistorySource: Ref<GoupixDexSealedCatalogPriceHistorySource | null> = ref(null)
 const marketPriceEur = ref<number | null>(null)
 const adding = ref(false)
 const ownedQuantity = ref(0)
@@ -91,16 +94,37 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 /** Prix marché Cardmarket (aligné sur les produits possédés), avec repli sur le prix catalogue. */
 const displayPriceEur = computed<number | null>(() => marketPriceEur.value ?? props.product.price)
 
+const priceHistorySourceLabel: ComputedRef<string | null> = computed(() => {
+  if (priceHistorySource.value === 'tcgplayer') {
+    return 'prix TCGplayer converti en €'
+  }
+  return priceHistory.value?.approximate ? 'tendance approximative' : null
+})
+
 /**
- * Charge la courbe approximative depuis le guide (best-effort, par idProduct).
+ * Charge la courbe : relevés Cardmarket du produit (API), sinon relevés TCGplayer du catalogue statique.
  * @returns Résolue quand la courbe est chargée ou l'échec acté.
  */
 async function loadPriceHistory(): Promise<void> {
+  let cardmarketHistory: GoupixPriceHistoryResponse | null = null
   try {
-    priceHistory.value = await catalogPriceHistory(props.product.p)
+    cardmarketHistory = await catalogPriceHistory(props.product.p)
   } catch {
-    priceHistory.value = null
+    cardmarketHistory = null
   }
+  if (cardmarketHistory && cardmarketHistory.points.length >= 2) {
+    priceHistory.value = cardmarketHistory
+    priceHistorySource.value = 'cardmarket'
+    return
+  }
+  const tcgplayerPoints = await loadProductPriceHistory(props.product.tp)
+  if (tcgplayerPoints.length >= 2) {
+    priceHistory.value = { points: tcgplayerPoints, approximate: false }
+    priceHistorySource.value = 'tcgplayer'
+    return
+  }
+  priceHistory.value = cardmarketHistory
+  priceHistorySource.value = cardmarketHistory ? 'cardmarket' : null
 }
 
 /**
