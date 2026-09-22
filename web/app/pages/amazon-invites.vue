@@ -210,6 +210,7 @@ const {
   requestInviteLoadingAsin,
   accountSelectItems,
   vaultAccountCount,
+  accountConnectionStates,
   selectedAccountId,
   accountSwitching,
   accountBackgroundSync,
@@ -254,6 +255,14 @@ const connectionBadge: ComputedRef<AmazonConnectionBadge | null> = computed(() =
   }
   const base = amazonSessionBadge(session.value)
   const n = vaultAccountCount.value
+  const states = Object.values(accountConnectionStates.value)
+  if (n > 0 && states.length) {
+    const ready = states.filter((s) => s === 'ready').length
+    return {
+      label: `Comptes connectés · ${ready}/${n}`,
+      color: ready === n ? 'success' : 'error',
+    }
+  }
   if (n > 0 && base.color === 'success') {
     return {
       ...base,

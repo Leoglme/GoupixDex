@@ -1,6 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { isAxiosError } from 'axios'
 import type {
+  AmazonAccountConnectionState,
   AmazonInvite,
   AmazonInviteStatusCounts,
   AmazonInvitesFetchParams,
@@ -112,6 +113,7 @@ export function useAmazonInvitesPage() {
   /** Lignes de la dernière recherche Amazon, communes à tous les comptes. */
   const catalog: Ref<AmazonInvite[]> = ref([])
   const rowsByAccount: Ref<Record<string, AmazonInvite[]>> = ref({})
+  const accountConnectionStates: Ref<Record<string, AmazonAccountConnectionState>> = ref({})
   const refreshedAt: Ref<string | null> = ref(null)
   /** Filtre local + requête Amazon lors d’« Actualiser » (vide = défaut worker). */
   const searchQuery: Ref<string> = ref('')
@@ -147,11 +149,13 @@ export function useAmazonInvitesPage() {
     catalog.value.map((row) => ({ ...row, status: 'listing_only' })),
   )
 
-  /** Lignes du compte affiché ; à défaut, le catalogue non vérifié. */
+  /** Lignes du compte affiché ; à défaut, le catalogue non vérifié (ou tel quel sans compte du coffre). */
   const items: ComputedRef<AmazonInvite[]> = computed(() => {
     const id = selectedAccountId.value
-    const rows = id != null ? rowsByAccount.value[String(id)] : undefined
-    return rows ?? catalogAsUnverified.value
+    if (id == null) {
+      return catalog.value
+    }
+    return rowsByAccount.value[String(id)] ?? catalogAsUnverified.value
   })
 
   /**
@@ -415,6 +419,7 @@ export function useAmazonInvitesPage() {
     if (res.refreshed_at) {
       refreshedAt.value = res.refreshed_at
     }
+    accountConnectionStates.value = res.account_states ?? {}
     const failed = Object.keys(res.errors ?? {})
     if (failed.length) {
       const labels = failed.map((id) => {
@@ -422,8 +427,8 @@ export function useAmazonInvitesPage() {
         return acc ? (acc.label ?? acc.amazon_email) : `compte ${id}`
       })
       toast.add({
-        title: 'Vérification incomplète',
-        description: `Statuts non vérifiés sur : ${labels.join(', ')}.`,
+        title: 'Comptes non connectés',
+        description: `Connexion impossible sur : ${labels.join(', ')}. Vérifiez leurs identifiants dans le coffre.`,
         color: 'warning',
       })
     }
@@ -469,21 +474,19 @@ export function useAmazonInvitesPage() {
     }
 
     try {
-      const res = await refreshInvites(fetchParams.value)
+      // Avec des comptes en coffre, la recherche ne vérifie rien : chaque compte est vérifié dans Chrome juste après.
+      const hasVaultAccounts = vaultAccounts.value.length > 0
+      const res = await refreshInvites(fetchParams.value, !hasVaultAccounts)
       catalog.value = trimInvitesToMaxItems(res.items, maxItems.value)
       if (res.refreshed_at) {
         refreshedAt.value = res.refreshed_at
-      }
-      const searchedOn = res.active_account_id ?? confirmedActiveAccountId.value
-      if (searchedOn != null) {
-        setAccountRows(searchedOn, res.items, res.refreshed_at ?? null)
       }
       saveCatalogCache()
       if (res.message && !refreshPhaseHint.value) {
         refreshPhaseHint.value = res.message
       }
 
-      if (catalog.value.length && vaultAccounts.value.length > 1) {
+      if (catalog.value.length && hasVaultAccounts) {
         streamingInvites.value = []
         const all = await verifyAllAccounts(catalog.value)
         applyVerifyAllResult(all)
@@ -631,6 +634,7 @@ export function useAmazonInvitesPage() {
     requestInviteLoadingAsin,
     accountSelectItems,
     vaultAccountCount,
+    accountConnectionStates,
     selectedAccountId,
     accountSwitching,
     accountBackgroundSync,

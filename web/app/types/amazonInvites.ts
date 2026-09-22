@@ -93,9 +93,12 @@ export interface AmazonReverifyResponse {
   active_account_id?: number | null
 }
 
+export type AmazonAccountConnectionState = 'ready' | 'needs_login'
+
 export type AmazonVerifyAllAccountsResponse = {
   rows_by_account: Record<string, AmazonInvite[]>
   account_ids: number[]
+  account_states?: Record<string, AmazonAccountConnectionState>
   refreshed_at: string | null
   active_account_id?: number | null
   errors?: Record<string, string>

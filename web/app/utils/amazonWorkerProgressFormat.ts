@@ -59,7 +59,7 @@ export function formatAmazonWorkerProgressLine(payload: AmazonWorkerProgressPayl
     const detail = title ? `${title}${asin ? ` (${asin})` : ''}` : (asin ?? '')
     return `${head}Vérification ${pg}/${tot}${detail ? ` — ${detail}` : ''}. ${msg}`
   }
-  if (st === 'account_done') {
+  if (st === 'connecting' || st === 'account_done') {
     return `${head}${msg}`
   }
   if (st === 'completed') {

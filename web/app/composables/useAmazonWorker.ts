@@ -112,12 +112,17 @@ export function useAmazonWorker() {
    * POST `/amazon/invites/refresh` — force a refresh scrape, then return normalized invites.
    *
    * @param params - Same shape as `fetchInvites` (search + max pages).
+   * @param checkStatuses - False when `verifyAllAccounts` runs right after (statuses checked per account).
    * @returns {Promise<AmazonRefreshResponse>} Refreshed list + optional worker `message`.
    */
-  async function refreshInvites(params: AmazonInvitesFetchParams): Promise<AmazonRefreshResponse> {
-    const body: Record<string, string | number | null> = {
+  async function refreshInvites(
+    params: AmazonInvitesFetchParams,
+    checkStatuses: boolean = true,
+  ): Promise<AmazonRefreshResponse> {
+    const body: Record<string, string | number | boolean | null> = {
       q: params.q?.trim() || null,
       max_pages: params.max_pages,
+      check_statuses: checkStatuses,
     }
     if (params.max_items != null) {
       body.max_items = params.max_items
@@ -166,7 +171,7 @@ export function useAmazonWorker() {
           price_hint: inv.price_hint ?? null,
         })),
       },
-      { timeout: 900_000 },
+      { timeout: 1_800_000 },
     )
     return data
   }
