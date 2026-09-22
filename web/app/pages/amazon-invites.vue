@@ -90,14 +90,10 @@
               :items="accountSelectItems"
               value-key="value"
               class="w-full max-w-md min-w-0"
-              :disabled="accountSwitching || refreshing || loading"
-              :loading="accountSwitching"
+              :disabled="refreshing || loading"
               placeholder="Compte Amazon"
               @update:model-value="onAccountChange"
             />
-            <p v-if="accountBackgroundSync" class="text-muted text-xs">
-              Sync Amazon en arrière-plan (liste déjà à jour).
-            </p>
           </div>
 
           <div v-if="refreshing" class="space-y-3">
@@ -212,8 +208,6 @@ const {
   vaultAccountCount,
   accountConnectionStates,
   selectedAccountId,
-  accountSwitching,
-  accountBackgroundSync,
   load,
   refresh,
   requestProductInvite,

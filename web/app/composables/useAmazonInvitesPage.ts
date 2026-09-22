@@ -39,30 +39,6 @@ function trimInvitesToMaxItems(list: AmazonInvite[], maxItems: number): AmazonIn
 }
 
 /**
- * Rejette la promesse si elle ne se résout pas dans le délai imparti.
- *
- * @param promise - Appel à borner.
- * @param ms - Délai en millisecondes.
- * @param label - Préfixe du message d’erreur affiché.
- * @returns {Promise<T>} La valeur de `promise`, ou une erreur « délai dépassé ».
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} (délai dépassé).`)), ms)
-    promise.then(
-      (v) => {
-        clearTimeout(timer)
-        resolve(v)
-      },
-      (e: unknown) => {
-        clearTimeout(timer)
-        reject(e)
-      },
-    )
-  })
-}
-
-/**
  * Map Axios / network failures to short user-visible copy for the invites UI.
  *
  * @param e - Thrown rejection from `fetch*` calls.
@@ -94,15 +70,7 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
  * @returns Reactive state, `displayItems`, `load`, `refresh`, `requestProductInvite`, `switchActiveAccount`.
  */
 export function useAmazonInvitesPage() {
-  const {
-    fetchSession,
-    fetchInvites,
-    refreshInvites,
-    reverifyInvites,
-    verifyAllAccounts,
-    requestInvite,
-    activateVaultAccount,
-  } = useAmazonWorker()
+  const { fetchSession, fetchInvites, refreshInvites, verifyAllAccounts, requestInvite } = useAmazonWorker()
   const { fetchOverview, setActiveAccount } = useAmazonAccounts()
   const toast = useToast()
 
@@ -130,10 +98,6 @@ export function useAmazonInvitesPage() {
   const selectedAccountId: Ref<number | undefined> = ref(undefined)
   /** Last account id confirmed by API + worker (avoids duplicate switch toasts). */
   const confirmedActiveAccountId: Ref<number | undefined> = ref(undefined)
-  /** True only while the API active account is being saved (should stay brief). */
-  const accountSwitching: Ref<boolean> = ref(false)
-  /** Chrome profile bind / statuts d’un compte jamais vérifié, après un changement de compte. */
-  const accountBackgroundSync: Ref<boolean> = ref(false)
   const vaultAccounts: Ref<{ id: number; label: string | null; amazon_email: string }[]> = ref([])
 
   const accountSelectItems = computed(() =>
@@ -295,55 +259,24 @@ export function useAmazonInvitesPage() {
   }
 
   /**
-   * Lie le profil Chrome du worker au compte choisi, puis vérifie ses statuts s’il n’a jamais été
-   * vérifié sur le catalogue courant. Les statuts ne sont appliqués que si le worker confirme ce compte.
-   *
-   * @param accountId - Compte du coffre venant d’être sélectionné.
-   * @returns {Promise<void>} Résolu à la fin de la synchronisation (les erreurs sont avalées : la liste reste affichée).
-   */
-  async function syncWorkerAfterAccountSwitch(accountId: number): Promise<void> {
-    accountBackgroundSync.value = true
-    try {
-      await withTimeout(activateVaultAccount(accountId), 620_000, 'Connexion au compte Amazon')
-      try {
-        session.value = await fetchSession()
-      } catch {
-        /* ignore */
-      }
-      if (rowsByAccount.value[String(accountId)] || !catalog.value.length) {
-        return
-      }
-      const res = await withTimeout(reverifyInvites(catalog.value), 120_000, 'Mise à jour des statuts')
-      if (res.active_account_id != null && res.active_account_id !== accountId) {
-        return
-      }
-      setAccountRows(accountId, res.items, res.refreshed_at ?? null)
-    } catch {
-      /* liste déjà affichée depuis le catalogue ou le cache compte */
-    } finally {
-      accountBackgroundSync.value = false
-    }
-  }
-
-  /**
-   * Change le compte affiché : même catalogue, statuts de ce compte, demandes envoyées depuis ce compte.
+   * Change le compte affiché immédiatement (statuts déjà en mémoire) et prévient l’API en arrière-plan.
    *
    * @param accountId - Compte du coffre à afficher.
-   * @returns {Promise<void>} Résolu quand l’API a enregistré le compte actif.
+   * @returns {Promise<void>} Résolu quand l’API a enregistré le compte actif (ou après le retour arrière en cas d’échec).
    */
   async function switchActiveAccount(accountId: number): Promise<void> {
     if (accountId === confirmedActiveAccountId.value) {
       selectedAccountId.value = accountId
       return
     }
-    if (accountSwitching.value || refreshing.value) {
+    if (refreshing.value) {
       selectedAccountId.value = confirmedActiveAccountId.value
       return
     }
 
     const previousConfirmed = confirmedActiveAccountId.value
     selectedAccountId.value = accountId
-    accountSwitching.value = true
+    confirmedActiveAccountId.value = accountId
     error.value = null
 
     try {
@@ -353,8 +286,6 @@ export function useAmazonInvitesPage() {
       if (active == null || active !== accountId) {
         throw new Error('Compte actif non enregistré.')
       }
-      confirmedActiveAccountId.value = active
-      selectedAccountId.value = active
     } catch (e: unknown) {
       selectedAccountId.value = previousConfirmed
       confirmedActiveAccountId.value = previousConfirmed
@@ -368,12 +299,7 @@ export function useAmazonInvitesPage() {
         description: errorMessageFromUnknown(e, 'Réessayez.'),
         color: 'error',
       })
-      return
-    } finally {
-      accountSwitching.value = false
     }
-
-    syncWorkerAfterAccountSwitch(accountId)
   }
 
   /**
@@ -642,8 +568,6 @@ export function useAmazonInvitesPage() {
     vaultAccountCount,
     accountConnectionStates,
     selectedAccountId,
-    accountSwitching,
-    accountBackgroundSync,
     load,
     refresh,
     requestProductInvite,
