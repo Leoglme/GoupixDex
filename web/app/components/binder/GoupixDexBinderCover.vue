@@ -1,5 +1,5 @@
 <template>
-  <div class="group block w-full">
+  <div class="group block w-full" :class="{ 'h-full': fill }">
     <GoupixDexBinderCoverCustom
       v-if="kind === 'custom'"
       :name="name"
