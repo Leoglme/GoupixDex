@@ -11,6 +11,9 @@ on:
       - 'api/desktop_amazon_server.spec'
       - 'api/desktop_cardmarket_server.py'
       - 'api/desktop_cardmarket_server.spec'
+      # Scraper Amazon et ses modules : bundlés dans le worker desktop (desktop_amazon_server.spec).
+      - 'api/scraper.py'
+      - 'api/amazon_*.py'
       - 'api/desktop_leboncoin_server.py'
       - 'api/desktop_leboncoin_server.spec'
       - 'api/worker_bundled.env'
