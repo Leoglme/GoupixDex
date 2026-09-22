@@ -229,6 +229,21 @@ export type CoverRender = {
   zones: Partial<Record<ZoneKey, RenderElement>>
 }
 
+/**
+ * Résout un chemin d'image de couverture en URL affichable.
+ * Un poster embarqué (`/binder-covers/…`) ou une URL absolue est renvoyé tel quel ;
+ * sinon on lit la table `cover_urls` fournie par l'API (chemins Supabase signés).
+ * @param coverUrls table chemin -> URL renvoyée par le backend
+ * @returns un résolveur utilisable par `renderCover`
+ */
+export function coverImageResolver(coverUrls?: Record<string, string> | null): (path: string) => string | null {
+  return (path: string): string | null => {
+    if (!path) return null
+    if (path.startsWith('/') || path.startsWith('http')) return path
+    return coverUrls?.[path] ?? null
+  }
+}
+
 export function renderCover(
   layout: CoverLayout,
   imageUrl: (path: string) => string | null,

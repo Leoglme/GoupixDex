@@ -65,7 +65,7 @@
 
           <div class="flex flex-wrap items-center justify-between gap-3">
             <GoupixDexCollectionViewTabs v-model="viewMode" :items="viewTabItems" class="shrink-0" />
-            <div class="flex shrink-0 items-center gap-2">
+            <div v-if="viewMode !== 'valeurs'" class="flex shrink-0 items-center gap-2">
               <UButton
                 :to="`/classeurs/${id}/editeur`"
                 size="sm"
@@ -100,6 +100,88 @@
             :preview-complete="previewComplete"
             @updated="onBinderUpdated"
           />
+        </div>
+
+        <div v-else-if="viewMode === 'valeurs'" class="app-dashboard-page space-y-4 pt-4 sm:pt-5">
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <UCard class="lg:col-span-2" :ui="{ body: 'p-5 sm:p-6' }">
+              <p class="app-label">Valeur du classeur complété</p>
+              <p class="text-highlighted mt-1.5 text-3xl font-semibold tabular-nums sm:text-4xl">
+                {{ eurValue.format(totalValue) }}
+              </p>
+              <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+                <span class="text-muted">
+                  Possédé <span class="text-highlighted font-medium">{{ eurValue.format(ownedValue) }}</span>
+                </span>
+                <span class="text-muted">
+                  Reste à acquérir <span class="text-highlighted font-medium">{{ eurValue.format(missingValue) }}</span>
+                </span>
+                <span
+                  v-if="binder.pokedex_total"
+                  class="inline-flex items-center gap-1 rounded-full bg-(--app-green-soft) px-2 py-0.5 text-xs font-semibold text-(--app-green)"
+                >
+                  {{ binder.pokedex_owned ?? 0 }} / {{ binder.pokedex_total }} cartes
+                </span>
+              </div>
+            </UCard>
+
+            <UCard :ui="{ body: 'p-5 sm:p-6' }">
+              <p class="app-label mb-3">Répartition</p>
+              <div v-if="totalValue > 0" class="flex items-center gap-4">
+                <div class="relative grid shrink-0 place-items-center">
+                  <div class="h-28 w-28 rounded-full" :style="donutRingStyle" />
+                  <div class="absolute text-center">
+                    <p class="text-highlighted text-sm font-semibold tabular-nums">{{ ownedPct }}%</p>
+                  </div>
+                </div>
+                <div class="min-w-0 space-y-2 text-sm">
+                  <div class="flex items-center gap-2">
+                    <span class="size-2.5 shrink-0 rounded-full bg-(--app-green)" />
+                    <span class="text-muted">Possédé</span>
+                    <span class="text-highlighted ml-auto font-medium tabular-nums">{{ ownedPct }}%</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="size-2.5 shrink-0 rounded-full bg-(--app-accent)" />
+                    <span class="text-muted">Manquant</span>
+                    <span class="text-highlighted ml-auto font-medium tabular-nums">{{ missingPct }}%</span>
+                  </div>
+                </div>
+              </div>
+              <p v-else class="text-muted py-8 text-center text-sm">Aucune carte cotée pour l'instant.</p>
+            </UCard>
+          </div>
+
+          <UCard :ui="{ body: 'p-4 sm:p-5' }">
+            <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-center gap-4 text-xs">
+                <span class="flex items-center gap-1.5">
+                  <span class="h-0.5 w-4 rounded bg-(--ui-primary)" />
+                  <span class="text-muted">Valeur totale</span>
+                </span>
+                <span class="flex items-center gap-1.5">
+                  <span class="h-0.5 w-4 rounded bg-(--app-green)" />
+                  <span class="text-muted">Possédé</span>
+                </span>
+              </div>
+              <div class="flex flex-wrap gap-1">
+                <UButton
+                  v-for="option in valuePeriodOptions"
+                  :key="option.value"
+                  :color="option.value === valuePeriod ? 'primary' : 'neutral'"
+                  :variant="option.value === valuePeriod ? 'solid' : 'ghost'"
+                  size="xs"
+                  @click="setValuePeriod(option.value)"
+                >
+                  {{ option.label }}
+                </UButton>
+              </div>
+            </div>
+
+            <div v-if="valueLoading && !valueTimeline.length" class="flex items-center justify-center py-16">
+              <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
+            </div>
+            <GoupixDexBinderValueChart v-else :points="valueTimeline" :period="valuePeriod" />
+          </UCard>
         </div>
 
         <div v-else class="app-dashboard-page space-y-4 pt-4 sm:pt-5">
@@ -190,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import type { BinderDetail, BinderPocketItem } from '~/types/binders'
+import type { BinderDetail, BinderPocketItem, BinderValuePeriod, BinderValueTimelinePoint } from '~/types/binders'
 import type { PokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
@@ -199,25 +281,29 @@ definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
 const router = useRouter()
-const { getBinder, updateBinder, deleteBinder } = useBinders()
+const { getBinder, updateBinder, deleteBinder, getBinderValueTimeline } = useBinders()
 const { confirm } = useGoupixConfirm()
 const toast = useToast()
 
 const id = computed(() => Number(route.params.id))
 const loading = ref(true)
 const binder = ref<BinderDetail | null>(null)
+type BinderViewMode = 'pages' | 'grille' | 'valeurs'
 const viewMode = computed({
-  get: (): 'pages' | 'grille' => {
+  get: (): BinderViewMode => {
     if (route.query.vue === 'grille') {
       return 'grille'
     }
     if (route.query.vue === 'pages') {
       return 'pages'
     }
+    if (route.query.vue === 'valeurs') {
+      return 'valeurs'
+    }
     // Un classeur de complétion s'affiche mieux en grille (toutes les cases visibles) : vue par défaut.
     return binder.value?.pokedex_region ? 'grille' : 'pages'
   },
-  set: (v: 'pages' | 'grille') => {
+  set: (v: BinderViewMode) => {
     void router.replace({ query: { ...route.query, vue: v } })
   },
 })
@@ -226,6 +312,7 @@ const previewComplete = ref(false)
 const viewTabItems = [
   { label: 'Pages', value: 'pages', icon: 'i-lucide-book-open' },
   { label: 'Grille', value: 'grille', icon: 'i-lucide-grid-2x2' },
+  { label: 'Valeurs', value: 'valeurs', icon: 'i-lucide-line-chart' },
 ]
 
 const gridItems = computed(() => [...(binder.value?.items ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)))
@@ -278,6 +365,75 @@ const binderMetaLine = computed(() => {
   return `${n} carte${n > 1 ? 's' : ''} · feuille ${grid}`
 })
 
+// --- Onglet « Valeurs » : chiffres, répartition et courbe d'évolution ---
+const eurValue: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+const valuePeriod = ref<BinderValuePeriod>('tout')
+const valueTimeline = ref<BinderValueTimelinePoint[]>([])
+const valueLoading = ref(false)
+
+const valuePeriodOptions: { label: string; value: BinderValuePeriod }[] = [
+  { label: '7J', value: '7j' },
+  { label: '1M', value: '1m' },
+  { label: '3M', value: '3m' },
+  { label: '6M', value: '6m' },
+  { label: 'Tout', value: 'tout' },
+]
+
+const totalValue = computed<number>(() => binder.value?.total_value_eur ?? 0)
+const ownedValue = computed<number>(() => binder.value?.estimated_value_eur ?? 0)
+const missingValue = computed<number>(() => Math.max(0, totalValue.value - ownedValue.value))
+const ownedPct = computed<number>(() =>
+  totalValue.value > 0 ? Math.min(100, Math.round((ownedValue.value / totalValue.value) * 100)) : 0,
+)
+const missingPct = computed<number>(() => (totalValue.value > 0 ? 100 - ownedPct.value : 0))
+
+const donutRingStyle = computed<Record<string, string>>(() => {
+  const owned = ownedPct.value
+  const mask = 'radial-gradient(farthest-side, transparent 58%, #000 59%)'
+  return {
+    background: `conic-gradient(var(--app-green) 0 ${owned}%, var(--app-accent) ${owned}% 100%)`,
+    mask,
+    WebkitMask: mask,
+  }
+})
+
+/**
+ * Recharge la courbe de valeur du classeur pour la période sélectionnée.
+ * @returns Résolue après mise à jour de la timeline.
+ */
+async function loadValueTimeline(): Promise<void> {
+  if (!binder.value) {
+    return
+  }
+  valueLoading.value = true
+  try {
+    const data = await getBinderValueTimeline(binder.value.id, valuePeriod.value)
+    valueTimeline.value = data.points
+  } catch {
+    toast.add({ title: 'Évolution de la valeur', color: 'error' })
+  } finally {
+    valueLoading.value = false
+  }
+}
+
+/**
+ * Change la période affichée et recharge la courbe.
+ * @param next - Nouvelle période.
+ * @returns Résolue après rechargement.
+ */
+async function setValuePeriod(next: BinderValuePeriod): Promise<void> {
+  if (next === valuePeriod.value) {
+    return
+  }
+  valuePeriod.value = next
+  await loadValueTimeline()
+}
+
 const renameOpen = ref(false)
 const renameName = ref('')
 const renaming = ref(false)
@@ -294,6 +450,9 @@ async function load() {
   try {
     binder.value = await getBinder(id.value)
     renameName.value = binder.value.name
+    if (viewMode.value === 'valeurs') {
+      void loadValueTimeline()
+    }
   } catch {
     toast.add({ title: 'Classeur introuvable', color: 'error' })
     await router.replace('/classeurs')
@@ -343,6 +502,12 @@ watch(
     void load()
   },
 )
+
+watch(viewMode, (mode) => {
+  if (mode === 'valeurs' && binder.value && !valueTimeline.value.length) {
+    void loadValueTimeline()
+  }
+})
 
 onMounted(() => {
   void load()

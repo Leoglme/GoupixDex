@@ -25,6 +25,7 @@ export interface BinderSummary {
   pokedex_owned: number | null
   pokedex_total: number | null
   covers: BinderCoverItem[]
+  cover_urls?: Record<string, string>
 }
 
 export interface BinderPocketItem {
@@ -56,7 +57,19 @@ export interface BinderCandidateItem {
 export interface BinderDetail extends BinderSummary {
   items: BinderPocketItem[]
   candidates: BinderCandidateItem[]
-  cover_urls?: Record<string, string>
+}
+
+export type BinderValuePeriod = '1j' | '7j' | '1m' | '3m' | '6m' | 'tout'
+
+export interface BinderValueTimelinePoint {
+  date: string
+  market_eur: number
+  owned_eur: number
+}
+
+export interface BinderValueTimelineResponse {
+  period: BinderValuePeriod
+  points: BinderValueTimelinePoint[]
 }
 
 export type BinderDesignResolved = BinderDesign

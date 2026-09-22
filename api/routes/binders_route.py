@@ -23,7 +23,7 @@ from schemas.binders import (
     BinderReorderBody,
     BinderUpdateBody,
 )
-from services import binder_cover_service, binder_service
+from services import binder_cover_service, binder_service, binder_value_service
 
 router = APIRouter(prefix="/binders", tags=["binders"])
 
@@ -90,6 +90,18 @@ def patch_binder(
     )
     detail = binder_service.get_binder_detail(db, binder_id, user.id)
     return detail or {}
+
+
+@router.get("/{binder_id}/value-timeline")
+def get_binder_value_timeline(
+    binder_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    period: str = "tout",
+) -> dict[str, Any]:
+    binder = _get_owned_binder(db, binder_id, user.id)
+    points = binder_value_service.binder_value_timeline(db, binder, period)
+    return {"period": period, "points": points}
 
 
 @router.delete("/{binder_id}", status_code=status.HTTP_204_NO_CONTENT)

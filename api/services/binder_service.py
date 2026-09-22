@@ -160,6 +160,8 @@ def list_binders_for_user(db: Session, user_id: int) -> list[dict[str, Any]]:
         summary = _binder_summary(b, card_count=count, value_eur=float(value) if priced else None)
         summary.update(_binder_completion_stats(b, b.items))
         summary["covers"] = _resolve_covers(b, b.items)
+        cover_paths = collect_paths_from_cover(b.cover)
+        summary["cover_urls"] = resolve_cover_urls(cover_paths) if cover_paths else {}
         out.append(summary)
     return out
 

@@ -614,6 +614,7 @@ import {
   TEXT_SIZES,
   ZONES,
   ZONE_LABELS,
+  coverImageResolver,
   coverLayout,
   renderCover,
   type CoverElement,
@@ -730,7 +731,7 @@ const MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 
 const colorHex = computed(() => binderColorHex(color.value))
 const coverIdsStr = computed(() => coverIds.value.map(String))
-const coverRender = computed(() => renderCover(layout.value, (p) => urls.value[p] ?? null, cardUrl))
+const coverRender = computed(() => renderCover(layout.value, coverImageResolver(urls.value), cardUrl))
 const isCustom = computed(() => style.value === 'custom')
 const maxCovers = computed(() => binderStyleCovers(style.value))
 const el = computed(() => layout.value.zones[zone.value] ?? null)

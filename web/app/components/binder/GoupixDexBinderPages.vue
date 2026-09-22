@@ -292,7 +292,7 @@ import type { CatalogSearchCardHit } from '~/composables/useCardCatalog'
 import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
 import { binderStyle } from '~/utils/binder/binder-styles'
-import { coverLayout, renderCover } from '~/utils/binder/binder-cover'
+import { coverImageResolver, coverLayout, renderCover } from '~/utils/binder/binder-cover'
 import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
@@ -357,15 +357,11 @@ const colorHex = computed(() => binderColorHex(props.binder.color))
 const name = computed(() => props.binder.name)
 const coverLayoutResolved = computed(() => coverLayout(props.binder.cover))
 const coverRender = computed(() =>
-  renderCover(
-    coverLayoutResolved.value,
-    (path) => props.binder.cover_urls?.[path] ?? null,
-    (itemId) => {
-      const cardId = Number(itemId)
-      const item = props.binder.items.find((i) => i.collection_card_id === cardId)
-      return item?.image_url ?? null
-    },
-  ),
+  renderCover(coverLayoutResolved.value, coverImageResolver(props.binder.cover_urls), (itemId) => {
+    const cardId = Number(itemId)
+    const item = props.binder.items.find((i) => i.collection_card_id === cardId)
+    return item?.image_url ?? null
+  }),
 )
 const coverProps = computed(() => ({
   coverStyle: props.binder.style,

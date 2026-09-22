@@ -23,6 +23,7 @@
           :name="tile(id).name"
           :color-hex="binderColorHex(tile(id).color)"
           :texture="binderDesign(tile(id).design).coverTexture"
+          :layout="coverLayoutFor(id)"
         />
         <p class="mt-3 truncate text-base font-semibold group-hover:text-(--app-accent)">{{ tile(id).name }}</p>
         <p class="mt-0.5 text-sm text-(--app-ink-soft)">
@@ -42,8 +43,11 @@
 
 <script setup lang="ts">
 import type { BinderSummary } from '~/types/binders'
+import type { CoverRender } from '~/utils/binder/binder-cover'
 import { binderColorHex } from '~/utils/binder/binder-colors'
 import { binderDesign } from '~/utils/binder/binder-design'
+import { coverImageResolver, coverLayout, renderCover } from '~/utils/binder/binder-cover'
+import { binderStyle } from '~/utils/binder/binder-styles'
 
 const props = defineProps<{ binders: BinderSummary[] }>()
 const emit = defineEmits<{ reordered: [] }>()
@@ -69,6 +73,18 @@ const toast = useToast()
 
 function tile(id: number) {
   return byId.value.get(id)!
+}
+
+/**
+ * Rendu de la couverture sur mesure (poster de fond) pour la vignette de liste.
+ * Renvoie null hors style `custom` : la couverture retombe alors sur son visuel par défaut.
+ * @param id identifiant du classeur
+ * @returns le rendu de couverture ou null
+ */
+function coverLayoutFor(id: number): CoverRender | null {
+  const b = tile(id)
+  if (binderStyle(b.style) !== 'custom') return null
+  return renderCover(coverLayout(b.cover), coverImageResolver(b.cover_urls), () => null)
 }
 
 function formatEur(n: number) {

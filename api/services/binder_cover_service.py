@@ -16,6 +16,13 @@ MAX_COVER_BYTES = 3 * 1024 * 1024
 ALLOWED_TYPES = {"image/webp", "image/jpeg", "image/png"}
 
 _PATH_RE = re.compile(r"^\d+/covers/\d+/[a-f0-9-]+\.(webp|jpe?g|png)$", re.I)
+# Posters livrés avec le front (web/public/binder-covers/…) : servis en statique, hors Supabase.
+_PRESET_RE = re.compile(r"^/binder-covers/[a-z0-9._-]+\.(webp|jpe?g|png)$", re.I)
+
+
+def is_preset_cover_path(path: str) -> bool:
+    """Vrai pour un poster embarqué (chemin racine `/binder-covers/…`), résolu tel quel."""
+    return bool(_PRESET_RE.match(path))
 
 
 def cover_path_prefix(user_id: int, binder_id: int) -> str:
@@ -25,6 +32,8 @@ def cover_path_prefix(user_id: int, binder_id: int) -> str:
 def validate_cover_paths(user_id: int, binder_id: int, paths: list[str]) -> None:
     prefix = cover_path_prefix(user_id, binder_id)
     for p in paths:
+        if is_preset_cover_path(p):
+            continue
         if not p.startswith(prefix) or not _PATH_RE.match(p):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Image de couverture non autorisée")
 
@@ -77,13 +86,18 @@ async def upload_cover_image(user_id: int, binder_id: int, upload: UploadFile) -
 
 
 def resolve_cover_urls(paths: list[str]) -> dict[str, str]:
-    if not supabase_storage_service.is_configured():
-        return {}
     out: dict[str, str] = {}
+    storage_ready = supabase_storage_service.is_configured()
     for p in paths:
-        if p and p not in out:
-            try:
-                out[p] = supabase_storage_service.public_url_for_path(p)
-            except RuntimeError:
-                continue
+        if not p or p in out:
+            continue
+        if is_preset_cover_path(p):
+            out[p] = p  # servi en statique par le front
+            continue
+        if not storage_ready:
+            continue
+        try:
+            out[p] = supabase_storage_service.public_url_for_path(p)
+        except RuntimeError:
+            continue
     return out

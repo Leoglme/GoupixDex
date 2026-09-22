@@ -1,6 +1,6 @@
 /** Thematic binders (classeurs) — REST `/binders`. */
 
-import type { BinderDetail, BinderSummary } from '~/types/binders'
+import type { BinderDetail, BinderSummary, BinderValuePeriod, BinderValueTimelineResponse } from '~/types/binders'
 
 /**
  *
@@ -127,6 +127,23 @@ export function useBinders() {
   }
 
   /**
+   * GET `/binders/:id/value-timeline` — courbe de valeur du classeur (marché complété + possédé).
+   *
+   * @param binderId - Identifiant du classeur.
+   * @param period - Fenêtre temporelle (`1j` | `7j` | `1m` | `3m` | `6m` | `tout`).
+   * @returns {Promise<BinderValueTimelineResponse>} Points datés (valeur totale, possédé).
+   */
+  async function getBinderValueTimeline(
+    binderId: number,
+    period: BinderValuePeriod = 'tout',
+  ): Promise<BinderValueTimelineResponse> {
+    const { data } = await $api.get<BinderValueTimelineResponse>(`/binders/${binderId}/value-timeline`, {
+      params: { period },
+    })
+    return data
+  }
+
+  /**
    * POST `/binders/:id/cover-image` — image de couverture sur mesure (max 3 Mo côté API).
    */
   async function uploadCoverImage(binderId: number, file: File): Promise<{ path: string; url: string }> {
@@ -161,6 +178,7 @@ export function useBinders() {
     removeFromPocket,
     setPageCount,
     addItems,
+    getBinderValueTimeline,
     uploadCoverImage,
     resolveCoverUrls,
   }
