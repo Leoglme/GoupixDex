@@ -203,15 +203,18 @@ const id = computed(() => Number(route.params.id))
 const loading = ref(true)
 const binder = ref<BinderDetail | null>(null)
 const viewMode = computed({
-  get: () => (route.query.vue === 'grille' ? 'grille' : 'pages') as 'pages' | 'grille',
-  set: (v: 'pages' | 'grille') => {
-    const q = { ...route.query }
-    if (v === 'grille') {
-      q.vue = 'grille'
-    } else {
-      delete q.vue
+  get: (): 'pages' | 'grille' => {
+    if (route.query.vue === 'grille') {
+      return 'grille'
     }
-    void router.replace({ query: q })
+    if (route.query.vue === 'pages') {
+      return 'pages'
+    }
+    // Un classeur de complétion s'affiche mieux en grille (toutes les cases visibles) : vue par défaut.
+    return binder.value?.pokedex_region ? 'grille' : 'pages'
+  },
+  set: (v: 'pages' | 'grille') => {
+    void router.replace({ query: { ...route.query, vue: v } })
   },
 })
 const cleanView = ref(false)
