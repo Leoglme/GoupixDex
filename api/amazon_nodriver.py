@@ -363,12 +363,17 @@ async def click_request_invite_async(dp_url: str) -> Dict[str, Any]:
     if not clicked:
         return not_clicked
 
-    await browser.sleep(3)
-    tab = await browser.get(dp_url)
-    await browser.sleep(2)
-    await tab
-    after = await tab.get_content()
+    # Le widget bascule sur « Invitation demandée » sur place : c'est la confirmation fiable.
+    # Un rechargement peut réafficher le bouton quelques instants (retard côté Amazon).
+    await browser.sleep(2.5)
     state_after = await read_invite_state_via_tab(tab)
+    if not (state_after.get("requestedBlock") or state_after.get("requestedText")):
+        await browser.sleep(1.5)
+        tab = await browser.get(dp_url)
+        await browser.sleep(2)
+        await tab
+        state_after = await read_invite_state_via_tab(tab)
+    after = await tab.get_content()
     return {
         "clicked": True,
         "html_before": before,

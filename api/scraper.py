@@ -705,13 +705,13 @@ class AmazonScraper:
                 "message": "Invitation button not found (Amazon may have changed the page).",
             }
 
+        state_after = dict(res.get("state_after") or {})
         after = parse_product_page(str(res.get("html_after") or ""), t, self.base_url)
-        if after is not None:
-            after = _apply_visible_state(after, dict(res.get("state_after") or {}))
-        st_after = _status_from_visible_state(dict(res.get("state_after") or {})) or (
-            after.get("invitation_status") if after else None
+        # Confirmation : bloc « demandée » visible après le clic (même si le bouton reste affiché un instant).
+        confirmed = bool(state_after.get("requestedBlock") or state_after.get("requestedText")) or (
+            after is not None and after.get("invitation_status") == "requested"
         )
-        if st_after == "requested":
+        if confirmed:
             item = dict(after or before or {"asin": t, "title": "Product", "url": dp_url})
             item["invitation_status"] = "requested"
             item["invitation_requested"] = True
