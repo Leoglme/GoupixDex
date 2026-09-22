@@ -73,7 +73,9 @@
               class="card-tile h-full w-full transition"
               :class="[
                 isSource(pageIdx * perPage + (k - 1)) ? 'opacity-30' : '',
-                displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' ? 'opacity-75 grayscale-[0.35]' : '',
+                displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' && !previewComplete
+                  ? 'opacity-75 grayscale-[0.35]'
+                  : '',
               ]"
             >
               <GoupixDexBinderCardImage
@@ -85,7 +87,7 @@
                 :fallback-src="placeholderAt(pageIdx * perPage + (k - 1))?.artworkUrl ?? null"
               />
               <span
-                v-if="displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted'"
+                v-if="displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' && !previewComplete"
                 class="tile-badge num top-1 left-1 z-10 !bg-black/70 !text-white"
               >
                 Manquante
@@ -170,7 +172,7 @@ const props = defineProps<{
   dragId: string | null
   overPocket: string | null
   pickerPocket: number | null
-  cleanView?: boolean
+  previewComplete?: boolean
   pokedexRegion?: string | null
 }>()
 
@@ -199,10 +201,7 @@ function placeholderAt(pocket: number) {
 }
 
 function displayItem(pocket: number) {
-  const item = itemAt(pocket)
-  if (!item) return null
-  if (props.cleanView && item.kind === 'wanted') return null
-  return item
+  return itemAt(pocket)
 }
 
 function pocketClass(pocket: number) {

@@ -76,30 +76,33 @@
                 Personnaliser
               </UButton>
               <UButton
-                v-if="viewMode === 'pages'"
                 color="neutral"
-                variant="ghost"
+                :variant="previewComplete ? 'solid' : 'ghost'"
                 size="sm"
-                :icon="cleanView ? 'i-lucide-eye' : 'i-lucide-eye-off'"
+                :icon="previewComplete ? 'i-lucide-eye' : 'i-lucide-eye-off'"
                 square
-                :aria-label="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
-                :title="cleanView ? 'Afficher les contrôles' : 'Vue propre'"
-                @click="cleanView = !cleanView"
+                :aria-label="previewComplete ? 'Revenir à mon classeur' : 'Aperçu du classeur complété'"
+                :title="
+                  previewComplete
+                    ? 'Revenir à mon classeur (cartes manquantes grisées)'
+                    : 'Aperçu : voir le classeur comme s’il était complet'
+                "
+                @click="previewComplete = !previewComplete"
               />
             </div>
           </div>
         </div>
 
-        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mb-3 sm:mx-4 sm:mb-4">
+        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mt-1 mb-3 sm:mx-4 sm:mt-2 sm:mb-4">
           <GoupixDexBinderPages
             :binder="binder"
             href-base="/collection/"
-            :clean-view="cleanView"
+            :preview-complete="previewComplete"
             @updated="onBinderUpdated"
           />
         </div>
 
-        <div v-else class="app-dashboard-page space-y-4">
+        <div v-else class="app-dashboard-page space-y-4 pt-1 sm:pt-2">
           <div
             v-if="isCompletionBinder"
             class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
@@ -114,7 +117,7 @@
               <div
                 class="card-tile relative aspect-[63/88]"
                 :class="[
-                  cell.item?.kind === 'wanted' ? 'opacity-75 grayscale-[0.35]' : '',
+                  cell.item?.kind === 'wanted' && !previewComplete ? 'opacity-75 grayscale-[0.35]' : '',
                   cell.item ? '' : 'ring-1 ring-white/10',
                 ]"
               >
@@ -217,7 +220,7 @@ const viewMode = computed({
     void router.replace({ query: { ...route.query, vue: v } })
   },
 })
-const cleanView = ref(false)
+const previewComplete = ref(false)
 
 const viewTabItems = [
   { label: 'Pages', value: 'pages', icon: 'i-lucide-book-open' },

@@ -1,6 +1,6 @@
 <template>
   <div ref="rootEl" class="max-w-full min-w-0 overflow-x-hidden outline-none" tabindex="0" @keydown="onKeyDown">
-    <div class="relative mx-auto w-full max-w-[1400px] min-w-0 overflow-x-hidden md:pr-12">
+    <div class="relative mx-auto w-full max-w-[1400px] min-w-0 overflow-x-hidden px-1 md:px-0 md:pr-16">
       <div
         ref="spreadEl"
         class="flex max-w-full items-stretch justify-center [perspective:2000px]"
@@ -38,7 +38,7 @@
                 :drag-id="drag?.id ?? null"
                 :over-pocket="over"
                 :picker-pocket="picker"
-                :clean-view="cleanView"
+                :preview-complete="previewComplete"
                 :pokedex-region="pokedexRegion"
                 @edge-prev="closeBinder()"
                 @edge-next="go(view + 1)"
@@ -118,7 +118,7 @@
                 :drag-id="drag?.id ?? null"
                 :over-pocket="over"
                 :picker-pocket="picker"
-                :clean-view="cleanView"
+                :preview-complete="previewComplete"
                 :pokedex-region="pokedexRegion"
                 @edge-prev="onPageEdgePrev(i)"
                 @edge-next="go(view + 1)"
@@ -171,7 +171,7 @@
       </div>
 
       <GoupixDexBinderTabs
-        v-if="perView === 2 && pageSize && !cleanView"
+        v-if="perView === 2 && pageSize"
         orientation="vertical"
         :opened="opened"
         :view="view"
@@ -189,7 +189,7 @@
     </div>
 
     <GoupixDexBinderTabs
-      v-if="perView === 1 && pageSize && !cleanView"
+      v-if="perView === 1 && pageSize"
       orientation="horizontal"
       :opened="opened"
       :view="view"
@@ -302,9 +302,9 @@ const props = withDefaults(
     candidates?: BinderCandidateItem[]
     readOnly?: boolean
     hrefBase?: string
-    cleanView?: boolean
+    previewComplete?: boolean
   }>(),
-  { readOnly: false, cleanView: false, candidates: undefined },
+  { readOnly: false, previewComplete: false, candidates: undefined },
 )
 
 const emit = defineEmits<{ updated: [BinderDetail] }>()
@@ -377,7 +377,7 @@ const coverProps = computed(() => ({
 }))
 
 const candidates = computed(() => props.candidates ?? props.binder.candidates ?? [])
-const cleanView = computed(() => props.cleanView)
+const previewComplete = computed(() => props.previewComplete)
 const bindersApi = useBinders()
 const { searchCatalogCards } = useCardCatalog()
 const toast = useToast()
