@@ -230,12 +230,22 @@
       @pick="place"
     />
 
-    <GoupixDexDialogModal v-model:open="detailOpen" :title="detail?.card_name ?? 'Carte'" width-class="max-w-md">
+    <GoupixDexDialogModal
+      v-model:open="detailOpen"
+      :title="detailDex?.pokemonName ?? detail?.card_name ?? 'Carte'"
+      width-class="max-w-md"
+    >
       <template v-if="detail">
         <div class="card-tile mx-auto aspect-[63/88] max-w-[240px]">
-          <GoupixDexBinderCardImage :src="detail.image_url" :alt="detail.card_name" />
+          <GoupixDexBinderCardImage
+            :src="detail.image_url || limitlessCardImageUrl(detail.tcgdex_card_id)"
+            :alt="detail.card_name"
+            :fallback-src="detailDex?.artworkUrl ?? null"
+          />
         </div>
-        <p class="text-muted mt-3 text-center text-sm">{{ detail.set_name }} · {{ detail.local_id }}</p>
+        <p class="text-muted mt-3 text-center text-sm">
+          {{ detail.card_name }} · {{ detail.set_name }} · {{ detail.local_id }}
+        </p>
         <div class="mt-5 flex flex-col gap-2">
           <NuxtLink
             v-if="hrefBase && detail.kind === 'owned'"
@@ -283,6 +293,8 @@ import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
 import { binderStyle } from '~/utils/binder/binder-styles'
 import { coverLayout, renderCover } from '~/utils/binder/binder-cover'
+import { pokedexPlaceholderAt } from '~/utils/pokedex/kanto'
+import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 const props = withDefaults(
   defineProps<{
@@ -643,6 +655,7 @@ async function changePageCount(next: number) {
 }
 
 const detail = ref<BinderPocketItem | null>(null)
+const detailDex = computed(() => pokedexPlaceholderAt(pokedexRegion.value, detail.value?.position ?? -1))
 const detailOpen = computed({
   get: () => detail.value != null,
   set: (v) => {

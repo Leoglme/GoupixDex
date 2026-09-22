@@ -77,7 +77,10 @@
               ]"
             >
               <GoupixDexBinderCardImage
-                :src="displayItem(pageIdx * perPage + (k - 1))!.image_url"
+                :src="
+                  displayItem(pageIdx * perPage + (k - 1))!.image_url ||
+                  limitlessCardImageUrl(displayItem(pageIdx * perPage + (k - 1))!.tcgdex_card_id)
+                "
                 :alt="displayItem(pageIdx * perPage + (k - 1))!.card_name"
                 :fallback-src="placeholderAt(pageIdx * perPage + (k - 1))?.artworkUrl ?? null"
               />
@@ -145,6 +148,7 @@ import type { PageGrid } from '~/utils/binder/binder-pages'
 import type { BinderPocketItem } from '~/types/binders'
 import type { PageSize, Role } from '~/composables/useBinderPages'
 import { pokedexPlaceholderAt } from '~/utils/pokedex/kanto'
+import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 const padTop = 14
 const padGap = 9

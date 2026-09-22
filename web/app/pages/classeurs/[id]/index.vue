@@ -120,7 +120,7 @@
               >
                 <GoupixDexBinderCardImage
                   v-if="cell.item"
-                  :src="cell.item.image_url"
+                  :src="cell.item.image_url || limitlessCardImageUrl(cell.item.tcgdex_card_id)"
                   :alt="cell.dex ? cell.dex.pokemonName : cell.item.card_name"
                   :fallback-src="cell.dex?.artworkUrl ?? null"
                 />
@@ -150,7 +150,10 @@
                 class="block"
               >
                 <div class="card-tile aspect-[63/88]">
-                  <GoupixDexBinderCardImage :src="item.image_url" :alt="item.card_name" />
+                  <GoupixDexBinderCardImage
+                    :src="item.image_url || limitlessCardImageUrl(item.tcgdex_card_id)"
+                    :alt="item.card_name"
+                  />
                   <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
                 </div>
                 <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
@@ -186,6 +189,7 @@
 <script setup lang="ts">
 import type { BinderDetail, BinderPocketItem } from '~/types/binders'
 import { pokedexPlaceholderAt, pokedexRegionSize } from '~/utils/pokedex/kanto'
+import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 definePageMeta({ middleware: 'auth' })
 
