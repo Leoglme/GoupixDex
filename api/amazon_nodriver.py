@@ -86,6 +86,7 @@ async def _ensure_browser_async():
         kwargs["browser_executable_path"] = AMAZON_CHROME_EXECUTABLE
     browser = await uc.start(**kwargs)
     _browser_holder["browser"] = browser
+    _browser_holder["consent_done"] = False
     return browser
 
 
@@ -164,6 +165,7 @@ async def close_browser_async() -> None:
         print(f"[nodriver] browser.stop(): {e}", flush=True)
     finally:
         _browser_holder["browser"] = None
+        _browser_holder["consent_done"] = False
 
 
 def run_browser(coro, timeout: float = 600):
@@ -178,6 +180,7 @@ def close_browser_sync() -> None:
         print(f"[nodriver] close_browser_sync: {e}")
     finally:
         _browser_holder["browser"] = None
+        _browser_holder["consent_done"] = False
 
 
 async def export_cookies_requests_format():
@@ -199,50 +202,38 @@ async def prime_session_and_export_cookies_async():
     return await browser.cookies.get_all(requests_cookie_format=True)
 
 
-async def _accept_amazon_cookie_consent(tab: Any, browser: Any, timeout_sec: float = 14.0) -> bool:
-    """Amazon.fr GDPR banner (``#sp-cc-accept`` / « Accepter »)."""
+_CONSENT_CLICK_JS = """
+() => {
+  const direct = document.querySelector('#sp-cc-accept');
+  if (direct) { direct.click(); return true; }
+  const nodes = document.querySelectorAll('button, input[type="submit"], a, span[role="button"]');
+  for (const el of nodes) {
+    const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+    if (/^accepter$/i.test(t) || /^accept$/i.test(t)) { el.click(); return true; }
+  }
+  return false;
+}
+"""
+
+
+async def _accept_amazon_cookie_consent(tab: Any, browser: Any, timeout_sec: float = 2.5) -> bool:
+    """Amazon.fr GDPR banner (``#sp-cc-accept`` / « Accepter ») — traité une seule fois par session Chrome."""
+    if _browser_holder.get("consent_done"):
+        return False
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         await tab
-        for sel in (
-            "#sp-cc-accept",
-            "input#sp-cc-accept",
-            "button#sp-cc-accept",
-            '[data-action="sp-cc-accept"]',
-        ):
-            try:
-                el = await tab.select(sel, timeout=1)
-                if el:
-                    await el.click()
-                    await browser.sleep(0.35)
-                    return True
-            except Exception:
-                continue
         try:
-            clicked = await _tab_eval_value(
-                tab,
-                """
-                () => {
-                  const direct = document.querySelector('#sp-cc-accept');
-                  if (direct) { direct.click(); return true; }
-                  const nodes = document.querySelectorAll('button, input[type="submit"], a, span[role="button"]');
-                  for (const el of nodes) {
-                    const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
-                    if (/^accepter$/i.test(t) || /^accept$/i.test(t)) {
-                      el.click();
-                      return true;
-                    }
-                  }
-                  return false;
-                }
-                """,
-            )
-            if clicked is True:
-                await browser.sleep(0.35)
-                return True
+            clicked = await _tab_eval_value(tab, _CONSENT_CLICK_JS)
         except Exception:
-            pass
-        await asyncio.sleep(0.2)
+            clicked = False
+        if clicked is True:
+            _browser_holder["consent_done"] = True
+            await browser.sleep(0.35)
+            return True
+        await asyncio.sleep(0.3)
+    # Pas de bandeau sur cette session : inutile de le rechercher à chaque page.
+    _browser_holder["consent_done"] = True
     return False
 
 
@@ -1309,11 +1300,14 @@ async def _maybe_fill_amazon_credentials(tab: Any, email: str, password: str) ->
 async def login_to_amazon_async(
     email: str | None = None,
     password: str | None = None,
+    reuse_browser: bool = False,
+    keep_browser_open: bool = False,
 ) -> Dict[str, Any]:
     """Sign-in (manual or auto-fill when ``email``/``password`` are set); cookies exported at the end."""
-    # Reset a zombie session (Chrome closed manually, or stop() stuck).
-    await close_browser_async()
-    await asyncio.sleep(0.6)
+    if not reuse_browser:
+        # Reset a zombie session (Chrome closed manually, or stop() stuck).
+        await close_browser_async()
+        await asyncio.sleep(0.6)
 
     base_url = AMAZON_BASE_URL
     browser = await _ensure_browser_async()
@@ -1339,6 +1333,7 @@ async def login_to_amazon_async(
     logged_in_ready = False
     auto_creds = (email or "").strip(), (password or "").strip()
     credentials_attempted = False
+    email_attempted = False
 
     try:
         while time.time() - start_time < max_wait:
@@ -1417,17 +1412,26 @@ async def login_to_amazon_async(
             )
 
             if is_auth_url or has_auth_form:
-                if (
-                    auto_creds[0]
-                    and auto_creds[1]
-                    and not credentials_attempted
-                    and "ap_password" in page_source
-                ):
-                    credentials_attempted = True
-                    print("   [auto] Filling Amazon email/password…")
-                    await _maybe_fill_amazon_credentials(tab, auto_creds[0], auto_creds[1])
-                    await browser.sleep(4)
-                    continue
+                if auto_creds[0] and auto_creds[1]:
+                    # amazon.fr connecte en deux étapes : l'e-mail seul (« Continuer »), puis le mot de passe.
+                    if "ap_password" in page_source and not credentials_attempted:
+                        credentials_attempted = True
+                        print("   [auto] Filling Amazon password…")
+                        await _maybe_fill_amazon_credentials(tab, auto_creds[0], auto_creds[1])
+                        await browser.sleep(4)
+                        continue
+                    if (
+                        "ap_password" not in page_source
+                        and not email_attempted
+                        and (await _amazon_auth_page_kind(tab)) == "identifier"
+                    ):
+                        email_attempted = True
+                        print("   [auto] Filling Amazon e-mail then « Continuer »…")
+                        if await _fill_amazon_identifier_email(tab, auto_creds[0], browser):
+                            await browser.sleep(0.6)
+                            await _click_amazon_auth_continue(tab)
+                        await browser.sleep(4)
+                        continue
                 if "qr" in page_source.lower() and "scan" in page_source.lower():
                     print("   [qr] QR code detected - scan with your phone...")
                 elif "cvf" in current_url or "mfa" in current_url:
@@ -1444,6 +1448,10 @@ async def login_to_amazon_async(
 
         if not logged_in_ready:
             raise RuntimeError("Inconsistent login state after wait loop")
+
+        if keep_browser_open:
+            # L'appelant enchaîne dans ce même Chrome (vérification des fiches) : pas de fermeture ni d'export.
+            return {"success": True, "message": "Sign-in successful. Chrome kept open for the next step."}
 
         # Do not call CDP ``Storage.getCookies``: with nodriver it can hang forever and never
         # finish POST /api/login (GoupixDex: close Chrome then read SQLite from profile).
@@ -1489,11 +1497,19 @@ async def login_to_amazon_async(
         print(f"\nTIMEOUT or ERROR: {wait_error}")
         return {"success": False, "message": str(wait_error)}
     finally:
-        _schedule_close_browser_after_login()
+        if not keep_browser_open:
+            _schedule_close_browser_after_login()
 
 
-def login_to_amazon(email: str | None = None, password: str | None = None) -> Dict[str, Any]:
-    return run_browser(login_to_amazon_async(email, password), timeout=620)
+def login_to_amazon(
+    email: str | None = None,
+    password: str | None = None,
+    reuse_browser: bool = False,
+    keep_browser_open: bool = False,
+) -> Dict[str, Any]:
+    return run_browser(
+        login_to_amazon_async(email, password, reuse_browser, keep_browser_open), timeout=620
+    )
 
 
 async def register_to_amazon_async(

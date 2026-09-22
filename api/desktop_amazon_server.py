@@ -306,12 +306,13 @@ async def _ensure_account_signed_in(
     from amazon_nodriver import login_to_amazon
 
     logger.info("Vault auto-login (multi-comptes) for account %s (%s)", account_id, email[:3] + "***")
-    result = await asyncio.to_thread(login_to_amazon, email, password)
+    # Même Chrome que la lecture du message d'accueil, gardé ouvert pour la vérification des fiches.
+    result = await asyncio.to_thread(
+        lambda: login_to_amazon(email, password, reuse_browser=True, keep_browser_open=True)
+    )
     if not result.get("success"):
         raise RuntimeError(str(result.get("message") or "Connexion automatique échouée."))
     _write_session_marker()
-    # Le flux de login programme la fermeture de son Chrome : laisser passer avant d'en rouvrir un.
-    await asyncio.sleep(1.5)
     state = await asyncio.to_thread(scraper.session_state_via_browser)
     if state != "ready":
         raise RuntimeError("Connexion automatique non confirmée (2FA ou captcha ?).")
