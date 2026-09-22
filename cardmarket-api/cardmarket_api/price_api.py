@@ -49,6 +49,10 @@ class CardmarketPriceApi:
         """Raw guide row for a Cardmarket product id, or ``None`` when unknown."""
         return self._store.get(id_product)
 
+    def rows(self) -> list[PriceGuideRow]:
+        """Every raw guide row currently loaded (copy)."""
+        return self._store.rows()
+
     def get_card_prices(self, id_product: int) -> CardmarketCardPrices | None:
         """Consumer view (reference EUR & friends) for a Cardmarket product id."""
         row = self._store.get(id_product)

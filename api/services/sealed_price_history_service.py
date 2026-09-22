@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from models.sealed_price_snapshot import SealedPriceSnapshot
 from models.sealed_product import SealedProduct
+from services import sealed_catalog_price_history_service
 from services.price_history_seed_service import synthesized_price_points
 
 _PARIS_TZ = ZoneInfo("Europe/Paris")
@@ -58,11 +59,25 @@ def snapshot_all_sealed(db: Session) -> int:
     return len(rows)
 
 
+def merge_price_points(primary: list[dict[str, Any]], secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fusionne deux séries datées : les points de ``primary`` gagnent sur ``secondary`` à date égale ; tri croissant."""
+    primary_dates = {p["date"] for p in primary}
+    merged = [p for p in secondary if p["date"] not in primary_dates] + list(primary)
+    merged.sort(key=lambda p: p["date"])
+    return merged
+
+
+def _points_with_seed(points: list[dict[str, Any]], id_product: int | None) -> dict[str, Any]:
+    """Complète une série trop courte (moins de deux points) par l'amorce guide ; ``approximate`` si l'amorce a ajouté une date."""
+    if len(points) >= 2:
+        return {"points": points, "approximate": False}
+    seed = synthesized_price_points(id_product)
+    merged = merge_price_points(points, seed)
+    return {"points": merged, "approximate": len(merged) > len(points)}
+
+
 def price_history(db: Session, product: SealedProduct) -> dict[str, Any]:
-    """
-    Courbe de prix d'un produit : historique réel, complété par l'amorce approximative
-    tant qu'il reste moins de deux points réels.
-    """
+    """Courbe d'un produit possédé : ses snapshots, étendus par les relevés catalogue du même ``idProduct`` aux autres dates, puis par l'amorce guide s'il manque des points."""
     rows = (
         db.query(SealedPriceSnapshot)
         .filter(SealedPriceSnapshot.sealed_product_id == product.id)
@@ -72,17 +87,22 @@ def price_history(db: Session, product: SealedProduct) -> dict[str, Any]:
     real_points = [
         {"date": r.snapshot_date.isoformat(), "price_eur": round(float(r.market_price_eur), 2)} for r in rows
     ]
-    if len(real_points) >= 2:
-        return {"points": real_points, "approximate": False}
-
-    seed = synthesized_price_points(product.cardmarket_id_product)
-    real_dates = {p["date"] for p in real_points}
-    merged = [p for p in seed if p["date"] not in real_dates] + real_points
-    merged.sort(key=lambda p: p["date"])
-    return {"points": merged, "approximate": bool(seed) and len(real_points) < 2}
+    catalog_points = sealed_catalog_price_history_service.catalog_price_points(db, product.cardmarket_id_product)
+    return _points_with_seed(merge_price_points(real_points, catalog_points), product.cardmarket_id_product)
 
 
-def catalog_price_history(id_product: int | None) -> dict[str, Any]:
-    """Courbe approximative d'un produit du catalogue (amorce guide par ``idProduct``, avant possession)."""
-    seed = synthesized_price_points(id_product)
-    return {"points": seed, "approximate": bool(seed)}
+def catalog_price_history(db: Session, *, user_id: int, id_product: int | None) -> dict[str, Any]:
+    """Courbe d'un produit du catalogue : celle du produit possédé s'il est dans la collection, sinon les relevés quotidiens du guide (point du jour posé à la première consultation)."""
+    if id_product is None:
+        return {"points": [], "approximate": False}
+    owned = (
+        db.query(SealedProduct)
+        .filter(SealedProduct.user_id == user_id, SealedProduct.cardmarket_id_product == id_product)
+        .order_by(SealedProduct.id.asc())
+        .first()
+    )
+    if owned is not None:
+        return price_history(db, owned)
+    sealed_catalog_price_history_service.ensure_today_catalog_snapshot(db, id_product)
+    points = sealed_catalog_price_history_service.catalog_price_points(db, id_product)
+    return _points_with_seed(points, id_product)

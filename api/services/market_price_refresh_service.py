@@ -34,6 +34,7 @@ from services import (
     collection_card_price_history_service,
     collection_card_service,
     portfolio_value_service,
+    sealed_catalog_price_history_service,
     sealed_price_history_service,
     sealed_product_service,
 )
@@ -69,6 +70,7 @@ def refresh_market_prices() -> dict[str, Any]:
         db.commit()
         snapshot_count = portfolio_value_service.snapshot_all_users(db)
         sealed_points = sealed_price_history_service.snapshot_all_sealed(db)
+        sealed_catalog_points = sealed_catalog_price_history_service.snapshot_all_sealed_catalog(db)
         card_points = collection_card_price_history_service.snapshot_all_collection_cards(db)
     finally:
         db.close()
@@ -82,6 +84,7 @@ def refresh_market_prices() -> dict[str, Any]:
         **articles_reval,
         "portfolio_snapshots": snapshot_count,
         "sealed_price_points": sealed_points,
+        "sealed_catalog_price_points": sealed_catalog_points,
         "card_price_points": card_points,
     }
     logger.info("Cardmarket market refresh done: %s", result)

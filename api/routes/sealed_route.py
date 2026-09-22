@@ -170,10 +170,13 @@ def quote_prices(
 @router.post("/catalog-price-history")
 def catalog_price_history(
     body: SealedCatalogPriceHistoryBody,
-    _user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Courbe approximative d'un produit du catalogue (amorce guide par ``idProduct``, avant l'ajout)."""
-    return sealed_price_history_service.catalog_price_history(body.cardmarket_id_product)
+    """Courbe d'un produit du catalogue : historique du produit possédé s'il l'est, sinon relevés quotidiens du guide."""
+    return sealed_price_history_service.catalog_price_history(
+        db, user_id=user.id, id_product=body.cardmarket_id_product
+    )
 
 
 @router.post("/resolve-cardmarket")

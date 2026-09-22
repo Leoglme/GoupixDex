@@ -12,6 +12,7 @@ from models.collection_card_price_snapshot import CollectionCardPriceSnapshot
 from models.image import Image
 from models.margin_settings import MarginSettings
 from models.portfolio_value_snapshot import PortfolioValueSnapshot
+from models.sealed_catalog_price_snapshot import SealedCatalogPriceSnapshot
 from models.sealed_price_snapshot import SealedPriceSnapshot
 from models.sealed_product import SealedProduct
 from models.user import User
@@ -32,6 +33,7 @@ __all__ = [
     "Image",
     "MarginSettings",
     "PortfolioValueSnapshot",
+    "SealedCatalogPriceSnapshot",
     "SealedPriceSnapshot",
     "SealedProduct",
     "User",

@@ -82,7 +82,7 @@ class SealedQuoteBody(BaseModel):
 
 
 class SealedCatalogPriceHistoryBody(BaseModel):
-    """``POST /sealed/catalog-price-history`` — courbe approximative d'un produit catalogue par ``idProduct``."""
+    """``POST /sealed/catalog-price-history`` — courbe d'un produit catalogue par ``idProduct``."""
 
     cardmarket_id_product: int | None = Field(default=None, ge=1)
 

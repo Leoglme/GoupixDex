@@ -81,6 +81,11 @@ class PriceGuideStore:
         with self._lock:
             return self._rows.get(id_product)
 
+    def rows(self) -> list[PriceGuideRow]:
+        """Copy of every indexed row, safe to iterate outside the lock."""
+        with self._lock:
+            return list(self._rows.values())
+
     @property
     def row_count(self) -> int:
         with self._lock:
