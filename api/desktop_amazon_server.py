@@ -29,7 +29,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, List
+from typing import Annotated, Any, AsyncIterator, List
 
 import httpx
 import uvicorn
@@ -45,12 +45,15 @@ from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.amazon_profile_session_service import detect_amazon_session_from_profile
 from services.amazon_worker_accounts import (
+    account_cookies_export_path,
+    account_profile_dir,
     bind_amazon_profile_for,
     bind_provision_staging_profile,
     claim_provision_staging_profile,
     discard_provision_staging_profile,
     fetch_account_credentials,
     fetch_active_account_id,
+    fetch_vault_account_ids,
     legacy_amazon_profile_dir,
 )
 from services.os_service import OsService
@@ -141,7 +144,10 @@ async def bind_active_amazon_profile(
     remote: Annotated[str, Depends(get_remote_base_flexible)],
 ) -> int | None:
     """Select Chromium profile for the user's active vault account (legacy path if none)."""
-    account_id = await fetch_active_account_id(raw_token, remote)
+    try:
+        account_id = await fetch_active_account_id(raw_token, remote)
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     bind_amazon_profile_for(user_id, account_id)
     _reset_amazon_scraper()
     return account_id
@@ -231,11 +237,16 @@ def _merge_search_rows_with_checked(
 def _run_check_invites_with_progress(
     asins: List[str],
     loop: asyncio.AbstractEventLoop,
+    scraper: Any | None = None,
+    account_scope: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    scraper = _get_amazon_scraper()
+    """Vérifie chaque ASIN ; ``scraper`` épinglé et ``account_scope`` (compte i/n) pour la boucle multi-comptes."""
+    scraper = scraper if scraper is not None else _get_amazon_scraper()
 
     def progress_cb(**kw: Any) -> None:
         pl: dict[str, Any] = dict(kw)
+        if account_scope:
+            pl.update(account_scope)
         item_data = pl.pop("item_data", None)
         if isinstance(item_data, dict):
             pl["item_title"] = item_data.get("title")
@@ -259,6 +270,25 @@ _refreshed_at: dict[str, str | None] = {}
 # Last Amazon search rows per user (shared across vault accounts — statuses differ per profile).
 _catalog_search_rows: dict[int, list[dict[str, Any]]] = {}
 _amazon_scraper = None
+# Sérialise les opérations qui lient un profil ou utilisent le scraper global (refresh, reverify, request, verify-all).
+_invites_lock = asyncio.Lock()
+
+
+async def hold_invites_lock() -> AsyncIterator[None]:
+    """Dépendance FastAPI : garde le verrou des invites pendant toute l'exécution du handler."""
+    async with _invites_lock:
+        yield
+
+
+def _pinned_scraper_for(user_id: int, account_id: int):
+    """Scraper lié aux chemins d'un compte précis (profil + cookies), sans Chrome : insensible au profil global."""
+    from scraper import AmazonScraper
+
+    return AmazonScraper(
+        profile_dir=str(account_profile_dir(user_id, account_id)),
+        cookies_path=str(account_cookies_export_path(user_id, account_id)),
+        allow_browser_fallback=False,
+    )
 
 
 def _invites_cache_key(user_id: int, account_id: int | None) -> str:
@@ -303,6 +333,8 @@ def _integration_item_to_goupix_invite(item: dict[str, object]) -> dict[str, obj
         status = "requested"
     elif st_raw == "not_requested":
         status = "not_requested"
+    elif st_raw == "needs_login":
+        status = "needs_login"
     elif not st_raw:
         status = "listing_only"
     else:
@@ -376,6 +408,8 @@ class AmazonRequestInviteBody(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     asin: str
+    #: Compte du coffre depuis lequel envoyer la demande (sinon : compte actif côté API).
+    account_id: int | None = Field(default=None, ge=1)
 
     @field_validator("asin", mode="after")
     @classmethod
@@ -905,6 +939,9 @@ async def amazon_activate_account(
             )
     except httpx.HTTPError as exc:
         logger.warning("Remote active Amazon account sync unreachable (%s); binding local profile anyway.", exc)
+    # La fenêtre de login encore ouverte appartient à l'ancien compte : la fermer, sinon
+    # ``GET /session`` lirait son message d'accueil et marquerait le nouveau profil « connecté ».
+    await _close_all_amazon_chromium()
     profile = bind_amazon_profile_for(user_id, account_id)
     _reset_amazon_scraper()
     auto_login = await _try_vault_auto_login_if_needed(
@@ -1146,6 +1183,7 @@ async def amazon_invites_list(
 
 @router.post("/invites/refresh")
 async def amazon_invites_refresh(
+    _lock: Annotated[None, Depends(hold_invites_lock)],
     user_id: Annotated[int, Depends(get_user_id_introspected)],
     active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     body: AmazonRefreshBody,
@@ -1252,6 +1290,7 @@ async def amazon_invites_refresh(
 
 @router.post("/invites/reverify")
 async def amazon_invites_reverify(
+    _lock: Annotated[None, Depends(hold_invites_lock)],
     user_id: Annotated[int, Depends(get_user_id_introspected)],
     active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     body: AmazonReverifyBody,
@@ -1308,31 +1347,172 @@ async def amazon_invites_reverify(
     }
 
 
+@router.post("/invites/verify-all")
+async def amazon_invites_verify_all(
+    _lock: Annotated[None, Depends(hold_invites_lock)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+    body: AmazonReverifyBody,
+) -> dict[str, object]:
+    """
+    Même catalogue vérifié sur chaque compte du coffre, l'un après l'autre, avec un scraper
+    épinglé par compte (cookies du compte, jamais de Chrome). Une liste de lignes par compte.
+    """
+    search_rows = _goupix_invites_to_search_rows(body.items)
+    if not search_rows:
+        search_rows = [dict(x) for x in _catalog_search_rows.get(user_id, [])]
+    if not search_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucun produit à vérifier — lancez d’abord une actualisation.",
+        )
+
+    asins_ordered: list[str] = []
+    seen_asin: set[str] = set()
+    for x in search_rows:
+        a = str(x.get("asin") or "").strip().upper()
+        if a and a not in seen_asin:
+            seen_asin.add(a)
+            asins_ordered.append(a)
+
+    try:
+        account_ids = await fetch_vault_account_ids(raw_token, remote)
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Liste des comptes Amazon injoignable : {exc}",
+        ) from exc
+    if not account_ids and active_account_id is not None:
+        account_ids = [active_account_id]
+    if not account_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucun compte Amazon dans le coffre.",
+        )
+
+    loop = asyncio.get_running_loop()
+    rows_by_account: dict[str, list[dict[str, object]]] = {}
+    errors: dict[str, str] = {}
+    total = len(account_ids)
+    for index, account_id in enumerate(account_ids, start=1):
+        scope: dict[str, Any] = {
+            "account_id": account_id,
+            "account_index": index,
+            "account_total": total,
+        }
+        try:
+            await _broadcast_amazon_progress(
+                {
+                    "status": "checking_phase",
+                    "message": f"Compte {index}/{total} — vérification de {len(asins_ordered)} fiche(s)…",
+                    "total_pages": len(asins_ordered),
+                    "current_page": 0,
+                    **scope,
+                }
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        scraper = _pinned_scraper_for(user_id, account_id)
+        try:
+            checked_rows = await asyncio.to_thread(
+                _run_check_invites_with_progress,
+                asins_ordered,
+                loop,
+                scraper,
+                scope,
+            )
+            rows = [
+                _integration_item_to_goupix_invite(x)
+                for x in _merge_search_rows_with_checked(search_rows, checked_rows)
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Amazon verify-all account %s", account_id)
+            errors[str(account_id)] = str(exc)
+            try:
+                await _broadcast_amazon_progress(
+                    {"status": "error", "message": f"Compte {index}/{total} : {exc}", **scope}
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+        finally:
+            scraper._invalidate_http()
+
+        key = _invites_cache_key(user_id, account_id)
+        _invites_cache[key] = rows
+        _refreshed_at[key] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        rows_by_account[str(account_id)] = rows
+        not_signed_in = sum(1 for r in rows if r.get("status") == "needs_login")
+        done_msg = f"Compte {index}/{total} : {len(rows)} produit(s) vérifié(s)"
+        if not_signed_in:
+            done_msg += f", {not_signed_in} fiche(s) « compte non connecté »"
+        try:
+            await _broadcast_amazon_progress(
+                {"status": "account_done", "message": done_msg + ".", "items_found": len(rows), **scope}
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    refreshed_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    summary = f"Statuts vérifiés sur {len(rows_by_account)}/{total} compte(s)."
+    try:
+        await _broadcast_amazon_progress(
+            {"status": "completed", "message": summary, "items_found": len(asins_ordered)}
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "rows_by_account": rows_by_account,
+        "account_ids": account_ids,
+        "refreshed_at": refreshed_iso,
+        "active_account_id": active_account_id,
+        "errors": errors,
+        "message": summary,
+    }
+
+
 @router.post("/invites/request")
 async def amazon_invites_request(
+    _lock: Annotated[None, Depends(hold_invites_lock)],
     user_id: Annotated[int, Depends(get_user_id_introspected)],
     active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
     body: AmazonRequestInviteBody,
 ) -> dict[str, object]:
     """
-    POST Amazon ``request-invite`` for one ASIN (session cookies), then refresh that row in the local cache.
+    POST Amazon ``request-invite`` for one ASIN with the cookies of ``body.account_id``
+    (pinned scraper, never the global profile), then refresh that row in that account's cache.
     """
-    cache_key = _invites_cache_key(user_id, active_account_id)
+    target_account_id = body.account_id if body.account_id is not None else active_account_id
+    cache_key = _invites_cache_key(user_id, target_account_id)
 
     asin = body.asin
+    scraper = (
+        _pinned_scraper_for(user_id, body.account_id)
+        if body.account_id is not None
+        else _get_amazon_scraper()
+    )
     try:
-        result = await asyncio.to_thread(_get_amazon_scraper().request_invitation_for_asin, asin)
+        result = await asyncio.to_thread(scraper.request_invitation_for_asin, asin)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Amazon request_invitation_for_asin")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Worker error: {exc}",
         ) from exc
+    finally:
+        if body.account_id is not None:
+            scraper._invalidate_http()
 
     if not result.get("success"):
         return {
             "success": False,
             "message": str(result.get("message") or "La demande a échoué."),
+            "account_id": target_account_id,
         }
 
     raw_item = result.get("item")
@@ -1356,6 +1536,7 @@ async def amazon_invites_request(
         "success": True,
         "message": str(result.get("message") or "Invitation demandée."),
         "invite": goupix,
+        "account_id": target_account_id,
     }
 
 

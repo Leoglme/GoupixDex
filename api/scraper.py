@@ -99,20 +99,31 @@ def _title_matches_user_filter(title: str, user_q: str) -> bool:
 
 
 class AmazonScraper:
-    def __init__(self, debug_mode=False, chromedriver_path=None):
+    def __init__(
+        self,
+        debug_mode=False,
+        chromedriver_path=None,
+        profile_dir: Optional[str] = None,
+        cookies_path: Optional[str] = None,
+        allow_browser_fallback: bool = True,
+    ):
         self.base_url = AMAZON_BASE_URL
         self.is_logged_in = False
         self.debug_mode = debug_mode
         self._http_client: Optional[httpx.Client] = None
         self._http_lock = threading.Lock()
+        # Instance épinglée sur un compte : chemins explicites, indépendants du profil global lié.
+        self._pinned_profile_dir = profile_dir
+        self._pinned_cookies_path = cookies_path
+        self.allow_browser_fallback = allow_browser_fallback
         # Legacy Selenium chromedriver arg — ignored by nodriver; use AMAZON_CHROME_EXECUTABLE
         _ = chromedriver_path
 
     def _profile_dir(self) -> str:
-        return amazon_config.AMAZON_USER_DATA_DIR
+        return self._pinned_profile_dir or amazon_config.AMAZON_USER_DATA_DIR
 
     def _cookies_path(self) -> str:
-        return amazon_config.AMAZON_COOKIES_EXPORT_FILE
+        return self._pinned_cookies_path or amazon_config.AMAZON_COOKIES_EXPORT_FILE
 
     def close_selenium(self):
         """Backward compat: close the browser."""
@@ -164,9 +175,10 @@ class AmazonScraper:
             return c
 
         det = detect_amazon_session_from_profile(Path(self._profile_dir()))
-        if det != "ready":
+        if det != "ready" or not self.allow_browser_fallback:
             print(
-                "   [http] Profil non connecté — pas d'export CDP (connexion auto / manuelle requise)"
+                "   [http] Profil non connecté ou instance épinglée — pas d'export CDP"
+                " (connexion auto / manuelle requise)"
             )
             return httpx.Client(
                 headers=DEFAULT_HEADERS,
@@ -192,14 +204,20 @@ class AmazonScraper:
 
     def _fetch_html(self, url: str) -> str:
         client = self._get_http_client()
+        html = ""
         try:
             html = fetch_html_http(client, url)
             if not looks_like_blocked_or_bot(html):
                 return html
-            print("   [warn] Suspicious HTTP response (bot / short page) - browser fallback")
+            print("   [warn] Suspicious HTTP response (bot / short page)")
         except Exception as e:
-            print(f"   [warn] HTTP: {e} - browser fallback")
+            print(f"   [warn] HTTP: {e}")
 
+        if not self.allow_browser_fallback:
+            # Instance épinglée : pas de Chrome (il ouvrirait le profil global, pas celui du compte).
+            return html
+
+        print("   [info] browser fallback")
         return run_browser(fetch_html_via_tab(url))
 
     def login_to_amazon(self) -> Dict:
@@ -556,6 +574,11 @@ class AmazonScraper:
                 "message": "This product is already orderable; no invitation to request.",
             }
         st = preview.get("invitation_status")
+        if st == "needs_login":
+            return {
+                "success": False,
+                "message": "Ce compte n'est pas connecté à Amazon sur ce PC. Reconnectez-le puis réessayez.",
+            }
         if st != "not_requested":
             return {
                 "success": False,
@@ -599,10 +622,22 @@ class AmazonScraper:
             item2 = parse_product_page(page2, t, self.base_url)
         except Exception:
             item2 = None
-        if item2 is None:
+        if item2 is not None and item2.get("invitation_status") == "needs_login":
+            return {
+                "success": False,
+                "message": "Session Amazon perdue pendant la demande. Reconnectez ce compte puis réessayez.",
+            }
+        if item2 is None or item2.get("invitation_status") == "unknown":
+            # Amazon a accepté le POST mais la relecture de la fiche ne le confirme pas :
+            # on ne fabrique pas « demandée », on laisse le statut à revérifier.
             item2 = dict(preview)
-            item2["invitation_status"] = "requested"
-            item2["invitation_requested"] = True
+            item2["invitation_status"] = "unknown"
+            item2["invitation_requested"] = False
+            return {
+                "success": True,
+                "message": "Demande envoyée, statut à revérifier (fiche non confirmée).",
+                "item": item2,
+            }
 
         return {
             "success": True,

@@ -93,15 +93,21 @@ def parse_product_page(
     invitation_status = None
     invitation_requested = False
 
+    signed_in_el = soup.find("input", id="hdp-ib-signedIn")
+    signed_out = signed_in_el is not None and (signed_in_el.get("value") or "").strip().lower() == "false"
+
     if can_order:
         invitation_status = "accepted"
         invitation_requested = True
+    elif signed_out or title_elem is None:
+        # Compte non connecté, captcha ou fiche non reconnue : on ne devine pas un statut.
+        invitation_status = "needs_login" if signed_out else "unknown"
+        invitation_requested = False
     else:
         already_requested = bool(
             soup.find("div", id="hdp-detail-requested-id")
             or "Invitation demandée" in page_source
             or "invitation a été demandée" in page_source.lower()
-            or "vous serez notifié" in page_source.lower()
         )
         has_invite_button_text = "Demander une invitation" in page_source
         if already_requested:
@@ -111,8 +117,8 @@ def parse_product_page(
             invitation_status = "not_requested"
             invitation_requested = False
         else:
-            invitation_status = "requested"
-            invitation_requested = True
+            invitation_status = "unknown"
+            invitation_requested = False
 
     price = None
     price_elem = soup.find("span", class_="a-price")

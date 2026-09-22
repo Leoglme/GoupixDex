@@ -56,6 +56,12 @@ def claim_provision_staging_profile(user_id: int, account_id: int) -> Path:
     return dst
 
 
+def account_cookies_export_path(user_id: int, account_id: int) -> Path:
+    """Fichier cookies JSON d'un compte, même convention que ``amazon_config.bind_amazon_profile``."""
+    profile = account_profile_dir(user_id, account_id)
+    return profile.parent / f"amazon_cookies_{profile.name}.json"
+
+
 def bind_amazon_profile_for(user_id: int, account_id: int | None) -> Path:
     if account_id is None:
         profile = legacy_amazon_profile_dir()
@@ -66,6 +72,26 @@ def bind_amazon_profile_for(user_id: int, account_id: int | None) -> Path:
     return profile
 
 
+async def fetch_vault_account_ids(raw_token: str, remote: str) -> list[int]:
+    """Identifiants de tous les comptes Amazon du coffre de l'utilisateur (ordre de l'API)."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(
+            f"{remote.rstrip('/')}/amazon-accounts",
+            headers={"Authorization": f"Bearer {raw_token}", "Accept": "application/json"},
+        )
+    if r.status_code == 401:
+        raise PermissionError("Not authenticated")
+    r.raise_for_status()
+    data = r.json()
+    out: list[int] = []
+    for acc in data.get("accounts") or []:
+        try:
+            out.append(int(acc.get("id")))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return out
+
+
 async def fetch_active_account_id(raw_token: str, remote: str) -> int | None:
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
@@ -73,7 +99,8 @@ async def fetch_active_account_id(raw_token: str, remote: str) -> int | None:
             headers={"Authorization": f"Bearer {raw_token}", "Accept": "application/json"},
         )
     if r.status_code == 401:
-        return None
+        # Ne jamais retomber en silence sur le profil legacy partagé : la session est expirée.
+        raise PermissionError("Not authenticated")
     r.raise_for_status()
     data = r.json()
     aid = data.get("active_account_id")
