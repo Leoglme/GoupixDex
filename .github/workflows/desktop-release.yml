@@ -54,6 +54,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: `v${version}`,
+              // Épingle la release sur le commit construit (sinon le tag suit la tête de main à la publication).
+              target_commitish: context.sha,
               name: `GoupixDex Desktop v${version}`,
               body: [
                 'Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).',
