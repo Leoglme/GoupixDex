@@ -257,6 +257,72 @@ async def fetch_html_via_tab(url: str) -> str:
     return await tab.get_content()
 
 
+_GREETING_JS = (
+    "(() => { const el = document.querySelector('#nav-link-accountList-nav-line-1');"
+    " return el && el.textContent ? el.textContent.trim() : ''; })()"
+)
+_SIGNED_OUT_GREETING_MARKERS = ("identifiez", "s'identifier", "s’identifier", "sign in", "connectez")
+
+
+async def session_state_via_browser_async() -> str:
+    """« ready » si le message d'accueil Amazon nomme un compte, « needs_login » sinon (profil lié)."""
+    browser = await _ensure_browser_async()
+    tab = await browser.get(AMAZON_BASE_URL)
+    await browser.sleep(2)
+    await _accept_amazon_cookie_consent(tab, browser)
+    await tab
+    try:
+        greeting = await asyncio.wait_for(tab.evaluate(_GREETING_JS), timeout=8)
+    except Exception:
+        return "needs_login"
+    text = str(greeting or "").strip()
+    if not text:
+        return "needs_login"
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _SIGNED_OUT_GREETING_MARKERS):
+        return "needs_login"
+    return "ready"
+
+
+_INVITE_BUTTON_SELECTORS = (
+    'input[name="submit.inviteButton"]',
+    "#hdp-invite-button input",
+    "#hdp-invite-button",
+)
+
+
+async def click_request_invite_async(dp_url: str) -> Dict[str, Any]:
+    """Ouvre la fiche, clique « Demander une invitation » comme l'utilisateur, renvoie le HTML avant/après."""
+    browser = await _ensure_browser_async()
+    tab = await browser.get(dp_url)
+    await browser.sleep(2)
+    if await _accept_amazon_cookie_consent(tab, browser):
+        tab = await browser.get(dp_url)
+        await browser.sleep(1.5)
+    await tab
+    before = await tab.get_content()
+
+    clicked = False
+    for selector in _INVITE_BUTTON_SELECTORS:
+        try:
+            btn = await tab.select(selector, timeout=4)
+        except Exception:
+            btn = None
+        if btn:
+            await btn.click()
+            clicked = True
+            break
+    if not clicked:
+        return {"clicked": False, "html_before": before, "html_after": before}
+
+    await browser.sleep(3)
+    tab = await browser.get(dp_url)
+    await browser.sleep(2)
+    await tab
+    after = await tab.get_content()
+    return {"clicked": True, "html_before": before, "html_after": after}
+
+
 async def _input_value_matches(tab: Any, selector: str, expected: str) -> bool:
     sel = json.dumps(selector)
     exp = json.dumps(expected)

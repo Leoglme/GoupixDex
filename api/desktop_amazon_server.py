@@ -45,8 +45,6 @@ from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from services.amazon_profile_session_service import detect_amazon_session_from_profile
 from services.amazon_worker_accounts import (
-    account_cookies_export_path,
-    account_profile_dir,
     bind_amazon_profile_for,
     bind_provision_staging_profile,
     claim_provision_staging_profile,
@@ -280,15 +278,43 @@ async def hold_invites_lock() -> AsyncIterator[None]:
         yield
 
 
-def _pinned_scraper_for(user_id: int, account_id: int):
-    """Scraper lié aux chemins d'un compte précis (profil + cookies), sans Chrome : insensible au profil global."""
+def _browser_scraper():
+    """Scraper qui lit chaque page via le Chrome du profil lié : compte connecté, aucun cookie à extraire."""
     from scraper import AmazonScraper
 
-    return AmazonScraper(
-        profile_dir=str(account_profile_dir(user_id, account_id)),
-        cookies_path=str(account_cookies_export_path(user_id, account_id)),
-        allow_browser_fallback=False,
-    )
+    return AmazonScraper(prefer_browser=True)
+
+
+async def _ensure_account_signed_in(
+    user_id: int,
+    account_id: int,
+    raw_token: str,
+    remote: str,
+    scraper: Any,
+) -> None:
+    """Vérifie le compte dans Chrome ; s'il n'est pas connecté, connexion automatique avec le coffre."""
+    state = await asyncio.to_thread(scraper.session_state_via_browser)
+    if state == "ready":
+        return
+    try:
+        email, password = await fetch_account_credentials(raw_token, remote, account_id)
+    except (ValueError, PermissionError) as exc:
+        raise RuntimeError(f"Identifiants du coffre indisponibles : {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Identifiants du coffre injoignables : {exc}") from exc
+
+    from amazon_nodriver import login_to_amazon
+
+    logger.info("Vault auto-login (multi-comptes) for account %s (%s)", account_id, email[:3] + "***")
+    result = await asyncio.to_thread(login_to_amazon, email, password)
+    if not result.get("success"):
+        raise RuntimeError(str(result.get("message") or "Connexion automatique échouée."))
+    _write_session_marker()
+    # Le flux de login programme la fermeture de son Chrome : laisser passer avant d'en rouvrir un.
+    await asyncio.sleep(1.5)
+    state = await asyncio.to_thread(scraper.session_state_via_browser)
+    if state != "ready":
+        raise RuntimeError("Connexion automatique non confirmée (2FA ou captcha ?).")
 
 
 def _invites_cache_key(user_id: int, account_id: int | None) -> str:
@@ -363,6 +389,8 @@ class AmazonRefreshBody(BaseModel):
     q: str | None = None
     max_pages: int = Field(default=2, ge=1, le=50)
     max_items: int | None = Field(default=None, ge=1, le=500)
+    #: False quand le front vérifie ensuite les statuts sur chaque compte (``/invites/verify-all``).
+    check_statuses: bool = True
 
 
 class AmazonReverifyItem(BaseModel):
@@ -1217,7 +1245,7 @@ async def amazon_invites_refresh(
                 asins_ordered.append(a)
                 if max_items is not None and len(asins_ordered) >= int(max_items):
                     break
-        if asins_ordered:
+        if asins_ordered and body.check_statuses:
             try:
                 await _broadcast_amazon_progress(
                     {
@@ -1396,6 +1424,7 @@ async def amazon_invites_verify_all(
 
     loop = asyncio.get_running_loop()
     rows_by_account: dict[str, list[dict[str, object]]] = {}
+    account_states: dict[str, str] = {}
     errors: dict[str, str] = {}
     total = len(account_ids)
     for index, account_id in enumerate(account_ids, start=1):
@@ -1407,17 +1436,32 @@ async def amazon_invites_verify_all(
         try:
             await _broadcast_amazon_progress(
                 {
-                    "status": "checking_phase",
-                    "message": f"Compte {index}/{total} — vérification de {len(asins_ordered)} fiche(s)…",
-                    "total_pages": len(asins_ordered),
-                    "current_page": 0,
+                    "status": "connecting",
+                    "message": f"Compte {index}/{total} — ouverture de Chrome et vérification de la connexion…",
                     **scope,
                 }
             )
         except Exception:  # noqa: BLE001
             pass
-        scraper = _pinned_scraper_for(user_id, account_id)
+        await _close_all_amazon_chromium()
+        bind_amazon_profile_for(user_id, account_id)
+        _reset_amazon_scraper()
+        scraper = _browser_scraper()
         try:
+            await _ensure_account_signed_in(user_id, account_id, raw_token, remote, scraper)
+            account_states[str(account_id)] = "ready"
+            try:
+                await _broadcast_amazon_progress(
+                    {
+                        "status": "checking_phase",
+                        "message": f"Compte {index}/{total} connecté — vérification de {len(asins_ordered)} fiche(s)…",
+                        "total_pages": len(asins_ordered),
+                        "current_page": 0,
+                        **scope,
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                pass
             checked_rows = await asyncio.to_thread(
                 _run_check_invites_with_progress,
                 asins_ordered,
@@ -1432,33 +1476,45 @@ async def amazon_invites_verify_all(
         except Exception as exc:  # noqa: BLE001
             logger.exception("Amazon verify-all account %s", account_id)
             errors[str(account_id)] = str(exc)
+            account_states[str(account_id)] = "needs_login"
+            # Fiches du catalogue marquées « compte non connecté » pour ce compte, sans deviner.
+            rows = [
+                _integration_item_to_goupix_invite({**x, "invitation_status": "needs_login"})
+                for x in search_rows
+            ]
             try:
                 await _broadcast_amazon_progress(
                     {"status": "error", "message": f"Compte {index}/{total} : {exc}", **scope}
                 )
             except Exception:  # noqa: BLE001
                 pass
-            continue
         finally:
-            scraper._invalidate_http()
+            await _close_all_amazon_chromium()
 
         key = _invites_cache_key(user_id, account_id)
         _invites_cache[key] = rows
         _refreshed_at[key] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         rows_by_account[str(account_id)] = rows
-        not_signed_in = sum(1 for r in rows if r.get("status") == "needs_login")
-        done_msg = f"Compte {index}/{total} : {len(rows)} produit(s) vérifié(s)"
-        if not_signed_in:
-            done_msg += f", {not_signed_in} fiche(s) « compte non connecté »"
-        try:
-            await _broadcast_amazon_progress(
-                {"status": "account_done", "message": done_msg + ".", "items_found": len(rows), **scope}
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        if account_states.get(str(account_id)) == "ready":
+            try:
+                await _broadcast_amazon_progress(
+                    {
+                        "status": "account_done",
+                        "message": f"Compte {index}/{total} : {len(rows)} produit(s) vérifié(s).",
+                        "items_found": len(rows),
+                        **scope,
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Revenir au profil du compte actif pour les requêtes suivantes.
+    bind_amazon_profile_for(user_id, active_account_id)
+    _reset_amazon_scraper()
 
     refreshed_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    summary = f"Statuts vérifiés sur {len(rows_by_account)}/{total} compte(s)."
+    ready_count = sum(1 for s in account_states.values() if s == "ready")
+    summary = f"{ready_count}/{total} compte(s) connecté(s), statuts vérifiés."
     try:
         await _broadcast_amazon_progress(
             {"status": "completed", "message": summary, "items_found": len(asins_ordered)}
@@ -1469,6 +1525,7 @@ async def amazon_invites_verify_all(
     return {
         "rows_by_account": rows_by_account,
         "account_ids": account_ids,
+        "account_states": account_states,
         "refreshed_at": refreshed_iso,
         "active_account_id": active_account_id,
         "errors": errors,
@@ -1481,32 +1538,42 @@ async def amazon_invites_request(
     _lock: Annotated[None, Depends(hold_invites_lock)],
     user_id: Annotated[int, Depends(get_user_id_introspected)],
     active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
     body: AmazonRequestInviteBody,
 ) -> dict[str, object]:
     """
-    POST Amazon ``request-invite`` for one ASIN with the cookies of ``body.account_id``
-    (pinned scraper, never the global profile), then refresh that row in that account's cache.
+    Demande l'invitation pour un ASIN depuis ``body.account_id`` : Chrome sur le profil de ce compte
+    (connexion auto si besoin) et clic sur le bouton, puis mise à jour de la ligne dans son cache.
+    Sans ``account_id`` : ancien chemin HTTP sur le profil actif.
     """
     target_account_id = body.account_id if body.account_id is not None else active_account_id
     cache_key = _invites_cache_key(user_id, target_account_id)
 
     asin = body.asin
-    scraper = (
-        _pinned_scraper_for(user_id, body.account_id)
-        if body.account_id is not None
-        else _get_amazon_scraper()
-    )
     try:
-        result = await asyncio.to_thread(scraper.request_invitation_for_asin, asin)
+        if body.account_id is None:
+            result = await asyncio.to_thread(_get_amazon_scraper().request_invitation_for_asin, asin)
+        else:
+            await _close_all_amazon_chromium()
+            bind_amazon_profile_for(user_id, body.account_id)
+            _reset_amazon_scraper()
+            scraper = _browser_scraper()
+            try:
+                await _ensure_account_signed_in(user_id, body.account_id, raw_token, remote, scraper)
+                result = await asyncio.to_thread(scraper.request_invitation_via_browser, asin)
+            except RuntimeError as exc:
+                result = {"success": False, "message": str(exc)}
+            finally:
+                await _close_all_amazon_chromium()
+                bind_amazon_profile_for(user_id, active_account_id)
+                _reset_amazon_scraper()
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Amazon request_invitation_for_asin")
+        logger.exception("Amazon request invitation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Worker error: {exc}",
         ) from exc
-    finally:
-        if body.account_id is not None:
-            scraper._invalidate_http()
 
     if not result.get("success"):
         return {

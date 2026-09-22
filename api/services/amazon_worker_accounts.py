@@ -56,12 +56,6 @@ def claim_provision_staging_profile(user_id: int, account_id: int) -> Path:
     return dst
 
 
-def account_cookies_export_path(user_id: int, account_id: int) -> Path:
-    """Fichier cookies JSON d'un compte, même convention que ``amazon_config.bind_amazon_profile``."""
-    profile = account_profile_dir(user_id, account_id)
-    return profile.parent / f"amazon_cookies_{profile.name}.json"
-
-
 def bind_amazon_profile_for(user_id: int, account_id: int | None) -> Path:
     if account_id is None:
         profile = legacy_amazon_profile_dir()

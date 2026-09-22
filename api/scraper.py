@@ -28,12 +28,14 @@ from amazon_http import (
 )
 from services.amazon_profile_session_service import detect_amazon_session_from_profile
 from amazon_nodriver import (
+    click_request_invite_async,
     close_browser_sync,
     export_cookies_requests_format,
     fetch_html_via_tab,
     login_to_amazon as nodriver_login_session,
     prime_session_and_export_cookies_async,
     run_browser,
+    session_state_via_browser_async,
 )
 from amazon_parse import (
     parse_hdp_invite_api_fields,
@@ -99,31 +101,22 @@ def _title_matches_user_filter(title: str, user_q: str) -> bool:
 
 
 class AmazonScraper:
-    def __init__(
-        self,
-        debug_mode=False,
-        chromedriver_path=None,
-        profile_dir: Optional[str] = None,
-        cookies_path: Optional[str] = None,
-        allow_browser_fallback: bool = True,
-    ):
+    def __init__(self, debug_mode=False, chromedriver_path=None, prefer_browser: bool = False):
         self.base_url = AMAZON_BASE_URL
         self.is_logged_in = False
         self.debug_mode = debug_mode
         self._http_client: Optional[httpx.Client] = None
         self._http_lock = threading.Lock()
-        # Instance épinglée sur un compte : chemins explicites, indépendants du profil global lié.
-        self._pinned_profile_dir = profile_dir
-        self._pinned_cookies_path = cookies_path
-        self.allow_browser_fallback = allow_browser_fallback
+        # Lit chaque page via l'onglet Chrome du profil lié : compte toujours connecté, aucun cookie à extraire.
+        self.prefer_browser = prefer_browser
         # Legacy Selenium chromedriver arg — ignored by nodriver; use AMAZON_CHROME_EXECUTABLE
         _ = chromedriver_path
 
     def _profile_dir(self) -> str:
-        return self._pinned_profile_dir or amazon_config.AMAZON_USER_DATA_DIR
+        return amazon_config.AMAZON_USER_DATA_DIR
 
     def _cookies_path(self) -> str:
-        return self._pinned_cookies_path or amazon_config.AMAZON_COOKIES_EXPORT_FILE
+        return amazon_config.AMAZON_COOKIES_EXPORT_FILE
 
     def close_selenium(self):
         """Backward compat: close the browser."""
@@ -175,10 +168,9 @@ class AmazonScraper:
             return c
 
         det = detect_amazon_session_from_profile(Path(self._profile_dir()))
-        if det != "ready" or not self.allow_browser_fallback:
+        if det != "ready":
             print(
-                "   [http] Profil non connecté ou instance épinglée — pas d'export CDP"
-                " (connexion auto / manuelle requise)"
+                "   [http] Profil non connecté — pas d'export CDP (connexion auto / manuelle requise)"
             )
             return httpx.Client(
                 headers=DEFAULT_HEADERS,
@@ -203,21 +195,17 @@ class AmazonScraper:
             return self._http_client
 
     def _fetch_html(self, url: str) -> str:
+        if self.prefer_browser:
+            return run_browser(fetch_html_via_tab(url))
         client = self._get_http_client()
-        html = ""
         try:
             html = fetch_html_http(client, url)
             if not looks_like_blocked_or_bot(html):
                 return html
-            print("   [warn] Suspicious HTTP response (bot / short page)")
+            print("   [warn] Suspicious HTTP response (bot / short page) - browser fallback")
         except Exception as e:
-            print(f"   [warn] HTTP: {e}")
+            print(f"   [warn] HTTP: {e} - browser fallback")
 
-        if not self.allow_browser_fallback:
-            # Instance épinglée : pas de Chrome (il ouvrirait le profil global, pas celui du compte).
-            return html
-
-        print("   [info] browser fallback")
         return run_browser(fetch_html_via_tab(url))
 
     def login_to_amazon(self) -> Dict:
@@ -643,4 +631,52 @@ class AmazonScraper:
             "success": True,
             "message": "Invitation requested.",
             "item": item2,
+        }
+
+    def session_state_via_browser(self) -> str:
+        """« ready » / « needs_login » d'après le message d'accueil, lu dans le Chrome du profil lié."""
+        return run_browser(session_state_via_browser_async(), timeout=120)
+
+    def request_invitation_via_browser(self, asin: str) -> Dict:
+        """Demande l'invitation en cliquant le bouton dans le Chrome du profil lié (compte connecté requis)."""
+        t = (asin or "").strip().upper()
+        if not re.match(r"^[A-Z0-9]{10}$", t):
+            return {"success": False, "message": "Invalid ASIN."}
+        dp_url = f"{self.base_url}/dp/{t}"
+        try:
+            res = run_browser(click_request_invite_async(dp_url), timeout=180)
+        except Exception as e:
+            return {"success": False, "message": f"Chrome : {e}"}
+
+        before = parse_product_page(str(res.get("html_before") or ""), t, self.base_url)
+        if before is not None:
+            if before.get("can_order"):
+                return {
+                    "success": False,
+                    "message": "This product is already orderable; no invitation to request.",
+                }
+            st = before.get("invitation_status")
+            if st == "requested":
+                return {"success": False, "message": "Invitation already recorded or status changed."}
+            if st == "needs_login":
+                return {
+                    "success": False,
+                    "message": "Ce compte n'est pas connecté à Amazon dans Chrome. Reconnectez-le puis réessayez.",
+                }
+        if not res.get("clicked"):
+            return {
+                "success": False,
+                "message": "Invitation button not found (Amazon may have changed the page).",
+            }
+
+        after = parse_product_page(str(res.get("html_after") or ""), t, self.base_url)
+        if after is not None and after.get("invitation_status") == "requested":
+            return {"success": True, "message": "Invitation requested.", "item": after}
+        item = dict(after or before or {"asin": t, "title": "Product", "url": dp_url})
+        item["invitation_status"] = "unknown"
+        item["invitation_requested"] = False
+        return {
+            "success": True,
+            "message": "Bouton cliqué, statut à revérifier (fiche non confirmée).",
+            "item": item,
         }
