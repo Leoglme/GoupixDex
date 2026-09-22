@@ -79,6 +79,7 @@
               <GoupixDexBinderCardImage
                 :src="displayItem(pageIdx * perPage + (k - 1))!.image_url"
                 :alt="displayItem(pageIdx * perPage + (k - 1))!.card_name"
+                :fallback-src="placeholderAt(pageIdx * perPage + (k - 1))?.artworkUrl ?? null"
               />
               <span
                 v-if="displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted'"
@@ -95,6 +96,10 @@
             </div>
           </div>
         </div>
+        <GoupixDexBinderPokedexPlaceholder
+          v-if="!itemAt(pageIdx * perPage + (k - 1)) && placeholderAt(pageIdx * perPage + (k - 1))"
+          :placeholder="placeholderAt(pageIdx * perPage + (k - 1))!"
+        />
         <button
           v-if="itemAt(pageIdx * perPage + (k - 1)) && !readOnly"
           type="button"
@@ -139,6 +144,7 @@ import type { BinderDesign } from '~/utils/binder/binder-design'
 import type { PageGrid } from '~/utils/binder/binder-pages'
 import type { BinderPocketItem } from '~/types/binders'
 import type { PageSize, Role } from '~/composables/useBinderPages'
+import { pokedexPlaceholderAt } from '~/utils/pokedex/kanto'
 
 const padTop = 14
 const padGap = 9
@@ -161,6 +167,7 @@ const props = defineProps<{
   overPocket: string | null
   pickerPocket: number | null
   cleanView?: boolean
+  pokedexRegion?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -181,6 +188,10 @@ const padRight = computed(() => (holesLeft.value ? 30 : 28))
 
 function itemAt(pocket: number) {
   return props.byPocket.get(pocket) ?? null
+}
+
+function placeholderAt(pocket: number) {
+  return pokedexPlaceholderAt(props.pokedexRegion, pocket)
 }
 
 function displayItem(pocket: number) {

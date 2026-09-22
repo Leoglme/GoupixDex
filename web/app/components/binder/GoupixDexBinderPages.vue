@@ -39,6 +39,7 @@
                 :over-pocket="over"
                 :picker-pocket="picker"
                 :clean-view="cleanView"
+                :pokedex-region="pokedexRegion"
                 @edge-prev="closeBinder()"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -118,6 +119,7 @@
                 :over-pocket="over"
                 :picker-pocket="picker"
                 :clean-view="cleanView"
+                :pokedex-region="pokedexRegion"
                 @edge-prev="onPageEdgePrev(i)"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -297,6 +299,7 @@ const emit = defineEmits<{ updated: [BinderDetail] }>()
 
 const items = computed(() => props.binder.items)
 const gridCode = computed(() => props.binder.page_grid)
+const pokedexRegion = computed(() => props.binder.pokedex_region)
 const designRaw = computed(() => props.binder.design)
 const pageCountProp = computed(() => props.binder.page_count)
 const readOnly = computed(() => props.readOnly)

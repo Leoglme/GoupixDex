@@ -26,6 +26,7 @@ POCKET_KEY_RE = re.compile(r"^i:(\d+)$")
 BINDER_COLOR_CODES = frozenset({"red", "orange", "yellow", "green", "blue", "purple", "pink"})
 BINDER_STYLE_CODES = frozenset({"binder", "mosaic", "showcase", "fan", "label", "custom"})
 PAGE_GRID_CODES = frozenset({"3x3", "4x3", "2x2", "4x4"})
+POKEDEX_REGION_CODES = frozenset({"kanto"})
 
 
 def pocket_key(collection_card_id: int) -> str:
@@ -71,6 +72,7 @@ def _binder_summary(binder: Binder, *, card_count: int, value_eur: float | None)
         "style": binder.style,
         "page_grid": binder.page_grid,
         "page_count": binder.page_count,
+        "pokedex_region": binder.pokedex_region,
         "position": binder.position,
         "design": binder.design,
         "cover": binder.cover,
@@ -207,6 +209,7 @@ def update_binder(
     style: str | None = None,
     page_grid: str | None = None,
     page_count: int | None = None,
+    pokedex_region: str | None = None,
     design: dict[str, Any] | None = None,
     cover: dict[str, Any] | None = None,
     cover_collection_card_ids: list[int] | None = None,
@@ -221,6 +224,9 @@ def update_binder(
         binder.page_grid = page_grid if page_grid in PAGE_GRID_CODES else binder.page_grid
     if page_count is not None:
         binder.page_count = page_count
+    if pokedex_region is not None:
+        code = pokedex_region.strip().lower()
+        binder.pokedex_region = code if code in POKEDEX_REGION_CODES else None
     if design is not None:
         binder.design = design
     if cover is not None:

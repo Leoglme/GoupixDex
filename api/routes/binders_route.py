@@ -82,6 +82,7 @@ def patch_binder(
         style=body.style,
         page_grid=body.page_grid,
         page_count=body.page_count,
+        pokedex_region=body.pokedex_region,
         design=body.design,
         cover=body.cover,
         cover_collection_card_ids=body.cover_collection_card_ids,

@@ -100,23 +100,60 @@
         </div>
 
         <div v-else class="app-dashboard-page space-y-4">
-          <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
-            Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
-          </p>
-          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            <NuxtLink
-              v-for="item in gridItems"
-              :key="item.id"
-              :to="`/collection/${item.collection_card_id}`"
+          <div
+            v-if="isCompletionBinder"
+            class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
+          >
+            <component
+              :is="cell.item ? 'NuxtLink' : 'div'"
+              v-for="cell in completionCells"
+              :key="cell.key"
+              :to="cell.item ? `/collection/${cell.item.collection_card_id}` : undefined"
               class="block"
             >
-              <div class="card-tile aspect-[63/88]">
-                <GoupixDexBinderCardImage :src="item.image_url" :alt="item.card_name" />
-                <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
+              <div
+                class="card-tile relative aspect-[63/88]"
+                :class="[
+                  cell.item?.kind === 'wanted' ? 'opacity-75 grayscale-[0.35]' : '',
+                  cell.item ? '' : 'ring-1 ring-white/10',
+                ]"
+              >
+                <GoupixDexBinderCardImage
+                  v-if="cell.item"
+                  :src="cell.item.image_url"
+                  :alt="cell.item.card_name"
+                  :fallback-src="fallbackArtFor(cell.item)"
+                />
+                <GoupixDexBinderPokedexPlaceholder v-else-if="cell.placeholder" :placeholder="cell.placeholder" />
+                <span v-if="cell.item && cell.item.quantity > 1" class="tile-badge num top-1.5 right-1.5">
+                  ×{{ cell.item.quantity }}
+                </span>
               </div>
-              <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
-            </NuxtLink>
+              <p class="mt-1 truncate text-xs" :class="cell.item ? 'font-medium' : 'text-(--app-faint)'">
+                {{ cell.item ? cell.item.card_name : cell.placeholder?.pokemonName }}
+              </p>
+            </component>
           </div>
+
+          <template v-else>
+            <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
+              Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
+            </p>
+            <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              <NuxtLink
+                v-for="item in gridItems"
+                :key="item.id"
+                :to="`/collection/${item.collection_card_id}`"
+                class="block"
+              >
+                <div class="card-tile aspect-[63/88]">
+                  <GoupixDexBinderCardImage :src="item.image_url" :alt="item.card_name" />
+                  <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
+                </div>
+                <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
+              </NuxtLink>
+            </div>
+          </template>
         </div>
       </div>
     </template>
@@ -144,7 +181,8 @@
 </template>
 
 <script setup lang="ts">
-import type { BinderDetail } from '~/types/binders'
+import type { BinderDetail, BinderPocketItem } from '~/types/binders'
+import { pokedexPlaceholderAt, pokedexRegionSize } from '~/utils/pokedex/kanto'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -178,12 +216,70 @@ const viewTabItems = [
 
 const gridItems = computed(() => [...(binder.value?.items ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)))
 
+const isCompletionBinder = computed(() => !!binder.value?.pokedex_region)
+
+interface CompletionCell {
+  key: string
+  item: BinderPocketItem | null
+  placeholder: ReturnType<typeof pokedexPlaceholderAt>
+}
+
+/**
+ * Cellules de la grille en mode complétion : une par numéro de la région (carte
+ * rangée ou placeholder), suivies des cartes hors plage (bonus).
+ */
+const completionCells = computed<CompletionCell[]>(() => {
+  const detail = binder.value
+  if (!detail || !detail.pokedex_region) {
+    return []
+  }
+  const region = detail.pokedex_region
+  const size = pokedexRegionSize(region)
+  const byPosition = new Map<number, BinderPocketItem>()
+  const extras: BinderPocketItem[] = []
+  for (const item of detail.items) {
+    const position = item.position
+    if (position != null && position >= 0 && position < size && !byPosition.has(position)) {
+      byPosition.set(position, item)
+    } else {
+      extras.push(item)
+    }
+  }
+  const cells: CompletionCell[] = []
+  for (let position = 0; position < size; position++) {
+    const item = byPosition.get(position) ?? null
+    cells.push({
+      key: item ? item.id : `ph-${position}`,
+      item,
+      placeholder: item ? null : pokedexPlaceholderAt(region, position),
+    })
+  }
+  for (const item of extras) {
+    cells.push({ key: item.id, item, placeholder: null })
+  }
+  return cells
+})
+
+/**
+ * Artwork Pokédex de repli pour une carte rangée sans image (ex. sets récents non
+ * encore illustrés sur TCGdex).
+ * @param item Carte rangée dans une pochette.
+ */
+function fallbackArtFor(item: BinderPocketItem): string | null {
+  return pokedexPlaceholderAt(binder.value?.pokedex_region ?? null, item.position ?? -1)?.artworkUrl ?? null
+}
+
 const binderMetaLine = computed(() => {
   if (!binder.value) {
     return ''
   }
-  const n = binder.value.card_count
   const grid = binder.value.page_grid.replace('x', '×')
+  if (binder.value.pokedex_region) {
+    const owned = binder.value.items.filter((item) => item.kind === 'owned').length
+    const total = pokedexRegionSize(binder.value.pokedex_region)
+    return `${owned} / ${total} possédées · feuille ${grid}`
+  }
+  const n = binder.value.card_count
   return `${n} carte${n > 1 ? 's' : ''} · feuille ${grid}`
 })
 
