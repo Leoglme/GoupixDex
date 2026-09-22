@@ -275,8 +275,8 @@ const binderMetaLine = computed(() => {
   }
   const grid = binder.value.page_grid.replace('x', '×')
   if (binder.value.pokedex_region) {
-    const owned = binder.value.items.filter((item) => item.kind === 'owned').length
     const total = pokedexRegionSize(binder.value.pokedex_region)
+    const owned = completionCells.value.slice(0, total).filter((cell) => cell.item?.kind === 'owned').length
     return `${owned} / ${total} possédées · feuille ${grid}`
   }
   const n = binder.value.card_count
