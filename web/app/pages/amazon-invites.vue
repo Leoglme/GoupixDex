@@ -266,7 +266,7 @@ const connectionBadge: ComputedRef<AmazonConnectionBadge | null> = computed(() =
   if (n > 0 && base.color === 'success') {
     return {
       ...base,
-      label: `${base.label} · ${n} compte${n > 1 ? 's' : ''}`,
+      label: `${base.label} · ${n} en coffre`,
     }
   }
   if (n > 0 && session.value.state === 'needs_login') {

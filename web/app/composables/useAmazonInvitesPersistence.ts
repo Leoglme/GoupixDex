@@ -2,7 +2,7 @@
  * Amazon Invites page UI preferences (localStorage, client only).
  */
 
-import type { AmazonInvite, AmazonStatusFilter } from '~/types/amazonInvites'
+import type { AmazonAccountConnectionState, AmazonInvite, AmazonStatusFilter } from '~/types/amazonInvites'
 
 const KEY = 'goupix_amazon_invites_prefs'
 
@@ -34,6 +34,7 @@ export interface AmazonInvitesUiPrefs {
   cachedRefreshedAt?: string | null
   /** Per vault account — instant UI when switching accounts. */
   invitesByAccount?: Record<string, AmazonInvitesAccountCache>
+  accountConnectionStates?: Record<string, AmazonAccountConnectionState>
 }
 
 /**
@@ -93,6 +94,15 @@ export function loadAmazonInvitesPrefs(): Partial<AmazonInvitesUiPrefs> | null {
     }
     if (typeof p.cachedRefreshedAt === 'string') {
       out.cachedRefreshedAt = p.cachedRefreshedAt
+    }
+    if (p.accountConnectionStates && typeof p.accountConnectionStates === 'object') {
+      const states: Record<string, AmazonAccountConnectionState> = {}
+      for (const [id, v] of Object.entries(p.accountConnectionStates as Record<string, unknown>)) {
+        if (v === 'ready' || v === 'needs_login') {
+          states[id] = v
+        }
+      }
+      out.accountConnectionStates = states
     }
     return Object.keys(out).length ? out : null
   } catch {

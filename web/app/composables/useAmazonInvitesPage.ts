@@ -250,6 +250,9 @@ export function useAmazonInvitesPage() {
         restored[id] = trimInvitesToMaxItems(cache.items, maxItems.value)
       }
       rowsByAccount.value = restored
+      if (p?.accountConnectionStates) {
+        accountConnectionStates.value = p.accountConnectionStates
+      }
     }
   })
 
@@ -420,6 +423,9 @@ export function useAmazonInvitesPage() {
       refreshedAt.value = res.refreshed_at
     }
     accountConnectionStates.value = res.account_states ?? {}
+    if (import.meta.client) {
+      saveAmazonInvitesPrefs({ accountConnectionStates: accountConnectionStates.value })
+    }
     const failed = Object.keys(res.errors ?? {})
     if (failed.length) {
       const labels = failed.map((id) => {
