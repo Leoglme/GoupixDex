@@ -77,9 +77,8 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
         card = bi.collection_card
         if card is None:
             continue
-        in_region = region_size == 0 or (bi.position is not None and 0 <= bi.position < region_size)
         is_owned = (not card.is_placeholder) and int(card.quantity) > 0
-        if is_owned and in_region:
+        if is_owned:
             owned += 1
         price = card.market_price_eur
         if price is None:
@@ -87,9 +86,8 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
         if is_owned:
             spent += Decimal(str(price)) * int(card.quantity)
             spent_priced = True
-        if in_region:
-            total += Decimal(str(price))
-            total_priced = True
+        total += Decimal(str(price))
+        total_priced = True
     return {
         "pokedex_owned": owned if region_size else None,
         "pokedex_total": region_size or None,
@@ -107,6 +105,7 @@ def _binder_summary(binder: Binder, *, card_count: int, value_eur: float | None)
         "page_grid": binder.page_grid,
         "page_count": binder.page_count,
         "pokedex_region": binder.pokedex_region,
+        "pokedex_slots": binder.pokedex_slots,
         "position": binder.position,
         "design": binder.design,
         "cover": binder.cover,
@@ -246,6 +245,7 @@ def update_binder(
     page_grid: str | None = None,
     page_count: int | None = None,
     pokedex_region: str | None = None,
+    pokedex_slots: dict[str, int] | None = None,
     design: dict[str, Any] | None = None,
     cover: dict[str, Any] | None = None,
     cover_collection_card_ids: list[int] | None = None,
@@ -263,6 +263,8 @@ def update_binder(
     if pokedex_region is not None:
         code = pokedex_region.strip().lower()
         binder.pokedex_region = code if code in POKEDEX_REGION_CODES else None
+    if pokedex_slots is not None:
+        binder.pokedex_slots = pokedex_slots or None
     if design is not None:
         binder.design = design
     if cover is not None:

@@ -39,7 +39,7 @@
                 :over-pocket="over"
                 :picker-pocket="picker"
                 :preview-complete="previewComplete"
-                :pokedex-region="pokedexRegion"
+                :pokedex-slots="pokedexSlots"
                 @edge-prev="closeBinder()"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -119,7 +119,7 @@
                 :over-pocket="over"
                 :picker-pocket="picker"
                 :preview-complete="previewComplete"
-                :pokedex-region="pokedexRegion"
+                :pokedex-slots="pokedexSlots"
                 @edge-prev="onPageEdgePrev(i)"
                 @edge-next="go(view + 1)"
                 @open-picker="openPicker"
@@ -293,7 +293,7 @@ import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
 import { binderStyle } from '~/utils/binder/binder-styles'
 import { coverLayout, renderCover } from '~/utils/binder/binder-cover'
-import { pokedexPlaceholderAt } from '~/utils/pokedex/kanto'
+import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 const props = withDefaults(
@@ -311,7 +311,7 @@ const emit = defineEmits<{ updated: [BinderDetail] }>()
 
 const items = computed(() => props.binder.items)
 const gridCode = computed(() => props.binder.page_grid)
-const pokedexRegion = computed(() => props.binder.pokedex_region)
+const pokedexSlots = computed(() => props.binder.pokedex_slots)
 const designRaw = computed(() => props.binder.design)
 const pageCountProp = computed(() => props.binder.page_count)
 const readOnly = computed(() => props.readOnly)
@@ -655,7 +655,10 @@ async function changePageCount(next: number) {
 }
 
 const detail = ref<BinderPocketItem | null>(null)
-const detailDex = computed(() => pokedexPlaceholderAt(pokedexRegion.value, detail.value?.position ?? -1))
+const detailDex = computed(() => {
+  const dexNumber = detail.value?.position != null ? pokedexSlots.value?.[String(detail.value.position)] : undefined
+  return dexNumber ? pokedexPlaceholder(dexNumber) : null
+})
 const detailOpen = computed({
   get: () => detail.value != null,
   set: (v) => {

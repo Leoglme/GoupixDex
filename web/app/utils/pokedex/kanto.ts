@@ -47,6 +47,18 @@ export function pokedexPokemonName(dexNumber: number): string {
 }
 
 /**
+ * Placeholder (artwork + nom FR + n°) pour un numéro national donné.
+ * @param dexNumber Numéro national du Pokémon.
+ */
+export function pokedexPlaceholder(dexNumber: number): PokedexPlaceholder {
+  return {
+    dexNumber,
+    pokemonName: pokedexPokemonName(dexNumber),
+    artworkUrl: pokedexArtworkUrl(dexNumber),
+  }
+}
+
+/**
  * Placeholder de complétion d'une pochette, ou `null` si le classeur n'est pas en
  * mode complétion ou si la pochette sort de la plage de la région.
  * @param regionCode Code de région du classeur.
@@ -61,11 +73,7 @@ export function pokedexPlaceholderAt(regionCode: string | null | undefined, pock
   if (dexNumber < region.from || dexNumber > region.to) {
     return null
   }
-  return {
-    dexNumber,
-    pokemonName: pokedexPokemonName(dexNumber),
-    artworkUrl: pokedexArtworkUrl(dexNumber),
-  }
+  return pokedexPlaceholder(dexNumber)
 }
 
 /**

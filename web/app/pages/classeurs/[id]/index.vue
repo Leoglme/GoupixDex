@@ -93,7 +93,7 @@
           </div>
         </div>
 
-        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mt-1 mb-3 sm:mx-4 sm:mt-2 sm:mb-4">
+        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mt-4 mb-3 sm:mx-4 sm:mt-5 sm:mb-4">
           <GoupixDexBinderPages
             :binder="binder"
             href-base="/collection/"
@@ -102,7 +102,7 @@
           />
         </div>
 
-        <div v-else class="app-dashboard-page space-y-4 pt-1 sm:pt-2">
+        <div v-else class="app-dashboard-page space-y-4 pt-4 sm:pt-5">
           <div
             v-if="isCompletionBinder"
             class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
@@ -191,7 +191,8 @@
 
 <script setup lang="ts">
 import type { BinderDetail, BinderPocketItem } from '~/types/binders'
-import { pokedexPlaceholderAt, pokedexRegionSize } from '~/utils/pokedex/kanto'
+import type { PokedexPlaceholder } from '~/utils/pokedex/kanto'
+import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 definePageMeta({ middleware: 'auth' })
@@ -234,39 +235,33 @@ const isCompletionBinder = computed(() => !!binder.value?.pokedex_region)
 interface CompletionCell {
   key: string
   item: BinderPocketItem | null
-  dex: ReturnType<typeof pokedexPlaceholderAt>
+  dex: PokedexPlaceholder | null
 }
 
 /**
- * Cellules de la grille en mode complétion : une par numéro de la région (carte
- * rangée ou placeholder), suivies des cartes hors plage (bonus). `dex` porte le
- * nom FR + l'artwork du Pokémon de la position, présent même sur une case remplie
- * (nom français affiché sous la carte, artwork de repli si la carte n'a pas d'image).
+ * Cellules de la grille en mode complétion, dans l'ordre exact des positions du
+ * classeur (cartes rangées + placeholders des slots Pokédex), compactées (les
+ * pochettes réellement vides ne sont pas affichées). `dex` porte le nom FR +
+ * l'artwork du Pokémon de la pochette.
  */
 const completionCells = computed<CompletionCell[]>(() => {
   const detail = binder.value
   if (!detail || !detail.pokedex_region) {
     return []
   }
-  const region = detail.pokedex_region
-  const size = pokedexRegionSize(region)
+  const slots = detail.pokedex_slots ?? {}
   const byPosition = new Map<number, BinderPocketItem>()
-  const extras: BinderPocketItem[] = []
   for (const item of detail.items) {
-    const position = item.position
-    if (position != null && position >= 0 && position < size && !byPosition.has(position)) {
-      byPosition.set(position, item)
-    } else {
-      extras.push(item)
+    if (item.position != null && item.position >= 0 && !byPosition.has(item.position)) {
+      byPosition.set(item.position, item)
     }
   }
+  const positions = new Set<number>([...byPosition.keys(), ...Object.keys(slots).map(Number)])
   const cells: CompletionCell[] = []
-  for (let position = 0; position < size; position++) {
+  for (const position of [...positions].sort((a, b) => a - b)) {
     const item = byPosition.get(position) ?? null
-    cells.push({ key: item ? item.id : `ph-${position}`, item, dex: pokedexPlaceholderAt(region, position) })
-  }
-  for (const item of extras) {
-    cells.push({ key: item.id, item, dex: null })
+    const dexNumber = slots[String(position)]
+    cells.push({ key: item ? item.id : `ph-${position}`, item, dex: dexNumber ? pokedexPlaceholder(dexNumber) : null })
   }
   return cells
 })
@@ -276,10 +271,8 @@ const binderMetaLine = computed(() => {
     return ''
   }
   const grid = binder.value.page_grid.replace('x', '×')
-  if (binder.value.pokedex_region) {
-    const total = pokedexRegionSize(binder.value.pokedex_region)
-    const owned = completionCells.value.slice(0, total).filter((cell) => cell.item?.kind === 'owned').length
-    return `${owned} / ${total} possédées · feuille ${grid}`
+  if (binder.value.pokedex_total != null) {
+    return `${binder.value.pokedex_owned ?? 0} / ${binder.value.pokedex_total} possédées · feuille ${grid}`
   }
   const n = binder.value.card_count
   return `${n} carte${n > 1 ? 's' : ''} · feuille ${grid}`

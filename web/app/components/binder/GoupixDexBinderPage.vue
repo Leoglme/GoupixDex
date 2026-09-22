@@ -149,7 +149,7 @@ import type { BinderDesign } from '~/utils/binder/binder-design'
 import type { PageGrid } from '~/utils/binder/binder-pages'
 import type { BinderPocketItem } from '~/types/binders'
 import type { PageSize, Role } from '~/composables/useBinderPages'
-import { pokedexPlaceholderAt } from '~/utils/pokedex/kanto'
+import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 
 const padTop = 14
@@ -173,7 +173,7 @@ const props = defineProps<{
   overPocket: string | null
   pickerPocket: number | null
   previewComplete?: boolean
-  pokedexRegion?: string | null
+  pokedexSlots?: Record<string, number> | null
 }>()
 
 const emit = defineEmits<{
@@ -197,7 +197,8 @@ function itemAt(pocket: number) {
 }
 
 function placeholderAt(pocket: number) {
-  return pokedexPlaceholderAt(props.pokedexRegion, pocket)
+  const dexNumber = props.pokedexSlots?.[String(pocket)]
+  return dexNumber ? pokedexPlaceholder(dexNumber) : null
 }
 
 function displayItem(pocket: number) {

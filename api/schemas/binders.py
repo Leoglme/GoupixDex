@@ -18,6 +18,7 @@ class BinderUpdateBody(BaseModel):
     page_grid: str | None = Field(None, max_length=8)
     page_count: int | None = Field(None, ge=0, le=400)
     pokedex_region: str | None = Field(None, max_length=16)
+    pokedex_slots: dict[str, int] | None = None
     design: dict[str, Any] | None = None
     cover: dict[str, Any] | None = None
     cover_collection_card_ids: list[int] | None = None

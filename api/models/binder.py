@@ -22,6 +22,7 @@ class Binder(Base):
     page_grid: Mapped[str] = mapped_column(String(8), default="3x3", server_default="3x3")
     page_count: Mapped[int] = mapped_column(Integer(), default=0, server_default="0")
     pokedex_region: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    pokedex_slots: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     position: Mapped[int | None] = mapped_column(Integer(), nullable=True)
     design: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     cover: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)

@@ -12,6 +12,7 @@ export interface BinderSummary {
   page_grid: string
   page_count: number
   pokedex_region: string | null
+  pokedex_slots: Record<string, number> | null
   position: number | null
   design: unknown
   cover: unknown
