@@ -2225,6 +2225,7 @@ class VintedService:
 
     @staticmethod
     def _price_match_fragments(sell_price: Decimal | float | int | None) -> list[str]:
+        """Fragments « 12,50 € » / « 12,50€ » à chercher dans un texte passé par :meth:`_normalize_price_haystack`."""
         if sell_price is None:
             return []
         try:
@@ -2232,7 +2233,38 @@ class VintedService:
         except Exception:  # noqa: BLE001
             return []
         s = f"{float(d):.2f}".replace(".", ",")
-        return [f"{s} €", f"{s}\u00a0€", f"{s}€"]
+        return [f"{s} €", f"{s}€"]
+
+    @staticmethod
+    def _normalize_price_haystack(s: str) -> str:
+        """Espaces insécables en espaces, décimales à point en virgule (le catalogue écrit « 2.00 € », le dressing « 2,00 € »)."""
+        text = (s or "").replace(" ", " ").replace(" ", " ")
+        return re.sub(r"(\d)\.(\d{2})(?!\d)", r"\1,\2", text)
+
+    @classmethod
+    def _pick_member_listing_match(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        normalized_title: str,
+        price_fragments: list[str],
+    ) -> int | None:
+        """Vignette dont le libellé contient le titre (et le prix s’il est connu) ; en cas de doublons, la première de la grille."""
+        hits: list[int] = []
+        for row in rows:
+            overlay = str(row.get("overlay") or "")
+            haystack_title = cls._normalize_match_token(f"{overlay} {row.get('title') or ''}")
+            if normalized_title not in haystack_title:
+                continue
+            if price_fragments:
+                haystack_price = cls._normalize_price_haystack(f"{overlay} {row.get('price') or ''}")
+                if not any(fragment in haystack_price for fragment in price_fragments):
+                    continue
+            try:
+                hits.append(int(row["id"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+        return hits[0] if hits else None
 
     @classmethod
     async def find_member_listing_item_id_for_match(
@@ -2243,10 +2275,7 @@ class VintedService:
         sell_price: Decimal | float | int | None,
         site_origin: str = "https://www.vinted.fr",
     ) -> int | None:
-        """
-        Sur la page dressing (grille), trouve l’id article Vinted en recoupant titre / prix / état
-        avec l’attribut ``title`` des vignettes (comme sur la garde-robe membre).
-        """
+        """Sur le dressing, retrouve l’id Vinted d’un article en recoupant titre et prix avec les vignettes (``product-item-id-{id}--overlay-link``), en faisant défiler la grille jusqu’en bas."""
         origin = site_origin.rstrip("/")
         url_now = (tab.target.url or "").lower()
         if "/member/" not in url_now:
@@ -2262,51 +2291,87 @@ class VintedService:
         js = r"""
         () => {
           const items = [];
-          for (const a of document.querySelectorAll('a.new-item-box__overlay--clickable[href*="/items/"]')) {
+          const seen = new Set();
+          const overlays = document.querySelectorAll(
+            'a[data-testid^="product-item-id-"][data-testid$="--overlay-link"], a[class*="new-item-box__overlay"][href*="/items/"]'
+          );
+          for (const a of overlays) {
+            const testid = a.getAttribute('data-testid') || '';
             const href = a.getAttribute('href') || '';
-            const t = a.getAttribute('title') || '';
-            const m = href.match(/\/items\/(\d+)/);
+            const m = testid.match(/product-item-id-(\d+)/) || href.match(/\/items\/(\d+)/);
             if (!m) continue;
             const id = parseInt(m[1], 10);
-            if (!Number.isFinite(id)) continue;
-            items.push({ id, title: t });
+            if (!Number.isFinite(id) || seen.has(id)) continue;
+            seen.add(id);
+            const card = a.closest('[data-testid="grid-item"]') || a.parentElement;
+            const titleEl = card ? card.querySelector(`[data-testid="product-item-id-${id}--description-title"]`) : null;
+            const priceEl = card ? card.querySelector(`[data-testid="product-item-id-${id}--price-text"]`) : null;
+            items.push({
+              id,
+              overlay: a.getAttribute('title') || '',
+              title: titleEl ? (titleEl.textContent || '') : '',
+              price: priceEl ? (priceEl.textContent || '') : '',
+            });
           }
-          return JSON.stringify({ ok: true, items });
+          const doc = document.documentElement;
+          const atBottom = window.scrollY + window.innerHeight >= doc.scrollHeight - 8;
+          return JSON.stringify({ ok: true, items, atBottom });
         }
         """
 
-        def _pick(rows: list[dict[str, Any]]) -> int | None:
-            hits: list[int] = []
-            for row in rows:
-                overlay = str(row.get("title") or "")
-                no = cls._normalize_match_token(overlay)
-                if nt not in no:
-                    continue
-                if price_frags and not any(p in overlay for p in price_frags):
-                    continue
-                if cond_n and cond_n not in no:
-                    continue
-                try:
-                    hits.append(int(row["id"]))
-                except (TypeError, ValueError, KeyError):
-                    continue
-            if len(hits) == 1:
-                return hits[0]
-            if len(hits) > 1:
-                return hits[0]
-            return None
-
+        last_count = -1
+        stale_rounds = 0
         for _ in range(42):
             raw = await tab.evaluate(js, return_by_value=True)
             parsed = _parse_eval_dict_result(raw, context="member_listing_scan")
-            rows = parsed.get("items") if isinstance(parsed.get("items"), list) else []
-            picked = _pick([r for r in rows if isinstance(r, dict)])
+            raw_rows = parsed.get("items") if isinstance(parsed.get("items"), list) else []
+            rows = [r for r in raw_rows if isinstance(r, dict)]
+            picked = cls._pick_member_listing_match(rows, normalized_title=nt, price_fragments=price_frags)
             if picked is not None:
                 return picked
+            if len(rows) == last_count and bool(parsed.get("atBottom")):
+                stale_rounds += 1
+                if stale_rounds >= 8:
+                    break
+            else:
+                stale_rounds = 0
+                last_count = len(rows)
             await tab.evaluate("window.scrollBy(0, Math.min(1200, window.innerHeight * 0.95))")
             await asyncio.sleep(0.45)
 
+        logger.info("Vinted member listing scan: no tile matched title=%r price=%s", title, sell_price)
         return None
+
+    @classmethod
+    async def _select_button_by_exact_text(
+        cls,
+        tab: "Tab",
+        labels: tuple[str, ...],
+        *,
+        marker: str,
+        scope_selector: str = "",
+    ) -> Any | None:
+        """Secours quand un ``data-testid`` a disparu : sélectionne le premier bouton dont le texte vaut exactement l’un des libellés."""
+        js = f"""
+        (() => {{
+          const wanted = {json.dumps([label.lower() for label in labels])};
+          const scopeSelector = {json.dumps(scope_selector)};
+          const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
+          if (!scope) return false;
+          for (const b of scope.querySelectorAll('button, [role="button"]')) {{
+            const t = (b.textContent || '').trim().toLowerCase();
+            if (wanted.includes(t)) {{
+              b.setAttribute('data-goupix-marker', {json.dumps(marker)});
+              return true;
+            }}
+          }}
+          return false;
+        }})()
+        """
+        raw = await tab.evaluate(js, return_by_value=True)
+        if raw is not True:
+            return None
+        return await tab.select(f'[data-goupix-marker="{marker}"]', timeout=3)
 
     @classmethod
     async def delete_vinted_item_listing(
@@ -2316,15 +2381,25 @@ class VintedService:
         *,
         site_origin: str = "https://www.vinted.fr",
     ) -> None:
-        """Ouvre la fiche article, supprime (bouton + modal), attend le retour ``/member/``."""
+        """Ouvre la fiche article, supprime (bouton + modal de confirmation), attend le retour ``/member/``."""
         origin = site_origin.rstrip("/")
         await tab.get(f"{origin}/items/{int(item_id)}")
         await asyncio.sleep(1.0)
-        del_btn = await tab.select('[data-testid="item-delete-button"]', timeout=25)
+        del_btn = await tab.select('[data-testid="item-delete-button"]', timeout=15)
+        if del_btn is None:
+            del_btn = await cls._select_button_by_exact_text(tab, ("supprimer",), marker="item-delete")
         if del_btn is None:
             raise RuntimeError("item_delete_button_not_found")
+        await del_btn.scroll_into_view()
         await del_btn.click()
         conf = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=15)
+        if conf is None:
+            conf = await cls._select_button_by_exact_text(
+                tab,
+                ("supprimer", "oui, supprimer", "confirmer"),
+                scope_selector='[role="dialog"]',
+                marker="item-delete-confirm",
+            )
         if conf is None:
             raise RuntimeError("item_delete_confirmation_not_found")
         await conf.click()
