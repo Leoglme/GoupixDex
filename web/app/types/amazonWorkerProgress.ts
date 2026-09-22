@@ -13,4 +13,7 @@ export interface AmazonWorkerProgressPayload {
   asin?: string
   /** Normalized invite (search or `/dp` check) for incremental UI while refreshing. */
   invite_preview?: AmazonInvite
+  account_id?: number | null
+  account_index?: number
+  account_total?: number
 }

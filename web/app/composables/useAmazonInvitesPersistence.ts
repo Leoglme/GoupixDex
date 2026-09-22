@@ -178,3 +178,15 @@ export function loadInvitesCacheForAccount(accountId: number): AmazonInvitesAcco
   }
   return readInvitesByAccount()[String(accountId)] ?? null
 }
+
+/**
+ * Load the cached invite rows of every vault account (instant account switch on the next visit).
+ *
+ * @returns {Record<string, AmazonInvitesAccountCache>} Account id → cached rows (empty when nothing stored).
+ */
+export function loadInvitesCacheByAccount(): Record<string, AmazonInvitesAccountCache> {
+  if (!import.meta.client) {
+    return {}
+  }
+  return readInvitesByAccount()
+}

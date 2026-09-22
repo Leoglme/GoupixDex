@@ -1,6 +1,18 @@
 import type { AmazonWorkerProgressPayload } from '~/types/amazonWorkerProgress'
 
 /**
+ * Préfixe « [compte i/n] » quand le worker vérifie les comptes l’un après l’autre.
+ * @param payload - Raw JSON from `/ws/progress`.
+ * @returns Prefix with trailing space, or an empty string.
+ */
+function accountScopePrefix(payload: AmazonWorkerProgressPayload): string {
+  if (payload.account_index == null || payload.account_total == null) {
+    return ''
+  }
+  return `[compte ${payload.account_index}/${payload.account_total}] `
+}
+
+/**
  * Format a worker progress payload as one human-readable log line (French UI copy).
  * @param payload - Raw JSON from `/ws/progress`.
  * @returns Single line with a short time prefix.
@@ -11,32 +23,33 @@ export function formatAmazonWorkerProgressLine(payload: AmazonWorkerProgressPayl
     minute: '2-digit',
     second: '2-digit',
   })
+  const head = `[${ts}] ${accountScopePrefix(payload)}`
   const st = payload.status
   const msg = payload.message?.trim() ?? ''
 
   if (st === 'starting') {
-    return `[${ts}] Démarrage — ${msg}`
+    return `${head}Démarrage — ${msg}`
   }
   if (st === 'searching') {
     const pg = payload.current_page ?? '?'
     const tot = payload.total_pages ?? '?'
     const found = payload.items_found ?? 0
-    return `[${ts}] Page ${pg}/${tot} — ${found} article(s) « invitation » cumulé(s). ${msg}`
+    return `${head}Page ${pg}/${tot} — ${found} article(s) « invitation » cumulé(s). ${msg}`
   }
   if (st === 'page_done') {
-    return `[${ts}] ${msg}`
+    return `${head}${msg}`
   }
   if (st === 'search_done') {
-    return `[${ts}] ${msg}`
+    return `${head}${msg}`
   }
   if (st === 'item_found') {
     const title = payload.item_title?.trim()
     const asin = payload.asin?.trim()
     const bit = title || asin || 'Article'
-    return `[${ts}] ${bit}${msg ? ` — ${msg}` : ''}`
+    return `${head}${bit}${msg ? ` — ${msg}` : ''}`
   }
   if (st === 'checking_phase') {
-    return `[${ts}] Vérification des invitations sur les fiches produit… ${msg}`.trim()
+    return `${head}Vérification des invitations sur les fiches produit… ${msg}`.trim()
   }
   if (st === 'checking') {
     const pg = payload.current_page ?? '?'
@@ -44,15 +57,18 @@ export function formatAmazonWorkerProgressLine(payload: AmazonWorkerProgressPayl
     const asin = payload.asin?.trim()
     const title = payload.item_title?.trim()
     const detail = title ? `${title}${asin ? ` (${asin})` : ''}` : (asin ?? '')
-    return `[${ts}] Vérification ${pg}/${tot}${detail ? ` — ${detail}` : ''}. ${msg}`
+    return `${head}Vérification ${pg}/${tot}${detail ? ` — ${detail}` : ''}. ${msg}`
+  }
+  if (st === 'account_done') {
+    return `${head}${msg}`
   }
   if (st === 'completed') {
     const n = payload.items_found
-    return `[${ts}] Terminé — ${n != null ? `${n} article(s). ` : ''}${msg}`
+    return `${head}Terminé — ${n != null ? `${n} article(s). ` : ''}${msg}`
   }
   if (st === 'error') {
-    return `[${ts}] Erreur — ${msg}`
+    return `${head}Erreur — ${msg}`
   }
 
-  return `[${ts}] ${msg || st}`
+  return `${head}${msg || st}`
 }

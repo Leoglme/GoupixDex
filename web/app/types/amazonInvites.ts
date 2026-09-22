@@ -5,7 +5,14 @@
  * Invite row status (aligned with product-page check: ``accepted`` = commandable,
  * ``requested`` / ``not_requested`` = invitation flow, ``listing_only`` = search hit not verified on /dp).
  */
-export type AmazonInviteStatus = 'accepted' | 'requested' | 'not_requested' | 'listing_only' | 'expired' | 'unknown'
+export type AmazonInviteStatus =
+  | 'accepted'
+  | 'requested'
+  | 'not_requested'
+  | 'listing_only'
+  | 'expired'
+  | 'needs_login'
+  | 'unknown'
 
 export interface AmazonInvite {
   id: string
@@ -84,6 +91,15 @@ export interface AmazonReverifyResponse {
   refreshed_at: string | null
   message?: string
   active_account_id?: number | null
+}
+
+export type AmazonVerifyAllAccountsResponse = {
+  rows_by_account: Record<string, AmazonInvite[]>
+  account_ids: number[]
+  refreshed_at: string | null
+  active_account_id?: number | null
+  errors?: Record<string, string>
+  message?: string
 }
 
 /** ``POST /amazon/invites/request`` — worker posts Amazon’s invite API (cookies). */

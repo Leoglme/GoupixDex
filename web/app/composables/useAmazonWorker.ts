@@ -7,6 +7,7 @@ import type {
   AmazonReverifyResponse,
   AmazonRequestInviteResponse,
   AmazonSessionResponse,
+  AmazonVerifyAllAccountsResponse,
 } from '~/types/amazonInvites'
 
 /**
@@ -148,14 +149,39 @@ export function useAmazonWorker() {
   }
 
   /**
-   * POST `/amazon/invites/request` — submit invite request on Amazon (worker session cookies).
+   * POST `/amazon/invites/verify-all` — re-check the same catalog on every vault account, in turn.
+   *
+   * @param items - Catalog rows (ASIN + display fields) from the last search.
+   * @returns {Promise<AmazonVerifyAllAccountsResponse>} One row list per account id.
+   */
+  async function verifyAllAccounts(items: AmazonInvite[]): Promise<AmazonVerifyAllAccountsResponse> {
+    const { data } = await client.value.post<AmazonVerifyAllAccountsResponse>(
+      '/amazon/invites/verify-all',
+      {
+        items: items.map((inv) => ({
+          asin: inv.asin ?? null,
+          title: inv.title,
+          product_url: inv.product_url,
+          image_url: inv.image_url,
+          price_hint: inv.price_hint ?? null,
+        })),
+      },
+      { timeout: 900_000 },
+    )
+    return data
+  }
+
+  /**
+   * POST `/amazon/invites/request` — submit invite request on Amazon with the given account's cookies.
    *
    * @param asin - Product ASIN (10 characters).
+   * @param accountId - Vault account the request must be sent from.
    * @returns {Promise<AmazonRequestInviteResponse>} Worker response (success, message, updated row).
    */
-  async function requestInvite(asin: string): Promise<AmazonRequestInviteResponse> {
+  async function requestInvite(asin: string, accountId: number): Promise<AmazonRequestInviteResponse> {
     const { data } = await client.value.post<AmazonRequestInviteResponse>('/amazon/invites/request', {
       asin: asin.trim(),
+      account_id: accountId,
     })
     return data
   }
@@ -325,6 +351,7 @@ export function useAmazonWorker() {
     fetchInvites,
     refreshInvites,
     reverifyInvites,
+    verifyAllAccounts,
     requestInvite,
     openLoginBrowser,
     closeLoginBrowser,

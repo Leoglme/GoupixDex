@@ -152,6 +152,7 @@ const statusLabel: ComputedRef<string> = computed(() => {
     not_requested: 'Non demandée',
     listing_only: 'Sur invitation',
     expired: 'Invitation expirée',
+    needs_login: 'Compte non connecté',
     unknown: 'Statut indéterminé',
   }
   return m[s] ?? s
@@ -165,6 +166,7 @@ const statusColor: ComputedRef<GoupixDexAmazonInviteStatusBadgeColor> = computed
     not_requested: 'neutral',
     listing_only: 'primary',
     expired: 'neutral',
+    needs_login: 'error',
     unknown: 'neutral',
   }
   return m[s] ?? 'neutral'

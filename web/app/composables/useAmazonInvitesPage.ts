@@ -7,11 +7,12 @@ import type {
   AmazonSessionResponse,
   AmazonStatusFilter,
   AmazonStatusSelectItem,
+  AmazonVerifyAllAccountsResponse,
 } from '~/types/amazonInvites'
 import type { AmazonWorkerProgressPayload } from '~/types/amazonWorkerProgress'
 import {
   loadAmazonInvitesPrefs,
-  loadInvitesCacheForAccount,
+  loadInvitesCacheByAccount,
   saveAmazonInvitesPrefs,
   saveInvitesCacheForAccount,
 } from '~/composables/useAmazonInvitesPersistence'
@@ -26,18 +27,23 @@ import {
 } from '~/utils/amazonInvitesScanLimit'
 
 /**
+ * Coupe une liste d’invitations à la limite « produits max » de la page.
  *
+ * @param list - Lignes à tronquer.
+ * @param maxItems - Limite saisie dans la barre d’outils.
+ * @returns {AmazonInvite[]} Les `maxItems` premières lignes.
  */
 function trimInvitesToMaxItems(list: AmazonInvite[], maxItems: number): AmazonInvite[] {
   return list.slice(0, clampMaxItems(maxItems))
 }
 
 /**
- * Map Axios / network failures to short user-visible copy for the invites UI.
+ * Rejette la promesse si elle ne se résout pas dans le délai imparti.
  *
- * @param e - Thrown rejection from `fetch*` calls.
- * @param fallback - Generic message when status-specific text does not apply.
- * @returns {string} User-visible error line.
+ * @param promise - Appel à borner.
+ * @param ms - Délai en millisecondes.
+ * @param label - Préfixe du message d’erreur affiché.
+ * @returns {Promise<T>} La valeur de `promise`, ou une erreur « délai dépassé ».
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -56,7 +62,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 /**
+ * Map Axios / network failures to short user-visible copy for the invites UI.
  *
+ * @param e - Thrown rejection from `fetch*` calls.
+ * @param fallback - Generic message when status-specific text does not apply.
+ * @returns {string} User-visible error line.
  */
 function errorMessageFromUnknown(e: unknown, fallback: string): string {
   if (isAxiosError(e)) {
@@ -78,13 +88,20 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
 }
 
 /**
- * Amazon Invites page: worker session + invites list, persisted filters, client-side search.
+ * Page Invitations Amazon : catalogue partagé, un statut par compte du coffre, demandes depuis le compte affiché.
  *
- * @returns Reactive state, `displayItems`, `load`, and `refresh`.
+ * @returns Reactive state, `displayItems`, `load`, `refresh`, `requestProductInvite`, `switchActiveAccount`.
  */
 export function useAmazonInvitesPage() {
-  const { fetchSession, fetchInvites, refreshInvites, reverifyInvites, requestInvite, activateVaultAccount } =
-    useAmazonWorker()
+  const {
+    fetchSession,
+    fetchInvites,
+    refreshInvites,
+    reverifyInvites,
+    verifyAllAccounts,
+    requestInvite,
+    activateVaultAccount,
+  } = useAmazonWorker()
   const { fetchOverview, setActiveAccount } = useAmazonAccounts()
   const toast = useToast()
 
@@ -92,7 +109,9 @@ export function useAmazonInvitesPage() {
   const refreshing: Ref<boolean> = ref(false)
   const error: Ref<string | null> = ref(null)
   const session: Ref<AmazonSessionResponse | null> = ref(null)
-  const items: Ref<AmazonInvite[]> = ref([])
+  /** Lignes de la dernière recherche Amazon, communes à tous les comptes. */
+  const catalog: Ref<AmazonInvite[]> = ref([])
+  const rowsByAccount: Ref<Record<string, AmazonInvite[]>> = ref({})
   const refreshedAt: Ref<string | null> = ref(null)
   /** Filtre local + requête Amazon lors d’« Actualiser » (vide = défaut worker). */
   const searchQuery: Ref<string> = ref('')
@@ -102,10 +121,7 @@ export function useAmazonInvitesPage() {
   const refreshLogLines: Ref<string[]> = ref([])
   /** Latest worker message for the progress subtitle. */
   const refreshPhaseHint: Ref<string> = ref('')
-  /**
-   * Invites received over WebSocket during ``refresh()`` (search + verification), shown before
-   * ``POST /amazon/invites/refresh`` completes.
-   */
+  /** Invites received over WebSocket during ``refresh()`` for the displayed account, shown before the calls complete. */
   const streamingInvites: Ref<AmazonInvite[]> = ref([])
   /** ASIN whose invite request is in flight (worker ``POST /amazon/invites/request``). */
   const requestInviteLoadingAsin: Ref<string | null> = ref(null)
@@ -114,7 +130,7 @@ export function useAmazonInvitesPage() {
   const confirmedActiveAccountId: Ref<number | undefined> = ref(undefined)
   /** True only while the API active account is being saved (should stay brief). */
   const accountSwitching: Ref<boolean> = ref(false)
-  /** Chrome profile bind / optional reverify after an instant account swap. */
+  /** Chrome profile bind / statuts d’un compte jamais vérifié, après un changement de compte. */
   const accountBackgroundSync: Ref<boolean> = ref(false)
   const vaultAccounts: Ref<{ id: number; label: string | null; amazon_email: string }[]> = ref([])
 
@@ -127,8 +143,38 @@ export function useAmazonInvitesPage() {
 
   const vaultAccountCount = computed(() => vaultAccounts.value.length)
 
+  const catalogAsUnverified: ComputedRef<AmazonInvite[]> = computed(() =>
+    catalog.value.map((row) => ({ ...row, status: 'listing_only' })),
+  )
+
+  /** Lignes du compte affiché ; à défaut, le catalogue non vérifié. */
+  const items: ComputedRef<AmazonInvite[]> = computed(() => {
+    const id = selectedAccountId.value
+    const rows = id != null ? rowsByAccount.value[String(id)] : undefined
+    return rows ?? catalogAsUnverified.value
+  })
+
+  /**
+   * Enregistre les lignes vérifiées d’un compte (mémoire + cache local).
+   *
+   * @param accountId - Compte du coffre.
+   * @param rows - Lignes avec statut pour ce compte.
+   * @param at - Horodatage ISO de la vérification.
+   * @returns {void} Cette fonction ne retourne rien.
+   */
+  function setAccountRows(accountId: number, rows: AmazonInvite[], at: string | null): void {
+    const trimmed = trimInvitesToMaxItems(rows, maxItems.value)
+    rowsByAccount.value = { ...rowsByAccount.value, [String(accountId)]: trimmed }
+    if (import.meta.client && trimmed.length) {
+      saveInvitesCacheForAccount(accountId, trimmed, at)
+    }
+  }
+
   /**
    * Upsert one invite into ``streamingInvites`` keyed by ASIN or id.
+   *
+   * @param inv - Ligne reçue en temps réel.
+   * @returns {void} Cette fonction ne retourne rien.
    */
   function mergeStreamInvite(inv: AmazonInvite): void {
     const key = ((inv.asin ?? inv.id) || '').trim().toUpperCase()
@@ -146,11 +192,18 @@ export function useAmazonInvitesPage() {
   }
 
   /**
-   * Merge ``invite_preview`` from a WebSocket progress payload into ``streamingInvites``.
+   * Merge ``invite_preview`` from a WebSocket progress payload into ``streamingInvites``,
+   * only when it concerns the displayed account (no account = search phase on the active one).
+   *
+   * @param payload - Message du flux `/ws/progress`.
+   * @returns {void} Cette fonction ne retourne rien.
    */
   function mergeInvitePreviewFromWs(payload: AmazonWorkerProgressPayload): void {
     const raw = payload.invite_preview
     if (!raw || typeof raw !== 'object') {
+      return
+    }
+    if (payload.account_id != null && payload.account_id !== selectedAccountId.value) {
       return
     }
     const inv = raw as AmazonInvite
@@ -182,24 +235,28 @@ export function useAmazonInvitesPage() {
       if (p?.statusFilter != null) {
         statusFilter.value = migratePersistedStatusFilter(p.statusFilter)
       }
-      // Show the last fetched list immediately; `load()` replaces it when the worker answers.
-      if (p?.cachedInvites?.length && !items.value.length) {
-        items.value = p.cachedInvites
+      // Dernier catalogue + statuts par compte : la page n’est pas vide en attendant le worker.
+      if (p?.cachedInvites?.length) {
+        catalog.value = p.cachedInvites
         refreshedAt.value = p.cachedRefreshedAt ?? null
       }
+      const byAccount = loadInvitesCacheByAccount()
+      const restored: Record<string, AmazonInvite[]> = {}
+      for (const [id, cache] of Object.entries(byAccount)) {
+        restored[id] = trimInvitesToMaxItems(cache.items, maxItems.value)
+      }
+      rowsByAccount.value = restored
     }
   })
 
   /**
-   * Persist the current invite list so the page is not empty on the next visit.
+   * Persist the shared catalog so the page is not empty on the next visit.
+   *
+   * @returns {void} Cette fonction ne retourne rien.
    */
-  function saveInvitesCache(): void {
+  function saveCatalogCache(): void {
     if (import.meta.client) {
-      saveAmazonInvitesPrefs({ cachedInvites: items.value, cachedRefreshedAt: refreshedAt.value })
-      const aid = confirmedActiveAccountId.value
-      if (aid != null && items.value.length) {
-        saveInvitesCacheForAccount(aid, items.value, refreshedAt.value)
-      }
+      saveAmazonInvitesPrefs({ cachedInvites: catalog.value, cachedRefreshedAt: refreshedAt.value })
     }
   }
 
@@ -214,9 +271,9 @@ export function useAmazonInvitesPage() {
   })
 
   /**
-   * Parallel fetch of session + invites (`fetchInvites` with current `fetchParams`).
+   * Charge les comptes du coffre et le compte actif côté API.
    *
-   * @returns Resolves after state is updated or `error` is set.
+   * @returns {Promise<void>} Résolu quand `vaultAccounts` et le compte sélectionné sont à jour.
    */
   async function loadVaultAccounts(): Promise<void> {
     try {
@@ -231,13 +288,13 @@ export function useAmazonInvitesPage() {
   }
 
   /**
+   * Lie le profil Chrome du worker au compte choisi, puis vérifie ses statuts s’il n’a jamais été
+   * vérifié sur le catalogue courant. Les statuts ne sont appliqués que si le worker confirme ce compte.
    *
+   * @param accountId - Compte du coffre venant d’être sélectionné.
+   * @returns {Promise<void>} Résolu à la fin de la synchronisation (les erreurs sont avalées : la liste reste affichée).
    */
-  async function syncWorkerAfterAccountSwitch(
-    accountId: number,
-    catalogForReverify: AmazonInvite[],
-    hadLocalCache: boolean,
-  ): Promise<void> {
+  async function syncWorkerAfterAccountSwitch(accountId: number): Promise<void> {
     accountBackgroundSync.value = true
     try {
       await withTimeout(activateVaultAccount(accountId), 620_000, 'Connexion au compte Amazon')
@@ -246,34 +303,26 @@ export function useAmazonInvitesPage() {
       } catch {
         /* ignore */
       }
-
-      const inv = await fetchInvites(fetchParams.value)
-      if (inv.items.length) {
-        items.value = trimInvitesToMaxItems(inv.items, maxItems.value)
-        refreshedAt.value = inv.refreshed_at ?? null
-        saveInvitesCache()
+      if (rowsByAccount.value[String(accountId)] || !catalog.value.length) {
         return
       }
-
-      if (hadLocalCache || !catalogForReverify.length) {
+      const res = await withTimeout(reverifyInvites(catalog.value), 120_000, 'Mise à jour des statuts')
+      if (res.active_account_id != null && res.active_account_id !== accountId) {
         return
       }
-
-      const res = await withTimeout(reverifyInvites(catalogForReverify), 120_000, 'Mise à jour des statuts')
-      items.value = trimInvitesToMaxItems(res.items, maxItems.value)
-      if (res.refreshed_at) {
-        refreshedAt.value = res.refreshed_at
-      }
-      saveInvitesCache()
+      setAccountRows(accountId, res.items, res.refreshed_at ?? null)
     } catch {
-      /* liste déjà affichée depuis le cache compte */
+      /* liste déjà affichée depuis le catalogue ou le cache compte */
     } finally {
       accountBackgroundSync.value = false
     }
   }
 
   /**
+   * Change le compte affiché : même catalogue, statuts de ce compte, demandes envoyées depuis ce compte.
    *
+   * @param accountId - Compte du coffre à afficher.
+   * @returns {Promise<void>} Résolu quand l’API a enregistré le compte actif.
    */
   async function switchActiveAccount(accountId: number): Promise<void> {
     if (accountId === confirmedActiveAccountId.value) {
@@ -286,21 +335,6 @@ export function useAmazonInvitesPage() {
     }
 
     const previousConfirmed = confirmedActiveAccountId.value
-    const previousItems = [...items.value]
-    const previousRefreshedAt = refreshedAt.value
-    const catalogForReverify = items.value.length ? [...items.value] : []
-
-    if (previousConfirmed != null && items.value.length) {
-      saveInvitesCacheForAccount(previousConfirmed, items.value, refreshedAt.value)
-    }
-
-    const localHit = loadInvitesCacheForAccount(accountId)
-    const hadLocalCache = Boolean(localHit?.items.length)
-    if (localHit?.items.length) {
-      items.value = trimInvitesToMaxItems(localHit.items, maxItems.value)
-      refreshedAt.value = localHit.refreshedAt ?? null
-    }
-
     selectedAccountId.value = accountId
     accountSwitching.value = true
     error.value = null
@@ -317,8 +351,6 @@ export function useAmazonInvitesPage() {
     } catch (e: unknown) {
       selectedAccountId.value = previousConfirmed
       confirmedActiveAccountId.value = previousConfirmed
-      items.value = previousItems
-      refreshedAt.value = previousRefreshedAt
       try {
         await loadVaultAccounts()
       } catch {
@@ -329,39 +361,36 @@ export function useAmazonInvitesPage() {
         description: errorMessageFromUnknown(e, 'Réessayez.'),
         color: 'error',
       })
-      accountSwitching.value = false
       return
     } finally {
       accountSwitching.value = false
     }
 
-    void syncWorkerAfterAccountSwitch(accountId, catalogForReverify, hadLocalCache)
+    syncWorkerAfterAccountSwitch(accountId)
   }
 
   /**
+   * Charge la session worker et les lignes en cache du compte actif (sans nouvelle recherche Amazon).
    *
+   * @returns {Promise<void>} Resolves after state is updated or `error` is set.
    */
   async function load(): Promise<void> {
     loading.value = true
     error.value = null
     try {
       await loadVaultAccounts()
-      const aid = confirmedActiveAccountId.value
-      if (aid != null) {
-        const hit = loadInvitesCacheForAccount(aid)
-        if (hit?.items.length) {
-          items.value = trimInvitesToMaxItems(hit.items, maxItems.value)
-          refreshedAt.value = hit.refreshedAt ?? null
-        }
-      }
       const params = fetchParams.value
       const [s, inv] = await Promise.all([fetchSession(), fetchInvites(params)])
       session.value = s
-      // A restarted worker answers with an empty cache: keep the locally cached list in that case.
-      if (inv.items.length || !items.value.length) {
-        items.value = trimInvitesToMaxItems(inv.items, maxItems.value)
-        refreshedAt.value = inv.refreshed_at ?? null
-        saveInvitesCache()
+      const aid = confirmedActiveAccountId.value
+      // A restarted worker answers with an empty cache: keep the locally cached rows in that case.
+      if (inv.items.length && aid != null) {
+        setAccountRows(aid, inv.items, inv.refreshed_at ?? null)
+        if (!catalog.value.length) {
+          catalog.value = trimInvitesToMaxItems(inv.items, maxItems.value)
+          refreshedAt.value = inv.refreshed_at ?? null
+          saveCatalogCache()
+        }
       }
     } catch (e: unknown) {
       error.value = errorMessageFromUnknown(e, 'Impossible de charger vos invitations pour le moment.')
@@ -371,10 +400,40 @@ export function useAmazonInvitesPage() {
   }
 
   /**
-   * Force worker rescrape (`refreshInvites`) then reload session snapshot.
-   * Opens `/ws/progress` when possible so the UI can show live scrape logs.
+   * Applique le résultat de la vérification multi-comptes et prévient si un compte n’a pas pu être vérifié.
    *
-   * @returns Resolves after refresh completes or fails into `error`.
+   * @param res - Réponse de ``POST /amazon/invites/verify-all``.
+   * @returns {void} Cette fonction ne retourne rien.
+   */
+  function applyVerifyAllResult(res: AmazonVerifyAllAccountsResponse): void {
+    for (const [id, rows] of Object.entries(res.rows_by_account)) {
+      const accountId = Number(id)
+      if (Number.isFinite(accountId)) {
+        setAccountRows(accountId, rows, res.refreshed_at)
+      }
+    }
+    if (res.refreshed_at) {
+      refreshedAt.value = res.refreshed_at
+    }
+    const failed = Object.keys(res.errors ?? {})
+    if (failed.length) {
+      const labels = failed.map((id) => {
+        const acc = vaultAccounts.value.find((a) => String(a.id) === id)
+        return acc ? (acc.label ?? acc.amazon_email) : `compte ${id}`
+      })
+      toast.add({
+        title: 'Vérification incomplète',
+        description: `Statuts non vérifiés sur : ${labels.join(', ')}.`,
+        color: 'warning',
+      })
+    }
+  }
+
+  /**
+   * « Actualiser » : recherche sur le compte actif, puis vérification du même catalogue sur chaque
+   * compte du coffre. Ouvre `/ws/progress` quand c’est possible pour afficher les logs en direct.
+   *
+   * @returns {Promise<void>} Resolves after refresh completes or fails into `error`.
    */
   async function refresh(): Promise<void> {
     refreshing.value = true
@@ -410,18 +469,30 @@ export function useAmazonInvitesPage() {
     }
 
     try {
-      const params = fetchParams.value
-      const res = await refreshInvites(params)
-      items.value = trimInvitesToMaxItems(res.items, maxItems.value)
-      streamingInvites.value = []
+      const res = await refreshInvites(fetchParams.value)
+      catalog.value = trimInvitesToMaxItems(res.items, maxItems.value)
       if (res.refreshed_at) {
         refreshedAt.value = res.refreshed_at
       }
-      saveInvitesCache()
-      session.value = await fetchSession()
+      const searchedOn = res.active_account_id ?? confirmedActiveAccountId.value
+      if (searchedOn != null) {
+        setAccountRows(searchedOn, res.items, res.refreshed_at ?? null)
+      }
+      saveCatalogCache()
       if (res.message && !refreshPhaseHint.value) {
         refreshPhaseHint.value = res.message
       }
+
+      if (catalog.value.length && vaultAccounts.value.length > 1) {
+        streamingInvites.value = []
+        const all = await verifyAllAccounts(catalog.value)
+        applyVerifyAllResult(all)
+        if (all.message) {
+          refreshPhaseHint.value = all.message
+        }
+      }
+      streamingInvites.value = []
+      session.value = await fetchSession()
     } catch (e: unknown) {
       error.value = errorMessageFromUnknown(e, 'Impossible de mettre à jour la liste. Réessayez.')
       streamingInvites.value = []
@@ -459,7 +530,7 @@ export function useAmazonInvitesPage() {
    * Applies status + local search filters (same as ``displayItems``).
    *
    * @param list - List to filter (main cache or real-time stream).
-   * @returns Filtered list.
+   * @returns {AmazonInvite[]} Filtered list.
    */
   function filterInvitesClientSide(list: AmazonInvite[]): AmazonInvite[] {
     const sf = statusFilter.value
@@ -477,7 +548,10 @@ export function useAmazonInvitesPage() {
   )
 
   /**
-   * Sends the invite request via the worker (POST Amazon), then updates the local row.
+   * Envoie la demande d’invitation depuis le compte affiché (le worker utilise ses cookies), puis met à jour sa ligne.
+   *
+   * @param invite - Ligne dont on demande l’invitation.
+   * @returns {Promise<void>} Résolu après le toast de résultat.
    */
   async function requestProductInvite(invite: AmazonInvite): Promise<void> {
     const asin = invite.asin?.trim()
@@ -489,9 +563,18 @@ export function useAmazonInvitesPage() {
       })
       return
     }
+    const accountId = selectedAccountId.value
+    if (accountId == null) {
+      toast.add({
+        title: 'Aucun compte sélectionné',
+        description: 'Choisissez le compte Amazon depuis lequel envoyer la demande.',
+        color: 'error',
+      })
+      return
+    }
     requestInviteLoadingAsin.value = asin.toUpperCase()
     try {
-      const res = await requestInvite(asin)
+      const res = await requestInvite(asin, accountId)
       if (!res.success) {
         toast.add({
           title: 'Demande non envoyée',
@@ -503,11 +586,15 @@ export function useAmazonInvitesPage() {
       const updated = res.invite
       if (updated) {
         const key = asin.toUpperCase()
-        items.value = items.value.map((row) => ((row.asin ?? '').trim().toUpperCase() === key ? updated : row))
+        const current = rowsByAccount.value[String(accountId)] ?? catalogAsUnverified.value
+        setAccountRows(
+          accountId,
+          current.map((row) => ((row.asin ?? '').trim().toUpperCase() === key ? updated : row)),
+          refreshedAt.value,
+        )
         streamingInvites.value = streamingInvites.value.map((row) =>
           (row.asin ?? '').trim().toUpperCase() === key ? updated : row,
         )
-        saveInvitesCache()
       }
       toast.add({
         title: 'Invitation demandée',
