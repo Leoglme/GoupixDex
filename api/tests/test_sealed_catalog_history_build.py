@@ -67,3 +67,10 @@ def test_update_price_history_writes_shards_and_accumulates(tmp_path: Path) -> N
     shard = json.loads((tmp_path / "0.json").read_text(encoding="utf-8"))
     assert shard["products"]["64"] == [["2026-09-22", 10.0], ["2026-09-23", 11.0]]
     assert "65" not in shard["products"]
+
+
+def test_merge_history_points_keeps_existing_and_adds_missing_dates() -> None:
+    existing = [["2026-09-22", 10.0]]
+    incoming = [["2026-09-20", 9.0], ["2026-09-22", 99.0], ["2026-09-21", 9.5]]
+    merged = build.merge_history_points(existing, incoming)
+    assert merged == [["2026-09-20", 9.0], ["2026-09-21", 9.5], ["2026-09-22", 10.0]]

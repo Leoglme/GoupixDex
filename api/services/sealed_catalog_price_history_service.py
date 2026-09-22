@@ -9,7 +9,9 @@ propres relevés quotidiens du prix guide, partagés entre tous les utilisateurs
 from __future__ import annotations
 
 import datetime as dt
+import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,6 +21,8 @@ from models.sealed_catalog_price_snapshot import SealedCatalogPriceSnapshot
 from services.cardmarket_local_price_service import get_price_api, resolve_market_price_eur
 
 _PARIS_TZ = ZoneInfo("Europe/Paris")
+#: Relevés rattrapés depuis les captures Wayback du guide (``scripts/backfill_sealed_catalog_snapshots_from_wayback.py``).
+BACKFILL_PATH = Path(__file__).resolve().parent.parent / "data" / "sealed_catalog_price_backfill.json"
 
 #: Catégories Cardmarket (``idCategory``) des scellés Pokémon présents dans le catalogue GoupixDex.
 SEALED_GUIDE_CATEGORY_IDS: frozenset[int] = frozenset(
@@ -112,6 +116,43 @@ def snapshot_all_sealed_catalog(db: Session) -> int:
             written += 1
     db.commit()
     return written
+
+
+def import_catalog_backfill(db: Session, path: Path = BACKFILL_PATH) -> int:
+    """Insère les relevés du fichier de rattrapage absents de la table (idempotent) ; renvoie le nombre de points insérés."""
+    if not path.exists():
+        return 0
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    series_by_product = payload.get("points") if isinstance(payload, dict) else None
+    if not isinstance(series_by_product, dict):
+        return 0
+    days = sorted({str(point[0]) for series in series_by_product.values() for point in series})
+    if not days:
+        return 0
+    existing = {
+        (id_product, snapshot_date.isoformat())
+        for id_product, snapshot_date in db.query(
+            SealedCatalogPriceSnapshot.cardmarket_id_product, SealedCatalogPriceSnapshot.snapshot_date
+        )
+        .filter(SealedCatalogPriceSnapshot.snapshot_date.between(days[0], days[-1]))
+        .all()
+    }
+    inserted = 0
+    for id_product_text, series in series_by_product.items():
+        id_product = int(id_product_text)
+        for day, price in series:
+            if (id_product, day) in existing:
+                continue
+            db.add(
+                SealedCatalogPriceSnapshot(
+                    cardmarket_id_product=id_product,
+                    snapshot_date=dt.date.fromisoformat(day),
+                    market_price_eur=Decimal(str(price)),
+                )
+            )
+            inserted += 1
+    db.commit()
+    return inserted
 
 
 def catalog_price_points(db: Session, id_product: int | None) -> list[dict[str, Any]]:

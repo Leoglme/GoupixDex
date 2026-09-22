@@ -185,8 +185,13 @@ def _bootstrap_sealed_catalog_snapshot() -> None:
     """Relevé du jour de tous les scellés du guide dès le démarrage (idempotent), sans attendre la nuit."""
     db = SessionLocal()
     try:
+        imported = sealed_catalog_price_history_service.import_catalog_backfill(db)
         written = sealed_catalog_price_history_service.snapshot_all_sealed_catalog(db)
-        logger.info("Sealed catalog price snapshot at startup: %s point(s) written.", written)
+        logger.info(
+            "Sealed catalog price snapshot at startup: %s backfill point(s) imported, %s point(s) written.",
+            imported,
+            written,
+        )
     finally:
         db.close()
 

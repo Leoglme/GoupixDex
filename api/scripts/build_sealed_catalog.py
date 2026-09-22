@@ -16,6 +16,7 @@ Usage (depuis la racine du repo) : ``python api/scripts/build_sealed_catalog.py`
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import unicodedata
@@ -377,9 +378,127 @@ def build() -> dict[str, Any]:
     return {"version": CATALOG_VERSION, "generated_at": generated_at, "series": ordered}
 
 
+TCGPLAYER_HISTORY_URL = "https://infinite-api.tcgplayer.com/price/history/{tp}/detailed?range={range}"
+#: Plages TCGplayer relevées pour amorcer un produit : « month » = 30 points quotidiens, « quarter » = 30 points tous les 3 jours.
+TCGPLAYER_HISTORY_RANGES = ("month", "quarter")
+#: Produits sans historique amorcés par nuit (le reste attend la nuit suivante) ; surchargeable via HISTORY_BOOTSTRAP_LIMIT.
+HISTORY_BOOTSTRAP_PER_RUN = int(os.environ.get("HISTORY_BOOTSTRAP_LIMIT") or 300)
+#: Pause entre deux lectures TCGplayer : au-delà d'environ deux requêtes par seconde, l'anti-bot répond 403.
+TCGPLAYER_HISTORY_PAUSE_SEC = 0.6
+
+
 def history_shard(tp: int) -> int:
     """Index du fichier ``history/{n}.json`` qui porte un idProduct TCGplayer."""
     return int(tp) % HISTORY_SHARDS
+
+
+class TcgplayerBlockedError(RuntimeError):
+    """TCGplayer refuse nos requêtes (403 anti-bot) : inutile d'insister pendant cette exécution."""
+
+
+def fetch_tcgplayer_price_history(client: httpx.Client, tp: int, range_name: str) -> list[list[Any]] | None:
+    """Points ``[date, prix €]`` (croissants) de l'historique public TCGplayer d'un produit ; ``[]`` sans données, ``None`` si la lecture a échoué."""
+    url = TCGPLAYER_HISTORY_URL.format(tp=int(tp), range=range_name)
+    for attempt in range(3):
+        try:
+            resp = client.get(url, headers={**UA, "Accept": "application/json"}, timeout=30.0)
+        except httpx.HTTPError:
+            time.sleep(1.5 * (attempt + 1))
+            continue
+        if resp.status_code == 404:
+            return []
+        if resp.status_code == 403:
+            raise TcgplayerBlockedError(f"TCGplayer a répondu 403 pour {url}")
+        if resp.status_code in (429, 500, 502, 503, 504):
+            time.sleep(5.0 * (attempt + 1))
+            continue
+        if resp.status_code != 200:
+            return None
+        try:
+            payload = resp.json()
+        except ValueError:
+            return None
+        variants = [v for v in (payload.get("result") or []) if isinstance(v, dict)]
+        if not variants:
+            return []
+        variant = next((v for v in variants if v.get("variant") == "Normal"), None) or max(
+            variants, key=lambda v: len(v.get("buckets") or [])
+        )
+        points: list[list[Any]] = []
+        for bucket in variant.get("buckets") or []:
+            day = str(bucket.get("bucketStartDate") or "")[:10]
+            try:
+                usd = float(bucket.get("marketPrice") or 0)
+            except (TypeError, ValueError):
+                continue
+            if len(day) == 10 and usd > 0:
+                points.append([day, round(usd * USD_TO_EUR, 2)])
+        points.sort(key=lambda point: point[0])
+        return points
+    return None
+
+
+def merge_history_points(series: list[list[Any]], points: list[list[Any]]) -> list[list[Any]]:
+    """Complète une série ``[date, prix]`` avec les points dont la date manque (les relevés existants gagnent), triée et plafonnée."""
+    known = {point[0] for point in series if isinstance(point, list) and len(point) == 2}
+    merged = [point for point in series if isinstance(point, list) and len(point) == 2]
+    merged.extend(point for point in points if point[0] not in known)
+    merged.sort(key=lambda point: str(point[0]))
+    return merged[-HISTORY_MAX_DAYS:]
+
+
+def bootstrap_missing_price_history(payload: dict[str, Any], history_dir: Path = HISTORY_DIR, limit: int = HISTORY_BOOTSTRAP_PER_RUN) -> int:
+    """Amorce depuis TCGplayer l'historique des produits qui ont moins de deux points (au plus ``limit`` produits) ; renvoie le nombre amorcés."""
+    products = [
+        product
+        for serie in payload["series"]
+        for expansion in serie["expansions"]
+        for product in expansion["products"]
+        if product.get("price") is not None
+    ]
+    shards: dict[int, dict[str, Any]] = {}
+    for product in products:
+        shard = history_shard(product["tp"])
+        if shard not in shards:
+            path = history_dir / f"{shard}.json"
+            loaded: Any = None
+            if path.exists():
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    loaded = None
+            shards[shard] = (
+                {"v": HISTORY_VERSION, "products": loaded["products"]}
+                if isinstance(loaded, dict) and isinstance(loaded.get("products"), dict)
+                else {"v": HISTORY_VERSION, "products": {}}
+            )
+    pending = [p for p in products if len(shards[history_shard(p["tp"])]["products"].get(str(p["tp"])) or []) < 2]
+    bootstrapped = 0
+    touched: set[int] = set()
+    with httpx.Client() as client:
+        for product in pending[:limit]:
+            points: list[list[Any]] = []
+            try:
+                for range_name in TCGPLAYER_HISTORY_RANGES:
+                    fetched = fetch_tcgplayer_price_history(client, product["tp"], range_name)
+                    points = merge_history_points(points, fetched or [])
+                    time.sleep(TCGPLAYER_HISTORY_PAUSE_SEC)
+            except TcgplayerBlockedError as exc:
+                print(f"historique prix: arrêt de l'amorçage ({exc})", flush=True)
+                break
+            if not points:
+                continue
+            shard = history_shard(product["tp"])
+            key = str(product["tp"])
+            shards[shard]["products"][key] = merge_history_points(shards[shard]["products"].get(key) or [], points)
+            touched.add(shard)
+            bootstrapped += 1
+    history_dir.mkdir(parents=True, exist_ok=True)
+    for shard in sorted(touched):
+        (history_dir / f"{shard}.json").write_text(
+            json.dumps(shards[shard], ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        )
+    return bootstrapped
 
 
 def append_history_point(series: list[list[Any]], day: str, price_eur: float) -> list[list[Any]]:
@@ -429,6 +548,8 @@ def main() -> int:
     day = datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
     recorded = update_price_history(payload, day)
     print(f"historique prix: {recorded} produits relevés pour {day} -> {HISTORY_DIR}")
+    bootstrapped = bootstrap_missing_price_history(payload)
+    print(f"historique prix: {bootstrapped} produit(s) amorcé(s) depuis TCGplayer")
     return 0
 
 
