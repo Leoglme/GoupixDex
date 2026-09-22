@@ -31,7 +31,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  create-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      # Une seule création de release (brouillon) : les 3 jobs de la matrice n'y déposent que
+      # leurs assets, ce qui évite la course « Published releases must have a valid tag ».
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: 0.1.${{ github.run_number }}
+        with:
+          result-encoding: string
+          script: |
+            const version = process.env.RELEASE_VERSION
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${version}`,
+              name: `GoupixDex Desktop v${version}`,
+              body: [
+                'Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).',
+                '',
+                'Installeurs : voir les assets de cette version (.exe, .msi, .dmg).',
+                '',
+                `**Version appli :** \`${version}\` (semver patch = numéro de run GitHub Actions, unique à chaque build sur \`main\`).`,
+              ].join('\n'),
+              draft: true,
+              prerelease: false,
+            })
+            return String(data.id)
+
   build-desktop:
+    needs: create-release
     name: Build desktop (${{ matrix.platform }})
     # Avoid the "JS actions on Node 20" warning (GitHub runner now on Node 24).
     env:
@@ -276,14 +313,36 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
-          tagName: v0.1.${{ github.run_number }}
-          releaseName: "GoupixDex Desktop v0.1.${{ github.run_number }}"
-          releaseBody: |
-            Build **production** Windows / macOS (Rust `--release`, pas de console cmd au lancement sur Windows).
-
-            Installeurs : voir les assets de cette version (.exe, .msi, .dmg).
-
-            **Version appli :** `0.1.${{ github.run_number }}` (semver patch = numéro de run GitHub Actions, unique à chaque build sur `main`).
-          releaseDraft: false
-          prerelease: false
+          # Release créée par le job create-release : ici on ne fait que déposer les assets.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  publish-release:
+    name: Publish release
+    needs: [create-release, build-desktop]
+    if: ${{ always() && needs.create-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Publie dès qu'au moins une plateforme a déposé ses assets (Windows reste livrable si un
+      # job macOS échoue) ; sans aucun asset, le brouillon est supprimé et le job échoue.
+      - name: Publish draft release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          BUILD_RESULT: ${{ needs.build-desktop.result }}
+        with:
+          script: |
+            const release_id = Number(process.env.RELEASE_ID)
+            const { owner, repo } = context.repo
+            const { data: assets } = await github.rest.repos.listReleaseAssets({ owner, repo, release_id, per_page: 100 })
+            if (!assets.length) {
+              await github.rest.repos.deleteRelease({ owner, repo, release_id })
+              core.setFailed(`Aucun asset déposé (build-desktop : ${process.env.BUILD_RESULT}) — brouillon supprimé.`)
+              return
+            }
+            await github.rest.repos.updateRelease({ owner, repo, release_id, draft: false })
+            if (process.env.BUILD_RESULT !== 'success') {
+              core.warning(`Release publiée avec ${assets.length} asset(s), mais build-desktop = ${process.env.BUILD_RESULT} : une plateforme manque.`)
+            }
