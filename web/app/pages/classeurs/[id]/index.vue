@@ -117,7 +117,7 @@
               <div
                 class="card-tile relative aspect-[63/88]"
                 :class="[
-                  cell.item?.kind === 'wanted' && !previewComplete ? 'opacity-75 grayscale-[0.35]' : '',
+                  cell.item?.kind === 'wanted' && !previewComplete ? 'opacity-70 grayscale' : '',
                   cell.item ? '' : 'ring-1 ring-white/10',
                 ]"
               >

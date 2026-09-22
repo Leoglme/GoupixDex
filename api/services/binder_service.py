@@ -27,6 +27,7 @@ BINDER_COLOR_CODES = frozenset({"red", "orange", "yellow", "green", "blue", "pur
 BINDER_STYLE_CODES = frozenset({"binder", "mosaic", "showcase", "fan", "label", "custom"})
 PAGE_GRID_CODES = frozenset({"3x3", "4x3", "2x2", "4x4"})
 POKEDEX_REGION_CODES = frozenset({"kanto"})
+POKEDEX_REGION_SIZES = {"kanto": 151}
 
 
 def pocket_key(collection_card_id: int) -> str:
@@ -61,6 +62,39 @@ def _pocket_item_dict(item: BinderItem) -> dict[str, Any]:
         "quantity": int(card.quantity) if card else 1,
         "position": item.position,
         "created_at": item.created_at.isoformat() if item.created_at else "",
+    }
+
+
+def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[str, Any]:
+    """Complétion + valeurs : dépensé = cartes possédées, total = toutes les cartes rangées."""
+    region_size = POKEDEX_REGION_SIZES.get(binder.pokedex_region or "", 0)
+    owned = 0
+    spent = Decimal(0)
+    total = Decimal(0)
+    spent_priced = False
+    total_priced = False
+    for bi in items:
+        card = bi.collection_card
+        if card is None:
+            continue
+        in_region = region_size == 0 or (bi.position is not None and 0 <= bi.position < region_size)
+        is_owned = (not card.is_placeholder) and int(card.quantity) > 0
+        if is_owned and in_region:
+            owned += 1
+        price = card.market_price_eur
+        if price is None:
+            continue
+        if is_owned:
+            spent += Decimal(str(price)) * int(card.quantity)
+            spent_priced = True
+        if in_region:
+            total += Decimal(str(price))
+            total_priced = True
+    return {
+        "pokedex_owned": owned if region_size else None,
+        "pokedex_total": region_size or None,
+        "estimated_value_eur": float(spent) if spent_priced else None,
+        "total_value_eur": float(total) if total_priced else None,
     }
 
 
@@ -125,6 +159,7 @@ def list_binders_for_user(db: Session, user_id: int) -> list[dict[str, Any]]:
                 value += Decimal(str(card.market_price_eur)) * int(card.quantity)
                 priced = True
         summary = _binder_summary(b, card_count=count, value_eur=float(value) if priced else None)
+        summary.update(_binder_completion_stats(b, b.items))
         summary["covers"] = _resolve_covers(b, b.items)
         out.append(summary)
     return out
@@ -173,6 +208,7 @@ def get_binder_detail(db: Session, binder_id: int, user_id: int) -> dict[str, An
     ]
 
     summary = _binder_summary(binder, card_count=count, value_eur=float(value) if priced else None)
+    summary.update(_binder_completion_stats(binder, binder.items))
     summary["items"] = items
     summary["covers"] = _resolve_covers(binder, binder.items)
     summary["candidates"] = candidate_dicts

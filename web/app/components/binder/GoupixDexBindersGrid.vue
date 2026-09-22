@@ -26,9 +26,13 @@
         />
         <p class="mt-3 truncate text-base font-semibold group-hover:text-(--app-accent)">{{ tile(id).name }}</p>
         <p class="mt-0.5 text-sm text-(--app-ink-soft)">
-          {{ tile(id).card_count }} carte{{ tile(id).card_count > 1 ? 's' : '' }}
+          <template v-if="tile(id).pokedex_total != null">
+            {{ tile(id).pokedex_owned ?? 0 }} / {{ tile(id).pokedex_total }} cartes
+          </template>
+          <template v-else>{{ tile(id).card_count }} carte{{ tile(id).card_count > 1 ? 's' : '' }}</template>
           <template v-if="tile(id).estimated_value_eur != null">
             · {{ formatEur(tile(id).estimated_value_eur!) }}
+            <template v-if="tile(id).total_value_eur != null"> / {{ formatEur(tile(id).total_value_eur!) }}</template>
           </template>
         </p>
       </NuxtLink>

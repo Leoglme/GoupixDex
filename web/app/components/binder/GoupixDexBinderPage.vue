@@ -74,7 +74,7 @@
               :class="[
                 isSource(pageIdx * perPage + (k - 1)) ? 'opacity-30' : '',
                 displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' && !previewComplete
-                  ? 'opacity-75 grayscale-[0.35]'
+                  ? 'opacity-70 grayscale'
                   : '',
               ]"
             >
