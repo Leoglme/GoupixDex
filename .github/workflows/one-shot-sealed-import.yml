@@ -1,0 +1,44 @@
+# One-shot manuel : remplace les produits scellés de l'utilisateur sur le VPS (prod).
+# Le script api/scripts/import_sealed_products.py doit déjà être déployé (arrive via un déploiement api/**).
+# Données en base64 (inputs.items_b64) pour éviter tout souci de quoting shell. À supprimer après usage.
+name: One-shot — sealed products import
+
+on:
+  workflow_dispatch:
+    inputs:
+      items_b64:
+        description: 'base64 du JSON [{name, edition, product_type, purchase_price_eur, market_price_eur}]'
+        required: true
+      apply:
+        description: 'true = écrit en base ; false = dry-run'
+        required: true
+        default: 'false'
+
+jobs:
+  run:
+    name: Import sealed products on VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run script over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ITEMS_B64: ${{ inputs.items_b64 }}
+          APPLY: ${{ inputs.apply }}
+          DEPLOY_API_DIR: ${{ secrets.DEPLOY_API_DIR }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: ITEMS_B64,APPLY,DEPLOY_API_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_ROOT="${DEPLOY_API_DIR%/}/api"
+            TMP="$(mktemp)"
+            printf '%s' "$ITEMS_B64" | base64 -d > "$TMP"
+            FLAG="--dry-run"
+            if [ "${APPLY}" = "true" ]; then FLAG=""; fi
+            cd "$APP_ROOT"
+            "$APP_ROOT/.venv/bin/python" "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG
+            rm -f "$TMP"
