@@ -31,6 +31,8 @@ from config import get_settings
 from models.sealed_product import SEALED_PRODUCT_TYPES, SealedProduct
 from models.user import User
 from services import sealed_product_service
+from services.cardmarket_local_price_service import resolve_market_price_eur
+from services.cardmarket_product_resolve_service import resolve_cardmarket_product
 
 
 def _load_items(file_path: str | None) -> list[dict[str, Any]]:
@@ -107,6 +109,25 @@ def main() -> None:
         for item in items:
             id_product = item.get("cardmarket_id_product")
             id_product = int(id_product) if id_product is not None else None
+            image_url = item.get("image_url")
+            market = float(item["market_price_eur"])
+            cardmarket_url = item.get("cardmarket_url")
+
+            # Best-effort : depuis l'URL Cardmarket, récupère l'idProduct (et l'image à défaut) si non fourni.
+            if id_product is None and cardmarket_url:
+                resolved = resolve_cardmarket_product(cardmarket_url)
+                if resolved.get("id_product"):
+                    id_product = int(resolved["id_product"])
+                    if not image_url and resolved.get("image_url"):
+                        image_url = resolved["image_url"]
+                    print(f"  résolu Cardmarket : {item['name']} → idProduct {id_product}")
+
+            # idProduct connu → prix marché depuis le guide local (jamais écrasé s'il est absent).
+            if id_product is not None:
+                guide_price = resolve_market_price_eur(id_product, None)
+                if guide_price is not None:
+                    market = float(guide_price)
+
             sealed_product_service.create_sealed_product(
                 db,
                 user.id,
@@ -117,10 +138,10 @@ def main() -> None:
                 quantity=int(item.get("quantity", 1)),
                 purchase_price_eur=float(item["purchase_price_eur"]),
                 notes=None,
-                image_url=item.get("image_url"),
+                image_url=image_url,
                 cardmarket_id_product=id_product,
-                cardmarket_url=None,
-                market_price_eur=float(item["market_price_eur"]),
+                cardmarket_url=cardmarket_url,
+                market_price_eur=market,
             )
         print(f"\nSupprimés : {len(existing)} · Créés : {len(items)}.")
 
