@@ -39,6 +39,12 @@ class BinderPlaceCatalogBody(BaseModel):
     language: str = Field("fr", min_length=2, max_length=8)
 
 
+class BinderSyncCatalogBody(BaseModel):
+    """Remplace en lot la carte cible de plusieurs pochettes par une carte catalogue."""
+
+    cards: list[BinderPlaceCatalogBody] = Field(..., min_length=1, max_length=400)
+
+
 class BinderMovePocketBody(BaseModel):
     pocket_key: str = Field(..., min_length=3, max_length=64)
     to_pocket: int = Field(..., ge=0)

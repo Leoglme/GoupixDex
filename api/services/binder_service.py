@@ -392,6 +392,42 @@ def place_catalog_card_in_pocket(
     place_item_in_pocket(db, binder, user_id, card.id, pocket)
 
 
+def _empty_pocket(db: Session, binder: Binder, user_id: int, pocket: int) -> None:
+    """Retire la carte cible actuelle d'une pochette (et son placeholder s'il n'est plus utilisé). Sans commit."""
+    occupant_id = _occupant_at(db, binder.id, pocket)
+    if occupant_id is None:
+        return
+    db.query(BinderItem).filter(BinderItem.binder_id == binder.id, BinderItem.position == pocket).delete()
+    db.flush()
+    card = (
+        db.query(CollectionCard)
+        .filter(CollectionCard.id == occupant_id, CollectionCard.user_id == user_id)
+        .first()
+    )
+    if card is not None and card.is_placeholder:
+        still_used = db.query(BinderItem).filter(BinderItem.collection_card_id == occupant_id).count()
+        if still_used == 0:
+            db.delete(card)
+    db.flush()
+
+
+def replace_pocket_with_catalog(
+    db: Session,
+    binder: Binder,
+    user_id: int,
+    tcgdex_card_id: str,
+    pocket: int,
+    language: str = "fr",
+) -> None:
+    """
+    Remplace la carte cible d'une pochette par une carte catalogue : vide la pochette puis y place la
+    nouvelle carte. La suppression n'est que *flushée* ; le commit final est celui de la pose, donc un
+    échec (TCGdex indisponible, id inconnu) laisse la pochette intacte après rollback de l'appelant.
+    """
+    _empty_pocket(db, binder, user_id, pocket)
+    place_catalog_card_in_pocket(db, binder, user_id, tcgdex_card_id, pocket, language)
+
+
 def place_item_in_pocket(
     db: Session,
     binder: Binder,

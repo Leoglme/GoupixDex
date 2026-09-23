@@ -21,6 +21,7 @@ from schemas.binders import (
     BinderPlaceItemBody,
     BinderRemovePocketBody,
     BinderReorderBody,
+    BinderSyncCatalogBody,
     BinderUpdateBody,
 )
 from services import binder_cover_service, binder_service, binder_value_service
@@ -163,6 +164,35 @@ def place_catalog_in_pocket(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     detail = binder_service.get_binder_detail(db, binder_id, user.id)
     return detail or {}
+
+
+@router.post("/{binder_id}/sync-catalog")
+def sync_catalog_cards(
+    binder_id: int,
+    body: BinderSyncCatalogBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Remplace en lot la carte cible de plusieurs pochettes par une carte catalogue (une par pochette).
+
+    Chaque pochette est traitée puis committée à part : l'opération est reprenable si le client coupe,
+    et une carte en échec (id TCGdex inconnu, réseau) n'empêche pas les autres. Renvoie le détail à jour.
+    """
+    binder = _get_owned_binder(db, binder_id, user.id)
+    placed = 0
+    failed: list[dict[str, Any]] = []
+    for entry in body.cards:
+        try:
+            binder_service.replace_pocket_with_catalog(
+                db, binder, user.id, entry.tcgdex_card_id, entry.pocket, entry.language
+            )
+            placed += 1
+        except (ValueError, RuntimeError) as exc:
+            db.rollback()
+            failed.append({"pocket": entry.pocket, "tcgdex_card_id": entry.tcgdex_card_id, "error": str(exc)[:120]})
+    detail = binder_service.get_binder_detail(db, binder_id, user.id)
+    return {"placed": placed, "failed": failed, "binder": detail}
 
 
 @router.post("/{binder_id}/move")
