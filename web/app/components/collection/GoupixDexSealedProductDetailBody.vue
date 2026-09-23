@@ -185,6 +185,7 @@
 <script setup lang="ts">
 import type {
   SealedArticlePrefillResponse,
+  SealedPriceHistoryPoint,
   SealedPriceHistoryResponse,
   SealedProduct,
   SealedProductType,
@@ -264,10 +265,10 @@ const cardmarketLink = computed<string | null>(() => {
   return current.cardmarket_url ?? cardmarketUrl({ idProduct: current.cardmarket_id_product, name: current.name })
 })
 
-/** Origine de la courbe affichée : relevés TCGplayer convertis, tendance approximative Cardmarket, ou rien. */
+/** Origine de la courbe affichée : tendance TCGplayer recalée sur le prix Cardmarket, tendance approximative, ou rien. */
 const priceHistorySourceLabel = computed<string | null>(() => {
   if (priceHistorySource.value === 'tcgplayer') {
-    return 'prix TCGplayer converti en €'
+    return 'tendance TCGplayer · prix Cardmarket'
   }
   return priceHistory.value?.approximate ? 'tendance approximative' : null
 })
@@ -344,30 +345,53 @@ async function load(): Promise<void> {
 }
 
 /**
- * Charge la courbe : relevés Cardmarket du produit possédé, sinon relevés TCGplayer du catalogue
- * (produits sans idProduct Cardmarket), comme l'aperçu catalogue.
+ * Recale une série TCGplayer sur le prix marché Cardmarket : dernier point aligné sur `marketPriceEur`,
+ * en conservant la forme (variations relatives). Cardmarket ne publie pas d'historique pour les scellés,
+ * mais son prix du jour est la référence € pertinente — d'où cette combinaison forme TCGplayer / niveau Cardmarket.
+ * @param points - Points datés TCGplayer (€, ordre croissant).
+ * @param marketPriceEur - Prix marché Cardmarket cible, ou `null`.
+ * @returns Série recalée, ou la série d'origine si le recalage est impossible.
+ */
+function rebaseToMarketPrice(
+  points: SealedPriceHistoryPoint[],
+  marketPriceEur: number | null,
+): SealedPriceHistoryPoint[] {
+  const lastPrice = points.length > 0 ? points[points.length - 1].price_eur : 0
+  if (marketPriceEur === null || marketPriceEur <= 0 || lastPrice <= 0) {
+    return points
+  }
+  const factor = marketPriceEur / lastPrice
+  return points.map(
+    (point): SealedPriceHistoryPoint => ({
+      date: point.date,
+      price_eur: Math.round(point.price_eur * factor * 100) / 100,
+    }),
+  )
+}
+
+/**
+ * Charge la courbe : tendance TCGplayer (vrai historique de ventes) recalée sur le prix marché Cardmarket
+ * affiché ; repli sur les relevés Cardmarket du produit possédé si TCGplayer n'a pas d'historique.
  * @returns Résolue quand la courbe est chargée ou l'échec acté.
  */
 async function loadPriceHistory(): Promise<void> {
+  const tcgplayerId = product.value?.tcgplayer_id
+  if (tcgplayerId != null) {
+    const tcgplayerPoints = await loadProductPriceHistory(tcgplayerId)
+    if (tcgplayerPoints.length >= 2) {
+      priceHistory.value = {
+        points: rebaseToMarketPrice(tcgplayerPoints, product.value?.market_price_eur ?? null),
+        approximate: false,
+      }
+      priceHistorySource.value = 'tcgplayer'
+      return
+    }
+  }
   let cardmarketHistory: SealedPriceHistoryResponse | null = null
   try {
     cardmarketHistory = await getPriceHistory(props.sealedId)
   } catch {
     cardmarketHistory = null
-  }
-  if (cardmarketHistory && cardmarketHistory.points.length >= 2) {
-    priceHistory.value = cardmarketHistory
-    priceHistorySource.value = 'cardmarket'
-    return
-  }
-  const tcgplayerId = product.value?.tcgplayer_id
-  if (tcgplayerId != null) {
-    const tcgplayerPoints = await loadProductPriceHistory(tcgplayerId)
-    if (tcgplayerPoints.length >= 2) {
-      priceHistory.value = { points: tcgplayerPoints, approximate: false }
-      priceHistorySource.value = 'tcgplayer'
-      return
-    }
   }
   priceHistory.value = cardmarketHistory
   priceHistorySource.value = cardmarketHistory ? 'cardmarket' : null
