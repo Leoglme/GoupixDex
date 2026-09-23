@@ -17,8 +17,8 @@
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <GoupixDexStatsCard
           title="Valeur estimée"
-          :value="eur.format(stats.estimated_value_eur)"
-          :description="`${numberFmt.format(stats.priced_cards)} carte(s) cotée(s)`"
+          :value="eur.format(totalCollectionValue)"
+          :description="`${eur.format(stats.estimated_value_eur)} cartes · ${eur.format(sealedStats?.estimated_market_eur ?? 0)} scellés`"
           icon="i-lucide-coins"
         />
         <GoupixDexStatsCard
@@ -243,7 +243,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import type { CollectionCard, CollectionStats } from '~/composables/useCollection'
 import type { SealedProduct, SealedStats } from '~/composables/useSealed'
 import type { BinderSummary } from '~/types/binders'
@@ -273,6 +273,11 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2,
 })
 const numberFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR')
+
+/** Valeur totale de la collection : cartes possédées + produits scellés (prix marché). */
+const totalCollectionValue: ComputedRef<number> = computed(
+  () => (stats.value?.estimated_value_eur ?? 0) + (sealedStats.value?.estimated_market_eur ?? 0),
+)
 
 /** Padding resserré et uniforme des cartes de la collection (titre + liste dans le même corps). */
 const cardUi: { body: string } = {
