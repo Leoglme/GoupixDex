@@ -18,6 +18,7 @@ from schemas.binders import (
     BinderMovePocketBody,
     BinderPageCountBody,
     BinderPlaceCatalogBody,
+    BinderPlaceCustomBody,
     BinderPlaceItemBody,
     BinderRemovePocketBody,
     BinderReorderBody,
@@ -187,6 +188,46 @@ def sync_catalog_cards(
             binder_service.replace_pocket_with_catalog(
                 db, binder, user.id, entry.tcgdex_card_id, entry.pocket, entry.language
             )
+            placed += 1
+        except (ValueError, RuntimeError) as exc:
+            db.rollback()
+            failed.append({"pocket": entry.pocket, "tcgdex_card_id": entry.tcgdex_card_id, "error": str(exc)[:120]})
+    detail = binder_service.get_binder_detail(db, binder_id, user.id)
+    return {"placed": placed, "failed": failed, "binder": detail}
+
+
+@router.post("/{binder_id}/place-custom")
+def place_custom_cards(
+    binder_id: int,
+    body: BinderPlaceCustomBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Place en lot des cartes cibles fournies explicitement (nom + image), sans passer par TCGdex.
+
+    Pour les cartes japonaises absentes de TCGdex mais illustrées par LimitlessTCG. Committée par
+    carte (reprenable) ; une carte en échec n'empêche pas les autres.
+    """
+    binder = _get_owned_binder(db, binder_id, user.id)
+    placed = 0
+    failed: list[dict[str, Any]] = []
+    for entry in body.cards:
+        try:
+            binder_service.place_custom_card_in_pocket(
+                db,
+                binder,
+                user.id,
+                pocket=entry.pocket,
+                tcgdex_card_id=entry.tcgdex_card_id,
+                display_name=entry.display_name,
+                language=entry.language,
+                set_code=entry.set_code,
+                set_name=entry.set_name,
+                card_number=entry.card_number,
+                image_url=entry.image_url,
+            )
+            db.commit()
             placed += 1
         except (ValueError, RuntimeError) as exc:
             db.rollback()

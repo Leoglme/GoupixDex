@@ -428,6 +428,58 @@ def replace_pocket_with_catalog(
     place_catalog_card_in_pocket(db, binder, user_id, tcgdex_card_id, pocket, language)
 
 
+def place_custom_card_in_pocket(
+    db: Session,
+    binder: Binder,
+    user_id: int,
+    *,
+    pocket: int,
+    tcgdex_card_id: str,
+    display_name: str,
+    language: str = "ja",
+    set_code: str | None = None,
+    set_name: str | None = None,
+    card_number: str | None = None,
+    image_url: str | None = None,
+) -> None:
+    """
+    Place une carte cible fournie explicitement (absente de TCGdex) : image et nom passés tels quels.
+
+    Sert aux cartes japonaises que TCGdex n'indexe pas mais que LimitlessTCG illustre (vieux sets,
+    promos, decks). Réutilise le placeholder existant s'il y en a déjà un pour cet id + langue.
+    """
+    lang = (language or "ja").strip().lower()
+    cid = tcgdex_card_id.strip()
+    existing = collection_card_service.find_existing_for_user(db, user_id, tcgdex_card_id=cid, language=lang)
+    if existing is not None:
+        card = existing
+        if image_url and not card.image_url:
+            card.image_url = image_url
+        db.flush()
+    else:
+        dash = cid.rfind("-")
+        derived_set = cid[:dash] if dash > 0 else cid
+        derived_num = cid[dash + 1 :] if dash > 0 else cid
+        card = CollectionCard(
+            user_id=user_id,
+            tcgdex_card_id=cid,
+            tcgdex_set_id=derived_set,
+            set_code=set_code or derived_set.upper(),
+            set_name=set_name,
+            card_number=card_number or derived_num,
+            card_name_fr=display_name,
+            display_name=display_name,
+            language=lang,
+            image_url=image_url,
+            quantity=0,
+            is_placeholder=True,
+        )
+        db.add(card)
+        db.flush()
+    _empty_pocket(db, binder, user_id, pocket)
+    place_item_in_pocket(db, binder, user_id, card.id, pocket)
+
+
 def place_item_in_pocket(
     db: Session,
     binder: Binder,
