@@ -109,18 +109,46 @@
               <p class="text-highlighted mt-1.5 text-3xl font-semibold tabular-nums sm:text-4xl">
                 {{ eurValue.format(totalValue) }}
               </p>
-              <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-                <span class="text-muted">
-                  Possédé <span class="text-highlighted font-medium">{{ eurValue.format(ownedValue) }}</span>
-                </span>
-                <span class="text-muted">
-                  Reste à acquérir <span class="text-highlighted font-medium">{{ eurValue.format(missingValue) }}</span>
-                </span>
+              <div class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                <div>
+                  <p class="app-label">Possédé (marché)</p>
+                  <p class="text-highlighted mt-0.5 text-lg font-semibold tabular-nums">
+                    {{ eurValue.format(ownedValue) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="app-label">Valeur d'achat</p>
+                  <p class="text-highlighted mt-0.5 text-lg font-semibold tabular-nums">
+                    {{ purchaseValue != null ? eurValue.format(purchaseValue) : '—' }}
+                  </p>
+                </div>
+                <div>
+                  <p class="app-label">Plus-value</p>
+                  <template v-if="binderGainEur != null">
+                    <p
+                      class="mt-0.5 text-lg font-semibold tabular-nums"
+                      :class="binderGainEur >= 0 ? 'text-(--app-green)' : 'text-(--app-red)'"
+                    >
+                      {{ binderGainEur >= 0 ? '+' : '' }}{{ eurValue.format(binderGainEur) }}
+                    </p>
+                    <p v-if="binderGainPercent != null" class="text-muted text-xs tabular-nums">
+                      {{ formatSignedPercent(binderGainPercent) }}
+                    </p>
+                  </template>
+                  <p v-else class="text-muted mt-0.5 text-lg">—</p>
+                </div>
+                <div>
+                  <p class="app-label">Reste à acquérir</p>
+                  <p class="text-highlighted mt-0.5 text-lg font-semibold tabular-nums">
+                    {{ eurValue.format(missingValue) }}
+                  </p>
+                </div>
+              </div>
+              <div v-if="binder.pokedex_total" class="mt-4">
                 <span
-                  v-if="binder.pokedex_total"
-                  class="inline-flex items-center gap-1 rounded-full bg-(--app-green-soft) px-2 py-0.5 text-xs font-semibold text-(--app-green)"
+                  class="inline-flex items-center gap-1 rounded-full bg-(--app-green-soft) px-2.5 py-1 text-xs font-semibold text-(--app-green)"
                 >
-                  {{ binder.pokedex_owned ?? 0 }} / {{ binder.pokedex_total }} cartes
+                  {{ binder.pokedex_owned ?? 0 }} / {{ binder.pokedex_total }} cartes possédées
                 </span>
               </div>
             </UCard>
@@ -279,6 +307,7 @@ import type { BinderDetail, BinderPocketItem, BinderValuePeriod, BinderValueTime
 import type { PokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
+import { formatSignedPercent } from '~/utils/sealedProducts'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -391,6 +420,13 @@ const valuePeriodOptions: { label: string; value: BinderValuePeriod }[] = [
 const totalValue = computed<number>(() => binder.value?.total_value_eur ?? 0)
 const ownedValue = computed<number>(() => binder.value?.estimated_value_eur ?? 0)
 const missingValue = computed<number>(() => Math.max(0, totalValue.value - ownedValue.value))
+const purchaseValue = computed<number | null>(() => binder.value?.purchase_value_eur ?? null)
+const binderGainEur = computed<number | null>(() =>
+  purchaseValue.value != null ? ownedValue.value - purchaseValue.value : null,
+)
+const binderGainPercent = computed<number | null>(() =>
+  purchaseValue.value && purchaseValue.value > 0 ? (ownedValue.value / purchaseValue.value - 1) * 100 : null,
+)
 const ownedPct = computed<number>(() =>
   totalValue.value > 0 ? Math.min(100, Math.round((ownedValue.value / totalValue.value) * 100)) : 0,
 )

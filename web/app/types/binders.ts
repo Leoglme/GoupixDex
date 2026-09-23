@@ -22,6 +22,7 @@ export interface BinderSummary {
   card_count: number
   estimated_value_eur: number | null
   total_value_eur: number | null
+  purchase_value_eur: number | null
   pokedex_owned: number | null
   pokedex_total: number | null
   covers: BinderCoverItem[]

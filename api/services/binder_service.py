@@ -71,8 +71,10 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
     owned = 0
     spent = Decimal(0)
     total = Decimal(0)
+    purchase = Decimal(0)
     spent_priced = False
     total_priced = False
+    purchase_priced = False
     for bi in items:
         card = bi.collection_card
         if card is None:
@@ -80,6 +82,9 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
         is_owned = (not card.is_placeholder) and int(card.quantity) > 0
         if is_owned:
             owned += 1
+            if card.purchase_price_eur is not None:
+                purchase += Decimal(str(card.purchase_price_eur)) * int(card.quantity)
+                purchase_priced = True
         price = card.market_price_eur
         if price is None:
             continue
@@ -93,6 +98,7 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
         "pokedex_total": region_size or None,
         "estimated_value_eur": float(spent) if spent_priced else None,
         "total_value_eur": float(total) if total_priced else None,
+        "purchase_value_eur": float(purchase) if purchase_priced else None,
     }
 
 
