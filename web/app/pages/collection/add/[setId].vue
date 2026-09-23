@@ -29,6 +29,7 @@
                 :logo="setDetail.logo"
                 :symbol="setDetail.symbol"
                 :cover="setDetail.cover"
+                :set-id="setDetail.id"
                 :name="setDisplayName"
                 large
               />

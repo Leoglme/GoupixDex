@@ -19,6 +19,12 @@ export function catalogLogoCandidates(logo?: string, symbol?: string, cover?: st
   }
   if (symbol?.trim()) {
     const s = symbol.trim()
+    // Le logo est souvent présent sur le CDN TCGdex même quand l'index ne le référence pas :
+    // il vit à côté du symbole (…/<set>/logo). On le tente avant de retomber sur le symbole/la carte.
+    const derivedLogo = s.replace(/\/symbol(\.\w+)?$/, '/logo')
+    if (derivedLogo !== s) {
+      out.push(`${derivedLogo}.webp`, `${derivedLogo}.png`)
+    }
     out.push(s.endsWith('.webp') || s.endsWith('.png') ? s : `${s}.webp`)
   }
   if (cover?.trim()) {

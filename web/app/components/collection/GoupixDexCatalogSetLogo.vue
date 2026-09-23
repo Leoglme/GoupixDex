@@ -14,6 +14,7 @@
 
 <script setup lang="ts">
 import { catalogLogoCandidates } from '~/utils/catalogAssets'
+import { setLogoOverride } from '~/utils/catalog/setLogoOverrides'
 
 const props = defineProps<{
   logo?: string
@@ -21,11 +22,16 @@ const props = defineProps<{
   cover?: string
   name: string
   large?: boolean
+  setId?: string
 }>()
 
 const idx = ref(0)
 
-const candidates = computed(() => catalogLogoCandidates(props.logo, props.symbol, props.cover))
+const candidates = computed(() => {
+  const override = setLogoOverride(props.setId)
+  const base = catalogLogoCandidates(props.logo, props.symbol, props.cover)
+  return override ? [override, ...base] : base
+})
 
 const currentSrc = computed(() => candidates.value[idx.value])
 
@@ -38,7 +44,7 @@ const imgClass = computed(() => {
 })
 
 watch(
-  () => [props.logo, props.symbol, props.cover],
+  () => [props.logo, props.symbol, props.cover, props.setId],
   () => {
     idx.value = 0
   },
