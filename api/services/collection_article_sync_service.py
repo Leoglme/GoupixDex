@@ -56,6 +56,8 @@ _TITLE_NOISE_WORDS = frozenset(
 )
 _NAME_SUFFIX_RE = re.compile(r"\s+(ex|vmax|vstar|v-union|v|gx)\s*$", re.IGNORECASE)
 _MEGA_PREFIX_RE = re.compile(r"^m[ée]ga[\s-]+", re.IGNORECASE)
+#: Écriture japonaise (kana, kanji) : un nom affiché doit rester en alphabet latin.
+_CJK_RE = re.compile(r"[぀-ヿ㐀-鿿]")
 #: Plafond d'appels au résolveur TCGdex par article (chacun peut chercher dans trois langues).
 _MAX_RESOLUTION_ATTEMPTS = 10
 
@@ -65,6 +67,12 @@ def _to_decimal(value: object) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(round(float(str(value)), 2)))
+
+
+def _latin_article_name(article: Article) -> str | None:
+    """Nom de la carte saisi dans l'annonce, s'il est en alphabet latin."""
+    name = (article.pokemon_name or "").strip()
+    return name if name and not _CJK_RE.search(name) else None
 
 
 def _has_card_identity(article: Article) -> bool:
@@ -222,6 +230,13 @@ def _collection_fields_for_article(article: Article) -> dict[str, Any]:
         except (RuntimeError, ValueError):
             payload = None
         if payload is not None:
+            display_name = str(payload["display_name"])
+            card_name_fr = payload.get("card_name_fr")
+            article_name = _latin_article_name(article)
+            if article_name and _CJK_RE.search(display_name):
+                # Carte japonaise sans nom latin sur TCGdex (dresseurs, objets) : le nom de l'annonce prend le relais.
+                display_name = article_name
+                card_name_fr = card_name_fr or article_name
             return {
                 "tcgdex_card_id": str(payload["tcgdex_card_id"]),
                 "tcgdex_set_id": str(payload["tcgdex_set_id"]),
@@ -229,9 +244,9 @@ def _collection_fields_for_article(article: Article) -> dict[str, Any]:
                 "set_name": payload.get("set_name"),
                 "card_number": str(payload["card_number"]),
                 "card_name_en": payload.get("card_name_en"),
-                "card_name_fr": payload.get("card_name_fr"),
+                "card_name_fr": card_name_fr,
                 "card_name_ja": payload.get("card_name_ja"),
-                "display_name": str(payload["display_name"]),
+                "display_name": display_name,
                 "rarity": payload.get("rarity"),
                 "language": str(payload.get("language") or language),
                 "image_url": payload.get("image_url") or article_photo,
@@ -311,10 +326,15 @@ def ensure_collection_card_for_article(db: Session, article: Article) -> Collect
 
 
 def needs_refresh(card: CollectionCard, article: Article) -> bool:
-    """Carte reliée à re-résoudre : sans fiche TCGdex, ou langue incohérente avec son set TCGdex."""
+    """
+    Carte reliée à re-résoudre : sans fiche TCGdex, langue incohérente avec son set TCGdex, ou nom
+    affiché en japonais alors que l'annonce en donne un en alphabet latin.
+    """
     if is_unresolved(card):
         return True
-    return card.language != _physical_language(article, card.tcgdex_card_id)
+    if card.language != _physical_language(article, card.tcgdex_card_id):
+        return True
+    return bool(_latin_article_name(article) and _CJK_RE.search(card.display_name or ""))
 
 
 def refresh_collection_card_from_article(db: Session, card: CollectionCard, article: Article) -> bool:
