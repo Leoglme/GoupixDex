@@ -144,6 +144,21 @@ def find_existing_for_user(
     )
 
 
+def owned_quantity(db: Session, user_id: int, tcgdex_card_id: str, language: str | None = None) -> int:
+    """
+    Exemplaires possédés d'une carte TCGdex (toutes lignes confondues, cartes en vente comprises),
+    limités à une langue physique si elle est fournie — même règle que l'index « possédé » du catalogue.
+    """
+    q = db.query(CollectionCard.quantity).filter(
+        CollectionCard.user_id == user_id,
+        CollectionCard.tcgdex_card_id == tcgdex_card_id,
+        CollectionCard.is_placeholder.is_(False),
+    )
+    if language:
+        q = q.filter(CollectionCard.language == language.strip().lower())
+    return sum(int(quantity) for (quantity,) in q.all())
+
+
 def delete_collection_card(db: Session, user_id: int, card_id: int) -> bool:
     row = db.query(CollectionCard).filter(
         CollectionCard.id == card_id, CollectionCard.user_id == user_id

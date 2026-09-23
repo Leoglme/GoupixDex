@@ -1,0 +1,28 @@
+# One-shot manuel : aligne « Ma Collection » sur les articles en vente (prod). À supprimer après usage.
+name: One-shot — collection backfill from articles
+on:
+  workflow_dispatch:
+    inputs:
+      apply: { description: 'true = écrit ; false = dry-run', required: true, default: 'false' }
+      repair: { description: 'true = ré-résout en place les cartes reliées à corriger', required: false, default: 'false' }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run script over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env: { APPLY: '${{ inputs.apply }}', REPAIR: '${{ inputs.repair }}', DEPLOY_API_DIR: '${{ secrets.DEPLOY_API_DIR }}' }
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: APPLY,REPAIR,DEPLOY_API_DIR
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            APP_ROOT="${DEPLOY_API_DIR%/}/api"
+            if [ "${APPLY}" = "true" ]; then FLAG=""; else FLAG="--dry-run"; fi
+            if [ "${REPAIR}" = "true" ]; then REPAIR_FLAG="--repair"; else REPAIR_FLAG=""; fi
+            cd "$APP_ROOT"; "$APP_ROOT/.venv/bin/python" -u "$APP_ROOT/scripts/backfill_collection_from_articles.py" $FLAG $REPAIR_FLAG

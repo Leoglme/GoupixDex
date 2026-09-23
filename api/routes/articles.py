@@ -435,7 +435,10 @@ def get_article(
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    return article_service.article_to_dict(article)
+    payload = article_service.article_to_dict(article)
+    linked_card = collection_article_sync_service.linked_collection_card(db, article)
+    payload["collection_card_id"] = linked_card.id if linked_card is not None else None
+    return payload
 
 
 @router.post("/{article_id}/publish-vinted")
@@ -948,10 +951,19 @@ def update_article(
     if "order_line_id" in unset:
         _apply_order_line_assignment(db, user, article, body.order_line_id)
     identity_keys = {"set_code", "card_number", "pokemon_name"}
-    if identity_keys & set(unset.keys()):
+    identity_changed = bool(identity_keys & set(unset.keys()))
+    if identity_changed:
         refresh_article_market_reference(article)
     db.commit()
     db.refresh(article)
+
+    # La carte de collection reliée suit sa fiche de vente (même carte physique).
+    linked_card = collection_article_sync_service.linked_collection_card(db, article)
+    if linked_card is not None:
+        if "purchase_price" in unset:
+            collection_article_sync_service.sync_purchase_price_to_collection(db, article)
+        if identity_changed:
+            collection_article_sync_service.refresh_collection_card_from_article(db, linked_card, article)
     return article_service.article_to_dict(article)
 
 

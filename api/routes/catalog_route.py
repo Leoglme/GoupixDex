@@ -17,6 +17,7 @@ from core.database import get_db
 from core.deps import get_current_user
 from models.margin_settings import MarginSettings
 from models.user import User
+from services import collection_card_service
 from services.catalog_browse_service import (
     browse_catalog_for_ui,
     get_series_for_ui,
@@ -202,4 +203,6 @@ def get_catalog_card_preview(
         lp["suggested_price"] = suggested
 
     body["margin_percent_used"] = margin
+    # « Déjà ×N » dès l'ouverture de l'aperçu (cartes en vente comprises), comme la grille du catalogue.
+    body["owned_quantity"] = collection_card_service.owned_quantity(db, user.id, tcgdx_card_id.strip(), bl)
     return body

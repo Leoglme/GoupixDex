@@ -60,6 +60,8 @@ export interface Article {
   market_cardmarket_eur?: number | null
   market_tcgplayer_eur?: number | null
   market_priced_at?: string | null
+  /** Carte de « Ma collection » reliée à cet article (fiche seule, ``GET /articles/:id``). */
+  collection_card_id?: number | null
   images: ArticleImage[]
 }
 

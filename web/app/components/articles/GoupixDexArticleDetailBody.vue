@@ -92,6 +92,18 @@
             </p>
           </div>
         </div>
+        <button
+          v-if="article.collection_card_id"
+          type="button"
+          class="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)]/50 px-3 py-2 text-left transition-colors hover:bg-[var(--app-surface-2)]"
+          @click="openLinkedCollectionCard"
+        >
+          <span class="flex min-w-0 items-center gap-2 text-sm text-[var(--app-ink)]">
+            <UIcon name="i-lucide-album" class="size-4 shrink-0 text-[var(--app-ink-soft)]" />
+            Dans ma collection
+          </span>
+          <span class="text-primary shrink-0 text-sm">Voir la carte</span>
+        </button>
       </section>
 
       <section class="space-y-2 border-t border-[var(--app-line-soft)] pt-4">
@@ -340,6 +352,7 @@ const { lookup } = usePricing()
 const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarketSearch()
 const toast = useToast()
 const { confirm: confirmAction } = useGoupixConfirm()
+const { openCard } = useOpenCardDrawer()
 
 const article: Ref<Article | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
@@ -407,6 +420,17 @@ const articleLightboxPhotos: ComputedRef<string[]> = computed(() =>
 
 function openArticleLightbox(index: number): void {
   articleLightboxIndex.value = index
+}
+
+/**
+ * Ouvre la carte de « Ma collection » reliée à cet article, par-dessus dans la même pile de drawers.
+ * @returns {void}
+ */
+function openLinkedCollectionCard(): void {
+  const collectionCardId = article.value?.collection_card_id
+  if (collectionCardId != null) {
+    openCard(collectionCardId)
+  }
 }
 
 const articleSellerProfileUrl: ComputedRef<string | null> = computed(() =>

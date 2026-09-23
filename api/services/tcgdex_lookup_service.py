@@ -238,6 +238,11 @@ def _search_cards_by_name(locale: str, name: str) -> list[dict[str, Any]]:
     return rows
 
 
+def search_cards_by_name(locale: str, name: str) -> list[dict[str, Any]]:
+    """Recherche TCGdex de cartes par nom dans une locale (même cache TTL que la résolution OCR)."""
+    return _search_cards_by_name(locale, name)
+
+
 def _set_id_from_card_id(card_id: str) -> str:
     """``sv03.5-025`` → ``sv03.5`` (TCGdex ids always have a trailing ``-{localId}``)."""
     if "-" in card_id:

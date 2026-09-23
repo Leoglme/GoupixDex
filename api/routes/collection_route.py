@@ -25,6 +25,7 @@ from schemas.collection import (
     CollectionCardUpdateBody,
 )
 from services import (
+    collection_article_sync_service,
     collection_card_price_history_service,
     collection_card_service,
     pricing_service,
@@ -201,6 +202,9 @@ def patch_collection_card(
     if (body.market_price_eur is not None or body.reset_market_price) and row.market_price_eur is not None:
         collection_card_price_history_service.record_snapshot(db, row.id, float(row.market_price_eur))
         db.commit()
+    if body.purchase_price_eur is not None:
+        # Carte en vente : son article reprend le même prix d'achat (même carte physique).
+        collection_article_sync_service.sync_purchase_price_to_article(db, row)
     return collection_card_service.collection_card_to_dict(row)
 
 

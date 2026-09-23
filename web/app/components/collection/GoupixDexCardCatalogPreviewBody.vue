@@ -129,13 +129,14 @@ function languageLabel(code: CatalogLocale): string {
 }
 
 /**
- * Charge le prix marché et l'image haute définition via l'aperçu catalogue.
+ * Charge le prix marché, l'image haute définition et la quantité déjà possédée via l'aperçu catalogue.
  * @returns Résolue quand l'aperçu est chargé ou l'échec acté.
  */
 async function loadPreview(): Promise<void> {
   loadingPrice.value = true
   try {
     const data = await previewCard(props.card.id, null, props.card.locale)
+    ownedQuantity.value = data.owned_quantity ?? 0
     marketPriceEur.value = data.pricing.cardmarket_eur
     averagePriceEur.value = data.pricing.average_price_eur
     if (data.image_url_high) {
@@ -162,7 +163,8 @@ async function onAdd(): Promise<void> {
       quantity: 1,
       purchase_price_eur: parseEuroAmount(purchaseText.value),
     })
-    ownedQuantity.value = res.card.quantity
+    // Total possédé (toutes lignes) : la ligne incrémentée peut ne pas être la seule de cette carte.
+    ownedQuantity.value = Math.max(ownedQuantity.value + 1, res.card.quantity)
     emit('added', res.card)
     toast.add({
       title: res.created ? 'Ajoutée à ta collection' : `Quantité ×${res.card.quantity}`,

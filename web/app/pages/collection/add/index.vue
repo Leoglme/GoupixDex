@@ -319,7 +319,8 @@ async function refreshOwnedIndex(): Promise<void> {
   try {
     const res = await listCollection({ language: catalogLanguage.value })
     const map = new Map<string, number>()
-    res.items.forEach((c) => map.set(c.tcgdex_card_id, c.quantity))
+    // Une même carte peut occuper plusieurs lignes (exemplaire gardé + exemplaire en vente) : on additionne.
+    res.items.forEach((c) => map.set(c.tcgdex_card_id, (map.get(c.tcgdex_card_id) ?? 0) + c.quantity))
     ownedCards.value = map
   } catch {
     /* best-effort */

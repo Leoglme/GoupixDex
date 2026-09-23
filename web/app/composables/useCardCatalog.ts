@@ -124,6 +124,8 @@ export interface CatalogCardPreviewResponse {
   }
   image_url_high: string | null
   margin_percent_used: number
+  /** Exemplaires déjà dans « Ma collection » (langue du catalogue, cartes en vente comprises). */
+  owned_quantity?: number
   error?: string | null
 }
 
