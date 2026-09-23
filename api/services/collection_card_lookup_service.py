@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, cast
 
 from app_types.tcgdex import TcgdexSetDetail
@@ -9,7 +10,11 @@ from services.cardmarket_local_price_service import (
     extract_cardmarket_block,
     resolve_market_price_eur,
 )
-from services.species_locale_names_service import fetch_species_locale_names
+from services.species_locale_names_service import (
+    fetch_species_locale_names,
+    fetch_species_names_by_dex,
+)
+from services.tcgdex_asset_url import card_image_low_webp, tcgdx_asset_url_with_webp
 from services.tcgdex_client_service import (
     SUPPORTED_LOCALES,
     TcgdexClientService,
@@ -17,7 +22,6 @@ from services.tcgdex_client_service import (
     normalize_card_number_for_pokewallet,
     split_tcgdex_card_id,
 )
-from services.tcgdex_asset_url import card_image_low_webp, tcgdx_asset_url_with_webp
 
 
 def _strip(value: Any) -> str:
@@ -31,6 +35,28 @@ def _latin_display_name(en: str, fr: str, ja: str) -> str:
     if en:
         return en
     return ja or "Pokémon"
+
+
+_CARD_SUFFIX_RE = re.compile(r"(ex|vmax|vstar|v-union|v|gx)\s*$", re.IGNORECASE)
+
+
+def _card_suffix(name: str) -> str:
+    """Suffixe de carte (ex/V/VMAX/VSTAR/GX) présent en Latin dans un nom, normalisé, sinon ``''``."""
+    match = _CARD_SUFFIX_RE.search(name)
+    if not match:
+        return ""
+    token = match.group(1).lower()
+    return token if token == "ex" else token.upper()
+
+
+def _dex_id_from_card(card_payload: dict[str, Any]) -> int | None:
+    """Premier numéro de Pokédex national d'une carte TCGdex (indépendant de la langue)."""
+    dex_ids = card_payload.get("dexId")
+    if isinstance(dex_ids, list):
+        for value in dex_ids:
+            if isinstance(value, int) and value > 0:
+                return value
+    return None
 
 
 def _resolve_image_url(card_payload: dict[str, Any]) -> str | None:
@@ -142,7 +168,23 @@ def fetch_card_for_collection(
 
     name_en = _strip(cards_by_locale.get("en", {}).get("name")) or _strip(fallback_name_en)
     name_ja = _strip(cards_by_locale.get("ja", {}).get("name"))
-    name_fr = _strip(cards_by_locale.get("fr", {}).get("name")) or name_en
+    name_fr = _strip(cards_by_locale.get("fr", {}).get("name"))
+
+    # Cartes japonaises uniquement : aucun nom EN/FR côté TCGdex. On résout le nom
+    # d'espèce (Latin) via le numéro de Pokédex national, en gardant le suffixe (ex/V/GX…).
+    if not name_en or not name_fr:
+        dex_id = _dex_id_from_card(primary)
+        if dex_id is not None:
+            species_fr, species_en, species_ja = fetch_species_names_by_dex(dex_id)
+            suffix = _card_suffix(name_ja) or _card_suffix(name_en)
+            if not name_fr and species_fr:
+                name_fr = f"{_strip(species_fr)} {suffix}".strip() if suffix else _strip(species_fr)
+            if not name_en and species_en:
+                name_en = f"{_strip(species_en)} {suffix}".strip() if suffix else _strip(species_en)
+            if not name_ja and species_ja:
+                name_ja = _strip(species_ja)
+
+    name_fr = name_fr or name_en
 
     if not name_ja and name_en:
         species = fetch_species_locale_names(name_en)

@@ -135,3 +135,41 @@ def fetch_french_species_name(english_species_name: str) -> str | None:
         english_species_name: English Pokémon name as used in PokéAPI slugs (e.g. ``Ivysaur``).
     """
     return fetch_species_locale_names(english_species_name).french
+
+
+_DEX_NAMES_CACHE: dict[int, tuple[str | None, str | None, str | None]] = {}
+
+
+def fetch_species_names_by_dex(dex_id: int) -> tuple[str | None, str | None, str | None]:
+    """
+    Official ``(french, english, japanese)`` species names for a national Pokédex id via PokéAPI.
+
+    Used for Japan-only cards (no EN/FR TCGdex payload) so the collection can show a
+    Latin-script name instead of the raw Japanese one. Returns ``(None, None, None)`` on failure.
+
+    Args:
+        dex_id: National Pokédex number (e.g. ``25`` for Pikachu).
+    """
+    if dex_id <= 0:
+        return (None, None, None)
+    cached = _DEX_NAMES_CACHE.get(dex_id)
+    if cached is not None:
+        return cached
+    url = f"{POKEAPI_SPECIES_URL}/{dex_id}"
+    try:
+        req = Request(url, headers=DEFAULT_REQUEST_HEADERS)
+        with urlopen(req, timeout=FETCH_TIMEOUT_SEC) as resp:
+            payload = cast(dict[str, Any], json.loads(resp.read().decode("utf-8")))
+        names = payload.get("names")
+        if not isinstance(names, list):
+            return (None, None, None)
+        result = (
+            _pick_name_for_languages(names, (FRENCH_LANGUAGE_NAME,)),
+            _pick_name_for_languages(names, ("en",)),
+            _pick_name_for_languages(names, (JAPANESE_KANA_LANGUAGE_NAME, JAPANESE_LANGUAGE_NAME)),
+        )
+        if len(_DEX_NAMES_CACHE) < _SPECIES_CACHE_MAX:
+            _DEX_NAMES_CACHE[dex_id] = result
+        return result
+    except (OSError, HTTPError, URLError, json.JSONDecodeError, TimeoutError):
+        return (None, None, None)

@@ -180,8 +180,45 @@ def patch_collection_card(
         quantity=body.quantity,
         language=body.language,
         notes=body.notes,
+        market_price_eur=body.market_price_eur,
     )
+    if body.market_price_eur is not None and row.market_price_eur is not None:
+        collection_card_price_history_service.record_snapshot(db, row.id, float(row.market_price_eur))
+        db.commit()
     return collection_card_service.collection_card_to_dict(row)
+
+
+@router.post("/refresh-names")
+def refresh_collection_names(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Re-résout un nom lisible (FR/EN) pour les cartes qui n'en ont pas (cartes japonaises).
+
+    Utilise le numéro de Pokédex national pour retrouver le nom d'espèce en français,
+    afin de ne plus afficher le nom japonais brut. Ne touche ni au prix ni à la quantité.
+    """
+    rows = (
+        db.query(CollectionCard)
+        .filter(CollectionCard.user_id == user.id, CollectionCard.card_name_fr.is_(None))
+        .all()
+    )
+    updated = 0
+    for row in rows:
+        try:
+            meta = fetch_card_for_collection(tcgdex_card_id=row.tcgdex_card_id, physical_language=row.language)
+        except (ValueError, RuntimeError):
+            continue
+        if meta["card_name_fr"] or meta["card_name_en"]:
+            row.card_name_en = meta["card_name_en"]
+            row.card_name_fr = meta["card_name_fr"]
+            if meta["card_name_ja"]:
+                row.card_name_ja = meta["card_name_ja"]
+            row.display_name = meta["display_name"]
+            updated += 1
+    db.commit()
+    return {"scanned": len(rows), "updated": updated}
 
 
 @router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT)

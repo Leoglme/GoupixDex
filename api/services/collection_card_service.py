@@ -156,6 +156,7 @@ def update_collection_card(
     quantity: int | None = None,
     language: str | None = None,
     notes: str | None = None,
+    market_price_eur: float | None = None,
 ) -> CollectionCard:
     """Apply optional patch fields and commit."""
     if quantity is not None:
@@ -166,6 +167,8 @@ def update_collection_card(
             card.language = lang
     if notes is not None:
         card.notes = notes.strip() or None
+    if market_price_eur is not None:
+        card.market_price_eur = round(float(market_price_eur), 2)
     db.commit()
     db.refresh(card)
     return card

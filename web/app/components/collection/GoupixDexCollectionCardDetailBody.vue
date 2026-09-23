@@ -81,6 +81,9 @@
             />
           </UFormField>
         </div>
+        <UFormField label="Prix marché (€)" hint="corrige un prix erroné">
+          <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="Auto" class="w-full" />
+        </UFormField>
         <UFormField label="Notes">
           <UTextarea v-model="notesDraft" :rows="2" class="w-full" />
         </UFormField>
@@ -152,6 +155,7 @@
 import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
+import { parseEuroAmount } from '~/utils/sealedProducts'
 
 /**
  * Corps de fiche d'une carte de collection, partagé entre le drawer et la page.
@@ -202,6 +206,7 @@ const languageItems = [
 const quantityDraft = ref(1)
 const languageDraft = ref('fr')
 const notesDraft = ref('')
+const marketText = ref('')
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -233,7 +238,8 @@ const isDirty = computed<boolean>(() => {
   return (
     quantityDraft.value !== current.quantity ||
     languageDraft.value !== current.language ||
-    notesDraft.value.trim() !== (current.notes ?? '')
+    notesDraft.value.trim() !== (current.notes ?? '') ||
+    (marketText.value.trim() || '') !== (current.market_price_eur != null ? String(current.market_price_eur) : '')
   )
 })
 
@@ -263,6 +269,7 @@ function syncDrafts(c: CollectionCard): void {
   quantityDraft.value = c.quantity
   languageDraft.value = c.language
   notesDraft.value = c.notes ?? ''
+  marketText.value = c.market_price_eur != null ? String(c.market_price_eur) : ''
 }
 
 /**
@@ -311,6 +318,7 @@ async function onSaveDraft(): Promise<void> {
       quantity: quantityDraft.value,
       language: languageDraft.value,
       notes: notesDraft.value.trim() || null,
+      market_price_eur: parseEuroAmount(marketText.value),
     })
     card.value = updated
     syncDrafts(updated)

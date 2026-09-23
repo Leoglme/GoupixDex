@@ -60,6 +60,7 @@ export interface CollectionPatchBody {
   quantity?: number
   language?: CollectionLanguage | string
   notes?: string | null
+  market_price_eur?: number | null
 }
 
 export interface CollectionArticlePrefillResponse extends CatalogCardPreviewResponse {
@@ -106,6 +107,16 @@ export function useCollection() {
    */
   async function addToCollection(body: CollectionAddBody) {
     const { data } = await $api.post<CollectionAddResponse>('/collection', body)
+    return data
+  }
+
+  /**
+   * POST `/collection/refresh-names` — re-résout un nom lisible (FR/EN) pour les cartes japonaises.
+   *
+   * @returns {Promise<{ scanned: number; updated: number }>} Nombre de cartes examinées / mises à jour.
+   */
+  async function refreshCollectionNames() {
+    const { data } = await $api.post<{ scanned: number; updated: number }>('/collection/refresh-names')
     return data
   }
 
@@ -184,6 +195,7 @@ export function useCollection() {
   return {
     listCollection,
     addToCollection,
+    refreshCollectionNames,
     getCollectionCard,
     getCardPriceHistory,
     patchCollectionCard,

@@ -20,6 +20,8 @@ class CollectionCardUpdateBody(BaseModel):
     quantity: int | None = Field(default=None, ge=1, le=999)
     language: str | None = Field(default=None, min_length=2, max_length=8)
     notes: str | None = Field(default=None, max_length=2000)
+    #: Prix marché saisi à la main (corrige un mapping Cardmarket TCGdex erroné, fréquent en JP).
+    market_price_eur: float | None = Field(default=None, ge=0, le=1000000)
 
 
 class CollectionCardPrepareSaleBody(BaseModel):
