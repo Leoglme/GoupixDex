@@ -12,6 +12,12 @@ Two responsibilities:
 Reference picking mirrors :class:`cardmarket_api.CardPriceService`
 (``avg30 → avg7 → avg → avg1 → trend``, never ``low``) so a price computed from
 a TCGdex pricing block matches one computed from the local guide.
+
+On top of that ordering, :func:`resolve_market_price_eur` applies an anti-pollution
+rule: some Cardmarket products (Japanese promos…) carry a barely-traded "normal"
+bucket whose short- and long-term aggregates each collapse to a single spiked value,
+sitting next to a liquid reverse-holo bucket. There the ``*-holo`` columns are the
+real market, so we use them instead of the inflated normal cote.
 """
 
 from __future__ import annotations
@@ -116,6 +122,60 @@ def reference_eur_from_block(block: dict[str, Any]) -> float | None:
     return CardPriceService.pick_reference_eur_from_mapping(block)
 
 
+def reverse_reference_eur_from_block(block: dict[str, Any]) -> float | None:
+    """Reverse-holo reference (``*-holo`` columns) from a TCGdex pricing block."""
+    return CardPriceService.pick_reverse_reference_eur_from_mapping(block)
+
+
+def _normal_bucket_is_illiquid(
+    trend: object,
+    avg1: object,
+    avg7: object,
+    avg30: object,
+) -> bool:
+    """
+    Vrai quand la cote « normale » d'un produit Cardmarket est trop peu échangée pour être fiable :
+    ses agrégats court terme (``avg1``/``trend``) et long terme (``avg7``/``avg30``) se figent chacun
+    sur une seule valeur. C'est la signature d'une promo dont le bucket normal est pollué (copies mal
+    classées, gradées, autres langues) alors que la série reverse-holo, elle, reflète le vrai marché.
+    """
+    values = [v if isinstance(v, (int, float)) else None for v in (trend, avg1, avg7, avg30)]
+    trend_v, avg1_v, avg7_v, avg30_v = values
+    return (
+        avg7_v is not None
+        and avg7_v == avg30_v
+        and avg1_v is not None
+        and avg1_v == trend_v
+        and avg7_v != avg1_v
+    )
+
+
+def _market_reference_eur(
+    base_reference: float | None,
+    reverse_reference: float | None,
+    trend: object,
+    avg1: object,
+    avg7: object,
+    avg30: object,
+) -> float | None:
+    """
+    Cote de marché : la référence « normale », sauf quand ce bucket est illiquide (voir
+    :func:`_normal_bucket_is_illiquid`) et qu'une cote reverse-holo existe — on prend alors cette
+    dernière, plus représentative. Repli sur la reverse-holo si la normale est absente.
+    """
+    if (
+        reverse_reference is not None
+        and reverse_reference > 0
+        and _normal_bucket_is_illiquid(trend, avg1, avg7, avg30)
+    ):
+        return round(float(reverse_reference), 2)
+    if base_reference is not None:
+        return round(float(base_reference), 2)
+    if reverse_reference is not None:
+        return round(float(reverse_reference), 2)
+    return None
+
+
 def resolve_market_price_eur(
     id_product: int | None,
     tcgdex_block: dict[str, Any] | None,
@@ -125,17 +185,34 @@ def resolve_market_price_eur(
 
     Both views are built from the same Cardmarket daily file; the local guide
     simply wins because it is refreshed by our own nightly job. The reference
-    leads with the 30-day average (see :data:`cardmarket_api.REFERENCE_FIELD_ORDER`),
-    so a low-liquidity JP promo whose ``trend`` spiked reads a fair market price.
+    leads with the 30-day average (see :data:`cardmarket_api.REFERENCE_FIELD_ORDER`)
+    and, via :func:`_market_reference_eur`, ignores a polluted "normal" bucket in
+    favour of the liquid reverse-holo one — so a JP promo reads a fair price.
     """
     if id_product is not None:
         local: CardmarketCardPrices | None = get_price_api().get_card_prices(id_product)
-        if local is not None and local.reference_eur is not None:
-            return round(local.reference_eur, 2)
+        if local is not None:
+            reference = _market_reference_eur(
+                local.reference_eur,
+                local.reverse_reference_eur,
+                local.trend,
+                local.avg1,
+                local.avg7,
+                local.avg30,
+            )
+            if reference is not None:
+                return reference
     if tcgdex_block is not None:
-        block_reference = reference_eur_from_block(tcgdex_block)
-        if block_reference is not None:
-            return round(block_reference, 2)
+        reference = _market_reference_eur(
+            reference_eur_from_block(tcgdex_block),
+            reverse_reference_eur_from_block(tcgdex_block),
+            tcgdex_block.get("trend"),
+            tcgdex_block.get("avg1"),
+            tcgdex_block.get("avg7"),
+            tcgdex_block.get("avg30"),
+        )
+        if reference is not None:
+            return reference
     return None
 
 

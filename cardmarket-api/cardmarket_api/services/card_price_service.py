@@ -50,6 +50,15 @@ class CardPriceService:
                 return value
         return None
 
+    @staticmethod
+    def pick_reverse_reference_eur_from_mapping(values: Mapping[str, object]) -> float | None:
+        """Same picking order on the ``*-holo`` keys of a mapping (e.g. a TCGdex block)."""
+        for field in REFERENCE_FIELD_ORDER:
+            value = values.get(f"{field}-holo")
+            if isinstance(value, (int, float)) and value > 0:
+                return float(value)
+        return None
+
     @classmethod
     def build_card_prices(
         cls,
