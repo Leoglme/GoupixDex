@@ -59,6 +59,21 @@ def _dex_id_from_card(card_payload: dict[str, Any]) -> int | None:
     return None
 
 
+def _same_pokemon(card_payload: dict[str, Any], reference_dex: int | None) -> bool:
+    """
+    Vrai si la carte d'une locale décrit le même Pokémon que la carte physique.
+
+    Un même id TCGdex (``sv10-112``) peut pointer vers deux cartes différentes selon
+    la langue : le set japonais « ロケット団の栄光 » (Sulfura ex, dex 146) et le set
+    international « Destined Rivals » (Abo, dex 23) partagent l'id. On ne reprend donc
+    le nom ni la cote Cardmarket d'une locale que si son dexId concorde.
+    """
+    if reference_dex is None:
+        return True
+    dex = _dex_id_from_card(card_payload)
+    return dex is None or dex == reference_dex
+
+
 def _resolve_image_url(card_payload: dict[str, Any]) -> str | None:
     base = card_payload.get("image")
     if not isinstance(base, str) or not base.strip():
@@ -166,23 +181,31 @@ def fetch_card_for_collection(
         next(iter(cards_by_locale.values())),
     )
 
-    name_en = _strip(cards_by_locale.get("en", {}).get("name")) or _strip(fallback_name_en)
-    name_ja = _strip(cards_by_locale.get("ja", {}).get("name"))
-    name_fr = _strip(cards_by_locale.get("fr", {}).get("name"))
+    primary_dex = _dex_id_from_card(primary)
 
-    # Cartes japonaises uniquement : aucun nom EN/FR côté TCGdex. On résout le nom
-    # d'espèce (Latin) via le numéro de Pokédex national, en gardant le suffixe (ex/V/GX…).
-    if not name_en or not name_fr:
-        dex_id = _dex_id_from_card(primary)
-        if dex_id is not None:
-            species_fr, species_en, species_ja = fetch_species_names_by_dex(dex_id)
-            suffix = _card_suffix(name_ja) or _card_suffix(name_en)
-            if not name_fr and species_fr:
-                name_fr = f"{_strip(species_fr)} {suffix}".strip() if suffix else _strip(species_fr)
-            if not name_en and species_en:
-                name_en = f"{_strip(species_en)} {suffix}".strip() if suffix else _strip(species_en)
-            if not name_ja and species_ja:
-                name_ja = _strip(species_ja)
+    def _locale_name(loc: str) -> str:
+        """Nom TCGdex d'une locale, uniquement si elle décrit le même Pokémon que la carte physique."""
+        payload = cards_by_locale.get(loc)
+        if not payload or not _same_pokemon(payload, primary_dex):
+            return ""
+        return _strip(payload.get("name"))
+
+    name_en = _locale_name("en") or _strip(fallback_name_en)
+    name_ja = _locale_name("ja")
+    name_fr = _locale_name("fr")
+
+    # Nom d'espèce (Latin) via le numéro de Pokédex national quand une locale manque OU décrit
+    # une autre carte (id TCGdex partagé entre set japonais et set international) : c'est le dexId
+    # de la carte physique qui fait foi, jamais le nom d'une locale divergente.
+    if (not name_en or not name_fr) and primary_dex is not None:
+        species_fr, species_en, species_ja = fetch_species_names_by_dex(primary_dex)
+        suffix = _card_suffix(name_ja) or _card_suffix(name_en)
+        if not name_fr and species_fr:
+            name_fr = f"{_strip(species_fr)} {suffix}".strip() if suffix else _strip(species_fr)
+        if not name_en and species_en:
+            name_en = f"{_strip(species_en)} {suffix}".strip() if suffix else _strip(species_en)
+        if not name_ja and species_ja:
+            name_ja = _strip(species_ja)
 
     name_fr = name_fr or name_en
 
@@ -201,7 +224,12 @@ def fetch_card_for_collection(
 
     # Cardmarket mapping + market price come for free in the payloads we already
     # fetched: TCGdex embeds ``pricing.cardmarket.idProduct`` on every mapped card.
-    cardmarket_block = extract_cardmarket_block(list(cards_by_locale.values()))
+    # On prend la cote de la carte physique (locale prioritaire d'abord) et jamais celle d'une
+    # carte différente partageant le même id TCGdex — sinon une promo JP hérite du prix (et de
+    # l'idProduct) d'une commune internationale.
+    ordered_payloads = [cards_by_locale[loc] for loc in locales if loc in cards_by_locale]
+    same_pokemon_payloads = [p for p in ordered_payloads if _same_pokemon(p, primary_dex)]
+    cardmarket_block = extract_cardmarket_block(same_pokemon_payloads or ordered_payloads)
     cardmarket_id_product = cardmarket_block.get("idProduct") if cardmarket_block else None
     market_price_eur = resolve_market_price_eur(cardmarket_id_product, cardmarket_block)
 

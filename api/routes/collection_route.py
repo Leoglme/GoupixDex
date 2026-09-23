@@ -269,6 +269,65 @@ def refresh_collection_prices(
     return {"scanned": len(rows), "updated": updated}
 
 
+@router.post("/resync")
+def resync_collection_metadata(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Re-résout, via TCGdex, les métadonnées de chaque carte (noms, rareté, set, image, cote
+    Cardmarket, prix) avec la résolution corrigée par langue physique.
+
+    Corrige les cartes dont un id TCGdex partagé (set japonais vs international) avait ramené
+    le nom et l'``idProduct`` d'une autre carte. Le prix saisi à la main n'est jamais écrasé.
+    """
+    rows = db.query(CollectionCard).filter(CollectionCard.user_id == user.id).all()
+    cardmarket_fixed = 0
+    repriced = 0
+    for row in rows:
+        try:
+            meta = fetch_card_for_collection(tcgdex_card_id=row.tcgdex_card_id, physical_language=row.language)
+        except (ValueError, RuntimeError):
+            continue
+
+        if meta["card_name_en"]:
+            row.card_name_en = meta["card_name_en"]
+        if meta["card_name_fr"]:
+            row.card_name_fr = meta["card_name_fr"]
+        if meta["card_name_ja"]:
+            row.card_name_ja = meta["card_name_ja"]
+        if meta["display_name"]:
+            row.display_name = meta["display_name"]
+        if meta["rarity"]:
+            row.rarity = meta["rarity"]
+        if meta["set_name"]:
+            row.set_name = meta["set_name"]
+        if meta["set_code"]:
+            row.set_code = meta["set_code"]
+        if meta["image_url"]:
+            row.image_url = meta["image_url"]
+
+        new_id = meta["cardmarket_id_product"]
+        if new_id is not None and new_id != row.cardmarket_id_product:
+            row.cardmarket_id_product = new_id
+            cardmarket_fixed += 1
+
+        if not row.market_price_overridden:
+            price = meta["market_price_eur"]
+            if price is None and row.cardmarket_id_product is not None:
+                price = resolve_market_price_eur(row.cardmarket_id_product, None)
+            if price is not None:
+                current = float(row.market_price_eur) if row.market_price_eur is not None else None
+                if current is None or abs(current - price) > 0.001:
+                    collection_card_service.apply_market_price(
+                        row, cardmarket_id_product=row.cardmarket_id_product, market_price_eur=price
+                    )
+                    collection_card_price_history_service.record_snapshot(db, row.id, price)
+                    repriced += 1
+    db.commit()
+    return {"scanned": len(rows), "cardmarket_fixed": cardmarket_fixed, "repriced": repriced}
+
+
 @router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_collection_card(
     card_id: int,
