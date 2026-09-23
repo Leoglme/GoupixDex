@@ -142,6 +142,7 @@ def main() -> None:
                 cardmarket_id_product=id_product,
                 cardmarket_url=cardmarket_url,
                 market_price_eur=market,
+                tcgplayer_id=(int(item["tcgplayer_id"]) if item.get("tcgplayer_id") is not None else None),
             )
         print(f"\nSupprimés : {len(existing)} · Créés : {len(items)}.")
 

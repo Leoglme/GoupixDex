@@ -56,6 +56,8 @@ class SealedProduct(Base):
 
     #: Identifiant produit Cardmarket (résolu depuis une URL Cardmarket ou saisi à la main).
     cardmarket_id_product: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    #: Identifiant produit TCGplayer (catalogue) : courbe TCGplayer quand il n'y a pas d'idProduct Cardmarket.
+    tcgplayer_id: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     #: URL Cardmarket d'origine, conservée pour rouvrir la fiche produit.
     cardmarket_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     #: Prix de référence marché en EUR (guide Cardmarket local, jamais la colonne ``low``).

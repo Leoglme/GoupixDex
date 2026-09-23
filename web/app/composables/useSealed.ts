@@ -25,6 +25,7 @@ export interface SealedProduct {
   notes: string | null
   article_id: number | null
   cardmarket_id_product: number | null
+  tcgplayer_id: number | null
   cardmarket_url: string | null
   market_price_eur: number | null
   market_price_updated_at: string | null

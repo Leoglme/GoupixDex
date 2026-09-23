@@ -88,6 +88,7 @@ def sealed_product_to_dict(product: SealedProduct) -> dict[str, Any]:
         "notes": product.notes,
         "article_id": product.article_id,
         "cardmarket_id_product": product.cardmarket_id_product,
+        "tcgplayer_id": product.tcgplayer_id,
         "cardmarket_url": product.cardmarket_url,
         "market_price_eur": float(product.market_price_eur) if product.market_price_eur is not None else None,
         "market_price_updated_at": (
@@ -134,6 +135,7 @@ def create_sealed_product(
     cardmarket_id_product: int | None,
     cardmarket_url: str | None,
     market_price_eur: float | None,
+    tcgplayer_id: int | None = None,
 ) -> SealedProduct:
     """Crée et persiste un produit scellé, prix marché appliqué s'il est fourni."""
     product = SealedProduct(
@@ -147,6 +149,7 @@ def create_sealed_product(
         notes=(notes.strip() if notes else None) or None,
         image_url=(image_url.strip() if image_url else None) or None,
         cardmarket_url=(cardmarket_url.strip() if cardmarket_url else None) or None,
+        tcgplayer_id=tcgplayer_id,
     )
     apply_market_price(
         product,

@@ -61,7 +61,7 @@
       <section class="space-y-2">
         <div class="flex items-center justify-between">
           <p class="app-label">Évolution du prix</p>
-          <span v-if="priceHistory?.approximate" class="text-muted text-[10px]">tendance approximative</span>
+          <span v-if="priceHistorySourceLabel" class="text-muted text-[10px]">{{ priceHistorySourceLabel }}</span>
         </div>
         <GoupixDexPriceHistoryChart :points="priceHistory?.points ?? []" />
       </section>
@@ -214,12 +214,14 @@ const emit = defineEmits<{
 }>()
 
 const { getSealed, getPriceHistory, patchSealed, deleteSealed, prepareArticlePrefill, attachArticle } = useSealed()
+const { loadProductPriceHistory } = useSealedCatalog()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { isDesktopApp } = useDesktopRuntime()
 const toast = useToast()
 
 const product = ref<SealedProduct | null>(null)
 const priceHistory = ref<SealedPriceHistoryResponse | null>(null)
+const priceHistorySource = ref<'cardmarket' | 'tcgplayer' | null>(null)
 const loading = ref(true)
 const savingDraft = ref(false)
 const deleting = ref(false)
@@ -260,6 +262,14 @@ const cardmarketLink = computed<string | null>(() => {
     return null
   }
   return current.cardmarket_url ?? cardmarketUrl({ idProduct: current.cardmarket_id_product, name: current.name })
+})
+
+/** Origine de la courbe affichée : relevés TCGplayer convertis, tendance approximative Cardmarket, ou rien. */
+const priceHistorySourceLabel = computed<string | null>(() => {
+  if (priceHistorySource.value === 'tcgplayer') {
+    return 'prix TCGplayer converti en €'
+  }
+  return priceHistory.value?.approximate ? 'tendance approximative' : null
 })
 
 const isDirty = computed<boolean>(() => {
@@ -334,15 +344,33 @@ async function load(): Promise<void> {
 }
 
 /**
- * Charge la courbe de prix (best-effort, n'empêche pas l'affichage de la fiche).
+ * Charge la courbe : relevés Cardmarket du produit possédé, sinon relevés TCGplayer du catalogue
+ * (produits sans idProduct Cardmarket), comme l'aperçu catalogue.
  * @returns Résolue quand la courbe est chargée ou l'échec acté.
  */
 async function loadPriceHistory(): Promise<void> {
+  let cardmarketHistory: SealedPriceHistoryResponse | null = null
   try {
-    priceHistory.value = await getPriceHistory(props.sealedId)
+    cardmarketHistory = await getPriceHistory(props.sealedId)
   } catch {
-    priceHistory.value = null
+    cardmarketHistory = null
   }
+  if (cardmarketHistory && cardmarketHistory.points.length >= 2) {
+    priceHistory.value = cardmarketHistory
+    priceHistorySource.value = 'cardmarket'
+    return
+  }
+  const tcgplayerId = product.value?.tcgplayer_id
+  if (tcgplayerId != null) {
+    const tcgplayerPoints = await loadProductPriceHistory(tcgplayerId)
+    if (tcgplayerPoints.length >= 2) {
+      priceHistory.value = { points: tcgplayerPoints, approximate: false }
+      priceHistorySource.value = 'tcgplayer'
+      return
+    }
+  }
+  priceHistory.value = cardmarketHistory
+  priceHistorySource.value = cardmarketHistory ? 'cardmarket' : null
 }
 
 /**
