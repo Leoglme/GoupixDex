@@ -28,7 +28,10 @@ from services import (
     collection_card_service,
     pricing_service,
 )
-from services.cardmarket_local_price_service import resolve_market_price_eur
+from services.cardmarket_local_price_service import (
+    fetch_pricing_block_for_card,
+    resolve_market_price_eur,
+)
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.scan_service import build_title_and_description
 from services.tcgdex_client_service import TcgdexClientService, tcgdx_image_url_high
@@ -233,8 +236,9 @@ def refresh_collection_prices(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
     """
-    Recalcule le prix marché des cartes depuis le guide Cardmarket local (rapide, sans TCGdex),
-    avec lissage anti-flambée du prix tendance. Ignore les cartes au prix saisi à la main.
+    Recalcule le prix marché des cartes depuis le guide Cardmarket local (référence
+    ``avg30`` en tête, jamais le pic ``trend``). Pour les promos japonaises absentes du
+    guide, on retombe sur le bloc TCGdex de la carte. Ignore les prix saisis à la main.
     """
     rows = (
         db.query(CollectionCard)
@@ -248,6 +252,10 @@ def refresh_collection_prices(
     updated = 0
     for row in rows:
         price = resolve_market_price_eur(row.cardmarket_id_product, None)
+        if price is None:
+            # Produit absent du guide local (fréquent sur les promos JP) : bloc TCGdex.
+            block = fetch_pricing_block_for_card(row.tcgdex_card_id, row.language)
+            price = resolve_market_price_eur(row.cardmarket_id_product, block)
         if price is None:
             continue
         current = float(row.market_price_eur) if row.market_price_eur is not None else None

@@ -6,10 +6,14 @@ from collections.abc import Mapping
 
 from cardmarket_api.types import CardmarketCardPrices, PriceGuideRow
 
-#: Sales-based fields tried in order for the reference price. ``low`` is
-#: deliberately excluded: it is the single cheapest listing of the product,
-#: any language (Korean copies on Japanese sets) and any condition.
-REFERENCE_FIELD_ORDER: tuple[str, ...] = ("trend", "avg7", "avg30", "avg1", "avg")
+#: Sales-based fields tried in order for the reference price. ``avg30`` (30-day
+#: average) leads on purpose: it is the most stable figure, so a low-liquidity
+#: promo whose ``trend`` spiked on a single sale (frequent on Japanese cards)
+#: still reads a fair market price. ``trend`` is the last resort, only used when
+#: every average is missing. ``low`` is deliberately excluded: it is the single
+#: cheapest listing of the product, any language (Korean copies on Japanese
+#: sets) and any condition.
+REFERENCE_FIELD_ORDER: tuple[str, ...] = ("avg30", "avg7", "avg", "avg1", "trend")
 
 
 class CardPriceService:
@@ -17,7 +21,7 @@ class CardPriceService:
 
     @staticmethod
     def pick_reference_eur(row: PriceGuideRow) -> float | None:
-        """First positive sales-based aggregate (``trend → avg7 → avg30 → avg1 → avg``)."""
+        """First positive sales-based aggregate (``avg30 → avg7 → avg → avg1 → trend``)."""
         for field in REFERENCE_FIELD_ORDER:
             value = getattr(row, field)
             if isinstance(value, float) and value > 0:
@@ -26,7 +30,11 @@ class CardPriceService:
 
     @staticmethod
     def pick_reference_eur_from_mapping(values: Mapping[str, object]) -> float | None:
-        """Same picking order over a plain mapping (e.g. a TCGdex ``pricing.cardmarket`` block)."""
+        """Same picking order over a plain mapping (e.g. a TCGdex ``pricing.cardmarket`` block).
+
+        A ``pricing.cardmarket`` block carries the same aggregate keys as a guide
+        row, so a price computed from a TCGdex block matches one from the guide.
+        """
         for field in REFERENCE_FIELD_ORDER:
             value = values.get(field)
             if isinstance(value, (int, float)) and value > 0:

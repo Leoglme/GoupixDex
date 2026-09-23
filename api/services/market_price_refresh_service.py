@@ -115,6 +115,17 @@ def _revalue_all_collection_cards() -> dict[str, int]:
                 time.sleep(_TCGDEX_RESOLUTION_SLEEP_SEC)
 
             price = resolve_market_price_eur(id_product, block)
+            if (
+                price is None
+                and id_product is not None
+                and block is None
+                and resolution_attempts < _MAX_TCGDEX_RESOLUTIONS_PER_RUN
+            ):
+                # Mappée mais absente du guide local (promo JP) : bloc TCGdex en repli.
+                resolution_attempts += 1
+                block = fetch_pricing_block_for_card(row.tcgdex_card_id, row.language)
+                price = resolve_market_price_eur(id_product, block)
+                time.sleep(_TCGDEX_RESOLUTION_SLEEP_SEC)
             if price is None:
                 unpriced += 1
                 continue

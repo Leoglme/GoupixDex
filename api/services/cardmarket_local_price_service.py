@@ -10,7 +10,7 @@ Two responsibilities:
    mapping in its open database, so GoupixDex never has to build it itself.
 
 Reference picking mirrors :class:`cardmarket_api.CardPriceService`
-(``trend → avg7 → avg30 → avg1 → avg``, never ``low``) so a price computed from
+(``avg30 → avg7 → avg → avg1 → trend``, never ``low``) so a price computed from
 a TCGdex pricing block matches one computed from the local guide.
 """
 
@@ -116,39 +116,6 @@ def reference_eur_from_block(block: dict[str, Any]) -> float | None:
     return CardPriceService.pick_reference_eur_from_mapping(block)
 
 
-#: Au-delà de ce ratio, le prix « tendance » est jugé être un pic ponctuel et cède à la moyenne 30 j.
-_TREND_SPIKE_RATIO = 1.3
-
-
-def _stable_reference_eur(
-    trend: object,
-    avg7: object,
-    avg30: object,
-    fallback: float,
-) -> float:
-    """
-    Anti-flambée : quand le prix *tendance* dépasse nettement la moyenne 30 j (pic ponctuel,
-    fréquent sur les promos japonaises peu échangées), on retient la moyenne 30 j (sinon 7 j),
-    plus représentative du marché. Sinon on garde la référence habituelle.
-    """
-    if (
-        isinstance(trend, (int, float))
-        and isinstance(avg30, (int, float))
-        and avg30 > 0
-        and trend > _TREND_SPIKE_RATIO * avg30
-    ):
-        return round(float(avg30), 2)
-    if (
-        isinstance(trend, (int, float))
-        and isinstance(avg7, (int, float))
-        and avg7 > 0
-        and not isinstance(avg30, (int, float))
-        and trend > _TREND_SPIKE_RATIO * avg7
-    ):
-        return round(float(avg7), 2)
-    return fallback
-
-
 def resolve_market_price_eur(
     id_product: int | None,
     tcgdex_block: dict[str, Any] | None,
@@ -157,22 +124,18 @@ def resolve_market_price_eur(
     Reference EUR for a card: local price guide first, TCGdex block as fallback.
 
     Both views are built from the same Cardmarket daily file; the local guide
-    simply wins because it is refreshed by our own nightly job. Le prix tendance,
-    parfois flambé sur une promo JP, est lissé par :func:`_stable_reference_eur`.
+    simply wins because it is refreshed by our own nightly job. The reference
+    leads with the 30-day average (see :data:`cardmarket_api.REFERENCE_FIELD_ORDER`),
+    so a low-liquidity JP promo whose ``trend`` spiked reads a fair market price.
     """
     if id_product is not None:
         local: CardmarketCardPrices | None = get_price_api().get_card_prices(id_product)
         if local is not None and local.reference_eur is not None:
-            return _stable_reference_eur(local.trend, local.avg7, local.avg30, round(local.reference_eur, 2))
+            return round(local.reference_eur, 2)
     if tcgdex_block is not None:
         block_reference = reference_eur_from_block(tcgdex_block)
         if block_reference is not None:
-            return _stable_reference_eur(
-                tcgdex_block.get("trend"),
-                tcgdex_block.get("avg7"),
-                tcgdex_block.get("avg30"),
-                round(block_reference, 2),
-            )
+            return round(block_reference, 2)
     return None
 
 
