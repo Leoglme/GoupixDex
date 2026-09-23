@@ -392,12 +392,22 @@ def place_catalog_card_in_pocket(
     place_item_in_pocket(db, binder, user_id, card.id, pocket)
 
 
-def _empty_pocket(db: Session, binder: Binder, user_id: int, pocket: int) -> None:
-    """Retire la carte cible actuelle d'une pochette (et son placeholder s'il n'est plus utilisé). Sans commit."""
-    occupant_id = _occupant_at(db, binder.id, pocket)
+def _empty_pocket(
+    db: Session, binder: Binder, user_id: int, pocket: int, *, except_card_id: int | None = None
+) -> None:
+    """
+    Retire la carte cible actuelle d'une pochette (et son placeholder s'il n'est plus utilisé). Sans commit.
+
+    ``except_card_id`` : ne touche pas cette carte (cas où on repose la même carte dans sa pochette pour,
+    par ex., lui ajouter une image) — sinon on supprimerait le placeholder qu'on s'apprête à replacer.
+    """
+    occupant_id = _occupant_at(db, binder.id, pocket, except_card_id=except_card_id)
     if occupant_id is None:
         return
-    db.query(BinderItem).filter(BinderItem.binder_id == binder.id, BinderItem.position == pocket).delete()
+    q = db.query(BinderItem).filter(BinderItem.binder_id == binder.id, BinderItem.position == pocket)
+    if except_card_id is not None:
+        q = q.filter(BinderItem.collection_card_id != except_card_id)
+    q.delete()
     db.flush()
     card = (
         db.query(CollectionCard)
@@ -476,7 +486,7 @@ def place_custom_card_in_pocket(
         )
         db.add(card)
         db.flush()
-    _empty_pocket(db, binder, user_id, pocket)
+    _empty_pocket(db, binder, user_id, pocket, except_card_id=card.id)
     place_item_in_pocket(db, binder, user_id, card.id, pocket)
 
 
