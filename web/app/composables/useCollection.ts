@@ -24,6 +24,7 @@ export interface CollectionCard {
   article_id: number | null
   cardmarket_id_product: number | null
   market_price_eur: number | null
+  market_price_overridden: boolean
   market_price_updated_at: string | null
   created_at: string
   updated_at: string
@@ -61,6 +62,7 @@ export interface CollectionPatchBody {
   language?: CollectionLanguage | string
   notes?: string | null
   market_price_eur?: number | null
+  reset_market_price?: boolean
 }
 
 export interface CollectionArticlePrefillResponse extends CatalogCardPreviewResponse {

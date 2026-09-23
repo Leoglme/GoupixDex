@@ -15,6 +15,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from models.collection_card import CollectionCard
+from services.cardmarket_local_price_service import resolve_market_price_eur
 
 
 def list_collection_for_user(
@@ -91,6 +92,7 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "article_id": card.article_id,
         "cardmarket_id_product": card.cardmarket_id_product,
         "market_price_eur": float(card.market_price_eur) if card.market_price_eur is not None else None,
+        "market_price_overridden": bool(card.market_price_overridden),
         "market_price_updated_at": (
             card.market_price_updated_at.isoformat() if card.market_price_updated_at is not None else None
         ),
@@ -157,6 +159,7 @@ def update_collection_card(
     language: str | None = None,
     notes: str | None = None,
     market_price_eur: float | None = None,
+    reset_market_price: bool = False,
 ) -> CollectionCard:
     """Apply optional patch fields and commit."""
     if quantity is not None:
@@ -167,8 +170,14 @@ def update_collection_card(
             card.language = lang
     if notes is not None:
         card.notes = notes.strip() or None
-    if market_price_eur is not None:
-        card.market_price_eur = round(float(market_price_eur), 2)
+    if reset_market_price:
+        card.market_price_overridden = False
+        auto_price = resolve_market_price_eur(card.cardmarket_id_product, None)
+        if auto_price is not None:
+            card.market_price_eur = Decimal(str(round(float(auto_price), 2)))
+    elif market_price_eur is not None:
+        card.market_price_eur = Decimal(str(round(float(market_price_eur), 2)))
+        card.market_price_overridden = True
     db.commit()
     db.refresh(card)
     return card

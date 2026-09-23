@@ -101,6 +101,8 @@ def _revalue_all_collection_cards() -> dict[str, int]:
     try:
         rows = db.query(CollectionCard).all()
         for row in rows:
+            if row.market_price_overridden:
+                continue  # prix saisi à la main : on ne le revalorise pas
             id_product = row.cardmarket_id_product
             block: dict[str, Any] | None = None
             if id_product is None and resolution_attempts < _MAX_TCGDEX_RESOLUTIONS_PER_RUN:

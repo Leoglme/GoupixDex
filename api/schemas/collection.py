@@ -22,6 +22,8 @@ class CollectionCardUpdateBody(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     #: Prix marché saisi à la main (corrige un mapping Cardmarket TCGdex erroné, fréquent en JP).
     market_price_eur: float | None = Field(default=None, ge=0, le=1000000)
+    #: Repasse le prix en automatique (efface la saisie manuelle et relit le guide Cardmarket).
+    reset_market_price: bool = False
 
 
 class CollectionCardPrepareSaleBody(BaseModel):

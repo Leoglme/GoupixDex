@@ -5,7 +5,16 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
@@ -51,6 +60,10 @@ class CollectionCard(Base):
     cardmarket_id_product: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     #: Reference market price in EUR (Cardmarket sales-based, never the ``low`` column).
     market_price_eur: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    #: Prix saisi à la main : la revalorisation nocturne ne le remplace pas.
+    market_price_overridden: Mapped[bool] = mapped_column(
+        Boolean(), default=False, server_default="0", nullable=False
+    )
     market_price_updated_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

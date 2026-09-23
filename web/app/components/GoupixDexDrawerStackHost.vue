@@ -63,6 +63,7 @@
 import type { Article } from '~/composables/useArticles'
 import type { CollectionCard } from '~/composables/useCollection'
 import type { SealedProduct } from '~/composables/useSealed'
+import { readableSetLabel } from '~/utils/cards/readableSet'
 import type {
   GoupixArticleDrawerEntry,
   GoupixCardDrawerEntry,
@@ -241,7 +242,7 @@ const cardHeaderSubtitle = computed((): string => {
 function onCardUpdated(card: CollectionCard): void {
   cardHeaderCache.value.set(card.id, {
     title: card.display_name || 'Carte de collection',
-    subtitle: card.set_name || card.tcgdex_set_id || '',
+    subtitle: readableSetLabel(card.set_name, card.set_code, card.tcgdex_set_id),
   })
   drawerStack.notifyCardUpdated(card.id)
 }
@@ -261,7 +262,7 @@ watch(
       .then((row) => {
         cardHeaderCache.value.set(id, {
           title: row.display_name || 'Carte de collection',
-          subtitle: row.set_name || row.tcgdex_set_id || '',
+          subtitle: readableSetLabel(row.set_name, row.set_code, row.tcgdex_set_id),
         })
       })
       .catch(() => {})

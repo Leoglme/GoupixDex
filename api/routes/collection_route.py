@@ -23,7 +23,12 @@ from schemas.collection import (
     CollectionCardPrepareSaleBody,
     CollectionCardUpdateBody,
 )
-from services import collection_card_price_history_service, collection_card_service, pricing_service
+from services import (
+    collection_card_price_history_service,
+    collection_card_service,
+    pricing_service,
+)
+from services.cardmarket_local_price_service import resolve_market_price_eur
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.scan_service import build_title_and_description
 from services.tcgdex_client_service import TcgdexClientService, tcgdx_image_url_high
@@ -181,8 +186,9 @@ def patch_collection_card(
         language=body.language,
         notes=body.notes,
         market_price_eur=body.market_price_eur,
+        reset_market_price=body.reset_market_price,
     )
-    if body.market_price_eur is not None and row.market_price_eur is not None:
+    if (body.market_price_eur is not None or body.reset_market_price) and row.market_price_eur is not None:
         collection_card_price_history_service.record_snapshot(db, row.id, float(row.market_price_eur))
         db.commit()
     return collection_card_service.collection_card_to_dict(row)
@@ -216,6 +222,40 @@ def refresh_collection_names(
             if meta["card_name_ja"]:
                 row.card_name_ja = meta["card_name_ja"]
             row.display_name = meta["display_name"]
+            updated += 1
+    db.commit()
+    return {"scanned": len(rows), "updated": updated}
+
+
+@router.post("/refresh-prices")
+def refresh_collection_prices(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """
+    Recalcule le prix marché des cartes depuis le guide Cardmarket local (rapide, sans TCGdex),
+    avec lissage anti-flambée du prix tendance. Ignore les cartes au prix saisi à la main.
+    """
+    rows = (
+        db.query(CollectionCard)
+        .filter(
+            CollectionCard.user_id == user.id,
+            CollectionCard.cardmarket_id_product.is_not(None),
+            CollectionCard.market_price_overridden.is_(False),
+        )
+        .all()
+    )
+    updated = 0
+    for row in rows:
+        price = resolve_market_price_eur(row.cardmarket_id_product, None)
+        if price is None:
+            continue
+        current = float(row.market_price_eur) if row.market_price_eur is not None else None
+        if current is None or abs(current - price) > 0.001:
+            collection_card_service.apply_market_price(
+                row, cardmarket_id_product=row.cardmarket_id_product, market_price_eur=price
+            )
+            collection_card_price_history_service.record_snapshot(db, row.id, price)
             updated += 1
     db.commit()
     return {"scanned": len(rows), "updated": updated}

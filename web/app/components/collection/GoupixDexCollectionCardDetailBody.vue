@@ -22,7 +22,10 @@
         <div class="min-w-0 flex-1">
           <p class="text-highlighted text-base leading-snug font-semibold">{{ card.display_name }}</p>
           <p class="text-muted mt-0.5 truncate text-sm">
-            {{ card.set_name || card.tcgdex_set_id }} · #{{ card.card_number }}
+            {{ readableSetLabel(card.set_name, card.set_code, card.tcgdex_set_id) }} · #{{ card.card_number }}
+          </p>
+          <p v-if="hasJapanese(card.set_name)" class="text-muted truncate text-[11px] opacity-70">
+            {{ card.set_name }}
           </p>
           <div class="mt-2 flex flex-wrap items-center gap-1.5">
             <UBadge color="primary" variant="subtle" size="sm">{{ languageLabel(card.language) }}</UBadge>
@@ -81,9 +84,27 @@
             />
           </UFormField>
         </div>
-        <UFormField label="Prix marché (€)" hint="corrige un prix erroné">
-          <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="Auto" class="w-full" />
-        </UFormField>
+        <div class="flex items-end gap-2">
+          <UFormField
+            label="Prix marché (€)"
+            :hint="card.market_price_overridden ? 'saisi à la main' : 'corrige un prix erroné'"
+            class="flex-1"
+          >
+            <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="Auto" class="w-full" />
+          </UFormField>
+          <UButton
+            v-if="card.market_price_overridden"
+            color="neutral"
+            variant="soft"
+            size="md"
+            icon="i-lucide-rotate-ccw"
+            :loading="resettingPrice"
+            title="Repasser le prix en automatique (Cardmarket)"
+            @click="onResetPrice"
+          >
+            Auto
+          </UButton>
+        </div>
         <UFormField label="Notes">
           <UTextarea v-model="notesDraft" :rows="2" class="w-full" />
         </UFormField>
@@ -156,6 +177,7 @@ import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composa
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { parseEuroAmount } from '~/utils/sealedProducts'
+import { hasJapanese, readableSetLabel } from '~/utils/cards/readableSet'
 
 /**
  * Corps de fiche d'une carte de collection, partagé entre le drawer et la page.
@@ -189,6 +211,7 @@ const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
 const loading = ref(true)
 const savingDraft = ref(false)
 const deleting = ref(false)
+const resettingPrice = ref(false)
 const prefill = ref<CollectionArticlePrefillResponse | null>(null)
 const loadingPrefill = ref(false)
 const submitting = ref(false)
@@ -328,6 +351,28 @@ async function onSaveDraft(): Promise<void> {
     toast.add({ title: 'Mise à jour impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
     savingDraft.value = false
+  }
+}
+
+/**
+ * Repasse le prix marché en automatique (efface la saisie manuelle, relit le guide Cardmarket).
+ * @returns Résolue après remise à zéro.
+ */
+async function onResetPrice(): Promise<void> {
+  if (!card.value) {
+    return
+  }
+  resettingPrice.value = true
+  try {
+    const updated = await patchCollectionCard(card.value.id, { reset_market_price: true })
+    card.value = updated
+    syncDrafts(updated)
+    emit('updated', updated)
+    toast.add({ title: 'Prix repassé en automatique', color: 'success' })
+  } catch (e) {
+    toast.add({ title: 'Réinitialisation impossible', description: apiErrorMessage(e), color: 'error' })
+  } finally {
+    resettingPrice.value = false
   }
 }
 
