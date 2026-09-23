@@ -12,130 +12,153 @@
           </span>
         </template>
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton
+            v-if="dashboardTab === 'ventes'"
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="ghost"
+            :loading="loading"
+            @click="load"
+          />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page">
-        <GoupixDexPageHeader
-          title="Tableau de bord"
-          description="Vue d'ensemble de votre activité : ventes, marges et stock."
-        >
-          <template #actions>
-            <GoupixDexDashboardRangePresetSelect v-model="range" />
-            <GoupixDexDashboardDateRangePicker v-model="range" />
-          </template>
-        </GoupixDexPageHeader>
+        <GoupixDexCollectionViewTabs
+          v-model="dashboardTab"
+          :items="dashboardTabs"
+          content
+          stretch-mobile
+          class="max-sm:w-full"
+        />
 
-        <div v-if="loading && !stats" class="flex justify-center py-16">
-          <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
-        </div>
+        <GoupixDexCollectionDashboard v-if="dashboardTab === 'collection'" />
 
-        <template v-else-if="stats">
-          <!-- Profit / revenue stat cards -->
-          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <GoupixDexStatsCard
-              title="Bénéfice période"
-              :value="eur.format(stats.profit_period_eur)"
-              icon="i-lucide-trending-up"
-            />
-            <GoupixDexStatsCard
-              title="Ventes période"
-              :value="eur.format(stats.revenue_period_eur)"
-              :description="`${numberFmt.format(stats.period_sales_count)} vente${stats.period_sales_count > 1 ? 's' : ''}`"
-              icon="i-lucide-shopping-bag"
-            />
-            <GoupixDexStatsCard
-              title="Bénéfice total"
-              :value="eur.format(stats.profit_total_eur)"
-              icon="i-lucide-piggy-bank"
-            />
-            <GoupixDexStatsCard
-              title="Ventes total"
-              :value="eur.format(stats.vinted_revenue_eur)"
-              icon="i-lucide-coins"
-            />
+        <template v-else>
+          <GoupixDexPageHeader
+            title="Tableau de bord"
+            description="Vue d'ensemble de votre activité : ventes, marges et stock."
+          >
+            <template #actions>
+              <GoupixDexDashboardRangePresetSelect v-model="range" />
+              <GoupixDexDashboardDateRangePicker v-model="range" />
+            </template>
+          </GoupixDexPageHeader>
+
+          <div v-if="loading && !stats" class="flex justify-center py-16">
+            <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
           </div>
 
-          <div class="grid gap-6 lg:grid-cols-2">
-            <!-- Inventory for sale -->
-            <UCard>
-              <template #header>
-                <p class="text-highlighted text-sm font-medium">Stock en vente</p>
-                <p class="text-muted text-xs">
-                  Cartes non vendues — totaux demandés, coût d'achat, marché et bénéfice estimé
-                </p>
-              </template>
-              <dl class="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <dt class="text-muted text-xs tracking-wide uppercase">Cartes</dt>
-                  <dd class="text-highlighted text-2xl font-semibold tabular-nums">
-                    {{ stats.inventory_count }}
-                  </dd>
-                </div>
-                <div>
-                  <dt class="text-muted text-xs tracking-wide uppercase">Prix de vente affichés</dt>
-                  <dd class="text-xl font-semibold tabular-nums">
-                    {{ eur2.format(stats.inventory_sell_total_eur) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt class="text-muted text-xs tracking-wide uppercase">Coût d'achat</dt>
-                  <dd class="text-xl font-semibold tabular-nums">
-                    {{ eur2.format(stats.inventory_purchase_total_eur) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt class="text-muted text-xs tracking-wide uppercase">Bénéfice estimé</dt>
-                  <dd class="text-primary text-xl font-semibold tabular-nums">
-                    {{ eur2.format(stats.inventory_estimated_profit_eur) }}
-                  </dd>
-                </div>
-              </dl>
-            </UCard>
+          <template v-else-if="stats">
+            <!-- Profit / revenue stat cards -->
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <GoupixDexStatsCard
+                title="Bénéfice période"
+                :value="eur.format(stats.profit_period_eur)"
+                icon="i-lucide-trending-up"
+              />
+              <GoupixDexStatsCard
+                title="Ventes période"
+                :value="eur.format(stats.revenue_period_eur)"
+                :description="`${numberFmt.format(stats.period_sales_count)} vente${stats.period_sales_count > 1 ? 's' : ''}`"
+                icon="i-lucide-shopping-bag"
+              />
+              <GoupixDexStatsCard
+                title="Bénéfice total"
+                :value="eur.format(stats.profit_total_eur)"
+                icon="i-lucide-piggy-bank"
+              />
+              <GoupixDexStatsCard
+                title="Ventes total"
+                :value="eur.format(stats.vinted_revenue_eur)"
+                icon="i-lucide-coins"
+              />
+            </div>
 
-            <!-- Vinted vs eBay sales pie -->
-            <UCard>
-              <template #header>
-                <p class="text-highlighted text-sm font-medium">Ventes Vinted vs eBay</p>
-                <p class="text-muted text-xs">Répartition du chiffre d'affaires sur la période sélectionnée</p>
-              </template>
-              <div class="flex flex-col items-center gap-6 sm:flex-row">
-                <div class="ring-default size-40 shrink-0 rounded-full shadow-sm ring-2" :style="pieStyle" />
-                <ul class="w-full min-w-0 flex-1 space-y-3 text-sm">
-                  <li v-for="seg in channelSegments" :key="seg.label" class="flex items-start justify-between gap-x-4">
-                    <span class="flex min-w-0 items-center gap-2">
-                      <span class="mt-1.5 size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: seg.color }" />
-                      <span class="leading-snug">
-                        <span class="text-highlighted font-medium">{{ seg.label }}</span>
-                        <span class="text-muted">
-                          · {{ numberFmt.format(seg.count) }} vente{{ seg.count > 1 ? 's' : '' }}</span
-                        >
+            <div class="grid gap-6 lg:grid-cols-2">
+              <!-- Inventory for sale -->
+              <UCard>
+                <template #header>
+                  <p class="text-highlighted text-sm font-medium">Stock en vente</p>
+                  <p class="text-muted text-xs">
+                    Cartes non vendues — totaux demandés, coût d'achat, marché et bénéfice estimé
+                  </p>
+                </template>
+                <dl class="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <dt class="text-muted text-xs tracking-wide uppercase">Cartes</dt>
+                    <dd class="text-highlighted text-2xl font-semibold tabular-nums">
+                      {{ stats.inventory_count }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-muted text-xs tracking-wide uppercase">Prix de vente affichés</dt>
+                    <dd class="text-xl font-semibold tabular-nums">
+                      {{ eur2.format(stats.inventory_sell_total_eur) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-muted text-xs tracking-wide uppercase">Coût d'achat</dt>
+                    <dd class="text-xl font-semibold tabular-nums">
+                      {{ eur2.format(stats.inventory_purchase_total_eur) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-muted text-xs tracking-wide uppercase">Bénéfice estimé</dt>
+                    <dd class="text-primary text-xl font-semibold tabular-nums">
+                      {{ eur2.format(stats.inventory_estimated_profit_eur) }}
+                    </dd>
+                  </div>
+                </dl>
+              </UCard>
+
+              <!-- Vinted vs eBay sales pie -->
+              <UCard>
+                <template #header>
+                  <p class="text-highlighted text-sm font-medium">Ventes Vinted vs eBay</p>
+                  <p class="text-muted text-xs">Répartition du chiffre d'affaires sur la période sélectionnée</p>
+                </template>
+                <div class="flex flex-col items-center gap-6 sm:flex-row">
+                  <div class="ring-default size-40 shrink-0 rounded-full shadow-sm ring-2" :style="pieStyle" />
+                  <ul class="w-full min-w-0 flex-1 space-y-3 text-sm">
+                    <li
+                      v-for="seg in channelSegments"
+                      :key="seg.label"
+                      class="flex items-start justify-between gap-x-4"
+                    >
+                      <span class="flex min-w-0 items-center gap-2">
+                        <span class="mt-1.5 size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: seg.color }" />
+                        <span class="leading-snug">
+                          <span class="text-highlighted font-medium">{{ seg.label }}</span>
+                          <span class="text-muted">
+                            · {{ numberFmt.format(seg.count) }} vente{{ seg.count > 1 ? 's' : '' }}</span
+                          >
+                        </span>
                       </span>
-                    </span>
-                    <span class="shrink-0 text-right">
-                      <span class="block font-semibold tabular-nums">{{ eur.format(seg.value) }}</span>
-                      <span class="text-muted text-xs tabular-nums">{{ pct(seg.value) }}</span>
-                    </span>
-                  </li>
-                  <li v-if="!channelSegments.length" class="text-muted text-sm">
-                    Aucune vente enregistrée sur Vinted ou eBay pour cette période.
-                  </li>
-                </ul>
-              </div>
-            </UCard>
-          </div>
+                      <span class="shrink-0 text-right">
+                        <span class="block font-semibold tabular-nums">{{ eur.format(seg.value) }}</span>
+                        <span class="text-muted text-xs tabular-nums">{{ pct(seg.value) }}</span>
+                      </span>
+                    </li>
+                    <li v-if="!channelSegments.length" class="text-muted text-sm">
+                      Aucune vente enregistrée sur Vinted ou eBay pour cette période.
+                    </li>
+                  </ul>
+                </div>
+              </UCard>
+            </div>
 
-          <!-- Revenue chart driven by period + range -->
-          <GoupixDexDashboardRevenueChart :stats="stats" :period="chartPeriod" />
+            <!-- Revenue chart driven by period + range -->
+            <GoupixDexDashboardRevenueChart :stats="stats" :period="chartPeriod" />
 
-          <!-- Recent sales -->
-          <GoupixDexDashboardSalesTable :sales="stats.recent_sales" />
+            <!-- Recent sales -->
+            <GoupixDexDashboardSalesTable :sales="stats.recent_sales" />
 
-          <!-- Rankings -->
-          <GoupixDexCharts :stats="stats" />
+            <!-- Rankings -->
+            <GoupixDexCharts :stats="stats" />
+          </template>
         </template>
       </div>
     </template>
@@ -162,6 +185,12 @@ const stats: Ref<DashboardStats | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
 const range: ShallowRef<DashboardRange> = shallowRef<DashboardRange>(dashboardRangeForPreset('days30'))
 const suppressDashboardPrefsWatch: Ref<boolean> = ref(false)
+
+const dashboardTab: Ref<string> = ref('ventes')
+const dashboardTabs: { label: string; value: string; icon: string }[] = [
+  { label: 'Ventes', value: 'ventes', icon: 'i-lucide-shopping-bag' },
+  { label: 'Collection', value: 'collection', icon: 'i-lucide-layers' },
+]
 
 const chartPeriod: ComputedRef<DashboardPeriod> = computed(() => chartPeriodForDashboardRange(range.value))
 
