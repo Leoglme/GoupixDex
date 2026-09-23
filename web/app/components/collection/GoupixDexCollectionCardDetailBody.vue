@@ -472,6 +472,8 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
   if (!isDesktopApp.value) {
     fd.set('publish_to_vinted', 'false')
   }
+  // Vente depuis la collection : relier l'article à CETTE carte (le back n'en recrée pas une).
+  fd.set('collection_card_id', String(card.value.id))
   submitting.value = true
   try {
     const { article, vinted } = await createArticle(fd)

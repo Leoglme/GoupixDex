@@ -31,7 +31,7 @@ from schemas.articles import (
     VintedBatchStartBody,
     VintedCrossRemovalFailBody,
 )
-from services import article_service
+from services import article_service, collection_article_sync_service
 from services.article_market_reference_service import refresh_article_market_reference
 from services.cardmarket_order_service import assign_article_order_line
 from services.combined_marketplace_service import CombinedMarketplaceService
@@ -73,6 +73,16 @@ def _parse_optional_order_line_id(raw: str | None) -> int | None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid order_line_id (expected integer).",
         ) from exc
+
+
+def _parse_optional_collection_card_id(raw: str | None) -> int | None:
+    """Parse optional multipart ``collection_card_id`` field (vente depuis la collection)."""
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return None
 
 
 def _apply_order_line_assignment(
@@ -740,6 +750,7 @@ async def create_article(
     graded_grade_value_id: str | None = Form(None),
     graded_cert_number: str | None = Form(None),
     order_line_id: str | None = Form(None),
+    collection_card_id: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -832,6 +843,16 @@ async def create_article(
     refresh_article_market_reference(article)
     db.commit()
     db.refresh(article)
+
+    # « Ma Collection » suit les ventes : rattacher la carte de collection d'origine (vente depuis
+    # la collection) ou en créer une (article direct), sauf pour un article créé déjà vendu.
+    linked_collection_card_id = _parse_optional_collection_card_id(collection_card_id)
+    if linked_collection_card_id is not None:
+        collection_article_sync_service.attach_collection_card(
+            db, user_id=user.id, collection_card_id=linked_collection_card_id, article=article
+        )
+    elif not sold_flag:
+        collection_article_sync_service.ensure_collection_card_for_article(db, article)
 
     vinted_local_desktop = request.headers.get("x-goupix-vinted-target", "").strip().lower() == "local"
 
@@ -961,6 +982,9 @@ def mark_sold(
     )
     db.commit()
     db.refresh(article)
+
+    # Carte vendue → elle quitte « Ma Collection ».
+    collection_article_sync_service.remove_collection_card_for_sold_article(db, article)
 
     if need_ebay_bg:
         background_tasks.add_task(
