@@ -25,6 +25,16 @@ from services.tcgdex_lookup_service import resolve_tcgdex_card_id_from_ocr
 _DEFAULT_LANGUAGE = "fr"
 
 
+def _infer_language(article: Article) -> str:
+    """Déduit la langue physique depuis le titre de l'article (les articles ne stockent pas la langue)."""
+    title = (article.title or "").lower()
+    if "japonais" in title or "japanese" in title or " jap" in title:
+        return "ja"
+    if "english" in title or "anglais" in title:
+        return "en"
+    return _DEFAULT_LANGUAGE
+
+
 def linked_collection_card(db: Session, article: Article) -> CollectionCard | None:
     """Carte de collection déjà reliée à cet article, le cas échéant."""
     return (
@@ -34,7 +44,7 @@ def linked_collection_card(db: Session, article: Article) -> CollectionCard | No
     )
 
 
-def _resolved_card_payload(article: Article) -> dict[str, Any] | None:
+def _resolved_card_payload(article: Article, language: str) -> dict[str, Any] | None:
     """Résout la carte TCGdex depuis le set/numéro de l'article ; ``None`` si irrésolvable."""
     if not article.set_code or not article.card_number:
         return None
@@ -43,13 +53,14 @@ def _resolved_card_payload(article: Article) -> dict[str, Any] | None:
             ocr_set_code=article.set_code,
             ocr_card_number=article.card_number,
             ocr_pokemon_name=article.pokemon_name,
+            physical_language=language,
         )
     except (RuntimeError, ValueError):
         return None
     if not tcgdex_card_id:
         return None
     try:
-        return fetch_card_for_collection(tcgdex_card_id=tcgdex_card_id, physical_language=_DEFAULT_LANGUAGE)
+        return fetch_card_for_collection(tcgdex_card_id=tcgdex_card_id, physical_language=language)
     except (RuntimeError, ValueError):
         return None
 
@@ -62,7 +73,9 @@ def _new_collection_card_from_article(article: Article) -> CollectionCard:
     portant la photo uploadée de l'article et son set/numéro.
     """
     purchase_price = Decimal(str(round(float(article.purchase_price), 2)))
-    payload = _resolved_card_payload(article)
+    language = _infer_language(article)
+    article_photo = article.images[0].image_url if article.images else None
+    payload = _resolved_card_payload(article, language)
     if payload is not None:
         market_price = payload.get("market_price_eur")
         return CollectionCard(
@@ -77,8 +90,8 @@ def _new_collection_card_from_article(article: Article) -> CollectionCard:
             card_name_ja=payload.get("card_name_ja"),
             display_name=str(payload["display_name"]),
             rarity=payload.get("rarity"),
-            language=str(payload.get("language") or _DEFAULT_LANGUAGE),
-            image_url=payload.get("image_url"),
+            language=str(payload.get("language") or language),
+            image_url=(payload.get("image_url") or article_photo),
             quantity=1,
             purchase_price_eur=purchase_price,
             cardmarket_id_product=payload.get("cardmarket_id_product"),
@@ -101,8 +114,8 @@ def _new_collection_card_from_article(article: Article) -> CollectionCard:
         card_number=(article.card_number or "?"),
         card_name_fr=(article.pokemon_name or None),
         display_name=display_name,
-        language=_DEFAULT_LANGUAGE,
-        image_url=(article.images[0].image_url if article.images else None),
+        language=language,
+        image_url=article_photo,
         quantity=1,
         purchase_price_eur=purchase_price,
         cardmarket_id_product=article.cardmarket_id_product,

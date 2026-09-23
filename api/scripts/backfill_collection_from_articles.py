@@ -42,6 +42,12 @@ def main() -> None:
     """Point d'entrée : crée les cartes de collection manquantes pour les articles en vente."""
     parser = argparse.ArgumentParser(description="Backfill « Ma Collection » depuis les articles en vente.")
     parser.add_argument("--dry-run", action="store_true", help="Affiche le plan sans rien écrire.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="DANGER : supprime d'abord les cartes déjà reliées à un article, puis les recrée "
+        "(à n'utiliser que si aucune carte de collection n'a été reliée à la main).",
+    )
     args = parser.parse_args()
 
     try:
@@ -59,6 +65,18 @@ def main() -> None:
         if user is None:
             raise SystemExit("Utilisateur cible introuvable (admin unique ou TARGET_USER_EMAIL).")
         print(f"Utilisateur cible : #{user.id} <{user.email}>")
+
+        if args.reset:
+            linked = (
+                db.query(CollectionCard)
+                .filter(CollectionCard.user_id == user.id, CollectionCard.article_id.is_not(None))
+                .all()
+            )
+            print(f"[RESET] {len(linked)} carte(s) reliée(s) à un article seront supprimées puis recréées.")
+            if not args.dry_run:
+                for card in linked:
+                    db.delete(card)
+                db.commit()
 
         articles = (
             db.query(Article)
