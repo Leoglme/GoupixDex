@@ -1,10 +1,5 @@
 <template>
-  <UDashboardPanel
-    id="binder-detail"
-    :ui="{
-      body: viewMode === 'pages' && binder ? 'min-w-0 overflow-x-hidden p-0 sm:p-0' : 'min-w-0 overflow-x-hidden',
-    }"
-  >
+  <UDashboardPanel id="binder-detail" :ui="{ body: 'min-w-0 overflow-x-hidden' }">
     <template #header>
       <UDashboardNavbar>
         <template #leading>
@@ -98,7 +93,7 @@
           </div>
         </div>
 
-        <div v-if="viewMode === 'pages'" class="binder-stage mx-2 mt-4 mb-3 sm:mx-4 sm:mt-5 sm:mb-4">
+        <div v-if="viewMode === 'pages'" class="binder-stage mt-4 mb-3 sm:mt-5 sm:mb-4">
           <GoupixDexBinderPages
             :binder="binder"
             href-base="/collection/"
