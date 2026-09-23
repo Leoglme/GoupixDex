@@ -26,13 +26,7 @@
 
     <template #body>
       <div class="app-dashboard-page">
-        <GoupixDexCollectionViewTabs
-          v-model="dashboardTab"
-          :items="dashboardTabs"
-          content
-          stretch-mobile
-          class="max-sm:w-full"
-        />
+        <GoupixDexCollectionViewTabs v-model="dashboardTab" :items="dashboardTabs" content stretch />
 
         <GoupixDexCollectionDashboard v-if="dashboardTab === 'collection'" />
 
