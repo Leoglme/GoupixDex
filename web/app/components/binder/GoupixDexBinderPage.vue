@@ -88,7 +88,7 @@
               />
               <span
                 v-if="displayItem(pageIdx * perPage + (k - 1))!.kind === 'wanted' && !previewComplete"
-                class="tile-badge num top-1 right-1 z-10 !bg-black/70 !text-white"
+                class="tile-badge num bottom-1 left-1 z-10 !bg-black/70 !text-white"
               >
                 Manquante
               </span>

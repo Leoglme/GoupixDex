@@ -67,9 +67,10 @@
       </section>
 
       <UButton
-        v-if="product.cardmarket_url"
-        :to="product.cardmarket_url"
+        v-if="cardmarketLink"
+        :to="cardmarketLink"
         target="_blank"
+        rel="noopener noreferrer"
         external
         color="neutral"
         variant="ghost"
@@ -195,6 +196,7 @@ import {
   sealedProductTypeLabel,
   SEALED_TYPE_OPTIONS,
 } from '~/utils/sealedProducts'
+import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 
 /**
  * Corps de fiche d'un produit scellé, partagé entre le drawer et la page.
@@ -249,6 +251,15 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
   currency: 'EUR',
   maximumFractionDigits: 2,
+})
+
+/** Lien Cardmarket : URL stockée si présente, sinon fiche via idProduct, sinon recherche par nom. */
+const cardmarketLink = computed<string | null>(() => {
+  const current = product.value
+  if (!current) {
+    return null
+  }
+  return current.cardmarket_url ?? cardmarketUrl({ idProduct: current.cardmarket_id_product, name: current.name })
 })
 
 const isDirty = computed<boolean>(() => {

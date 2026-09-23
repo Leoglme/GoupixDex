@@ -42,6 +42,20 @@
       <GoupixDexPriceHistoryChart :points="priceHistory?.points ?? []" />
     </section>
 
+    <!-- Cardmarket -->
+    <UButton
+      :to="cardmarketLink"
+      target="_blank"
+      rel="noopener noreferrer"
+      color="neutral"
+      variant="subtle"
+      size="md"
+      icon="i-lucide-external-link"
+      block
+    >
+      Voir sur Cardmarket
+    </UButton>
+
     <!-- Ajout -->
     <UButton color="primary" variant="solid" size="lg" icon="i-lucide-plus" block :loading="adding" @click="onAdd">
       {{ ownedQuantity > 0 ? 'Ajouter un exemplaire' : 'Ajouter à ma collection' }}
@@ -56,6 +70,7 @@ import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
 import type { GoupixDexSealedCatalogPriceHistorySource } from '~/types/GoupixDexSealedCatalogPreviewBody'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
+import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 
 /**
  * Aperçu d'un produit du catalogue scellé (avant ajout) : prix, courbe, bouton d'ajout.
@@ -93,6 +108,9 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 
 /** Prix marché Cardmarket (aligné sur les produits possédés), avec repli sur le prix catalogue. */
 const displayPriceEur = computed<number | null>(() => marketPriceEur.value ?? props.product.price)
+
+/** Lien Cardmarket du produit (fiche via idProduct, repli recherche par nom). */
+const cardmarketLink = computed<string>(() => cardmarketUrl({ idProduct: props.product.p, name: props.product.full }))
 
 const priceHistorySourceLabel: ComputedRef<string | null> = computed(() => {
   if (priceHistorySource.value === 'tcgplayer') {

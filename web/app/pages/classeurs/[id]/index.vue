@@ -195,11 +195,13 @@
             class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
           >
             <component
-              :is="cell.item ? 'NuxtLink' : 'div'"
+              :is="cell.item ? 'button' : 'div'"
               v-for="cell in completionCells"
               :key="cell.key"
-              :to="cell.item ? `/collection/${cell.item.collection_card_id}` : undefined"
-              class="block"
+              :type="cell.item ? 'button' : undefined"
+              class="block w-full text-left"
+              :class="cell.item ? 'cursor-pointer' : ''"
+              @click="cell.item ? openCardDetail(cell.item) : undefined"
             >
               <div
                 class="card-tile relative aspect-[63/88]"
@@ -233,11 +235,12 @@
               Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
             </p>
             <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              <NuxtLink
+              <button
                 v-for="item in gridItems"
                 :key="item.id"
-                :to="`/collection/${item.collection_card_id}`"
-                class="block"
+                type="button"
+                class="block w-full cursor-pointer text-left"
+                @click="openCardDetail(item)"
               >
                 <div class="card-tile aspect-[63/88]">
                   <GoupixDexBinderCardImage
@@ -247,7 +250,7 @@
                   <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
                 </div>
                 <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
-              </NuxtLink>
+              </button>
             </div>
           </template>
         </div>
@@ -289,6 +292,7 @@ const router = useRouter()
 const { getBinder, updateBinder, deleteBinder, getBinderValueTimeline } = useBinders()
 const { confirm } = useGoupixConfirm()
 const toast = useToast()
+const drawerStack = useGoupixDrawerStack()
 
 const id = computed(() => Number(route.params.id))
 const loading = ref(true)
@@ -470,6 +474,15 @@ function onBinderUpdated(detail: BinderDetail) {
   binder.value = detail
 }
 
+/**
+ * Ouvre la fiche (drawer) d'une carte du classeur : image, prix, lien Cardmarket.
+ * @param item - Pochette cliquée (carte possédée ou manquante).
+ * @returns {void}
+ */
+function openCardDetail(item: BinderPocketItem): void {
+  drawerStack.pushCard(item.collection_card_id)
+}
+
 async function submitRename() {
   const name = renameName.value.trim()
   if (!name || !binder.value) return
@@ -513,6 +526,13 @@ watch(viewMode, (mode) => {
     void loadValueTimeline()
   }
 })
+
+watch(
+  () => drawerStack.cardMutationCounter.value,
+  () => {
+    void load()
+  },
+)
 
 onMounted(() => {
   void load()

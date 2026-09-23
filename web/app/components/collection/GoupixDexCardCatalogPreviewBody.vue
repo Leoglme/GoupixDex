@@ -35,6 +35,20 @@
       </p>
     </div>
 
+    <!-- Cardmarket -->
+    <UButton
+      :to="cardmarketLink"
+      target="_blank"
+      rel="noopener noreferrer"
+      color="neutral"
+      variant="subtle"
+      size="md"
+      icon="i-lucide-external-link"
+      block
+    >
+      Voir sur Cardmarket
+    </UButton>
+
     <!-- Ajout -->
     <UButton color="primary" variant="solid" size="lg" icon="i-lucide-plus" block :loading="adding" @click="onAdd">
       {{ ownedQuantity > 0 ? 'Ajouter un exemplaire' : 'Ajouter à ma collection' }}
@@ -46,6 +60,7 @@
 import type { CollectionCard } from '~/composables/useCollection'
 import type { CatalogLocale } from '~/composables/useCardCatalog'
 import type { GoupixCatalogCardRef } from '~/types/GoupixDrawerStack'
+import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 
 /**
  * Aperçu d'une carte du catalogue TCGdex (avant ajout) : image, prix marché, bouton d'ajout.
@@ -77,6 +92,9 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 
 /** Prix marché Cardmarket, avec repli sur la moyenne connue. */
 const displayPriceEur = computed<number | null>(() => marketPriceEur.value ?? averagePriceEur.value)
+
+/** Lien Cardmarket de la carte (recherche par nom + numéro, l'idProduct n'étant pas exposé au catalogue). */
+const cardmarketLink = computed<string>(() => cardmarketUrl({ name: props.card.name, localId: props.card.localId }))
 
 const priceSourceLabel = computed<string | null>(() => {
   if (marketPriceEur.value == null && averagePriceEur.value != null) {

@@ -13,17 +13,11 @@
       <!-- Aperçu -->
       <div class="flex gap-4">
         <div class="bg-muted/20 aspect-[63/88] w-24 shrink-0 overflow-hidden rounded-xl">
-          <img
-            v-if="card.image_url"
-            :src="card.image_url"
+          <GoupixDexCardImage
+            :image-url="card.image_url"
+            :tcgdex-card-id="card.tcgdex_card_id"
             :alt="card.display_name"
-            class="h-full w-full object-contain"
-            referrerpolicy="no-referrer"
-            decoding="async"
           />
-          <div v-else class="flex h-full items-center justify-center">
-            <UIcon name="i-lucide-image-off" class="text-muted size-8" />
-          </div>
         </div>
         <div class="min-w-0 flex-1">
           <p class="text-highlighted text-base leading-snug font-semibold">{{ card.display_name }}</p>
@@ -47,6 +41,18 @@
         <p v-if="card.market_price_eur != null" class="text-muted mt-0.5 text-xs">
           Cardmarket · {{ eur.format(lineMarketEur) }} pour {{ card.quantity }} exemplaire(s)
         </p>
+        <UButton
+          :to="cardmarketLink"
+          target="_blank"
+          rel="noopener noreferrer"
+          color="neutral"
+          variant="subtle"
+          size="xs"
+          icon="i-lucide-external-link"
+          class="mt-2"
+        >
+          Voir sur Cardmarket
+        </UButton>
       </div>
 
       <!-- Évolution du prix -->
@@ -145,6 +151,7 @@
 <script setup lang="ts">
 import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
+import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 
 /**
  * Corps de fiche d'une carte de collection, partagé entre le drawer et la page.
@@ -209,6 +216,14 @@ const lineMarketEur = computed<number>(() => {
   }
   return price * (card.value?.quantity ?? 1)
 })
+
+const cardmarketLink = computed<string>(() =>
+  cardmarketUrl({
+    idProduct: card.value?.cardmarket_id_product,
+    name: card.value?.display_name ?? '',
+    localId: card.value?.card_number,
+  }),
+)
 
 const isDirty = computed<boolean>(() => {
   const current = card.value
