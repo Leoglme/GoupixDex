@@ -216,6 +216,24 @@ def resolve_market_price_eur(
     return None
 
 
+def resolve_sealed_market_price_eur(id_product: int | None) -> float | None:
+    """
+    Reference EUR for a **sealed** product: the Cardmarket ``trend`` (the "Price Trend" shown on the
+    product page), falling back to the standard cote (``avg``) when ``trend`` is missing.
+
+    Sealed products carry no ``avg30``/``avg7``/``avg1`` in the downloadable guide (unlike singles), so the
+    card ordering would collapse to the all-time ``avg`` — laggy and inflated by launch prices. ``trend`` is
+    Cardmarket's recomputed current price, so the value here matches what the user reads on the Cardmarket
+    listing.
+    """
+    if id_product is None:
+        return None
+    local: CardmarketCardPrices | None = get_price_api().get_card_prices(id_product)
+    if local is not None and isinstance(local.trend, (int, float)) and float(local.trend) > 0:
+        return round(float(local.trend), 2)
+    return resolve_market_price_eur(id_product, None)
+
+
 def fetch_tcgdex_pricing_snapshot(
     tcgdex_card_id: str,
     physical_language: str | None = None,

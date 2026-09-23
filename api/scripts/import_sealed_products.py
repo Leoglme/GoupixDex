@@ -31,7 +31,7 @@ from config import get_settings
 from models.sealed_product import SEALED_PRODUCT_TYPES, SealedProduct
 from models.user import User
 from services import sealed_product_service
-from services.cardmarket_local_price_service import resolve_market_price_eur
+from services.cardmarket_local_price_service import resolve_sealed_market_price_eur
 from services.cardmarket_product_resolve_service import resolve_cardmarket_product
 
 
@@ -122,9 +122,9 @@ def main() -> None:
                         image_url = resolved["image_url"]
                     print(f"  résolu Cardmarket : {item['name']} → idProduct {id_product}")
 
-            # idProduct connu → prix marché depuis le guide local (jamais écrasé s'il est absent).
+            # idProduct connu → prix marché scellé (trend Cardmarket) depuis le guide local (jamais écrasé s'il est absent).
             if id_product is not None:
-                guide_price = resolve_market_price_eur(id_product, None)
+                guide_price = resolve_sealed_market_price_eur(id_product)
                 if guide_price is not None:
                     market = float(guide_price)
 

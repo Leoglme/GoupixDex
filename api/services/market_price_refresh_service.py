@@ -44,6 +44,7 @@ from services.cardmarket_local_price_service import (
     get_price_api,
     refresh_price_guide,
     resolve_market_price_eur,
+    resolve_sealed_market_price_eur,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ def _revalue_all_sealed_products() -> dict[str, int]:
             if id_product is None:
                 unpriced += 1
                 continue
-            price = resolve_market_price_eur(id_product, None)
+            price = resolve_sealed_market_price_eur(id_product)
             if price is None:
                 unpriced += 1
                 continue
