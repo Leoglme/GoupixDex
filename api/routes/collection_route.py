@@ -273,6 +273,7 @@ def refresh_collection_prices(
 def resync_collection_metadata(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    ids: str | None = Query(None, description="Ids de cartes séparés par des virgules ; toutes les cartes si absent."),
 ) -> dict[str, Any]:
     """
     Re-résout, via TCGdex, les métadonnées de chaque carte (noms, rareté, set, image, cote
@@ -280,8 +281,14 @@ def resync_collection_metadata(
 
     Corrige les cartes dont un id TCGdex partagé (set japonais vs international) avait ramené
     le nom et l'``idProduct`` d'une autre carte. Le prix saisi à la main n'est jamais écrasé.
+    Chaque carte est committée à part : l'opération est reprenable si le client coupe.
     """
-    rows = db.query(CollectionCard).filter(CollectionCard.user_id == user.id).all()
+    query = db.query(CollectionCard).filter(CollectionCard.user_id == user.id)
+    wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
+    if wanted:
+        query = query.filter(CollectionCard.id.in_(wanted))
+    rows = query.all()
+
     cardmarket_fixed = 0
     repriced = 0
     for row in rows:
@@ -324,7 +331,7 @@ def resync_collection_metadata(
                     )
                     collection_card_price_history_service.record_snapshot(db, row.id, price)
                     repriced += 1
-    db.commit()
+        db.commit()
     return {"scanned": len(rows), "cardmarket_fixed": cardmarket_fixed, "repriced": repriced}
 
 
