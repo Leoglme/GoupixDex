@@ -199,8 +199,14 @@ def resolve_article_tcgdex_card_id(article: Article) -> str | None:
     resolved = _try_resolve(set_codes[0], number, denominator_value, article.pokemon_name, _title_language(article))
     if resolved:
         return resolved
+    if denominator_value:
+        # Certains sets japonais ont un total TCGdex (secrètes incluses) différent du dénominateur imprimé
+        # (SV11B : 174 contre 086) : même set + numéro sans ce contrôle, en cherchant d'abord côté japonais.
+        resolved = _try_resolve(set_codes[0], number, None, article.pokemon_name, "ja")
+        if resolved:
+            return resolved
 
-    attempts = 1
+    attempts = 2
     french_names = list(dict.fromkeys(n for n in [*_title_name_candidates(article), article.pokemon_name] if n))
     client = TcgdexClientService()
     for french_name in french_names:
@@ -343,9 +349,9 @@ def refresh_collection_card_from_article(db: Session, card: CollectionCard, arti
     (placements en classeur), sa quantité, ses notes et son prix d'achat sont conservés. Une carte déjà
     résolue n'est jamais dégradée en repli minimal (TCGdex injoignable) : seule sa langue est corrigée.
 
-    Retourne ``True`` si l'identité ou la langue de la carte a changé.
+    Retourne ``True`` si l'identité, la langue ou le nom affiché de la carte a changé.
     """
-    before = (card.tcgdex_card_id, card.language)
+    before = (card.tcgdex_card_id, card.language, card.display_name)
     fields = _collection_fields_for_article(article)
     if str(fields["tcgdex_card_id"]).startswith(MANUAL_CARD_ID_PREFIX) and not is_unresolved(card):
         card.language = _physical_language(article, card.tcgdex_card_id)
@@ -357,7 +363,7 @@ def refresh_collection_card_from_article(db: Session, card: CollectionCard, arti
     db.commit()
     db.refresh(card)
     _record_price_snapshot(db, card)
-    return (card.tcgdex_card_id, card.language) != before
+    return (card.tcgdex_card_id, card.language, card.display_name) != before
 
 
 def attach_collection_card(db: Session, *, user_id: int, collection_card_id: int, article: Article) -> bool:
