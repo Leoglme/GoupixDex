@@ -23,6 +23,7 @@ jobs:
             set -euo pipefail
             APP_ROOT="${DEPLOY_API_DIR%/}/api"
             TMP="$(mktemp)"; printf '%s' "$ITEMS_B64" | base64 -d > "$TMP"
+            echo "decoded bytes: $(wc -c < "$TMP")"
             FLAG="--dry-run"; [ "${APPLY}" = "true" ] && FLAG=""
-            cd "$APP_ROOT"; "$APP_ROOT/.venv/bin/python" "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG
+            cd "$APP_ROOT"; "$APP_ROOT/.venv/bin/python" -u "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG 2>&1
             rm -f "$TMP"
