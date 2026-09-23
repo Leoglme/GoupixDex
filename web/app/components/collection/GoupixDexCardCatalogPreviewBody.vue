@@ -49,6 +49,11 @@
       Voir sur Cardmarket
     </UButton>
 
+    <!-- Prix d'achat (optionnel) -->
+    <UFormField label="Prix d'achat (€)" hint="optionnel — pour suivre ta plus-value">
+      <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
+    </UFormField>
+
     <!-- Ajout -->
     <UButton color="primary" variant="solid" size="lg" icon="i-lucide-plus" block :loading="adding" @click="onAdd">
       {{ ownedQuantity > 0 ? 'Ajouter un exemplaire' : 'Ajouter à ma collection' }}
@@ -61,6 +66,7 @@ import type { CollectionCard } from '~/composables/useCollection'
 import type { CatalogLocale } from '~/composables/useCardCatalog'
 import type { GoupixCatalogCardRef } from '~/types/GoupixDrawerStack'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
+import { parseEuroAmount } from '~/utils/sealedProducts'
 
 /**
  * Aperçu d'une carte du catalogue TCGdex (avant ajout) : image, prix marché, bouton d'ajout.
@@ -83,6 +89,7 @@ const averagePriceEur = ref<number | null>(null)
 const loadingPrice = ref(false)
 const adding = ref(false)
 const ownedQuantity = ref(0)
+const purchaseText = ref('')
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -153,6 +160,7 @@ async function onAdd(): Promise<void> {
       tcgdex_card_id: props.card.id,
       language: props.card.locale,
       quantity: 1,
+      purchase_price_eur: parseEuroAmount(purchaseText.value),
     })
     ownedQuantity.value = res.card.quantity
     emit('added', res.card)
@@ -174,6 +182,7 @@ watch(
     ownedQuantity.value = 0
     marketPriceEur.value = null
     averagePriceEur.value = null
+    purchaseText.value = ''
     previewImageUrl.value = props.card.image
     void loadPreview()
   },

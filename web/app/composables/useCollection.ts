@@ -20,12 +20,17 @@ export interface CollectionCard {
   language: CollectionLanguage | string
   image_url: string | null
   quantity: number
+  purchase_price_eur: number | null
   notes: string | null
   article_id: number | null
   cardmarket_id_product: number | null
   market_price_eur: number | null
   market_price_overridden: boolean
   market_price_updated_at: string | null
+  line_market_eur: number | null
+  line_purchase_eur: number | null
+  gain_eur: number | null
+  gain_percent: number | null
   created_at: string
   updated_at: string
 }
@@ -38,6 +43,10 @@ export interface CollectionStats {
   with_article: number
   estimated_value_eur: number
   priced_cards: number
+  purchase_value_eur: number
+  gain_eur: number
+  gain_percent: number | null
+  invested_cards: number
 }
 
 export interface CollectionListResponse {
@@ -49,6 +58,7 @@ export interface CollectionAddBody {
   tcgdex_card_id: string
   language: CollectionLanguage | string
   quantity?: number
+  purchase_price_eur?: number | null
   notes?: string | null
 }
 
@@ -60,6 +70,7 @@ export interface CollectionAddResponse {
 export interface CollectionPatchBody {
   quantity?: number
   language?: CollectionLanguage | string
+  purchase_price_eur?: number | null
   notes?: string | null
   market_price_eur?: number | null
   reset_market_price?: boolean

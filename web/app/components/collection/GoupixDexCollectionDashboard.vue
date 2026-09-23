@@ -42,6 +42,90 @@
       </div>
 
       <div class="grid gap-6 lg:grid-cols-2">
+        <!-- Meilleurs investissements -->
+        <UCard>
+          <template #header>
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-highlighted text-sm font-medium">Meilleurs investissements</p>
+              <span
+                v-if="stats.gain_percent != null"
+                class="shrink-0 text-xs font-semibold tabular-nums"
+                :class="gainTextClass(stats.gain_percent)"
+              >
+                {{ formatSignedPercent(stats.gain_percent) }}
+              </span>
+            </div>
+          </template>
+          <ul v-if="topGainers.length" class="space-y-2.5">
+            <li v-for="card in topGainers" :key="card.id">
+              <button
+                type="button"
+                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
+                @click="openCard(card.id)"
+              >
+                <span class="bg-muted/20 aspect-[63/88] w-8 shrink-0 overflow-hidden rounded">
+                  <GoupixDexCardImage
+                    :image-url="card.image_url"
+                    :tcgdex-card-id="card.tcgdex_card_id"
+                    :alt="card.display_name"
+                  />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="text-highlighted block truncate text-sm font-medium">{{ card.display_name }}</span>
+                  <span class="text-muted block truncate text-xs tabular-nums">
+                    {{ eur.format(card.purchase_price_eur ?? 0) }} → {{ eur.format(card.market_price_eur ?? 0) }}
+                  </span>
+                </span>
+                <span class="shrink-0 text-right">
+                  <span class="block text-sm font-semibold tabular-nums" :class="gainTextClass(card.gain_percent)">
+                    {{ formatSignedPercent(card.gain_percent ?? 0) }}
+                  </span>
+                  <span v-if="card.gain_eur != null" class="text-muted block text-xs tabular-nums">
+                    {{ card.gain_eur >= 0 ? '+' : '' }}{{ eur.format(card.gain_eur) }}
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="text-muted py-8 text-center text-sm">
+            Renseigne un prix d'achat sur tes cartes pour suivre tes plus-values.
+          </p>
+        </UCard>
+
+        <!-- Cartes les plus cotées -->
+        <UCard>
+          <template #header>
+            <p class="text-highlighted text-sm font-medium">Cartes les plus cotées</p>
+          </template>
+          <ul v-if="topCards.length" class="space-y-2.5">
+            <li v-for="card in topCards" :key="card.id">
+              <button
+                type="button"
+                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
+                @click="openCard(card.id)"
+              >
+                <span class="bg-muted/20 aspect-[63/88] w-8 shrink-0 overflow-hidden rounded">
+                  <GoupixDexCardImage
+                    :image-url="card.image_url"
+                    :tcgdex-card-id="card.tcgdex_card_id"
+                    :alt="card.display_name"
+                  />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="text-highlighted block truncate text-sm font-medium">{{ card.display_name }}</span>
+                  <span class="text-muted block truncate text-xs">
+                    {{ readableSetLabel(card.set_name, card.set_code, card.tcgdex_set_id) }}
+                  </span>
+                </span>
+                <span class="text-highlighted shrink-0 text-sm font-semibold tabular-nums">
+                  {{ eur.format(card.market_price_eur ?? 0) }}
+                </span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="text-muted py-8 text-center text-sm">Aucune carte cotée pour l'instant.</p>
+        </UCard>
+
         <!-- Classeurs -->
         <UCard>
           <template #header>
@@ -79,38 +163,61 @@
           <p v-else class="text-muted py-8 text-center text-sm">Aucun classeur pour l'instant.</p>
         </UCard>
 
-        <!-- Cartes les plus cotées -->
+        <!-- Produits scellés -->
         <UCard>
           <template #header>
-            <p class="text-highlighted text-sm font-medium">Cartes les plus cotées</p>
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-highlighted text-sm font-medium">Produits scellés</p>
+              <span v-if="sealedStats && sealedStats.unique_products > 0" class="text-muted text-xs tabular-nums">
+                {{ numberFmt.format(sealedStats.unique_products) }} · {{ eur.format(sealedStats.estimated_market_eur) }}
+              </span>
+            </div>
           </template>
-          <ul v-if="topCards.length" class="space-y-2.5">
-            <li v-for="card in topCards" :key="card.id">
+          <ul v-if="topSealed.length" class="space-y-2.5">
+            <li v-for="product in topSealed" :key="product.id">
               <button
                 type="button"
                 class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
-                @click="openCard(card.id)"
+                @click="openSealed(product.id)"
               >
-                <span class="bg-muted/20 aspect-[63/88] w-8 shrink-0 overflow-hidden rounded">
-                  <GoupixDexCardImage
-                    :image-url="card.image_url"
-                    :tcgdex-card-id="card.tcgdex_card_id"
-                    :alt="card.display_name"
+                <span class="bg-muted/20 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded">
+                  <img
+                    v-if="product.image_url"
+                    :src="product.image_url"
+                    :alt="product.name"
+                    class="h-full w-full object-contain"
+                    referrerpolicy="no-referrer"
+                    decoding="async"
                   />
+                  <UIcon v-else :name="sealedProductTypeIcon(product.product_type)" class="text-muted size-4" />
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="text-highlighted block truncate text-sm font-medium">{{ card.display_name }}</span>
+                  <span class="text-highlighted block truncate text-sm font-medium">{{ product.name }}</span>
                   <span class="text-muted block truncate text-xs">
-                    {{ readableSetLabel(card.set_name, card.set_code, card.tcgdex_set_id) }}
+                    {{ sealedProductTypeLabel(product.product_type) }}
                   </span>
                 </span>
-                <span class="text-highlighted shrink-0 text-sm font-semibold tabular-nums">
-                  {{ eur.format(card.market_price_eur ?? 0) }}
+                <span class="shrink-0 text-right">
+                  <span class="text-highlighted block text-sm font-semibold tabular-nums">
+                    {{ product.market_price_eur != null ? eur.format(product.market_price_eur) : '—' }}
+                  </span>
+                  <span
+                    v-if="product.gain_percent != null"
+                    class="block text-xs font-medium tabular-nums"
+                    :class="gainTextClass(product.gain_percent)"
+                  >
+                    {{ formatSignedPercent(product.gain_percent) }}
+                  </span>
                 </span>
               </button>
             </li>
           </ul>
-          <p v-else class="text-muted py-8 text-center text-sm">Aucune carte cotée pour l'instant.</p>
+          <p v-else class="text-muted py-8 text-center text-sm">
+            Aucun produit scellé.
+            <NuxtLink to="/collection/produits/add" class="text-primary underline underline-offset-2">
+              En ajouter
+            </NuxtLink>
+          </p>
         </UCard>
       </div>
     </template>
@@ -120,20 +227,26 @@
 <script setup lang="ts">
 import type { Ref } from 'vue'
 import type { CollectionCard, CollectionStats } from '~/composables/useCollection'
+import type { SealedProduct, SealedStats } from '~/composables/useSealed'
 import type { BinderSummary } from '~/types/binders'
 import { readableSetLabel } from '~/utils/cards/readableSet'
+import { formatSignedPercent, sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
 /**
- * Tableau de bord de la collection (onglet « Collection » du pilotage) : valeur, cartes, classeurs.
+ * Tableau de bord de la collection (onglet « Collection » du pilotage) : valeur, plus-values, classeurs, scellés.
  */
 const { listCollection } = useCollection()
 const { listBinders } = useBinders()
+const { listSealed } = useSealed()
 const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
 const stats: Ref<CollectionStats | null> = ref<CollectionStats | null>(null)
 const binders: Ref<BinderSummary[]> = ref<BinderSummary[]>([])
 const topCards: Ref<CollectionCard[]> = ref<CollectionCard[]>([])
+const topGainers: Ref<CollectionCard[]> = ref<CollectionCard[]>([])
+const topSealed: Ref<SealedProduct[]> = ref<SealedProduct[]>([])
+const sealedStats: Ref<SealedStats | null> = ref<SealedStats | null>(null)
 const loading: Ref<boolean> = ref(true)
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -157,6 +270,15 @@ function completionPct(binder: BinderSummary): number {
 }
 
 /**
+ * Couleur d'un pourcentage de plus-value (vert si positif ou nul, rouge si perte).
+ * @param percent - Pourcentage de plus-value (peut être null).
+ * @returns Classe de couleur applicable.
+ */
+function gainTextClass(percent: number | null): string {
+  return (percent ?? 0) >= 0 ? 'text-(--app-green)' : 'text-(--app-red)'
+}
+
+/**
  * Ouvre la fiche d'une carte dans le drawer partagé.
  * @param cardId - Identifiant de la carte de collection.
  * @returns {void}
@@ -166,19 +288,36 @@ function openCard(cardId: number): void {
 }
 
 /**
- * Charge les stats de collection, les classeurs et les cartes les plus cotées.
+ * Ouvre la fiche d'un produit scellé dans le drawer partagé.
+ * @param sealedId - Identifiant du produit scellé.
+ * @returns {void}
+ */
+function openSealed(sealedId: number): void {
+  drawerStack.pushSealed(sealedId)
+}
+
+/**
+ * Charge les stats de collection, les classeurs, les plus-values et les produits scellés.
  * @returns Résolue après chargement.
  */
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [collection, binderList] = await Promise.all([listCollection(), listBinders()])
+    const [collection, binderList, sealed] = await Promise.all([listCollection(), listBinders(), listSealed()])
     stats.value = collection.stats
     topCards.value = [...collection.items]
       .filter((card) => card.market_price_eur != null)
       .sort((a, b) => (b.market_price_eur ?? 0) - (a.market_price_eur ?? 0))
       .slice(0, 5)
+    topGainers.value = [...collection.items]
+      .filter((card) => card.gain_percent != null)
+      .sort((a, b) => (b.gain_percent ?? 0) - (a.gain_percent ?? 0))
+      .slice(0, 5)
     binders.value = [...binderList].sort((a, b) => (b.estimated_value_eur ?? 0) - (a.estimated_value_eur ?? 0))
+    sealedStats.value = sealed.stats
+    topSealed.value = [...sealed.items]
+      .sort((a, b) => (b.market_price_eur ?? 0) - (a.market_price_eur ?? 0))
+      .slice(0, 6)
   } catch {
     toast.add({ title: 'Impossible de charger la collection', color: 'error' })
   } finally {
@@ -187,7 +326,7 @@ async function load(): Promise<void> {
 }
 
 watch(
-  () => drawerStack.cardMutationCounter.value,
+  () => [drawerStack.cardMutationCounter.value, drawerStack.sealedMutationCounter.value],
   () => {
     void load()
   },

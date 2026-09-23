@@ -40,13 +40,34 @@
         Changer la carte de cette pochette
       </UButton>
 
-      <!-- Prix marché -->
-      <div class="border-default rounded-xl border p-3">
-        <p class="app-label">Prix marché</p>
-        <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
-          {{ card.market_price_eur != null ? eur.format(card.market_price_eur) : '—' }}
+      <!-- Prix marché + plus-value -->
+      <div class="border-default space-y-3 rounded-xl border p-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <p class="app-label">Prix marché</p>
+            <p class="text-highlighted mt-0.5 text-xl font-semibold tabular-nums">
+              {{ card.market_price_eur != null ? eur.format(card.market_price_eur) : '—' }}
+            </p>
+          </div>
+          <div>
+            <p class="app-label">Plus-value</p>
+            <p
+              v-if="card.gain_percent != null"
+              class="mt-0.5 text-xl font-semibold tabular-nums"
+              :class="card.gain_percent >= 0 ? 'text-(--app-green)' : 'text-(--app-red)'"
+            >
+              {{ formatSignedPercent(card.gain_percent) }}
+            </p>
+            <p v-else class="text-muted mt-0.5 text-xl">—</p>
+          </div>
+        </div>
+        <p v-if="card.purchase_price_eur != null" class="text-muted text-xs">
+          Acheté {{ eur.format(card.purchase_price_eur) }}
+          <template v-if="card.gain_eur != null">
+            · {{ card.gain_eur >= 0 ? '+' : '' }}{{ eur.format(card.gain_eur) }} sur {{ card.quantity }} ex.
+          </template>
         </p>
-        <p v-if="card.market_price_eur != null" class="text-muted mt-0.5 text-xs">
+        <p v-else-if="card.market_price_eur != null" class="text-muted text-xs">
           Cardmarket · {{ eur.format(lineMarketEur) }} pour {{ card.quantity }} exemplaire(s)
         </p>
         <UButton
@@ -57,7 +78,6 @@
           variant="subtle"
           size="xs"
           icon="i-lucide-external-link"
-          class="mt-2"
         >
           Voir sur Cardmarket
         </UButton>
@@ -89,6 +109,9 @@
             />
           </UFormField>
         </div>
+        <UFormField label="Prix d'achat (€)" hint="pour suivre ta plus-value">
+          <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
+        </UFormField>
         <div class="flex items-end gap-2">
           <UFormField
             label="Prix marché (€)"
@@ -183,7 +206,7 @@ import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composa
 import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
-import { parseEuroAmount } from '~/utils/sealedProducts'
+import { formatSignedPercent, parseEuroAmount } from '~/utils/sealedProducts'
 import { hasJapanese, readableSetLabel } from '~/utils/cards/readableSet'
 
 /**
@@ -241,6 +264,7 @@ const languageItems = [
 const quantityDraft = ref(1)
 const languageDraft = ref('fr')
 const notesDraft = ref('')
+const purchaseText = ref('')
 const marketText = ref('')
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -274,6 +298,8 @@ const isDirty = computed<boolean>(() => {
     quantityDraft.value !== current.quantity ||
     languageDraft.value !== current.language ||
     notesDraft.value.trim() !== (current.notes ?? '') ||
+    (purchaseText.value.trim() || '') !==
+      (current.purchase_price_eur != null ? String(current.purchase_price_eur) : '') ||
     (marketText.value.trim() || '') !== (current.market_price_eur != null ? String(current.market_price_eur) : '')
   )
 })
@@ -304,6 +330,7 @@ function syncDrafts(c: CollectionCard): void {
   quantityDraft.value = c.quantity
   languageDraft.value = c.language
   notesDraft.value = c.notes ?? ''
+  purchaseText.value = c.purchase_price_eur != null ? String(c.purchase_price_eur) : ''
   marketText.value = c.market_price_eur != null ? String(c.market_price_eur) : ''
 }
 
@@ -353,6 +380,7 @@ async function onSaveDraft(): Promise<void> {
       quantity: quantityDraft.value,
       language: languageDraft.value,
       notes: notesDraft.value.trim() || null,
+      purchase_price_eur: parseEuroAmount(purchaseText.value),
       market_price_eur: parseEuroAmount(marketText.value),
     })
     card.value = updated

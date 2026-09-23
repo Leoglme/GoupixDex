@@ -8,6 +8,7 @@ Lean storage: card identity + language + quantity. Pricing / condition stay on
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -104,6 +105,8 @@ def add_to_collection(
             existing.quantity = int(existing.quantity) + int(body.quantity)
         if body.notes:
             existing.notes = body.notes.strip() or existing.notes
+        if body.purchase_price_eur is not None:
+            existing.purchase_price_eur = Decimal(str(round(body.purchase_price_eur, 2)))
         collection_card_service.apply_market_price(
             existing,
             cardmarket_id_product=meta["cardmarket_id_product"],
@@ -131,6 +134,9 @@ def add_to_collection(
         language=meta["language"],
         image_url=meta["image_url"],
         quantity=int(body.quantity),
+        purchase_price_eur=(
+            Decimal(str(round(body.purchase_price_eur, 2))) if body.purchase_price_eur is not None else None
+        ),
         notes=(body.notes.strip() if body.notes else None),
     )
     collection_card_service.apply_market_price(
@@ -188,6 +194,7 @@ def patch_collection_card(
         quantity=body.quantity,
         language=body.language,
         notes=body.notes,
+        purchase_price_eur=body.purchase_price_eur,
         market_price_eur=body.market_price_eur,
         reset_market_price=body.reset_market_price,
     )

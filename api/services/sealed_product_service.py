@@ -15,6 +15,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from models.sealed_product import SealedProduct
+from services.collection_gain import gain_fields
 
 
 def list_sealed_for_user(
@@ -72,28 +73,6 @@ def find_by_cardmarket_id_product(db: Session, user_id: int, id_product: int) ->
     )
 
 
-def _gain_fields(
-    market_price_eur: Decimal | None,
-    purchase_price_eur: Decimal | None,
-    quantity: int,
-) -> dict[str, Any]:
-    """Calcule les champs de gain (valeur ligne, gain absolu et pourcentage) pour la fiche."""
-    line_market = float(market_price_eur) * quantity if market_price_eur is not None else None
-    line_purchase = float(purchase_price_eur) * quantity if purchase_price_eur is not None else None
-    gain_eur: float | None = None
-    gain_percent: float | None = None
-    if market_price_eur is not None and purchase_price_eur is not None:
-        gain_eur = round((float(market_price_eur) - float(purchase_price_eur)) * quantity, 2)
-        if float(purchase_price_eur) > 0:
-            gain_percent = round((float(market_price_eur) / float(purchase_price_eur) - 1.0) * 100.0, 1)
-    return {
-        "line_market_eur": round(line_market, 2) if line_market is not None else None,
-        "line_purchase_eur": round(line_purchase, 2) if line_purchase is not None else None,
-        "gain_eur": gain_eur,
-        "gain_percent": gain_percent,
-    }
-
-
 def sealed_product_to_dict(product: SealedProduct) -> dict[str, Any]:
     """Forme JSON consommée par le front (snake_case), gain inclus."""
     quantity = int(product.quantity)
@@ -114,7 +93,7 @@ def sealed_product_to_dict(product: SealedProduct) -> dict[str, Any]:
         "market_price_updated_at": (
             product.market_price_updated_at.isoformat() if product.market_price_updated_at is not None else None
         ),
-        **_gain_fields(product.market_price_eur, product.purchase_price_eur, quantity),
+        **gain_fields(product.market_price_eur, product.purchase_price_eur, quantity),
         "created_at": product.created_at.isoformat(),
         "updated_at": product.updated_at.isoformat(),
     }

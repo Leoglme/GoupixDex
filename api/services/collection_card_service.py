@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from models.collection_card import CollectionCard
 from services.cardmarket_local_price_service import resolve_market_price_eur
+from services.collection_gain import gain_fields
 
 
 def list_collection_for_user(
@@ -71,7 +72,8 @@ def get_collection_card(
 
 
 def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
-    """JSON shape used by the front-end (snake_case)."""
+    """JSON shape used by the front-end (snake_case), plus-value incluse."""
+    quantity = int(card.quantity)
     return {
         "id": card.id,
         "tcgdex_card_id": card.tcgdex_card_id,
@@ -86,8 +88,9 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "rarity": card.rarity,
         "language": card.language,
         "image_url": card.image_url,
-        "quantity": int(card.quantity),
+        "quantity": quantity,
         "is_placeholder": bool(card.is_placeholder),
+        "purchase_price_eur": float(card.purchase_price_eur) if card.purchase_price_eur is not None else None,
         "notes": card.notes,
         "article_id": card.article_id,
         "cardmarket_id_product": card.cardmarket_id_product,
@@ -96,6 +99,7 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "market_price_updated_at": (
             card.market_price_updated_at.isoformat() if card.market_price_updated_at is not None else None
         ),
+        **gain_fields(card.market_price_eur, card.purchase_price_eur, quantity),
         "created_at": card.created_at.isoformat(),
         "updated_at": card.updated_at.isoformat(),
     }
@@ -158,6 +162,7 @@ def update_collection_card(
     quantity: int | None = None,
     language: str | None = None,
     notes: str | None = None,
+    purchase_price_eur: float | None = None,
     market_price_eur: float | None = None,
     reset_market_price: bool = False,
 ) -> CollectionCard:
@@ -170,6 +175,8 @@ def update_collection_card(
             card.language = lang
     if notes is not None:
         card.notes = notes.strip() or None
+    if purchase_price_eur is not None:
+        card.purchase_price_eur = Decimal(str(round(float(purchase_price_eur), 2)))
     if reset_market_price:
         card.market_price_overridden = False
         auto_price = resolve_market_price_eur(card.cardmarket_id_product, None)
@@ -184,7 +191,7 @@ def update_collection_card(
 
 
 def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
-    """High-level counters for the dashboard header (unique cards, quantity, sets)."""
+    """High-level counters for the dashboard header (unique cards, quantity, sets, plus-value)."""
     if not rows:
         return {
             "unique_cards": 0,
@@ -194,6 +201,10 @@ def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
             "with_article": 0,
             "estimated_value_eur": 0.0,
             "priced_cards": 0,
+            "purchase_value_eur": 0.0,
+            "gain_eur": 0.0,
+            "gain_percent": None,
+            "invested_cards": 0,
         }
     languages: dict[str, int] = {}
     sets: set[str] = set()
@@ -201,16 +212,30 @@ def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
     with_article = 0
     estimated_value = Decimal("0")
     priced_cards = 0
+    purchase_value = Decimal("0")
+    gain_basis_purchase = Decimal("0")
+    gain_eur = Decimal("0")
+    invested_cards = 0
     for r in rows:
-        languages[r.language] = languages.get(r.language, 0) + int(r.quantity)
+        qty = int(r.quantity)
+        languages[r.language] = languages.get(r.language, 0) + qty
         if r.tcgdex_set_id:
             sets.add(r.tcgdex_set_id)
-        total_quantity += int(r.quantity)
+        total_quantity += qty
         if r.article_id is not None:
             with_article += 1
         if r.market_price_eur is not None:
-            estimated_value += Decimal(r.market_price_eur) * int(r.quantity)
+            estimated_value += Decimal(r.market_price_eur) * qty
             priced_cards += 1
+        if r.purchase_price_eur is not None:
+            purchase_value += Decimal(r.purchase_price_eur) * qty
+            invested_cards += 1
+        if r.market_price_eur is not None and r.purchase_price_eur is not None:
+            gain_eur += (Decimal(r.market_price_eur) - Decimal(r.purchase_price_eur)) * qty
+            gain_basis_purchase += Decimal(r.purchase_price_eur) * qty
+    gain_percent = (
+        round(float(gain_eur) / float(gain_basis_purchase) * 100.0, 1) if gain_basis_purchase > 0 else None
+    )
     return {
         "unique_cards": len(rows),
         "total_quantity": total_quantity,
@@ -219,4 +244,8 @@ def aggregate_collection_stats(rows: list[CollectionCard]) -> dict[str, Any]:
         "with_article": with_article,
         "estimated_value_eur": float(estimated_value),
         "priced_cards": priced_cards,
+        "purchase_value_eur": float(purchase_value),
+        "gain_eur": round(float(gain_eur), 2),
+        "gain_percent": gain_percent,
+        "invested_cards": invested_cards,
     }

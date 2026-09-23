@@ -52,6 +52,8 @@ class CollectionCard(Base):
     language: Mapped[str] = mapped_column(String(8), default="fr", server_default="fr")
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer(), default=1, server_default="1")
+    #: Prix d'achat unitaire payé, saisi par l'utilisateur (base du pourcentage de plus-value).
+    purchase_price_eur: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     #: True when the row exists only to fill a binder slot (not owned physically).
     is_placeholder: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text(), nullable=True)

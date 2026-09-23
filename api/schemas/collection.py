@@ -11,6 +11,8 @@ class CollectionCardAddBody(BaseModel):
     tcgdex_card_id: str = Field(..., min_length=3, max_length=120)
     language: str = Field("fr", min_length=2, max_length=8)
     quantity: int = Field(1, ge=1, le=999)
+    #: Prix d'achat unitaire payé, optionnel (base du pourcentage de plus-value).
+    purchase_price_eur: float | None = Field(default=None, ge=0, le=1000000)
     notes: str | None = Field(default=None, max_length=2000)
 
 
@@ -19,6 +21,8 @@ class CollectionCardUpdateBody(BaseModel):
 
     quantity: int | None = Field(default=None, ge=1, le=999)
     language: str | None = Field(default=None, min_length=2, max_length=8)
+    #: Prix d'achat unitaire payé, optionnel (base du pourcentage de plus-value).
+    purchase_price_eur: float | None = Field(default=None, ge=0, le=1000000)
     notes: str | None = Field(default=None, max_length=2000)
     #: Prix marché saisi à la main (corrige un mapping Cardmarket TCGdex erroné, fréquent en JP).
     market_price_eur: float | None = Field(default=None, ge=0, le=1000000)
