@@ -20,18 +20,10 @@ jobs:
           envs: ITEMS_B64,APPLY,DEPLOY_API_DIR
           script_stop: true
           script: |
-            set -uo pipefail
+            set -euo pipefail
             APP_ROOT="${DEPLOY_API_DIR%/}/api"
             TMP="$(mktemp)"; printf '%s' "$ITEMS_B64" | base64 -d > "$TMP"
-            echo "decoded bytes: $(wc -c < "$TMP")"
-            echo "payload head: $(head -c 160 "$TMP")"
-            echo "python: $("$APP_ROOT/.venv/bin/python" --version 2>&1)"
-            FLAG="--dry-run"; [ "${APPLY}" = "true" ] && FLAG=""
-            "$APP_ROOT/.venv/bin/python" -u "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG > /tmp/imp_out.txt 2>&1
-            RC=$?
-            echo "exit code: $RC"
-            echo "----- script output -----"
-            cat /tmp/imp_out.txt
-            echo "----- end output -----"
-            rm -f "$TMP" /tmp/imp_out.txt
-            exit "$RC"
+            # `if` (et non `[ ] && …`) : sous script_stop, une condition fausse ferait échouer l'étape avant l'exécution.
+            if [ "${APPLY}" = "true" ]; then FLAG=""; else FLAG="--dry-run"; fi
+            cd "$APP_ROOT"; "$APP_ROOT/.venv/bin/python" -u "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG
+            rm -f "$TMP"
