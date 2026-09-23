@@ -21,9 +21,22 @@ export type GoupixSealedDrawerEntry = {
   sealedId: number
 }
 
+/** Pochette d'un classeur d'où une carte a été ouverte (permet le bouton « Changer la carte »). */
+export type GoupixBinderPocketRef = {
+  binderId: number
+  position: number
+}
+
 export type GoupixCardDrawerEntry = {
   kind: 'card'
   cardId: number
+  /** Présent quand la carte est ouverte depuis une pochette de classeur (drawer pages/grille). */
+  pocket?: GoupixBinderPocketRef
+}
+
+/** Demande d'ouverture du sélecteur de carte pour une pochette (émise depuis un drawer). */
+export type GoupixPocketPickerRequest = GoupixBinderPocketRef & {
+  nonce: number
 }
 
 export type GoupixSealedCatalogDrawerEntry = {

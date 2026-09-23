@@ -48,7 +48,7 @@
                 @card-up="onCardUp"
                 @card-cancel="onCardCancel"
                 @remove="remove"
-                @detail="detail = $event"
+                @detail="onCardDetail"
               />
               <div
                 aria-hidden
@@ -128,7 +128,7 @@
                 @card-up="onCardUp"
                 @card-cancel="onCardCancel"
                 @remove="remove"
-                @detail="detail = $event"
+                @detail="onCardDetail"
               />
             </template>
           </template>
@@ -229,46 +229,6 @@
       :has-collection-candidates="candidates.length > 0"
       @pick="place"
     />
-
-    <GoupixDexDialogModal
-      v-model:open="detailOpen"
-      :title="detailDex?.pokemonName ?? detail?.card_name ?? 'Carte'"
-      width-class="max-w-md"
-    >
-      <template v-if="detail">
-        <div class="card-tile mx-auto aspect-[63/88] max-w-[240px]">
-          <GoupixDexBinderCardImage
-            :src="detail.image_url || limitlessCardImageUrl(detail.tcgdex_card_id)"
-            :alt="detail.card_name"
-            :fallback-src="detailDex?.artworkUrl ?? null"
-          />
-        </div>
-        <p class="text-muted mt-3 text-center text-sm">
-          {{ detail.card_name }} · {{ detail.set_name }} · {{ detail.local_id }}
-        </p>
-        <div class="mt-5 flex flex-col gap-2">
-          <NuxtLink
-            v-if="hrefBase && detail.kind === 'owned'"
-            :to="`${hrefBase}${detail.collection_card_id}`"
-            class="dialog-btn-secondary text-center no-underline"
-            @click="detail = null"
-          >
-            Voir dans ma collection
-          </NuxtLink>
-          <p v-else-if="detail.kind === 'wanted'" class="text-muted text-center text-sm">
-            Carte du catalogue — pas encore dans ta collection physique.
-          </p>
-          <button
-            v-if="!readOnly && detail.position != null"
-            type="button"
-            class="dialog-btn-primary"
-            @click="openPickerFromDetail"
-          >
-            Changer la carte de cette pochette
-          </button>
-        </div>
-      </template>
-    </GoupixDexDialogModal>
   </div>
 </template>
 
@@ -293,8 +253,7 @@ import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
 import { binderStyle } from '~/utils/binder/binder-styles'
 import { coverImageResolver, coverLayout, renderCover } from '~/utils/binder/binder-cover'
-import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
-import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
+import type { GoupixPocketPickerRequest } from '~/types/GoupixDrawerStack'
 
 const props = withDefaults(
   defineProps<{
@@ -377,6 +336,7 @@ const previewComplete = computed(() => props.previewComplete)
 const bindersApi = useBinders()
 const { searchCatalogCards } = useCardCatalog()
 const toast = useToast()
+const drawerStack = useGoupixDrawerStack()
 const catalogHits = ref<CatalogSearchCardHit[]>([])
 const catalogSearching = ref(false)
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null
@@ -432,7 +392,10 @@ function attachSpreadMeasure() {
   measureSpread()
 }
 
-onMounted(attachSpreadMeasure)
+onMounted(() => {
+  attachSpreadMeasure()
+  handlePocketPickerRequest(drawerStack.pocketPickerRequest.value)
+})
 watch(spreadEl, attachSpreadMeasure)
 onUnmounted(teardownSpreadMeasure)
 
@@ -562,14 +525,28 @@ const placedCollectionIds = computed(() => {
   return ids
 })
 
-function openPickerFromDetail(): void {
-  const position = detail.value?.position
-  if (position == null) {
-    return
-  }
-  detail.value = null
-  openPicker(position)
+/**
+ * Ouvre la carte d'une pochette dans le drawer partagé, avec le contexte de la pochette.
+ * @param item - Pochette cliquée (carte possédée ou manquante).
+ * @returns {void}
+ */
+function onCardDetail(item: BinderPocketItem): void {
+  drawerStack.pushCard(item.collection_card_id, { binderId: props.binder.id, position: item.position ?? -1 })
 }
+
+/**
+ * Ouvre le sélecteur de carte quand un drawer de ce classeur demande à recomposer une pochette.
+ * @param request - Requête pochette (classeur + position), ou `null`.
+ * @returns {void}
+ */
+function handlePocketPickerRequest(request: GoupixPocketPickerRequest | null): void {
+  if (request && request.binderId === props.binder.id) {
+    openPicker(request.position)
+    drawerStack.pocketPickerRequest.value = null
+  }
+}
+
+watch(() => drawerStack.pocketPickerRequest.value, handlePocketPickerRequest)
 
 function openPicker(pocket: number) {
   picker.value = pocket
@@ -649,18 +626,6 @@ async function changePageCount(next: number) {
     toast.add({ title: 'Pages non enregistrées', color: 'error' })
   }
 }
-
-const detail = ref<BinderPocketItem | null>(null)
-const detailDex = computed(() => {
-  const dexNumber = detail.value?.position != null ? pokedexSlots.value?.[String(detail.value.position)] : undefined
-  return dexNumber ? pokedexPlaceholder(dexNumber) : null
-})
-const detailOpen = computed({
-  get: () => detail.value != null,
-  set: (v) => {
-    if (!v) detail.value = null
-  },
-})
 
 const drag = ref<Drag | null>(null)
 const dragItem = computed(() => (drag.value ? (itemById.value.get(drag.value.id) ?? null) : null))

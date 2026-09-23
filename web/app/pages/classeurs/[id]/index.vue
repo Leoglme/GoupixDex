@@ -304,8 +304,8 @@ const viewMode = computed({
     if (route.query.vue === 'valeurs') {
       return 'valeurs'
     }
-    // Un classeur de complétion s'affiche mieux en grille (toutes les cases visibles) : vue par défaut.
-    return binder.value?.pokedex_region ? 'grille' : 'pages'
+    // Ouvrir toujours sur le premier onglet (Pages) par défaut.
+    return 'pages'
   },
   set: (v: BinderViewMode) => {
     void router.replace({ query: { ...route.query, vue: v } })
@@ -470,12 +470,12 @@ function onBinderUpdated(detail: BinderDetail) {
 }
 
 /**
- * Ouvre la fiche (drawer) d'une carte du classeur : image, prix, lien Cardmarket.
+ * Ouvre la fiche (drawer) d'une carte du classeur : image, prix, lien Cardmarket, changer la carte.
  * @param item - Pochette cliquée (carte possédée ou manquante).
  * @returns {void}
  */
 function openCardDetail(item: BinderPocketItem): void {
-  drawerStack.pushCard(item.collection_card_id)
+  drawerStack.pushCard(item.collection_card_id, { binderId: id.value, position: item.position ?? -1 })
 }
 
 async function submitRename() {
@@ -526,6 +526,16 @@ watch(
   () => drawerStack.cardMutationCounter.value,
   () => {
     void load()
+  },
+)
+
+// « Changer la carte » demandé depuis un drawer en mode Grille : basculer sur Pages (où vit le sélecteur).
+watch(
+  () => drawerStack.pocketPickerRequest.value,
+  (request) => {
+    if (request && request.binderId === id.value && viewMode.value !== 'pages') {
+      viewMode.value = 'pages'
+    }
   },
 )
 

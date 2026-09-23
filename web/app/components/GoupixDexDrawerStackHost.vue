@@ -33,10 +33,12 @@
     :header-title="cardHeaderTitle"
     :header-subtitle="cardHeaderSubtitle"
     :show-back="hasPrevious"
+    :pocket="cardEntry?.pocket ?? null"
     @close="drawerStack.closeAll()"
     @back="drawerStack.back()"
     @updated="onCardUpdated"
     @deleted="onCardDeleted"
+    @change-card="onCardChangeRequested"
   />
 
   <GoupixDexSealedCatalogPreviewDrawer
@@ -250,6 +252,19 @@ function onCardUpdated(card: CollectionCard): void {
 function onCardDeleted(cardId: number): void {
   drawerStack.notifyCardDeleted(cardId)
   drawerStack.back()
+}
+
+/**
+ * « Changer la carte de cette pochette » : ferme le drawer et demande le sélecteur au classeur ouvert.
+ * @returns {void}
+ */
+function onCardChangeRequested(): void {
+  const pocket = cardEntry.value?.pocket
+  if (!pocket) {
+    return
+  }
+  drawerStack.closeAll()
+  drawerStack.requestPocketPicker(pocket)
 }
 
 watch(

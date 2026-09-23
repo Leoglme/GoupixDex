@@ -48,8 +48,10 @@
           <GoupixDexCollectionCardDetailBody
             :key="cardId"
             :card-id="cardId"
+            :pocket="pocket"
             @updated="(c) => emit('updated', c)"
             @deleted="(id) => emit('deleted', id)"
+            @change-card="emit('change-card')"
           />
         </div>
       </div>
@@ -58,28 +60,25 @@
 </template>
 
 <script setup lang="ts">
+import type { PropType } from 'vue'
 import type { CollectionCard } from '~/composables/useCollection'
+import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 
-withDefaults(
-  defineProps<{
-    open: boolean
-    cardId: number | null
-    headerTitle?: string
-    headerSubtitle?: string
-    showBack?: boolean
-  }>(),
-  {
-    headerTitle: 'Carte de collection',
-    headerSubtitle: '',
-    showBack: false,
-  },
-)
+defineProps({
+  open: { type: Boolean, default: false },
+  cardId: { type: Number as PropType<number | null>, default: null },
+  headerTitle: { type: String, default: 'Carte de collection' },
+  headerSubtitle: { type: String, default: '' },
+  showBack: { type: Boolean, default: false },
+  pocket: { type: Object as PropType<GoupixBinderPocketRef | null>, default: null },
+})
 
 const emit = defineEmits<{
   close: []
   back: []
   updated: [card: CollectionCard]
   deleted: [cardId: number]
+  'change-card': []
 }>()
 </script>
 

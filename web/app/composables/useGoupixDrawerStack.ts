@@ -2,9 +2,11 @@ import type { Ref } from 'vue'
 import type { SealedCatalogProduct } from '~/composables/useSealedCatalog'
 import type {
   GoupixArticleMutationNotice,
+  GoupixBinderPocketRef,
   GoupixCardMutationNotice,
   GoupixCatalogCardRef,
   GoupixDrawerStackEntry,
+  GoupixPocketPickerRequest,
   GoupixSealedMutationNotice,
 } from '~/types/GoupixDrawerStack'
 
@@ -24,6 +26,7 @@ export function useGoupixDrawerStack() {
   const lastSealedMutation = useState<GoupixSealedMutationNotice | null>('goupix-drawer-sealed-mutation', () => null)
   const cardMutationCounter = useState<number>('goupix-drawer-card-mutation-counter', () => 0)
   const lastCardMutation = useState<GoupixCardMutationNotice | null>('goupix-drawer-card-mutation', () => null)
+  const pocketPickerRequest = useState<GoupixPocketPickerRequest | null>('goupix-drawer-pocket-picker', () => null)
 
   /**
    *
@@ -95,9 +98,18 @@ export function useGoupixDrawerStack() {
   /**
    * Ouvre (ou remplace le sommet par) la fiche d'une carte de collection.
    * @param cardId - Identifiant de la carte de collection.
+   * @param pocket - Pochette de classeur d'origine (active le bouton « Changer la carte »).
    */
-  function pushCard(cardId: number): void {
-    push({ kind: 'card', cardId })
+  function pushCard(cardId: number, pocket?: GoupixBinderPocketRef): void {
+    push(pocket ? { kind: 'card', cardId, pocket } : { kind: 'card', cardId })
+  }
+
+  /**
+   * Demande d'ouvrir le sélecteur de carte pour une pochette (consommée par le classeur ouvert).
+   * @param pocket - Classeur + position de la pochette à recomposer.
+   */
+  function requestPocketPicker(pocket: GoupixBinderPocketRef): void {
+    pocketPickerRequest.value = { ...pocket, nonce: Date.now() }
   }
 
   /**
@@ -194,10 +206,12 @@ export function useGoupixDrawerStack() {
     lastSealedMutation,
     cardMutationCounter,
     lastCardMutation,
+    pocketPickerRequest,
     push,
     pushArticle,
     pushSealed,
     pushCard,
+    requestPocketPicker,
     pushSealedCatalog,
     pushCatalogCard,
     back,

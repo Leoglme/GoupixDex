@@ -35,6 +35,11 @@
         </div>
       </div>
 
+      <!-- Changer la carte (uniquement quand ouverte depuis une pochette de classeur) -->
+      <UButton v-if="pocket" color="primary" variant="soft" icon="i-lucide-replace" block @click="emit('change-card')">
+        Changer la carte de cette pochette
+      </UButton>
+
       <!-- Prix marché -->
       <div class="border-default rounded-xl border p-3">
         <p class="app-label">Prix marché</p>
@@ -173,7 +178,9 @@
 </template>
 
 <script setup lang="ts">
+import type { PropType } from 'vue'
 import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
+import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { parseEuroAmount } from '~/utils/sealedProducts'
@@ -187,11 +194,16 @@ const props = defineProps({
     type: Number,
     required: true,
   },
+  pocket: {
+    type: Object as PropType<GoupixBinderPocketRef | null>,
+    default: null,
+  },
 })
 
 const emit = defineEmits<{
   updated: [card: CollectionCard]
   deleted: [cardId: number]
+  'change-card': []
 }>()
 
 const {
