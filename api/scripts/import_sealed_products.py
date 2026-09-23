@@ -89,10 +89,11 @@ def main() -> None:
 
         print(f"\n--- À créer : {len(items)} ---")
         for item in items:
+            tags = ("[cm]" if item.get("cardmarket_id_product") else "") + ("[img]" if item.get("image_url") else "")
             print(
                 f"  {item['name']} · {item.get('edition') or '—'} · {item['product_type']}"
                 f" · achat {float(item['purchase_price_eur']):.2f} €"
-                f" · marché {float(item['market_price_eur']):.2f} €"
+                f" · marché {float(item['market_price_eur']):.2f} € {tags}"
             )
 
         if args.dry_run:
@@ -104,6 +105,8 @@ def main() -> None:
         db.commit()
 
         for item in items:
+            id_product = item.get("cardmarket_id_product")
+            id_product = int(id_product) if id_product is not None else None
             sealed_product_service.create_sealed_product(
                 db,
                 user.id,
@@ -114,8 +117,8 @@ def main() -> None:
                 quantity=int(item.get("quantity", 1)),
                 purchase_price_eur=float(item["purchase_price_eur"]),
                 notes=None,
-                image_url=None,
-                cardmarket_id_product=None,
+                image_url=item.get("image_url"),
+                cardmarket_id_product=id_product,
                 cardmarket_url=None,
                 market_price_eur=float(item["market_price_eur"]),
             )
