@@ -1,0 +1,28 @@
+# One-shot manuel : remplace les produits scellés de l'utilisateur sur le VPS (prod). À supprimer après usage.
+name: One-shot — sealed products import
+on:
+  workflow_dispatch:
+    inputs:
+      items_b64: { description: 'base64 du JSON des scellés', required: true }
+      apply: { description: 'true = écrit ; false = dry-run', required: true, default: 'false' }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run script over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env: { ITEMS_B64: '${{ inputs.items_b64 }}', APPLY: '${{ inputs.apply }}', DEPLOY_API_DIR: '${{ secrets.DEPLOY_API_DIR }}' }
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: ITEMS_B64,APPLY,DEPLOY_API_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_ROOT="${DEPLOY_API_DIR%/}/api"
+            TMP="$(mktemp)"; printf '%s' "$ITEMS_B64" | base64 -d > "$TMP"
+            FLAG="--dry-run"; [ "${APPLY}" = "true" ] && FLAG=""
+            cd "$APP_ROOT"; "$APP_ROOT/.venv/bin/python" "$APP_ROOT/scripts/import_sealed_products.py" --file "$TMP" $FLAG
+            rm -f "$TMP"
