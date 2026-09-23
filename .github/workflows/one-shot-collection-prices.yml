@@ -1,0 +1,44 @@
+# One-shot manuel : renseigne les prix d'achat des cartes de collection sur le VPS (prod).
+# Le script api/scripts/set_purchase_prices.py doit déjà être déployé (arrive via un déploiement api/**).
+# Données passées en base64 (inputs.prices_b64) pour éviter tout souci de quoting shell. À supprimer après usage.
+name: One-shot — collection purchase prices
+
+on:
+  workflow_dispatch:
+    inputs:
+      prices_b64:
+        description: 'base64 du JSON [{set, number, price}]'
+        required: true
+      apply:
+        description: 'true = écrit en base ; false = dry-run'
+        required: true
+        default: 'false'
+
+jobs:
+  run:
+    name: Set purchase prices on VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run script over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PRICES_B64: ${{ inputs.prices_b64 }}
+          APPLY: ${{ inputs.apply }}
+          DEPLOY_API_DIR: ${{ secrets.DEPLOY_API_DIR }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: PRICES_B64,APPLY,DEPLOY_API_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_ROOT="${DEPLOY_API_DIR%/}/api"
+            TMP="$(mktemp)"
+            printf '%s' "$PRICES_B64" | base64 -d > "$TMP"
+            FLAG="--dry-run"
+            if [ "${APPLY}" = "true" ]; then FLAG=""; fi
+            cd "$APP_ROOT"
+            "$APP_ROOT/.venv/bin/python" "$APP_ROOT/scripts/set_purchase_prices.py" --file "$TMP" $FLAG
+            rm -f "$TMP"
