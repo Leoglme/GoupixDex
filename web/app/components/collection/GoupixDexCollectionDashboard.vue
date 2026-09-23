@@ -43,7 +43,7 @@
 
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- Meilleurs investissements -->
-        <UCard>
+        <UCard :ui="cardUi">
           <template #header>
             <div class="flex items-center justify-between gap-2">
               <p class="text-highlighted text-sm font-medium">Meilleurs investissements</p>
@@ -60,10 +60,10 @@
             <li v-for="card in topGainers" :key="card.id">
               <button
                 type="button"
-                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
+                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors"
                 @click="openCard(card.id)"
               >
-                <span class="bg-muted/20 aspect-[63/88] w-8 shrink-0 overflow-hidden rounded">
+                <span class="bg-muted/20 aspect-[63/88] w-10 shrink-0 overflow-hidden rounded">
                   <GoupixDexCardImage
                     :image-url="card.image_url"
                     :tcgdex-card-id="card.tcgdex_card_id"
@@ -93,7 +93,7 @@
         </UCard>
 
         <!-- Cartes les plus cotées -->
-        <UCard>
+        <UCard :ui="cardUi">
           <template #header>
             <p class="text-highlighted text-sm font-medium">Cartes les plus cotées</p>
           </template>
@@ -101,10 +101,10 @@
             <li v-for="card in topCards" :key="card.id">
               <button
                 type="button"
-                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
+                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors"
                 @click="openCard(card.id)"
               >
-                <span class="bg-muted/20 aspect-[63/88] w-8 shrink-0 overflow-hidden rounded">
+                <span class="bg-muted/20 aspect-[63/88] w-10 shrink-0 overflow-hidden rounded">
                   <GoupixDexCardImage
                     :image-url="card.image_url"
                     :tcgdex-card-id="card.tcgdex_card_id"
@@ -127,18 +127,25 @@
         </UCard>
 
         <!-- Classeurs -->
-        <UCard>
+        <UCard :ui="cardUi">
           <template #header>
             <div class="flex items-center justify-between gap-2">
-              <p class="text-highlighted text-sm font-medium">Classeurs</p>
-              <NuxtLink to="/classeurs" class="text-primary text-xs underline underline-offset-2"> Tous </NuxtLink>
+              <div class="flex min-w-0 items-center gap-2">
+                <p class="text-highlighted text-sm font-medium">Classeurs</p>
+                <UBadge v-if="binders.length" color="neutral" variant="subtle" size="sm" class="shrink-0 tabular-nums">
+                  {{ binders.length }}
+                </UBadge>
+              </div>
+              <NuxtLink to="/classeurs" class="text-primary shrink-0 text-xs underline underline-offset-2">
+                Tous
+              </NuxtLink>
             </div>
           </template>
           <ul v-if="binders.length" class="space-y-2.5">
             <li v-for="binder in binders" :key="binder.id">
               <NuxtLink
                 :to="`/classeurs/${binder.id}`"
-                class="hover:bg-elevated/50 block rounded-lg px-2.5 py-2 transition-colors"
+                class="hover:bg-elevated/50 block rounded-lg px-2 py-2 transition-colors"
               >
                 <div class="flex items-center justify-between gap-3">
                   <span class="text-highlighted min-w-0 truncate text-sm font-medium">{{ binder.name }}</span>
@@ -164,12 +171,26 @@
         </UCard>
 
         <!-- Produits scellés -->
-        <UCard>
+        <UCard :ui="cardUi">
           <template #header>
             <div class="flex items-center justify-between gap-2">
-              <p class="text-highlighted text-sm font-medium">Produits scellés</p>
-              <span v-if="sealedStats && sealedStats.unique_products > 0" class="text-muted text-xs tabular-nums">
-                {{ numberFmt.format(sealedStats.unique_products) }} · {{ eur.format(sealedStats.estimated_market_eur) }}
+              <div class="flex min-w-0 items-center gap-2">
+                <p class="text-highlighted text-sm font-medium">Produits scellés</p>
+                <UBadge
+                  v-if="sealedStats && sealedStats.unique_products > 0"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                  class="shrink-0 tabular-nums"
+                >
+                  {{ numberFmt.format(sealedStats.unique_products) }}
+                </UBadge>
+              </div>
+              <span
+                v-if="sealedStats && sealedStats.estimated_market_eur > 0"
+                class="text-muted shrink-0 text-xs tabular-nums"
+              >
+                {{ eur.format(sealedStats.estimated_market_eur) }}
               </span>
             </div>
           </template>
@@ -177,10 +198,12 @@
             <li v-for="product in topSealed" :key="product.id">
               <button
                 type="button"
-                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left transition-colors"
+                class="hover:bg-elevated/50 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors"
                 @click="openSealed(product.id)"
               >
-                <span class="bg-muted/20 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded">
+                <span
+                  class="bg-muted/20 flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md"
+                >
                   <img
                     v-if="product.image_url"
                     :src="product.image_url"
@@ -189,7 +212,7 @@
                     referrerpolicy="no-referrer"
                     decoding="async"
                   />
-                  <UIcon v-else :name="sealedProductTypeIcon(product.product_type)" class="text-muted size-4" />
+                  <UIcon v-else :name="sealedProductTypeIcon(product.product_type)" class="text-muted size-6" />
                 </span>
                 <span class="min-w-0 flex-1">
                   <span class="text-highlighted block truncate text-sm font-medium">{{ product.name }}</span>
@@ -255,6 +278,12 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2,
 })
 const numberFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR')
+
+/** Padding resserré (surtout horizontal) des cartes de la collection, pour laisser plus de place au contenu. */
+const cardUi: { header: string; body: string } = {
+  header: 'px-4 py-3 sm:px-4',
+  body: 'px-2 py-2 sm:px-2.5',
+}
 
 /**
  * Pourcentage de complétion d'un classeur Pokédex (possédées / total).
