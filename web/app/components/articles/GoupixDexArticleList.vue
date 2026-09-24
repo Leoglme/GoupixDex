@@ -21,14 +21,12 @@
       </template>
     </UAlert>
 
-    <div v-if="loading && !filtered.length" class="app-card flex justify-center py-16">
+    <div v-if="loading && !articles.length" class="app-card flex justify-center py-16">
       <UIcon name="i-lucide-loader-circle" class="h-8 w-8 animate-spin text-[var(--app-accent)]" />
     </div>
 
-    <div v-else-if="!loading && !filtered.length" class="app-card px-6 py-12 text-center">
-      <p class="text-sm text-[var(--app-ink-soft)]">
-        {{ searchQuery.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun article.' }}
-      </p>
+    <div v-else-if="!loading && !articles.length" class="app-card px-6 py-12 text-center">
+      <p class="text-sm text-[var(--app-ink-soft)]">Aucun article.</p>
     </div>
 
     <div v-else class="app-card overflow-hidden">
@@ -48,188 +46,89 @@
         </div>
       </div>
 
-      <ul class="divide-y divide-[var(--app-line)] md:hidden">
-        <li v-for="row in paged" :key="`m-${row.id}`" class="flex gap-2 bg-[var(--app-surface)] p-3">
-          <button
-            type="button"
-            class="flex min-w-0 flex-1 gap-3 text-left transition-colors hover:opacity-95 active:opacity-90"
-            @click="onOpenArticleRow(row.id)"
-          >
-            <span
-              class="relative block h-[5.25rem] w-[3.75rem] shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
+      <div v-if="!filtered.length" class="px-6 py-12 text-center">
+        <p class="text-sm text-[var(--app-ink-soft)]">Aucun résultat pour cette recherche.</p>
+      </div>
+
+      <template v-else>
+        <ul class="divide-y divide-[var(--app-line)] md:hidden">
+          <li v-for="row in paged" :key="`m-${row.id}`" class="flex gap-2 bg-[var(--app-surface)] p-3">
+            <button
+              type="button"
+              class="flex min-w-0 flex-1 gap-3 text-left transition-colors hover:opacity-95 active:opacity-90"
+              @click="onOpenArticleRow(row.id)"
             >
-              <img
-                v-if="row.images?.length"
-                :src="imageSrc(row.images[0]?.image_url)"
-                :alt="row.title"
-                loading="lazy"
-                decoding="async"
-                class="absolute inset-0 h-full w-full object-cover"
-              />
               <span
-                v-else
-                class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
+                class="relative block h-[5.25rem] w-[3.75rem] shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
               >
-                {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
-              </span>
-            </span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm font-semibold text-[var(--app-ink)]">
-                {{ row.pokemon_name || row.title || '—' }}
-              </span>
-              <span
-                v-if="articleTableSecondaryLine(row)"
-                class="mt-0.5 block truncate text-xs text-[var(--app-ink-soft)]"
-                :title="row.title"
-              >
-                {{ articleTableSecondaryLine(row) }}
-              </span>
-              <span class="mt-1 block text-xs text-[var(--app-ink-soft)]">
-                <span v-if="row.set_code">{{ row.set_code }}</span>
-                <span v-if="row.set_code && row.card_number"> · </span>
-                <span v-if="row.card_number">#{{ row.card_number }}</span>
-                <span v-if="!row.set_code && !row.card_number">—</span>
-              </span>
-              <span class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs tabular-nums">
-                <span class="font-medium text-[var(--app-ink)]">{{ eur.format(row.purchase_price) }}</span>
-                <UIcon name="i-lucide-arrow-right" class="size-3 shrink-0 text-[var(--app-faint)]" aria-hidden="true" />
-                <span class="text-[var(--app-ink-soft)]">
-                  {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
-                </span>
-              </span>
-              <span
-                v-if="showSaleOutcomeColumns && realizedSalePrice(row) != null"
-                class="mt-1 block text-xs tabular-nums"
-              >
-                <span class="text-[var(--app-ink-soft)]">Réalisé </span>
-                <span class="font-medium text-[var(--app-ink)]">{{ eur.format(realizedSalePrice(row)!) }}</span>
-              </span>
-              <span class="mt-2 flex flex-wrap items-center gap-2">
-                <GoupixDexArticleListedMarketplaces
-                  :row="row"
-                  :show-vinted="vintedChannelEnabled"
-                  :show-ebay="showEbayColumn"
-                  :show-leboncoin="leboncoinPublishAvailable"
+                <img
+                  v-if="row.images?.length"
+                  :src="imageSrc(row.images[0]?.image_url)"
+                  :alt="row.title"
+                  loading="lazy"
+                  decoding="async"
+                  class="absolute inset-0 h-full w-full object-cover"
                 />
                 <span
-                  v-if="showSaleOutcomeColumns && row.is_sold"
-                  class="app-badge app-badge--success py-0 text-[10px]"
+                  v-else
+                  class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
                 >
-                  Vendu
+                  {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
                 </span>
               </span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="mt-1 size-4 shrink-0 self-start text-[var(--app-faint)]" />
-          </button>
-          <div class="flex shrink-0 flex-col items-center justify-start gap-2 pt-0.5">
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer accent-(--app-accent)"
-              :checked="isSelected(row.id)"
-              :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
-              @change="onToggleRowNative(row.id, $event)"
-            />
-            <UDropdownMenu :items="buildRowMenu(row)">
-              <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" size="xs" square />
-            </UDropdownMenu>
-          </div>
-        </li>
-      </ul>
-
-      <div class="goupix-articles-table hidden md:block">
-        <GoupixDexBaseTable :min-width="tableMinWidth">
-          <template #head>
-            <GoupixDexBaseTableTh class="w-12">
-              <input
-                type="checkbox"
-                class="h-4 w-4 cursor-pointer accent-(--app-accent)"
-                :checked="allFilteredSelected"
-                :indeterminate.prop="someFilteredSelected && !allFilteredSelected"
-                aria-label="Tout sélectionner sur cette page"
-                @change="onToggleSelectAllNative"
-              />
-            </GoupixDexBaseTableTh>
-            <GoupixDexBaseTableSortTh
-              label="Nom"
-              title="Nom de l'article"
-              th-class="goupix-card-table__name-col goupix-articles-table__article-col"
-              :active="sortColumn === 'name'"
-              :direction="sortDirection"
-              @sort="toggleSort('name')"
-            />
-            <GoupixDexBaseTableSortTh
-              v-if="showSaleOutcomeColumns"
-              label="Statut"
-              title="Article vendu ou en stock"
-              :active="sortColumn === 'sold'"
-              :direction="sortDirection"
-              @sort="toggleSort('sold')"
-            />
-            <GoupixDexBaseTableSortTh
-              label="Set"
-              title="Série / set"
-              :active="sortColumn === 'set'"
-              :direction="sortDirection"
-              @sort="toggleSort('set')"
-            />
-            <GoupixDexBaseTableSortTh
-              label="N°"
-              title="Numéro de carte"
-              :active="sortColumn === 'number'"
-              :direction="sortDirection"
-              @sort="toggleSort('number')"
-            />
-            <GoupixDexBaseTableSortTh
-              label="Achat"
-              title="Prix d'achat"
-              align="right"
-              :active="sortColumn === 'purchase'"
-              :direction="sortDirection"
-              @sort="toggleSort('purchase')"
-            />
-            <GoupixDexBaseTableSortTh
-              label="Vente"
-              title="Prix de vente affiché"
-              align="right"
-              :active="sortColumn === 'sell'"
-              :direction="sortDirection"
-              @sort="toggleSort('sell')"
-            />
-            <GoupixDexBaseTableSortTh
-              v-if="showSaleOutcomeColumns"
-              label="Réalisé"
-              title="Prix réalisé"
-              align="right"
-              :active="sortColumn === 'realized'"
-              :direction="sortDirection"
-              @sort="toggleSort('realized')"
-            />
-            <GoupixDexBaseTableTh align="center" title="Vinted, eBay, Leboncoin">En ligne</GoupixDexBaseTableTh>
-            <GoupixDexBaseTableSortTh
-              label="Créé"
-              title="Date de création"
-              :active="sortColumn === 'created'"
-              :direction="sortDirection"
-              @sort="toggleSort('created')"
-            />
-            <GoupixDexBaseTableSortTh
-              v-if="showSaleOutcomeColumns"
-              label="Vendu le"
-              title="Date de vente"
-              :active="sortColumn === 'sold_at'"
-              :direction="sortDirection"
-              @sort="toggleSort('sold_at')"
-            />
-            <GoupixDexBaseTableTh align="center" sr-only>Actions</GoupixDexBaseTableTh>
-          </template>
-
-          <GoupixDexBaseTableTr
-            v-for="row in cachedRows"
-            v-show="idToPage.get(row.id) === page"
-            :key="row.id"
-            :class="isSelected(row.id) ? 'bg-[var(--app-accent-soft)] hover:bg-[var(--app-accent-soft)]' : ''"
-          >
-            <GoupixDexBaseTableTd class="goupix-card-table__select w-12 align-middle">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-semibold text-[var(--app-ink)]">
+                  {{ row.pokemon_name || row.title || '—' }}
+                </span>
+                <span
+                  v-if="articleTableSecondaryLine(row)"
+                  class="mt-0.5 block truncate text-xs text-[var(--app-ink-soft)]"
+                  :title="row.title"
+                >
+                  {{ articleTableSecondaryLine(row) }}
+                </span>
+                <span class="mt-1 block text-xs text-[var(--app-ink-soft)]">
+                  <span v-if="row.set_code">{{ row.set_code }}</span>
+                  <span v-if="row.set_code && row.card_number"> · </span>
+                  <span v-if="row.card_number">#{{ row.card_number }}</span>
+                  <span v-if="!row.set_code && !row.card_number">—</span>
+                </span>
+                <span class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs tabular-nums">
+                  <span class="font-medium text-[var(--app-ink)]">{{ eur.format(row.purchase_price) }}</span>
+                  <UIcon
+                    name="i-lucide-arrow-right"
+                    class="size-3 shrink-0 text-[var(--app-faint)]"
+                    aria-hidden="true"
+                  />
+                  <span class="text-[var(--app-ink-soft)]">
+                    {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+                  </span>
+                </span>
+                <span
+                  v-if="showSaleOutcomeColumns && realizedSalePrice(row) != null"
+                  class="mt-1 block text-xs tabular-nums"
+                >
+                  <span class="text-[var(--app-ink-soft)]">Réalisé </span>
+                  <span class="font-medium text-[var(--app-ink)]">{{ eur.format(realizedSalePrice(row)!) }}</span>
+                </span>
+                <span class="mt-2 flex flex-wrap items-center gap-2">
+                  <GoupixDexArticleListedMarketplaces
+                    :row="row"
+                    :show-vinted="vintedChannelEnabled"
+                    :show-ebay="showEbayColumn"
+                    :show-leboncoin="leboncoinPublishAvailable"
+                  />
+                  <span
+                    v-if="showSaleOutcomeColumns && row.is_sold"
+                    class="app-badge app-badge--success py-0 text-[10px]"
+                  >
+                    Vendu
+                  </span>
+                </span>
+              </span>
+              <UIcon name="i-lucide-chevron-right" class="mt-1 size-4 shrink-0 self-start text-[var(--app-faint)]" />
+            </button>
+            <div class="flex shrink-0 flex-col items-center justify-start gap-2 pt-0.5">
               <input
                 type="checkbox"
                 class="h-4 w-4 cursor-pointer accent-(--app-accent)"
@@ -237,185 +136,294 @@
                 :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
                 @change="onToggleRowNative(row.id, $event)"
               />
-            </GoupixDexBaseTableTd>
+              <UDropdownMenu :items="buildRowMenu(row)">
+                <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" size="xs" square />
+              </UDropdownMenu>
+            </div>
+          </li>
+        </ul>
 
-            <GoupixDexBaseTableTd
-              class="goupix-card-table__lead goupix-articles-table__article-cell min-w-0 align-middle"
+        <div class="goupix-articles-table hidden md:block">
+          <GoupixDexBaseTable :min-width="tableMinWidth">
+            <template #head>
+              <GoupixDexBaseTableTh class="w-12">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 cursor-pointer accent-(--app-accent)"
+                  :checked="allFilteredSelected"
+                  :indeterminate.prop="someFilteredSelected && !allFilteredSelected"
+                  aria-label="Tout sélectionner sur cette page"
+                  @change="onToggleSelectAllNative"
+                />
+              </GoupixDexBaseTableTh>
+              <GoupixDexBaseTableSortTh
+                label="Nom"
+                title="Nom de l'article"
+                th-class="goupix-card-table__name-col goupix-articles-table__article-col"
+                :active="sortColumn === 'name'"
+                :direction="sortDirection"
+                @sort="toggleSort('name')"
+              />
+              <GoupixDexBaseTableSortTh
+                v-if="showSaleOutcomeColumns"
+                label="Statut"
+                title="Article vendu ou en stock"
+                :active="sortColumn === 'sold'"
+                :direction="sortDirection"
+                @sort="toggleSort('sold')"
+              />
+              <GoupixDexBaseTableSortTh
+                label="Set"
+                title="Série / set"
+                :active="sortColumn === 'set'"
+                :direction="sortDirection"
+                @sort="toggleSort('set')"
+              />
+              <GoupixDexBaseTableSortTh
+                label="N°"
+                title="Numéro de carte"
+                :active="sortColumn === 'number'"
+                :direction="sortDirection"
+                @sort="toggleSort('number')"
+              />
+              <GoupixDexBaseTableSortTh
+                label="Achat"
+                title="Prix d'achat"
+                align="right"
+                :active="sortColumn === 'purchase'"
+                :direction="sortDirection"
+                @sort="toggleSort('purchase')"
+              />
+              <GoupixDexBaseTableSortTh
+                label="Vente"
+                title="Prix de vente affiché"
+                align="right"
+                :active="sortColumn === 'sell'"
+                :direction="sortDirection"
+                @sort="toggleSort('sell')"
+              />
+              <GoupixDexBaseTableSortTh
+                v-if="showSaleOutcomeColumns"
+                label="Réalisé"
+                title="Prix réalisé"
+                align="right"
+                :active="sortColumn === 'realized'"
+                :direction="sortDirection"
+                @sort="toggleSort('realized')"
+              />
+              <GoupixDexBaseTableTh align="center" title="Vinted, eBay, Leboncoin">En ligne</GoupixDexBaseTableTh>
+              <GoupixDexBaseTableSortTh
+                label="Créé"
+                title="Date de création"
+                :active="sortColumn === 'created'"
+                :direction="sortDirection"
+                @sort="toggleSort('created')"
+              />
+              <GoupixDexBaseTableSortTh
+                v-if="showSaleOutcomeColumns"
+                label="Vendu le"
+                title="Date de vente"
+                :active="sortColumn === 'sold_at'"
+                :direction="sortDirection"
+                @sort="toggleSort('sold_at')"
+              />
+              <GoupixDexBaseTableTh align="center" sr-only>Actions</GoupixDexBaseTableTh>
+            </template>
+
+            <GoupixDexBaseTableTr
+              v-for="row in cachedRows"
+              v-show="idToPage.get(row.id) === page"
+              :key="row.id"
+              :class="isSelected(row.id) ? 'bg-[var(--app-accent-soft)] hover:bg-[var(--app-accent-soft)]' : ''"
             >
-              <div class="flex min-w-0 items-center gap-2.5">
-                <a
-                  :href="articleDetailHref(row.id)"
-                  class="relative block size-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
-                  :aria-label="row.pokemon_name || row.title"
-                  @click="onOpenArticle(row.id, $event)"
-                >
-                  <img
-                    v-if="row.images?.length"
-                    :src="imageSrc(row.images[0]?.image_url)"
-                    :alt="row.title"
-                    loading="lazy"
-                    decoding="async"
-                    class="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <span
-                    v-else
-                    class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
-                  >
-                    {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
-                  </span>
-                </a>
-                <div class="min-w-0 flex-1">
+              <GoupixDexBaseTableTd class="goupix-card-table__select w-12 align-middle">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 cursor-pointer accent-(--app-accent)"
+                  :checked="isSelected(row.id)"
+                  :aria-label="`Sélectionner ${row.pokemon_name || row.title}`"
+                  @change="onToggleRowNative(row.id, $event)"
+                />
+              </GoupixDexBaseTableTd>
+
+              <GoupixDexBaseTableTd
+                class="goupix-card-table__lead goupix-articles-table__article-cell min-w-0 align-middle"
+              >
+                <div class="flex min-w-0 items-center gap-2.5">
                   <a
                     :href="articleDetailHref(row.id)"
-                    class="block truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
-                    :title="row.pokemon_name || row.title || undefined"
+                    class="relative block size-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
+                    :aria-label="row.pokemon_name || row.title"
                     @click="onOpenArticle(row.id, $event)"
                   >
-                    {{ row.pokemon_name || row.title || '—' }}
+                    <img
+                      v-if="row.images?.length"
+                      :src="imageSrc(row.images[0]?.image_url)"
+                      :alt="row.title"
+                      loading="lazy"
+                      decoding="async"
+                      class="absolute inset-0 h-full w-full object-cover"
+                    />
+                    <span
+                      v-else
+                      class="absolute inset-0 flex items-center justify-center bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-ink-soft)]"
+                    >
+                      {{ (row.pokemon_name || row.title || '?').slice(0, 2).toUpperCase() }}
+                    </span>
                   </a>
-                  <span
-                    v-if="articleTableSecondaryLine(row)"
-                    class="block truncate text-xs text-[var(--app-ink-soft)]"
-                    :title="row.title"
-                  >
-                    {{ articleTableSecondaryLine(row) }}
-                  </span>
+                  <div class="min-w-0 flex-1">
+                    <a
+                      :href="articleDetailHref(row.id)"
+                      class="block truncate text-sm font-semibold text-[var(--app-ink)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-[var(--app-accent)]"
+                      :title="row.pokemon_name || row.title || undefined"
+                      @click="onOpenArticle(row.id, $event)"
+                    >
+                      {{ row.pokemon_name || row.title || '—' }}
+                    </a>
+                    <span
+                      v-if="articleTableSecondaryLine(row)"
+                      class="block truncate text-xs text-[var(--app-ink-soft)]"
+                      :title="row.title"
+                    >
+                      {{ articleTableSecondaryLine(row) }}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </GoupixDexBaseTableTd>
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd v-if="showSaleOutcomeColumns" label="Statut">
-              <span v-if="!row.is_sold" class="app-badge app-badge--danger">
-                {{ soldStatusLabel(row) }}
-              </span>
-              <span
-                v-else-if="soldStatusBrandStyle(row)"
-                class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-black/10"
-                :style="soldStatusBrandStyle(row)!"
+              <GoupixDexBaseTableTd v-if="showSaleOutcomeColumns" label="Statut">
+                <span v-if="!row.is_sold" class="app-badge app-badge--danger">
+                  {{ soldStatusLabel(row) }}
+                </span>
+                <span
+                  v-else-if="soldStatusBrandStyle(row)"
+                  class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-black/10"
+                  :style="soldStatusBrandStyle(row)!"
+                >
+                  {{ soldStatusLabel(row) }}
+                </span>
+                <span v-else class="app-badge app-badge--success">
+                  <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
+                  {{ soldStatusLabel(row) }}
+                </span>
+              </GoupixDexBaseTableTd>
+
+              <GoupixDexBaseTableTd label="Set" class="hidden text-[var(--app-ink-soft)] md:table-cell">
+                {{ row.set_code || '—' }}
+              </GoupixDexBaseTableTd>
+
+              <GoupixDexBaseTableTd label="N°" class="hidden tabular-nums md:table-cell">
+                {{ row.card_number || '—' }}
+              </GoupixDexBaseTableTd>
+
+              <GoupixDexBaseTableTd
+                label="Achat"
+                align="right"
+                class="hidden text-[var(--app-ink)] tabular-nums md:table-cell"
               >
-                {{ soldStatusLabel(row) }}
-              </span>
-              <span v-else class="app-badge app-badge--success">
-                <UIcon name="i-lucide-circle-check" class="h-3 w-3" />
-                {{ soldStatusLabel(row) }}
-              </span>
-            </GoupixDexBaseTableTd>
+                {{ eur.format(row.purchase_price) }}
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd label="Set" class="hidden text-[var(--app-ink-soft)] md:table-cell">
-              {{ row.set_code || '—' }}
-            </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd
+                label="Vente"
+                align="right"
+                class="hidden text-[var(--app-ink-soft)] tabular-nums md:table-cell"
+              >
+                {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd label="N°" class="hidden tabular-nums md:table-cell">
-              {{ row.card_number || '—' }}
-            </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd
+                v-if="showSaleOutcomeColumns"
+                label="Réalisé"
+                align="right"
+                class="font-medium text-[var(--app-ink)] tabular-nums"
+              >
+                <span v-if="realizedSalePrice(row) != null">{{ eur.format(realizedSalePrice(row)!) }}</span>
+                <span v-else class="text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd
-              label="Achat"
-              align="right"
-              class="hidden text-[var(--app-ink)] tabular-nums md:table-cell"
-            >
-              {{ eur.format(row.purchase_price) }}
-            </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd label="En ligne" align="center" class="hidden md:table-cell">
+                <GoupixDexArticleListedMarketplaces
+                  :row="row"
+                  :show-vinted="vintedChannelEnabled"
+                  :show-ebay="showEbayColumn"
+                  :show-leboncoin="leboncoinPublishAvailable"
+                />
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd
-              label="Vente"
-              align="right"
-              class="hidden text-[var(--app-ink-soft)] tabular-nums md:table-cell"
-            >
-              {{ row.sell_price != null ? eur.format(row.sell_price) : '—' }}
-            </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd
+                label="Créé"
+                class="hidden text-xs whitespace-nowrap text-[var(--app-ink-soft)] md:table-cell"
+              >
+                {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd
-              v-if="showSaleOutcomeColumns"
-              label="Réalisé"
-              align="right"
-              class="font-medium text-[var(--app-ink)] tabular-nums"
-            >
-              <span v-if="realizedSalePrice(row) != null">{{ eur.format(realizedSalePrice(row)!) }}</span>
-              <span v-else class="text-[var(--app-faint)]">—</span>
-            </GoupixDexBaseTableTd>
+              <GoupixDexBaseTableTd
+                v-if="showSaleOutcomeColumns"
+                label="Vendu le"
+                class="text-xs whitespace-nowrap text-[var(--app-ink-soft)]"
+              >
+                <span v-if="row.sold_at">{{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}</span>
+                <span v-else class="text-[var(--app-faint)]">—</span>
+              </GoupixDexBaseTableTd>
 
-            <GoupixDexBaseTableTd label="En ligne" align="center" class="hidden md:table-cell">
-              <GoupixDexArticleListedMarketplaces
-                :row="row"
-                :show-vinted="vintedChannelEnabled"
-                :show-ebay="showEbayColumn"
-                :show-leboncoin="leboncoinPublishAvailable"
+              <GoupixDexBaseTableTd class="goupix-card-table__actions align-middle" label="Actions" align="center">
+                <UDropdownMenu :items="buildRowMenu(row)">
+                  <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" square />
+                </UDropdownMenu>
+              </GoupixDexBaseTableTd>
+            </GoupixDexBaseTableTr>
+          </GoupixDexBaseTable>
+        </div>
+
+        <div
+          class="flex flex-col gap-3 border-t border-[var(--app-line)] bg-[var(--app-surface-2)]/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+        >
+          <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+            <p class="text-xs text-[var(--app-ink-soft)] tabular-nums">
+              {{ paginationFrom }}–{{ paginationTo }} sur {{ filtered.length }} article{{
+                filtered.length > 1 ? 's' : ''
+              }}
+            </p>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-[var(--app-ink-soft)]">Par page</span>
+              <USelect
+                v-model="pageSize"
+                :items="PAGE_SIZE_ITEMS"
+                value-key="value"
+                label-key="label"
+                size="sm"
+                class="w-28"
               />
-            </GoupixDexBaseTableTd>
-
-            <GoupixDexBaseTableTd
-              label="Créé"
-              class="hidden text-xs whitespace-nowrap text-[var(--app-ink-soft)] md:table-cell"
-            >
-              {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}
-            </GoupixDexBaseTableTd>
-
-            <GoupixDexBaseTableTd
-              v-if="showSaleOutcomeColumns"
-              label="Vendu le"
-              class="text-xs whitespace-nowrap text-[var(--app-ink-soft)]"
-            >
-              <span v-if="row.sold_at">{{ new Date(row.sold_at).toLocaleDateString('fr-FR') }}</span>
-              <span v-else class="text-[var(--app-faint)]">—</span>
-            </GoupixDexBaseTableTd>
-
-            <GoupixDexBaseTableTd class="goupix-card-table__actions align-middle" label="Actions" align="center">
-              <UDropdownMenu :items="buildRowMenu(row)">
-                <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" square />
-              </UDropdownMenu>
-            </GoupixDexBaseTableTd>
-          </GoupixDexBaseTableTr>
-        </GoupixDexBaseTable>
-      </div>
-
-      <div
-        class="flex flex-col gap-3 border-t border-[var(--app-line)] bg-[var(--app-surface-2)]/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-      >
-        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-          <p class="text-xs text-[var(--app-ink-soft)] tabular-nums">
-            {{ paginationFrom }}–{{ paginationTo }} sur {{ filtered.length }} article{{
-              filtered.length > 1 ? 's' : ''
-            }}
-          </p>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-[var(--app-ink-soft)]">Par page</span>
-            <USelect
-              v-model="pageSize"
-              :items="PAGE_SIZE_ITEMS"
-              value-key="value"
-              label-key="label"
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-2 sm:justify-end">
+            <UButton
+              color="neutral"
+              variant="subtle"
               size="sm"
-              class="w-28"
-            />
+              icon="i-lucide-arrow-left"
+              :disabled="page <= 1"
+              class="max-sm:px-2.5"
+              @click="page = Math.max(1, page - 1)"
+            >
+              <span class="max-sm:sr-only">Précédent</span>
+            </UButton>
+            <span class="px-1 text-xs text-[var(--app-ink-soft)] tabular-nums">Page {{ page }} / {{ totalPages }}</span>
+            <UButton
+              color="neutral"
+              variant="subtle"
+              size="sm"
+              icon="i-lucide-arrow-right"
+              :disabled="page >= totalPages"
+              class="max-sm:px-2.5"
+              @click="page = Math.min(totalPages, page + 1)"
+            >
+              <span class="max-sm:sr-only">Suivant</span>
+            </UButton>
           </div>
         </div>
-        <div class="flex items-center justify-between gap-2 sm:justify-end">
-          <UButton
-            color="neutral"
-            variant="subtle"
-            size="sm"
-            icon="i-lucide-arrow-left"
-            :disabled="page <= 1"
-            class="max-sm:px-2.5"
-            @click="page = Math.max(1, page - 1)"
-          >
-            <span class="max-sm:sr-only">Précédent</span>
-          </UButton>
-          <span class="px-1 text-xs text-[var(--app-ink-soft)] tabular-nums">Page {{ page }} / {{ totalPages }}</span>
-          <UButton
-            color="neutral"
-            variant="subtle"
-            size="sm"
-            icon="i-lucide-arrow-right"
-            :disabled="page >= totalPages"
-            class="max-sm:px-2.5"
-            @click="page = Math.min(totalPages, page + 1)"
-          >
-            <span class="max-sm:sr-only">Suivant</span>
-          </UButton>
-        </div>
-      </div>
+      </template>
     </div>
 
     <Teleport to="body">
