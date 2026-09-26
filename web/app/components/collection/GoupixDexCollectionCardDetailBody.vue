@@ -183,7 +183,11 @@
 
         <UAlert v-if="card.article_id" color="success" variant="subtle" icon="i-lucide-tag" title="Article créé">
           <template #description>
-            <NuxtLink :to="`/articles/${card.article_id}`" class="text-primary text-sm underline underline-offset-2">
+            <NuxtLink
+              :to="`/articles/${card.article_id}`"
+              class="text-primary text-sm underline underline-offset-2"
+              @click="openLinkedArticle"
+            >
               Voir l'article #{{ card.article_id }}
             </NuxtLink>
           </template>
@@ -239,6 +243,7 @@ const {
 } = useCollection()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { isDesktopApp } = useDesktopRuntime()
+const { openArticleFromClick } = useOpenArticleDrawer()
 const toast = useToast()
 
 const card = ref<CollectionCard | null>(null)
@@ -434,6 +439,18 @@ async function onDelete(): Promise<void> {
     toast.add({ title: 'Suppression impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
     deleting.value = false
+  }
+}
+
+/**
+ * Ouvre l'article lié dans le drawer, par-dessus la collection (un clic modifié garde la navigation classique).
+ * @param event - Clic sur « Voir l'article ».
+ * @returns {void}
+ */
+function openLinkedArticle(event: MouseEvent): void {
+  const articleId = card.value?.article_id
+  if (articleId) {
+    openArticleFromClick(articleId, event)
   }
 }
 
