@@ -22,7 +22,7 @@ import nodriver as uc
 from nodriver import Element, cdp
 
 from app_types.payload import ItemPayload
-from app_types.vinted import VintedPackageSize
+from app_types.vinted import VintedClickTargetState, VintedPackageSize
 from config import get_settings
 from services.os_service import get_project_root, resolve_vinted_nodriver_user_data_dir
 from services.timer_service import TimerService
@@ -2481,15 +2481,15 @@ class VintedService:
         return None
 
     @classmethod
-    async def _select_button_by_exact_text(
+    async def _mark_button_by_exact_text(
         cls,
         tab: "Tab",
         labels: tuple[str, ...],
         *,
         marker: str,
         scope_selector: str = "",
-    ) -> Any | None:
-        """Secours quand un ``data-testid`` a disparu : sélectionne le premier bouton dont le texte vaut exactement l’un des libellés."""
+    ) -> bool:
+        """Secours quand un ``data-testid`` a disparu : marque (``data-goupix-marker``) le premier bouton dont le texte vaut exactement l’un des libellés."""
         js = f"""
         (() => {{
           const wanted = {json.dumps([label.lower() for label in labels])};
@@ -2506,33 +2506,67 @@ class VintedService:
           return false;
         }})()
         """
-        raw = await tab.evaluate(js, return_by_value=True)
-        if raw is not True:
-            return None
-        return await tab.select(f'[data-goupix-marker="{marker}"]', timeout=3)
+        try:
+            return await tab.evaluate(js, return_by_value=True) is True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    async def _read_click_target_state(tab: "Tab", selector: str) -> VintedClickTargetState:
+        """État de l’élément dans la page : ``missing``, ``static`` (HTML pas encore repris par React) ou ``interactive``."""
+        js = f"""
+        (() => {{
+          const el = document.querySelector({json.dumps(selector)});
+          if (!el) return 'missing';
+          return Object.keys(el).some((key) => key.startsWith('__reactProps')) ? 'interactive' : 'static';
+        }})()
+        """
+        try:
+            state = await tab.evaluate(js, return_by_value=True)
+        except Exception:  # noqa: BLE001
+            return "missing"
+        return state if state in ("static", "interactive") else "missing"
 
     @classmethod
-    async def _wait_until_react_handles_clicks(cls, tab: "Tab", selector: str, *, timeout_sec: float = 10.0) -> None:
+    async def _wait_until_react_handles_clicks(cls, tab: "Tab", selector: str, *, timeout_sec: float) -> bool:
         """
-        Attend que React ait branché ses gestionnaires sur l’élément : la page Vinted arrive en HTML statique et un clic envoyé avant est perdu.
+        Attend que l’élément soit dans la page et que React y ait branché ses gestionnaires : la page Vinted arrive en HTML statique et un clic envoyé avant est perdu.
 
         Args:
             tab: Onglet nodriver.
             selector: Sélecteur CSS de l’élément à cliquer.
-            timeout_sec: Attente maximale, après quoi on clique quand même.
+            timeout_sec: Attente maximale ; un élément resté statique est cliqué quand même.
+
+        Returns:
+            ``False`` si l’élément n’est jamais apparu dans la page.
         """
+        state: VintedClickTargetState = "missing"
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            state = await cls._read_click_target_state(tab, selector)
+            if state == "interactive":
+                return True
+            await asyncio.sleep(0.15)
+        if state == "static":
+            logger.warning("React did not take over %s within %.0fs — clicking anyway.", selector, timeout_sec)
+        return state != "missing"
+
+    @staticmethod
+    async def _click_in_page(tab: "Tab", selector: str) -> bool:
+        """Clique l’élément en le cherchant dans la page au moment du clic : une référence nodriver peut viser un nœud que la page a déjà remplacé."""
         js = f"""
         (() => {{
           const el = document.querySelector({json.dumps(selector)});
-          return !!el && Object.keys(el).some((key) => key.startsWith('__reactProps'));
+          if (!el) return false;
+          el.scrollIntoView({{ block: 'center' }});
+          el.click();
+          return true;
         }})()
         """
-        deadline = time.monotonic() + timeout_sec
-        while time.monotonic() < deadline:
-            if await tab.evaluate(js, return_by_value=True) is True:
-                return
-            await asyncio.sleep(0.15)
-        logger.warning("React did not take over %s within %.0fs — clicking anyway.", selector, timeout_sec)
+        try:
+            return await tab.evaluate(js, return_by_value=True) is True
+        except Exception:  # noqa: BLE001
+            return False
 
     @classmethod
     async def delete_vinted_item_listing(
@@ -2551,32 +2585,31 @@ class VintedService:
         origin = site_origin.rstrip("/")
         await tab.get(f"{origin}/items/{int(item_id)}")
         delete_button_selector = '[data-testid="item-delete-button"]'
-        delete_button = await tab.select(delete_button_selector, timeout=15)
-        if delete_button is None:
-            delete_button = await cls._select_button_by_exact_text(tab, ("supprimer",), marker="item-delete")
+        if not await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=15.0):
+            if not await cls._mark_button_by_exact_text(tab, ("supprimer",), marker="item-delete"):
+                raise RuntimeError(
+                    f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
+                )
             delete_button_selector = '[data-goupix-marker="item-delete"]'
-        if delete_button is None:
-            raise RuntimeError(
-                f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
-            )
-        await cls._wait_until_react_handles_clicks(tab, delete_button_selector)
-        confirmation_button = None
+            await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=5.0)
+
+        confirmation_selector = '[data-testid="item-delete-confirmation-button"]'
+        has_confirmation_opened = False
         for _ in range(3):
-            await delete_button.scroll_into_view()
-            await delete_button.click()
-            confirmation_button = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=4)
-            if confirmation_button is not None:
+            await cls._click_in_page(tab, delete_button_selector)
+            if await cls._wait_until_react_handles_clicks(tab, confirmation_selector, timeout_sec=4.0):
+                has_confirmation_opened = True
                 break
-        if confirmation_button is None:
-            confirmation_button = await cls._select_button_by_exact_text(
+        if not has_confirmation_opened:
+            has_confirmation_opened = await cls._mark_button_by_exact_text(
                 tab,
                 ("supprimer", "oui, supprimer", "confirmer"),
                 scope_selector='[role="dialog"]',
                 marker="item-delete-confirm",
             )
-        if confirmation_button is None:
+            confirmation_selector = '[data-goupix-marker="item-delete-confirm"]'
+        if not has_confirmation_opened or not await cls._click_in_page(tab, confirmation_selector):
             raise RuntimeError(f"Confirmation de suppression introuvable sur la fiche Vinted #{item_id}.")
-        await confirmation_button.click()
         member_id: int | None = None
         deadline = time.monotonic() + 35.0
         while member_id is None and time.monotonic() < deadline:

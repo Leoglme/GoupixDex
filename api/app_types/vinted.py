@@ -12,6 +12,8 @@ VintedConditions = Literal[
 
 VintedPackageSize = Literal["small", "medium", "large"]
 
+VintedClickTargetState = Literal["missing", "static", "interactive"]
+
 VINTED_CONDITIONS: tuple[str, ...] = (
     "Neuf avec étiquette",
     "Neuf sans étiquette",
