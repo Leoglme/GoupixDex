@@ -1,6 +1,9 @@
 @import 'tailwindcss' theme(static);
 @import '@nuxt/ui';
 
+/* App lancée depuis l'écran d'accueil (PWA installée), pas depuis le navigateur. */
+@custom-variant standalone (@media (display-mode: standalone));
+
 @theme static {
   --font-sans: 'Nunito Sans', sans-serif;
   --font-display: 'Fredoka', 'Nunito Sans', sans-serif;
@@ -111,6 +114,17 @@ html.dark {
   --ui-success: var(--app-green);
   --ui-error: var(--app-red);
   --ui-info: var(--app-blue);
+}
+
+/* Hauteur laissée libre en bas des pages et des toasts sous GoupixDexMobileTabBar. */
+:root {
+  --app-tab-bar-offset: 0px;
+}
+
+@media (display-mode: standalone) and (width < 64rem) {
+  :root {
+    --app-tab-bar-offset: 3.5rem;
+  }
 }
 
 /* Pointer cursor on clickable controls (complements UButton via app.config) */

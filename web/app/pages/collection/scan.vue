@@ -579,7 +579,9 @@
 import type { ComputedRef, Ref } from 'vue'
 import { renderSVG } from 'uqr'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
+import type { CardScannerShortcut } from '~/types/CardScannerShortcut'
 import type { ScanCardLanguage, ScanMatchDecision } from '~/types/ScanMatch'
+import { useOpenCardScanner } from '~/composables/useOpenCardScanner'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -592,6 +594,7 @@ useGoupixPageSeo(
 // desktop (Tauri), la page sert d'écran de contrôle : QR code pour ouvrir le
 // scan sur le téléphone + flux temps réel des cartes qui rentrent / sortent.
 const { isDesktopApp } = useDesktopRuntime()
+const { setScanPageCameraOpener }: CardScannerShortcut = useOpenCardScanner()
 const runtimeConfig = useRuntimeConfig()
 
 /** URL of this page on the deployed site — what the phone should open. */
@@ -2116,6 +2119,7 @@ watch(soundOn, (on: boolean): void => {
 })
 
 onMounted(async () => {
+  setScanPageCameraOpener(onActivateAutoScan)
   document.addEventListener('visibilitychange', onVisibilityChange)
   nowTicker = setInterval((): void => {
     nowEpochSec.value = Math.floor(Date.now() / 1000)
@@ -2140,6 +2144,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  setScanPageCameraOpener(null)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   if (nowTicker !== null) {
     clearInterval(nowTicker)

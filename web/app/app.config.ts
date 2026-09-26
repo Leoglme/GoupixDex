@@ -78,7 +78,7 @@ export default defineAppConfig({
     },
     dashboardPanel: {
       slots: {
-        body: 'flex flex-col gap-4 sm:gap-6 flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-6',
+        body: 'flex flex-col gap-4 sm:gap-6 flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-tab-bar-offset))] sm:p-6 sm:pb-[calc(1.5rem+var(--app-tab-bar-offset))]',
       },
     },
     dashboardNavbar: {

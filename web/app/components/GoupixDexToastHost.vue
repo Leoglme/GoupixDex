@@ -1,6 +1,8 @@
 <template>
   <Teleport to="body">
-    <div class="pointer-events-none fixed right-4 bottom-4 z-[110] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+    <div
+      class="pointer-events-none fixed right-4 bottom-[calc(1rem+var(--app-tab-bar-offset))] z-[110] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2"
+    >
       <TransitionGroup name="goupix-toast">
         <div
           v-for="toast in toasts"
