@@ -97,7 +97,7 @@ _TCGPLAYER_ENGLISH_GROUPS: dict[str, int] = {
     "xya": 1938,
 }
 
-# Groupes TCGplayer japonais dont le nom ne commence pas par le code TCGdex (extensions de 1996 à 2007, Start Deck 100).
+# Groupes TCGplayer japonais dont le nom ne commence pas par le code TCGdex (1996 à 2007, « SM1+ » écrit SM1p, Start Deck 100).
 _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
     "E1": 23730,
     "E2": 23731,
@@ -121,6 +121,11 @@ _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
     "PMCG4": 23724,
     "PMCG5": 23725,
     "PMCG6": 23726,
+    "SM1p": 23880,
+    "SM2p": 23693,
+    "SM3p": 23694,
+    "SM4p": 23707,
+    "SM5p": 23695,
     "VS1": 24180,
     "neo1": 23727,
     "neo2": 23728,
