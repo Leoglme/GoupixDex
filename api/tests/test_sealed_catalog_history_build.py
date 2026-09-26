@@ -99,3 +99,9 @@ def test_load_tcgcsv_groups_retries_groups_that_failed(monkeypatch: pytest.Monke
     loaded = build.load_tcgcsv_groups()
 
     assert [group["name"] for group in loaded] == ["Base Set", "Jungle"]
+
+
+def test_print_run_groups_keep_distinct_names() -> None:
+    assert build.PRINT_RUN_RE.search(build.norm("Base Set (Shadowless)")).group(1) == "shadowless"
+    assert build.PRINT_RUN_RE.search(build.norm("Base Set")) is None
+    assert "base set" in build.set_keys("Base Set (Shadowless)")

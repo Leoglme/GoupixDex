@@ -129,6 +129,9 @@ TCGDEX_ID_BY_GROUP_NAME: dict[str, str] = {
 }
 #: Groupes TCGplayer hors TCGdex dont le logo existe sous un autre nom chez pokemontcg.io.
 POKEMONTCG_NAME_BY_GROUP_NAME: dict[str, str] = {"wotc promo": "wizards black star promos"}
+#: Tirages d'une même extension vendus en groupes TCGplayer distincts (« Base Set (Shadowless) »).
+PRINT_RUN_RE = re.compile(r"\s+(shadowless|1st edition|unlimited)$")
+PRINT_RUN_LABELS: dict[str, str] = {"shadowless": "Shadowless", "1st edition": "Édition 1", "unlimited": "Unlimited"}
 POKEMONTCG_SETS = "https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master/sets/en.json"
 POKECARDEX_LOGOS = "https://pokecardex.b-cdn.net/assets/images/logos/{code}.png"
 SERIE_OTHER = "Autres"
@@ -151,7 +154,7 @@ def name_prefix(name: str) -> str:
 def set_keys(group_name: str) -> list[str]:
     """Clés candidates d'une extension TCGdex pour un groupe TCGplayer, de la plus précise à la plus large."""
     name = norm(group_name)
-    without_print_run = re.sub(r"\s+(shadowless|1st edition|unlimited)$", "", name)
+    without_print_run = PRINT_RUN_RE.sub("", name)
     keys: list[str] = [name, without_print_run, name.replace(" and ", " ")]
     base_match = re.match(r"^(.*?)\s+base set$", name)
     if base_match:
@@ -485,7 +488,9 @@ def build() -> dict[str, Any]:
         )
         if td:
             stat_matched += 1
-            exp_name = td["fr_name"]
+            print_run = PRINT_RUN_RE.search(set_norm)
+            # Sans le tirage, deux groupes (Set de Base / Shadowless) auraient le même nom, donc le même lien.
+            exp_name = f"{td['fr_name']} ({PRINT_RUN_LABELS[print_run.group(1)]})" if print_run else td["fr_name"]
             exp_logo = td["logo"]
             serie_name = td["serie_name"]
         else:
