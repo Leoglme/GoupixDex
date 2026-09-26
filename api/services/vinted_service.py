@@ -326,15 +326,28 @@ class VintedService:
     @classmethod
     def _member_id_from_tab_url(cls, tab: Tab) -> int | None:
         """Extract ``/member/{id}`` from the tab's current URL, if present."""
-        url = (tab.target.url or "").strip()
-        m = re.search(r"/member/(\d+)", url, re.IGNORECASE)
-        if not m:
+        return cls._member_id_from_url((tab.target.url or "").strip())
+
+    @staticmethod
+    def _member_id_from_url(url: str) -> int | None:
+        """Extract ``/member/{id}`` from a URL, if present."""
+        match = re.search(r"/member/(\d+)", url, re.IGNORECASE)
+        if not match:
             return None
         try:
-            n = int(m.group(1))
+            member_id = int(match.group(1))
         except ValueError:
             return None
-        return n if n > 0 else None
+        return member_id if member_id > 0 else None
+
+    @staticmethod
+    async def _read_page_url(tab: Tab) -> str:
+        """URL réelle du document, lue dans la page : ``tab.target.url`` de nodriver peut rester figée après une redirection faite par le site."""
+        try:
+            url = await tab.evaluate("location.href", return_by_value=True)
+        except Exception:  # noqa: BLE001
+            return ""
+        return url if isinstance(url, str) else ""
 
     @classmethod
     def _vinted_origin_from_tab_url(cls, tab: Tab) -> str:
@@ -2408,7 +2421,7 @@ class VintedService:
             return picked
 
         logger.warning("Vinted wardrobe API unavailable — scanning the member page tiles instead.")
-        if "/member/" not in (tab.target.url or "").lower():
+        if "/member/" not in (await cls._read_page_url(tab)).lower():
             await tab.get(f"{site_origin.rstrip('/')}/member/{member_id}")
             await asyncio.sleep(1.2)
         price_frags = cls._price_match_fragments(sell_price)
@@ -2568,7 +2581,7 @@ class VintedService:
         deadline = time.monotonic() + 35.0
         while member_id is None and time.monotonic() < deadline:
             await asyncio.sleep(0.35)
-            member_id = cls._member_id_from_tab_url(tab)
+            member_id = cls._member_id_from_url(await cls._read_page_url(tab))
         if member_id is None:
             raise RuntimeError(f"Vinted n’a pas confirmé la suppression de l’annonce #{item_id} (pas de retour au dressing).")
         await cls._ensure_listing_left_wardrobe(tab, member_id, item_id)
@@ -2576,13 +2589,13 @@ class VintedService:
     @classmethod
     async def _ensure_listing_left_wardrobe(cls, tab: "Tab", member_id: int, item_id: int) -> None:
         """
-        Vérifie pendant une dizaine de secondes que l’annonce a quitté le dressing ; si l’API ne répond jamais, le retour au dressing fait foi.
+        Vérifie pendant quelques secondes que l’annonce a quitté le dressing ; si l’API ne répond jamais, le retour au dressing fait foi.
 
         Raises:
             RuntimeError: L’annonce figure toujours sur le dressing.
         """
         has_wardrobe_api_answered = False
-        for delay_sec in (1.0, 1.5, 3.0, 5.0):
+        for delay_sec in (0.5, 1.0, 2.0, 4.0):
             await asyncio.sleep(delay_sec)
             rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
             if rows is None:
