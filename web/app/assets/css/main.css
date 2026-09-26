@@ -123,7 +123,7 @@ html.dark {
 
 @media (display-mode: standalone) and (width < 64rem) {
   :root {
-    --app-tab-bar-offset: 3.5rem;
+    --app-tab-bar-offset: 5.5rem;
   }
 }
 

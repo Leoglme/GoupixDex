@@ -1,6 +1,6 @@
 <template>
   <nav
-    class="standalone:max-lg:block fixed inset-x-0 bottom-0 z-30 hidden border-t border-(--app-line) bg-(--app-bg) pb-[env(safe-area-inset-bottom)]"
+    class="standalone:max-lg:block fixed inset-x-0 bottom-0 z-30 hidden border-t border-(--app-line) bg-(--app-bg) pt-1 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
     aria-label="Navigation rapide"
   >
     <div class="flex h-14 items-stretch">
@@ -20,11 +20,11 @@
       <div class="flex w-22 shrink-0 items-center justify-center">
         <button
           type="button"
-          class="text-primary-950 flex size-14 -translate-y-2 items-center justify-center rounded-full bg-(--app-accent) transition-opacity [-webkit-tap-highlight-color:transparent] active:opacity-80"
+          class="text-primary-950 flex size-15 -translate-y-2.5 items-center justify-center rounded-full bg-(--app-accent) transition-opacity [-webkit-tap-highlight-color:transparent] active:opacity-80"
           aria-label="Scanner une carte"
           @click="openCardScanner()"
         >
-          <UIcon name="i-lucide-scan-line" class="size-6.5" />
+          <UIcon name="i-lucide-scan-line" class="size-7" />
         </button>
       </div>
 
