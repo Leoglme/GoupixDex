@@ -4,8 +4,8 @@ Scans de repli pour les cartes que TCGdex liste sans ``image`` (galeries, promos
 Sources, de la plus fidèle à la plus lointaine : CDN TCGdex par convention dans la langue demandée, images
 anglaises TCGdex (listées ou par convention), données publiques pokemontcg.io (numéro imprimé ou nom anglais),
 CDN Limitless pour les promos et énergies récentes, puis scans TCGplayer (via TCGCSV) pour les kits dresseur,
-promos McDonald's et extensions japonaises que personne d'autre n'illustre. Les McDonald's exclusifs à la France
-reprennent en dernier recours la carte d'origine de même nom et même illustrateur.
+promos McDonald's et extensions japonaises que personne d'autre n'illustre. Les réimpressions (McDonald's exclusifs
+à la France, kits dresseur) reprennent en dernier recours la carte d'origine de même nom et même illustrateur.
 """
 
 from __future__ import annotations
@@ -134,8 +134,13 @@ _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
     "web1": 24141,
 }
 
-# Collections McDonald's exclusives à la France : réimpressions de cartes existantes, absentes de TCGplayer.
+# Réimpressions de cartes existantes : McDonald's exclusifs à la France (absents de TCGplayer) et kits dresseur
+# (TCGplayer liste des images inexistantes pour une partie de leurs cartes).
 _REPRINT_ARTWORK_SETS: frozenset[str] = frozenset({"2013bw", "2018sm-fr", "2019sm-fr"})
+_TRAINER_KIT_SET_PREFIX = "tk-"
+# Kits dont TCGdex ignore l'illustrateur : série de leur ère et extension de base (énergies de base identiques).
+_TRAINER_KIT_ERAS: dict[str, tuple[str, str]] = {"tk-xy-": ("xy", "xy1")}
+_ENERGY_CATEGORIES: frozenset[str] = frozenset({"Energy", "Énergie"})
 # Sets TCG Pocket (A1, A3a, P-A…) : même illustration parfois, mais pas des cartes physiques.
 _POCKET_SET_ID_RE = re.compile(r"^(?:[AB]\d+[a-z]?|P-[AB])$")
 
@@ -275,7 +280,7 @@ def fallback_card_images(locale: str, set_detail: dict[str, Any]) -> dict[str, C
         found.update(_match_pokemontcg(set_id, _still_missing(missing, found), english_names))
         found.update(_probe_limitless_english(set_id, _still_missing(missing, found)))
         found.update(_match_tcgplayer(locale, set_detail, _still_missing(missing, found), english_names))
-        if set_id in _REPRINT_ARTWORK_SETS:
+        if set_id in _REPRINT_ARTWORK_SETS or set_id.startswith(_TRAINER_KIT_SET_PREFIX):
             found.update(_match_reprint_artwork(locale, set_detail, _still_missing(missing, found)))
 
     _cache.set(cache_key, found)
@@ -647,25 +652,26 @@ def _match_tcgplayer(
         if card.number:
             by_number.setdefault(card.number, []).append(card)
 
-    found: dict[str, CardImageUrls] = {}
+    matched: dict[str, CardImageUrls] = {}
     # Numérotation fiable seulement si elle couvre le groupe : Neo 4 n'a qu'une carte numérotée sur 113.
     if 2 * sum(len(numbered) for numbered in by_number.values()) >= len(cards):
         for local_id in local_ids:
             picked = _pick_tcgplayer_card(by_number.get(_normalize_number(local_id), []), english_names.get(local_id))
             if picked is not None:
-                found[local_id] = picked.urls
-        return found
-
-    names = english_names or _japanese_card_english_names(set_detail, local_ids)
-    by_name: dict[str, list[_TcgplayerCard]] = {}
-    for card in cards:
-        by_name.setdefault(card.name, []).append(card)
-    for local_id in local_ids:
-        # Homonymes (deux Pikachu d'un deck) attribués dans l'ordre de l'export.
-        queue = by_name.get(names.get(local_id, ""), [])
-        if queue:
-            found[local_id] = queue.pop(0).urls
-    return found
+                matched[local_id] = picked.urls
+    else:
+        names = english_names or _japanese_card_english_names(set_detail, local_ids)
+        by_name: dict[str, list[_TcgplayerCard]] = {}
+        for card in cards:
+            by_name.setdefault(card.name, []).append(card)
+        for local_id in local_ids:
+            # Homonymes (deux Pikachu d'un deck) attribués dans l'ordre de l'export.
+            queue = by_name.get(names.get(local_id, ""), [])
+            if queue:
+                matched[local_id] = queue.pop(0).urls
+    # TCGCSV liste aussi des images jamais mises en ligne (403 à toutes les tailles) : on ne garde que les vraies.
+    exists = _assets_exist([urls.low for urls in matched.values()])
+    return {local_id: urls for (local_id, urls), ok in zip(matched.items(), exists, strict=True) if ok}
 
 
 def _tcgdex_json(path: str, params: dict[str, str] | None = None) -> Any:
@@ -687,7 +693,8 @@ def _original_artwork(locale: str, set_id: str, card: dict[str, Any]) -> CardIma
     detail = _tcgdex_json(f"{locale}/cards/{quote(str(card['id']), safe='')}")
     illustrator = detail.get("illustrator") if isinstance(detail, dict) else None
     if not isinstance(illustrator, str) or not illustrator:
-        return None
+        is_energy = isinstance(detail, dict) and detail.get("category") in _ENERGY_CATEGORIES
+        return _era_artwork(locale, set_id, str(card.get("name") or ""), is_energy=is_energy)
     matches = _tcgdex_json(f"{locale}/cards", {"name": f"eq:{card.get('name')}", "illustrator": f"eq:{illustrator}"})
     for match in matches if isinstance(matches, list) else []:
         match_id = str(match.get("id") or "") if isinstance(match, dict) else ""
@@ -695,6 +702,28 @@ def _original_artwork(locale: str, set_id: str, card: dict[str, Any]) -> CardIma
         image = match.get("image") if isinstance(match, dict) else None
         if isinstance(image, str) and image and match_set != set_id and not _POCKET_SET_ID_RE.match(match_set):
             return _tcgdex_urls(image)
+    return None
+
+
+def _era_artwork(locale: str, set_id: str, name: str, *, is_energy: bool) -> CardImageUrls | None:
+    """Carte d'un kit sans illustrateur connu : seule carte de ce nom dans son ère, ou énergie de base de l'ère."""
+    era = next((era for prefix, era in _TRAINER_KIT_ERAS.items() if set_id.startswith(prefix)), None)
+    if era is None or not name:
+        return None
+    series_prefix, base_set = era
+    matches = _tcgdex_json(f"{locale}/cards", {"name": f"eq:{name}"})
+    in_era = [
+        match
+        for match in (matches if isinstance(matches, list) else [])
+        if isinstance(match, dict)
+        and isinstance(match.get("image"), str)
+        and re.match(rf"^{series_prefix}\d", str(match.get("id") or "").rsplit("-", 1)[0])
+    ]
+    if len(in_era) == 1:
+        return _tcgdex_urls(in_era[0]["image"])
+    if is_energy and in_era:
+        base = next((match for match in in_era if str(match["id"]).rsplit("-", 1)[0] == base_set), in_era[0])
+        return _tcgdex_urls(base["image"])
     return None
 
 

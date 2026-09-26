@@ -28,7 +28,9 @@ export function catalogLogoCandidates(logo?: string, symbol?: string, cover?: st
     out.push(s.endsWith('.webp') || s.endsWith('.png') ? s : `${s}.webp`)
   }
   if (cover?.trim()) {
-    out.push(cover.includes('/low.') ? cover : `${cover.replace(/\/$/, '')}/low.webp`)
+    // Base d'asset TCGdex à compléter, sauf image déjà finale (scan TCGplayer d'un set que TCGdex n'illustre pas).
+    const isFinalImage: boolean = cover.includes('/low.') || /\.(?:jpe?g|png|webp)$/i.test(cover)
+    out.push(isFinalImage ? cover : `${cover.replace(/\/$/, '')}/low.webp`)
   }
   return out
 }

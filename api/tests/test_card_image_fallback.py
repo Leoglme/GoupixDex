@@ -150,6 +150,7 @@ def test_tcgplayer_trainer_kit_half_is_chosen_by_name_never_guessed(monkeypatch:
     ]
     monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (3, 1532))
     monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+    monkeypatch.setattr(fallback, "_assets_exist", lambda urls: [True] * len(urls))
 
     found = fallback._match_tcgplayer("fr", {"id": "tk-xy-n"}, ["8", "9"], {"8": "psychicenergy", "9": "pumpkaboo"})
 
@@ -160,6 +161,7 @@ def test_tcgplayer_japanese_number_prefers_the_regular_print(monkeypatch: pytest
     cards = [_tcgplayer_card("122/100", "Elesa's Sparkle (Master Ball)", 1), _tcgplayer_card("122/100", "Elesa's Sparkle - 122/100", 2)]
     monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (85, 23627))
     monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+    monkeypatch.setattr(fallback, "_assets_exist", lambda urls: [True] * len(urls))
 
     found = fallback._match_tcgplayer("ja", {"id": "S8"}, ["122"], {})
 
@@ -170,6 +172,7 @@ def test_tcgplayer_unnumbered_japanese_group_matches_english_names(monkeypatch: 
     cards = [_tcgplayer_card("", "Dark Crobat", 1), _tcgplayer_card("", "Nidoran M", 2), _tcgplayer_card("", "Pikachu", 3)]
     monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (85, 23729))
     monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+    monkeypatch.setattr(fallback, "_assets_exist", lambda urls: [True] * len(urls))
     monkeypatch.setattr(
         fallback,
         "_japanese_card_english_names",
@@ -205,3 +208,28 @@ def test_reprint_artwork_skips_the_same_set_and_tcg_pocket(monkeypatch: pytest.M
     )
 
     assert found == {"2": fallback.CardImageUrls(low="https://assets.test/fr/sm/sm1/18/low.webp", high="https://assets.test/fr/sm/sm1/18/high.webp")}
+
+
+def test_tcgplayer_images_missing_from_the_cdn_are_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards = [_tcgplayer_card("1/30", "Fletchling (#1)", 1), _tcgplayer_card("4/30", "Vigoroth (#4)", 2)]
+    monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (3, 1533))
+    monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+    monkeypatch.setattr(fallback, "_assets_exist", lambda urls: [url.startswith("https://tcg.test/2_") for url in urls])
+
+    found = fallback._match_tcgplayer("en", {"id": "tk-xy-b"}, ["1", "4"], {"1": "fletchling", "4": "vigoroth"})
+
+    assert found == {"4": cards[1].urls}
+
+
+def test_era_artwork_takes_the_only_era_card_or_the_base_set_energy(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = {
+        "Vigoroth": [{"id": "xy3-82", "image": "https://assets.test/xy3/82"}, {"id": "sm7-100", "image": "https://assets.test/sm7/100"}],
+        "Metal Energy": [{"id": "g1-83", "image": "https://assets.test/g1/83"}, {"id": "xy1-139", "image": "https://assets.test/xy1/139"}],
+        "Fletchling": [{"id": "xy1-99", "image": "https://assets.test/xy1/99"}, {"id": "xy2-70", "image": "https://assets.test/xy2/70"}],
+    }
+    monkeypatch.setattr(fallback, "_tcgdex_json", lambda _path, params=None: responses.get(params["name"][3:]))
+
+    assert fallback._era_artwork("en", "tk-xy-b", "Vigoroth", is_energy=False) == fallback._tcgdex_urls("https://assets.test/xy3/82")
+    assert fallback._era_artwork("en", "tk-xy-b", "Metal Energy", is_energy=True) == fallback._tcgdex_urls("https://assets.test/xy1/139")
+    assert fallback._era_artwork("en", "tk-xy-b", "Fletchling", is_energy=False) is None
+    assert fallback._era_artwork("en", "tk-sm-l", "Vigoroth", is_energy=False) is None

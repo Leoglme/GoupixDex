@@ -628,9 +628,42 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
     details = [serie for serie in details if serie.get("sets")]
     details.sort(key=lambda s: (s.get("releaseDate") or ""), reverse=True)
     enrich_browse_series_tree(details, loc, verify_limitless=True)
+    _fill_covers_from_fallback_images(details, loc)
     details = _merge_subset_rows(details, loc)
     _cache.set(cache_key, details, ttl_seconds=_CACHE_TTL_BROWSE_SEC)
     return details
+
+
+def _fill_covers_from_fallback_images(series_details: list[dict[str, Any]], loc: str) -> None:
+    """Visuel des sets sans logo : première carte réellement illustrée, à la place de la vignette devinée « 001 »."""
+    rows = [
+        row
+        for serie in series_details
+        for row in serie.get("sets") or []
+        if isinstance(row, dict) and not row.get("logo") and isinstance(row.get("id"), str)
+    ]
+    if not rows:
+        return
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        covers = list(pool.map(lambda row: _first_card_image(loc, str(row["id"])), rows))
+    for row, cover in zip(rows, covers, strict=True):
+        if cover:
+            row["cover"] = cover
+
+
+def _first_card_image(loc: str, set_id: str) -> str | None:
+    """Vignette de la première carte illustrée d'un set : scan listé par TCGdex, sinon source de repli (TCGplayer…)."""
+    try:
+        detail = dict(_client().get_set(loc, set_id))
+    except (RuntimeError, ValueError):
+        return None
+    cards = [card for card in detail.get("cards") or [] if isinstance(card, dict)]
+    listed = next((card["image"] for card in cards if isinstance(card.get("image"), str) and card["image"]), None)
+    if listed:
+        return f"{listed.rstrip('/')}/low.webp"
+    images = fallback_card_images(loc, detail)
+    first = next((images[card["localId"]] for card in cards if card.get("localId") in images), None)
+    return first.low if first is not None else None
 
 
 def _ghost_set_ids(
