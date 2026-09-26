@@ -96,9 +96,47 @@ def test_load_tcgcsv_groups_retries_groups_that_failed(monkeypatch: pytest.Monke
     monkeypatch.setattr(build, "_fetch_json", fake_fetch_json)
     monkeypatch.setattr(build.time, "sleep", lambda _seconds: None)
 
-    loaded = build.load_tcgcsv_groups()
+    loaded, abandoned = build.load_tcgcsv_groups()
 
     assert [group["name"] for group in loaded] == ["Base Set", "Jungle"]
+    assert abandoned == []
+
+
+def test_load_tcgcsv_groups_reports_groups_refused_at_every_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    groups = [{"groupId": 1406, "name": "Platinum"}]
+
+    def fake_fetch_json(url: str, **_kwargs: object) -> dict:
+        if url.endswith("/groups"):
+            return {"results": groups}
+        raise SystemExit("TCGCSV limite les requêtes")
+
+    monkeypatch.setattr(build, "_fetch_json", fake_fetch_json)
+    monkeypatch.setattr(build.time, "sleep", lambda _seconds: None)
+
+    loaded, abandoned = build.load_tcgcsv_groups()
+
+    assert loaded == []
+    assert abandoned == groups
+
+
+def test_previous_expansions_are_indexed_by_tcgplayer_group(tmp_path: Path) -> None:
+    catalog = tmp_path / "sealed-v2.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "series": [
+                    {"name": "Platine", "expansions": [{"id": "PL", "group_id": 1406, "name": "Platine"}]},
+                    {"name": "Autres", "expansions": [{"id": "PR", "name": "Sans groupe"}]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    previous = build.previous_expansions_by_group(catalog)
+
+    assert previous == {1406: ("Platine", {"id": "PL", "group_id": 1406, "name": "Platine"})}
+    assert build.previous_expansions_by_group(tmp_path / "absent.json") == {}
 
 
 def test_print_run_groups_keep_distinct_names() -> None:

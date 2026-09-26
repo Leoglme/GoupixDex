@@ -424,7 +424,7 @@ def load_tcgdex_sets() -> tuple[dict[str, dict], list[dict]]:
 
 #: Passes sur les groupes TCGCSV en échec : la CI se fait limiter par rafales et perdait jusqu'à 20 extensions par nuit.
 TCGCSV_GROUP_PASSES = 3
-TCGCSV_RETRY_PAUSE_SEC = 60.0
+TCGCSV_RETRY_PAUSE_SEC = 120.0
 
 
 def load_tcgcsv_group(group: dict) -> dict | None:
@@ -449,8 +449,8 @@ def load_tcgcsv_group(group: dict) -> dict | None:
     }
 
 
-def load_tcgcsv_groups() -> list[dict]:
-    """Groupes TCGplayer (extensions) avec leurs scellés ; les groupes en échec sont repris après une pause."""
+def load_tcgcsv_groups() -> tuple[list[dict], list[dict]]:
+    """Groupes TCGplayer (extensions) avec leurs scellés, et les groupes que TCGCSV a refusés à chaque passe."""
     pending = _fetch_json("https://tcgcsv.com/tcgplayer/3/groups", cache=True)["results"]
     out: list[dict] = []
     for attempt in range(TCGCSV_GROUP_PASSES):
@@ -472,7 +472,20 @@ def load_tcgcsv_groups() -> list[dict]:
             time.sleep(TCGCSV_RETRY_PAUSE_SEC)
     if pending:
         print("TCGCSV : groupes abandonnés : " + ", ".join(group["name"] for group in pending), flush=True)
-    return out
+    return out, pending
+
+
+def previous_expansions_by_group(path: Path) -> dict[int, tuple[str, dict]]:
+    """Extensions du dernier catalogue publié (série et contenu) par groupe TCGplayer."""
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        expansion["group_id"]: (serie["name"], expansion)
+        for serie in payload.get("series", [])
+        for expansion in serie.get("expansions", [])
+        if isinstance(expansion.get("group_id"), int)
+    }
 
 
 def build() -> dict[str, Any]:
@@ -481,7 +494,8 @@ def build() -> dict[str, Any]:
     tcgdex, series_meta = load_tcgdex_sets()
     tcgdex_by_id = {info["set_id"]: info for info in tcgdex.values()}
     pokemontcg_logos = load_pokemontcg_logos()
-    groups = load_tcgcsv_groups()
+    groups, abandoned_groups = load_tcgcsv_groups()
+    previous_expansions = previous_expansions_by_group(OUT_DIR / "sealed-v2.json")
 
     serie_logo = {s["name"]: s["logo"] for s in series_meta}
     serie_names = {s["id"]: s["name"] for s in series_meta}
@@ -550,6 +564,7 @@ def build() -> dict[str, Any]:
         bucket["expansions"].append(
             {
                 "id": group["abbr"] or set_norm,
+                "group_id": group["group_id"],
                 "tcgdex_id": td["set_id"] if td else None,
                 "name": exp_name,
                 "logo": exp_logo,
@@ -558,6 +573,19 @@ def build() -> dict[str, Any]:
                 "products": products,
             }
         )
+
+    # Un groupe refusé par TCGCSV à chaque passe garde son extension de la veille plutôt que de disparaître.
+    for group in abandoned_groups:
+        kept = previous_expansions.get(group["groupId"])
+        if kept is None:
+            continue
+        serie_name, expansion = kept
+        bucket = series.setdefault(
+            serie_name,
+            {"name": serie_name, "logo": serie_logo.get(serie_name), "expansions": []},
+        )
+        bucket["expansions"].append(expansion)
+        print(f"TCGCSV : « {group['name']} » repris du catalogue précédent", flush=True)
 
     # Extensions récentes en premier dans chaque série ; séries dans l'ordre chronologique
     # inverse de TCGdex (série la plus récente d'abord), inconnues puis « Autres » en dernier.
