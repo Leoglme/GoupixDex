@@ -144,10 +144,11 @@ def _add_or_increment(
     meta: dict[str, Any],
     *,
     notes: str | None,
-) -> tuple[CollectionCard, bool]:
+) -> tuple[dict[str, Any], bool]:
     """
     Insert a new row or bump the quantity when ``(tcgdex_card_id, language)``
-    already exists for this user. Returns ``(row, created)``.
+    already exists for this user. Returns ``(card_dict, created)``, serialised
+    before the session closes (the linked article is lazy-loaded).
     """
     db = SessionLocal()
     try:
@@ -168,7 +169,7 @@ def _add_or_increment(
             )
             db.commit()
             db.refresh(existing)
-            return existing, False
+            return collection_card_service.collection_card_to_dict(existing), False
 
         row = CollectionCard(
             user_id=user_id,
@@ -195,7 +196,7 @@ def _add_or_increment(
         db.add(row)
         db.commit()
         db.refresh(row)
-        return row, True
+        return collection_card_service.collection_card_to_dict(row), True
     finally:
         db.close()
 
@@ -494,7 +495,7 @@ async def _process_scan(
         return
 
     try:
-        row, created = await loop.run_in_executor(
+        card_dict, created = await loop.run_in_executor(
             None,
             lambda: _add_or_increment(user_id, meta, notes=None),
         )
@@ -527,7 +528,7 @@ async def _process_scan(
             image_preview_data_url=preview,
             ocr=ocr_payload,
             tcgdex_card_id=tcgdex_card_id,
-            collection_card=collection_card_service.collection_card_to_dict(row),
+            collection_card=card_dict,
             created=created,
         ),
     )
@@ -812,7 +813,7 @@ async def _process_matched_scan(
                 fallback_name_en=None,
             ),
         )
-        row, created = await loop.run_in_executor(
+        card_dict, created = await loop.run_in_executor(
             None,
             lambda: _add_or_increment(user_id, meta, notes=None),
         )
@@ -841,7 +842,7 @@ async def _process_matched_scan(
             physical_language=physical_language,
             direction=direction,
             tcgdex_card_id=tcgdex_card_id,
-            collection_card=collection_card_service.collection_card_to_dict(row),
+            collection_card=card_dict,
             created=created,
         ),
     )

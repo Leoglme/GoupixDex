@@ -141,6 +141,11 @@ def article_live_on_any_marketplace(article: Article) -> bool:
     )
 
 
+def is_article_online(article: Article | None) -> bool:
+    """Vrai quand l'article est invendu et en ligne sur Vinted, eBay ou Leboncoin."""
+    return article is not None and not article.is_sold and article_live_on_any_marketplace(article)
+
+
 def apply_offers_for_sale_after_delist(article: Article, *, hide_when_off_all: bool) -> None:
     if article.is_sold:
         return

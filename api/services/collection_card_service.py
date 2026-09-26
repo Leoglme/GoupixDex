@@ -15,6 +15,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from models.collection_card import CollectionCard
+from services.article_service import is_article_online
 from services.cardmarket_local_price_service import resolve_market_price_eur
 from services.collection_gain import gain_fields
 
@@ -33,9 +34,13 @@ def list_collection_for_user(
 
     ``listed_state`` filter values: ``"any"`` (default), ``"with_article"``, ``"without_article"``.
     """
-    q = db.query(CollectionCard).filter(
-        CollectionCard.user_id == user_id,
-        CollectionCard.is_placeholder.is_(False),
+    q = (
+        db.query(CollectionCard)
+        .options(joinedload(CollectionCard.article))
+        .filter(
+            CollectionCard.user_id == user_id,
+            CollectionCard.is_placeholder.is_(False),
+        )
     )
     if search:
         like = f"%{search.strip()}%"
@@ -93,6 +98,7 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "purchase_price_eur": float(card.purchase_price_eur) if card.purchase_price_eur is not None else None,
         "notes": card.notes,
         "article_id": card.article_id,
+        "is_article_online": card.article_id is not None and is_article_online(card.article),
         "cardmarket_id_product": card.cardmarket_id_product,
         "market_price_eur": float(card.market_price_eur) if card.market_price_eur is not None else None,
         "market_price_overridden": bool(card.market_price_overridden),

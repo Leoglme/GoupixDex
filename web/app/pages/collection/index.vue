@@ -151,13 +151,14 @@
               >
                 {{ eur.format(card.market_price_eur) }}
               </span>
-              <span
+              <UBadge
                 v-if="card.article_id"
-                class="bg-success/90 text-inverted absolute top-1.5 right-1.5 rounded-full p-1 backdrop-blur-sm"
-                title="Article créé"
-              >
-                <UIcon name="i-lucide-tag" class="size-3" />
-              </span>
+                :color="card.is_article_online ? 'success' : 'error'"
+                icon="i-lucide-tag"
+                size="sm"
+                :title="card.is_article_online ? 'Article en vente' : 'Article créé, pas en vente'"
+                class="absolute top-1.5 right-1.5 rounded-full"
+              />
             </template>
           </GoupixDexPokemonCardTile>
         </div>
@@ -212,7 +213,13 @@
                 <span v-else class="text-xs text-[var(--app-faint)]">—</span>
               </GoupixDexBaseTableTd>
               <GoupixDexBaseTableTd label="Statut">
-                <UBadge v-if="row.article_id" color="success" variant="subtle" size="sm" icon="i-lucide-tag">
+                <UBadge
+                  v-if="row.article_id"
+                  :color="row.is_article_online ? 'success' : 'error'"
+                  variant="subtle"
+                  size="sm"
+                  icon="i-lucide-tag"
+                >
                   Article #{{ row.article_id }}
                 </UBadge>
                 <span v-else class="text-xs text-[var(--app-faint)]">—</span>

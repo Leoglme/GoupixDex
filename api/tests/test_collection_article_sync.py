@@ -1,19 +1,21 @@
-"""Synchro « Ma Collection » ↔ articles en vente : une carte vendue quitte la collection."""
+"""Synchro « Ma Collection » ↔ articles en vente : une carte vendue quitte la collection, une carte liée dit si son article est en ligne."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 import models  # noqa: F401 — enregistre tous les mappers (relations croisées entre modèles)
 from models.article import Article
 from models.base import Base
 from models.collection_card import CollectionCard
 from services import collection_article_sync_service as sync
+from services import collection_card_service, scan_stream_service
 
 
 @pytest.fixture
@@ -59,6 +61,13 @@ def _linked_card(db: Session, article: Article, *, quantity: int = 1) -> Collect
     return card
 
 
+def _listed_card_json(db: Session) -> dict[str, Any]:
+    """Première carte de ``GET /collection``, sérialisée hors session : l'article lié doit venir avec la liste."""
+    rows = collection_card_service.list_collection_for_user(db, 1)
+    db.expunge_all()
+    return collection_card_service.collection_card_to_dict(rows[0])
+
+
 def test_sold_card_leaves_the_collection(db: Session) -> None:
     article = _for_sale_article(db)
     card = _linked_card(db, article)
@@ -78,6 +87,44 @@ def test_selling_one_of_several_copies_keeps_the_others(db: Session) -> None:
 def test_selling_an_article_without_collection_card_changes_nothing(db: Session) -> None:
     article = _for_sale_article(db)
     assert sync.remove_collection_card_for_sold_article(db, article) is False
+
+
+def test_card_whose_article_is_not_listed_anywhere_is_not_online(db: Session) -> None:
+    _linked_card(db, _for_sale_article(db))
+    assert _listed_card_json(db)["is_article_online"] is False
+
+
+def test_card_whose_article_is_listed_on_a_marketplace_is_online(db: Session) -> None:
+    article = _for_sale_article(db)
+    article.published_on_leboncoin = True
+    db.commit()
+    _linked_card(db, article)
+    assert _listed_card_json(db)["is_article_online"] is True
+
+
+def test_card_whose_article_is_sold_is_not_online(db: Session) -> None:
+    article = _for_sale_article(db)
+    article.published_on_vinted = True
+    article.is_sold = True
+    db.commit()
+    _linked_card(db, article)
+    assert _listed_card_json(db)["is_article_online"] is False
+
+
+def test_scanning_a_card_already_for_sale_keeps_it_online(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    article = _for_sale_article(db)
+    article.published_on_vinted = True
+    db.commit()
+    card = _linked_card(db, article)
+    scanned_meta = {"tcgdex_card_id": card.tcgdex_card_id, "language": card.language}
+    db.close()
+    monkeypatch.setattr(scan_stream_service, "SessionLocal", sessionmaker(bind=db.get_bind()))
+
+    card_json, created = scan_stream_service._add_or_increment(1, scanned_meta, notes=None)
+
+    assert created is False
+    assert card_json["quantity"] == 2
+    assert card_json["is_article_online"] is True
 
 
 def test_purchase_price_follows_the_article_and_the_card(db: Session) -> None:

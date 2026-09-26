@@ -137,13 +137,14 @@
               >
                 ×{{ product.quantity }}
               </span>
-              <span
+              <UBadge
                 v-if="product.article_id"
-                class="bg-success/90 text-inverted absolute top-1.5 left-1.5 rounded-full p-1"
-                title="Article créé"
-              >
-                <UIcon name="i-lucide-tag" class="size-3" />
-              </span>
+                :color="product.is_article_online ? 'success' : 'error'"
+                icon="i-lucide-tag"
+                size="sm"
+                :title="product.is_article_online ? 'Article en vente' : 'Article créé, pas en vente'"
+                class="absolute top-1.5 left-1.5 rounded-full"
+              />
             </template>
           </GoupixDexSealedProductTile>
         </div>

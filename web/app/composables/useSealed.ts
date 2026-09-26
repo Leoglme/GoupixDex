@@ -24,6 +24,7 @@ export interface SealedProduct {
   purchase_price_eur: number | null
   notes: string | null
   article_id: number | null
+  is_article_online: boolean
   cardmarket_id_product: number | null
   tcgplayer_id: number | null
   cardmarket_url: string | null

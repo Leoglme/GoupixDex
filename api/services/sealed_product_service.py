@@ -15,6 +15,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from models.sealed_product import SealedProduct
+from services.article_service import is_article_online
 from services.collection_gain import gain_fields
 
 
@@ -32,7 +33,7 @@ def list_sealed_for_user(
 
     ``listed_state`` : ``"any"`` (défaut), ``"with_article"``, ``"without_article"``.
     """
-    q = db.query(SealedProduct).filter(SealedProduct.user_id == user_id)
+    q = db.query(SealedProduct).options(joinedload(SealedProduct.article)).filter(SealedProduct.user_id == user_id)
     if search:
         like = f"%{search.strip()}%"
         q = q.filter(
@@ -87,6 +88,7 @@ def sealed_product_to_dict(product: SealedProduct) -> dict[str, Any]:
         "purchase_price_eur": float(product.purchase_price_eur) if product.purchase_price_eur is not None else None,
         "notes": product.notes,
         "article_id": product.article_id,
+        "is_article_online": product.article_id is not None and is_article_online(product.article),
         "cardmarket_id_product": product.cardmarket_id_product,
         "tcgplayer_id": product.tcgplayer_id,
         "cardmarket_url": product.cardmarket_url,

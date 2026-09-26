@@ -86,7 +86,7 @@ Profit, revenue and number of sales over any period, the stock currently for sal
 
 ### Collection
 
-- **My collection** — every card you own with its language, Cardmarket price and a badge when it is listed; KPIs for estimated value, capital gain, cards, sets and listed cards.
+- **My collection** — every card you own with its language, Cardmarket price and a badge when it has a listing (green once it is live on a marketplace, red otherwise); KPIs for estimated value, capital gain, cards, sets and listed cards.
 - **Sealed products** — Elite Trainer Boxes, Ultra-Premium Collections, boxes, displays… valued at the Cardmarket price, with the gain on your purchase price.
 - **Value over time** — market value against purchase value, and the cards / sealed products split.
 - **Binders** — themed sub-collections displayed like a real binder (3×3 pockets, custom cover) or as a grid, with missing cards in grayscale. Example below: the full 151 Kanto Pokédex.
