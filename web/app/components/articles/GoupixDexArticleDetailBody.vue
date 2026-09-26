@@ -677,7 +677,7 @@ async function loadPricing(a: Article): Promise<void> {
     pricingLoading.value = true
   }
   try {
-    const p = await lookup(a.set_code.trim(), a.card_number.trim(), a.pokemon_name)
+    const p = await lookup(a.set_code.trim(), a.card_number.trim(), a.pokemon_name, a.id)
     pricing.value = {
       ...p,
       cardmarket_eur: a.market_cardmarket_eur ?? p.cardmarket_eur,

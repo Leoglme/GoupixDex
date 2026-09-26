@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from models.article import Article
+from services.collection_article_sync_service import is_unresolved, linked_collection_card
 from services.pricing_service import fetch_card_prices
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,39 @@ def clear_article_market_reference(article: Article) -> None:
     article.market_priced_at = None
 
 
+def _printed_card_number(value: str | None) -> str:
+    """Printed number without denominator nor leading zeros (``"071/063"`` gives ``"71"``), to compare an article with its card."""
+    head = (value or "").split("/", 1)[0].strip().lower()
+    return head.lstrip("0") or head
+
+
+def fetch_article_card_prices(db: Session, article: Article) -> dict[str, Any]:
+    """
+    Reference prices of an article's card, identified by its linked collection card when that card is resolved and still has the article's number.
+
+    Args:
+        db: Database session.
+        article: Article to price.
+
+    Returns:
+        The ``fetch_card_prices`` result.
+    """
+    linked_card = linked_collection_card(db, article)
+    if (
+        linked_card is not None
+        and not is_unresolved(linked_card)
+        and _printed_card_number(linked_card.card_number) == _printed_card_number(article.card_number)
+    ):
+        return fetch_card_prices(
+            article.set_code,
+            article.card_number,
+            article.pokemon_name,
+            tcgdex_card_id=linked_card.tcgdex_card_id,
+            language=linked_card.language,
+        )
+    return fetch_card_prices(article.set_code, article.card_number, article.pokemon_name)
+
+
 def refresh_article_market_reference(article: Article) -> None:
     """Resolve set + number and store reference prices (TCGdex + local guide)."""
     set_code = (article.set_code or "").strip()
@@ -66,7 +100,7 @@ def revalue_all_articles(db: Session) -> dict[str, int]:
                 cleared += 1
             continue
         try:
-            refresh_article_market_reference(row)
+            apply_pricing_snapshot_to_article(row, fetch_article_card_prices(db, row))
             repriced += 1
         except Exception as exc:
             logger.warning("Article %s market reprice failed: %s", row.id, exc)

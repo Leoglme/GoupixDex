@@ -55,27 +55,32 @@ def _fetch_prices_via_cardmarket_local(
     set_code: str,
     card_number: str,
     pokemon_name: str | None,
+    *,
+    tcgdex_card_id: str | None = None,
+    language: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Tier 1: TCGdex resolution + local Cardmarket price guide.
 
     Returns ``None`` only when the card cannot be resolved on TCGdex — then the
     caller may fall back to PokéWallet. Once a TCGdex id exists, we never call
-    PokéWallet (even when the guide has no price yet).
+    PokéWallet (even when the guide has no price yet). A known ``tcgdex_card_id``
+    (and its ``language``) skips the set code / number resolution.
     """
-    try:
-        tcgdex_card_id = resolve_tcgdex_card_id_from_ocr(
-            ocr_set_code=set_code,
-            ocr_card_number=card_number,
-            ocr_pokemon_name_english=pokemon_name,
-        )
-    except (RuntimeError, ValueError, OSError) as exc:
-        logger.warning("TCGdex resolution failed for %s %s: %s", set_code, card_number, exc)
-        return None
-    if not tcgdex_card_id:
-        return None
+    if tcgdex_card_id is None:
+        try:
+            tcgdex_card_id = resolve_tcgdex_card_id_from_ocr(
+                ocr_set_code=set_code,
+                ocr_card_number=card_number,
+                ocr_pokemon_name_english=pokemon_name,
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.warning("TCGdex resolution failed for %s %s: %s", set_code, card_number, exc)
+            return None
+        if not tcgdex_card_id:
+            return None
 
-    block, tcgplayer_usd = fetch_tcgdex_pricing_snapshot(tcgdex_card_id)
+    block, tcgplayer_usd = fetch_tcgdex_pricing_snapshot(tcgdex_card_id, language)
     id_product = block.get("idProduct") if isinstance(block, dict) else None
     cardmarket_eur = resolve_market_price_eur(
         id_product if isinstance(id_product, int) else None,
@@ -189,9 +194,19 @@ def fetch_card_prices(
     set_code: str | None,
     card_number: str | None,
     pokemon_name: str | None = None,
+    *,
+    tcgdex_card_id: str | None = None,
+    language: str | None = None,
 ) -> dict[str, Any]:
     """
     Resolve a card's reference prices (EUR basis).
+
+    Args:
+        set_code: Printed set code.
+        card_number: Printed card number.
+        pokemon_name: Optional English Pokémon name, helps the set code / number resolution.
+        tcgdex_card_id: Already identified TCGdex card: skips the set code / number resolution and the PokéWallet lookup.
+        language: Physical language of that card, to read its TCGdex locale first.
 
     Returns:
         Dict with ``cardmarket_eur``, ``tcgplayer_usd``, ``average_price``,
@@ -200,7 +215,13 @@ def fetch_card_prices(
     if not set_code or not card_number:
         return _empty_result("Le code set et le numéro de carte sont requis.")
 
-    local = _fetch_prices_via_cardmarket_local(set_code.strip(), card_number.strip(), pokemon_name)
+    local = _fetch_prices_via_cardmarket_local(
+        set_code.strip(),
+        card_number.strip(),
+        pokemon_name,
+        tcgdex_card_id=tcgdex_card_id,
+        language=language,
+    )
     if local is not None:
         return local
 

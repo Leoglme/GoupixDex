@@ -14,7 +14,8 @@ from core.database import get_db
 from core.deps import get_current_user
 from models.margin_settings import MarginSettings
 from models.user import User
-from services import pricing_service
+from services import article_service, pricing_service
+from services.article_market_reference_service import fetch_article_card_prices
 from services.cardmarket_local_price_service import get_price_api
 from services.market_price_refresh_service import refresh_market_prices
 
@@ -41,14 +42,19 @@ def lookup_prices(
     set_code: str = Query(..., min_length=1),
     card_number: str = Query(..., min_length=1),
     pokemon_name: str | None = Query(None),
+    article_id: int | None = Query(None, ge=1),
 ) -> dict[str, Any]:
-    """Cardmarket local (TCGdex) first, PokéWallet last resort; suggested price uses saved margin %."""
+    """Cardmarket local (TCGdex) first, PokéWallet last resort, the ``article_id``'s linked collection card identifying the card when resolved; suggested price uses saved margin %."""
     margin = _margin_percent(db, user.id)
-    pricing = pricing_service.fetch_card_prices(
-        set_code.strip(),
-        card_number.strip(),
-        pokemon_name.strip() if pokemon_name else None,
-    )
+    article = article_service.get_article(db, article_id, user.id) if article_id is not None else None
+    if article is not None:
+        pricing = fetch_article_card_prices(db, article)
+    else:
+        pricing = pricing_service.fetch_card_prices(
+            set_code.strip(),
+            card_number.strip(),
+            pokemon_name.strip() if pokemon_name else None,
+        )
     avg = _round_eur(pricing.get("average_price"))
     suggested: float | None = None
     if avg is not None:

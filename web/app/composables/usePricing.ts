@@ -28,14 +28,16 @@ export function usePricing() {
    * @param setCode - Pokémon TCG set code.
    * @param cardNumber - Collector number within the set.
    * @param pokemonName - Optional name hint for disambiguation.
+   * @param articleId - Optional article whose linked collection card identifies the card.
    * @returns {Promise<PricingLookup>} Normalized pricing payload from the API.
    */
-  async function lookup(setCode: string, cardNumber: string, pokemonName?: string | null) {
+  async function lookup(setCode: string, cardNumber: string, pokemonName?: string | null, articleId?: number) {
     const { data } = await $api.get<PricingLookup>('/pricing/lookup', {
       params: {
         set_code: setCode,
         card_number: cardNumber,
         pokemon_name: pokemonName || undefined,
+        article_id: articleId,
       },
     })
     return data
