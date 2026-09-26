@@ -243,7 +243,7 @@ const {
 } = useCollection()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { isDesktopApp } = useDesktopRuntime()
-const { openArticleFromClick } = useOpenArticleDrawer()
+const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
 const toast = useToast()
 
 const card = ref<CollectionCard | null>(null)
@@ -511,7 +511,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
       return
     }
     toast.add({ title: 'Article créé depuis la carte', color: 'success' })
-    await navigateTo(`/articles/${article.id}`)
+    openArticle(article.id)
   } catch (e) {
     toast.add({ title: 'Création impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {

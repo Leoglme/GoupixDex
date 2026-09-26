@@ -222,7 +222,7 @@ const { getSealed, getPriceHistory, patchSealed, deleteSealed, prepareArticlePre
 const { loadProductPriceHistory } = useSealedCatalog()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { isDesktopApp } = useDesktopRuntime()
-const { openArticleFromClick } = useOpenArticleDrawer()
+const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
 const toast = useToast()
 
 const product = ref<SealedProduct | null>(null)
@@ -522,7 +522,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
       return
     }
     toast.add({ title: 'Article créé depuis le produit', color: 'success' })
-    await navigateTo(`/articles/${article.id}`)
+    openArticle(article.id)
   } catch (e) {
     toast.add({ title: 'Création impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
