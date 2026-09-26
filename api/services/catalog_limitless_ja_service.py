@@ -1,5 +1,5 @@
 """
-Limitless TCG (JP) — Latin display names for Japanese catalog rows.
+Limitless TCG (JP) — Latin display names and card lists for Japanese catalog rows.
 
 TailTCG uses the same source (limitlesstcg.com/cards/jp) in ``scripts/catalog-sync.mjs``.
 We fetch on demand with a long TTL cache instead of a local DB.
@@ -11,6 +11,7 @@ import html as html_module
 import re
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -20,13 +21,38 @@ _INDEX_URL = "https://limitlesstcg.com/cards/jp"
 _INDEX_TTL_SEC = 86400.0
 _SET_CARDS_TTL_SEC = 3600.0
 
+# Extensions jumelles que Limitless code autrement que TCGdex : son XY8b est le XY8a de TCGdex (Blue Shock).
+_TCGDEX_TO_LIMITLESS_CODES: dict[str, str] = {
+    "XY1a": "XY1x",
+    "XY1b": "XY1y",
+    "XY5a": "XY5g",
+    "XY5b": "XY5t",
+    "XY8a": "XY8b",
+    "XY8b": "XY8r",
+    "XY11a": "XY11b",
+    "XY11b": "XY11r",
+}
+
 _strip_re = re.compile(r"<[^>]+>")
 _index_link_re = re.compile(
     r'href="/cards/jp/([A-Za-z0-9+.\-]+)"[^>]*>(.*?)</a>',
     re.DOTALL,
 )
-_table_row_re = re.compile(r"<tr[^>]*>(.*?)</tr>", re.DOTALL)
+_table_row_re = re.compile(r"<tr([^>]*)>(.*?)</tr>", re.DOTALL)
 _table_cell_re = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.DOTALL)
+_row_image_re = re.compile(r'data-hover="([^"]+)"')
+
+
+@dataclass(frozen=True)
+class LimitlessCard:
+    """Carte d'une extension japonaise chez Limitless : numéro imprimé, noms, type, rareté, vignette XS."""
+
+    number: str
+    name_ja: str
+    name_en: str | None
+    card_type: str
+    rarity: str | None
+    image_xs: str | None
 
 
 class _Cache:
@@ -108,6 +134,9 @@ def limitless_jp_set_names_by_code() -> dict[str, str]:
 
 
 def _resolve_limitless_code(tcgdex_set_id: str, names_by_code: dict[str, str]) -> str | None:
+    explicit = _TCGDEX_TO_LIMITLESS_CODES.get(tcgdex_set_id)
+    if explicit is not None:
+        return explicit if explicit in names_by_code else None
     want = code_key(tcgdex_set_id)
     if tcgdex_set_id in names_by_code:
         return tcgdex_set_id
@@ -133,10 +162,19 @@ def _parse_limitless_list_table(page: str) -> list[dict[str, str]]:
     chunk = page[start:end]
     rows: list[dict[str, str]] = []
     for tr in _table_row_re.finditer(chunk):
-        cells = [_strip_html(m.group(1)) for m in _table_cell_re.finditer(tr.group(1))]
+        cells = [_strip_html(m.group(1)) for m in _table_cell_re.finditer(tr.group(2))]
         if len(cells) < 3 or cells[0] == "Set":
             continue
-        rows.append({"no": cells[1], "name": cells[2]})
+        image = _row_image_re.search(tr.group(1))
+        rows.append(
+            {
+                "no": cells[1],
+                "name": cells[2],
+                "type": cells[3] if len(cells) > 3 else "",
+                "rarity": cells[4] if len(cells) > 4 else "",
+                "image": image.group(1) if image else "",
+            }
+        )
     return rows
 
 
@@ -146,6 +184,19 @@ def _normalize_local_id(local_id: str) -> str:
     return local_id.upper()
 
 
+def _limitless_list_rows(code: str, *, english: bool) -> list[dict[str, str]]:
+    """Lignes de la liste Limitless d'une extension (noms japonais, ou anglais avec ``english``), mises en cache."""
+    cache_key = f"limitless_jp_list:{code}:{'en' if english else 'ja'}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+    suffix = "&translate=en" if english else ""
+    page = _http_get_text(f"https://limitlesstcg.com/cards/jp/{code}?display=list{suffix}")
+    rows = _parse_limitless_list_table(page) if page else []
+    _cache.set(cache_key, rows, _SET_CARDS_TTL_SEC)
+    return rows
+
+
 def limitless_en_card_names_for_set(tcgdex_set_id: str) -> dict[str, str]:
     """localId → English card name (Limitless translate=en)."""
     names_by_code = limitless_jp_set_names_by_code()
@@ -153,28 +204,39 @@ def limitless_en_card_names_for_set(tcgdex_set_id: str) -> dict[str, str]:
     if code is None:
         return {}
 
-    cache_key = f"limitless_jp_cards_en:{code}"
-    cached = _cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    url = f"https://limitlesstcg.com/cards/jp/{code}?display=list&translate=en"
-    page = _http_get_text(url)
-    if not page:
-        _cache.set(cache_key, {}, _SET_CARDS_TTL_SEC)
-        return {}
-
-    parsed = _parse_limitless_list_table(page)
     out: dict[str, str] = {}
-    for row in parsed:
+    for row in _limitless_list_rows(code, english=True):
         no = row.get("no", "")
         name = row.get("name", "").strip()
         if no and name:
             out[_normalize_local_id(no)] = name
             out[no] = name
-
-    _cache.set(cache_key, out, _SET_CARDS_TTL_SEC)
     return out
+
+
+def limitless_jp_cards(tcgdex_set_id: str) -> list[LimitlessCard]:
+    """
+    Cartes d'une extension japonaise listées par Limitless, noms japonais et anglais, vide si Limitless ne l'a pas.
+
+    Args:
+        tcgdex_set_id: Identifiant TCGdex de l'extension (``S4a``, ``XY8b``).
+    """
+    code = _resolve_limitless_code(tcgdex_set_id, limitless_jp_set_names_by_code())
+    if code is None:
+        return []
+    english_names = {row["no"]: row["name"] for row in _limitless_list_rows(code, english=True)}
+    return [
+        LimitlessCard(
+            number=row["no"],
+            name_ja=row["name"],
+            name_en=english_names.get(row["no"]) or None,
+            card_type=row["type"],
+            rarity=row["rarity"] or None,
+            image_xs=row["image"] or None,
+        )
+        for row in _limitless_list_rows(code, english=False)
+        if row["no"] and row["name"]
+    ]
 
 
 def apply_limitless_labels_to_series_detail(detail: dict[str, Any]) -> None:

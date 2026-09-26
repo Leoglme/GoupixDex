@@ -24,6 +24,7 @@ from typing import Any, cast
 import httpx
 
 from services.card_image_fallback_service import fallback_card_images
+from services.catalog_external_cards_service import external_set_cards
 from services.catalog_set_logos import enrich_browse_series_tree, enrich_set_visuals_row
 from services.tcgdex_asset_url import (
     card_image_low_webp,
@@ -613,15 +614,20 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
             if isinstance(row, dict) and isinstance(row.get("id"), str)
         ],
     )
-    ghost_set_ids = _ghost_set_ids(details, set_facts)
+    external_totals = _external_card_totals(loc, [set_id for set_id, (_date, total) in set_facts.items() if total == 0])
+    hidden_set_ids = _hidden_set_ids(details, set_facts, external_totals)
     for serie in details:
         sets = serie.get("sets")
         if isinstance(sets, list):
-            typed = [s for s in sets if isinstance(s, dict) and str(s.get("id")) not in ghost_set_ids]
+            typed = [s for s in sets if isinstance(s, dict) and str(s.get("id")) not in hidden_set_ids]
             for row in typed:
                 release_date = set_facts.get(str(row.get("id")), (None, -1))[0]
                 if release_date and not row.get("releaseDate"):
                     row["releaseDate"] = release_date
+                external_total = external_totals.get(str(row.get("id")))
+                if external_total:
+                    card_count = row.get("cardCount")
+                    row["cardCount"] = {**(card_count if isinstance(card_count, dict) else {}), "total": external_total}
             _sort_sets(typed)
             serie["sets"] = typed
 
@@ -684,6 +690,27 @@ def _ghost_set_ids(
         if card_total == 0 and ((name, release_date) in filled_twins or name_counts[name] > 2):
             ghosts.add(str(row.get("id")))
     return ghosts
+
+
+def _hidden_set_ids(
+    series_details: list[dict[str, Any]],
+    set_facts: dict[str, tuple[str | None, int]],
+    external_totals: dict[str, int],
+) -> set[str]:
+    """Extensions masquées : fiches fantômes, et extensions vides chez TCGdex que rien d'autre ne remplit (jumbo)."""
+    empty_without_source = {
+        set_id for set_id, (_date, total) in set_facts.items() if total == 0 and not external_totals.get(set_id)
+    }
+    return _ghost_set_ids(series_details, set_facts) | empty_without_source
+
+
+def _external_card_totals(loc: str, set_ids: list[str]) -> dict[str, int]:
+    """Nombre de cartes reprises hors TCGdex (Limitless, TCGplayer) de chaque extension japonaise vide chez TCGdex."""
+    if loc != "ja" or not set_ids:
+        return {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        totals = list(pool.map(lambda set_id: len(external_set_cards(set_id)), set_ids))
+    return dict(zip(set_ids, totals, strict=True))
 
 
 def _set_release_facts(loc: str, set_ids: list[str]) -> dict[str, tuple[str | None, int]]:
@@ -907,8 +934,31 @@ def get_set_for_ui(locale: str, set_id: str) -> dict[str, Any]:
 
     _fill_missing_card_images(cast(dict[str, Any], detail), loc)
     _append_merged_subset_cards(cast(dict[str, Any], detail), loc)
+    if loc == "ja" and not detail.get("cards"):
+        _fill_external_cards(cast(dict[str, Any], detail))
     _cache.set(cache_key, detail)
     return detail
+
+
+def _fill_external_cards(detail: dict[str, Any]) -> None:
+    """Extension japonaise que TCGdex liste sans carte : cartes reprises de Limitless ou TCGplayer, et leur nombre."""
+    set_id = str(detail.get("id") or "")
+    cards: list[dict[str, Any]] = []
+    for card in external_set_cards(set_id):
+        row: dict[str, Any] = {
+            "id": f"{set_id}-{card.local_id}",
+            "localId": card.local_id,
+            "name": card.name_ja or card.name_en or card.local_id,
+            "display_name": card.name_en or card.name_ja or card.local_id,
+        }
+        if card.images is not None:
+            row["image_low"] = card.images.low
+        cards.append(row)
+    if not cards:
+        return
+    detail["cards"] = cards
+    card_count = detail.get("cardCount")
+    detail["cardCount"] = {**(card_count if isinstance(card_count, dict) else {}), "total": len(cards)}
 
 
 def _fill_missing_card_images(detail: dict[str, Any], loc: str) -> None:

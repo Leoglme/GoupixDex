@@ -191,22 +191,27 @@ def _preview_without_english_card(
         physical_language=locale if locale in SUPPORTED_LOCALES else "ja",
         tcgdex=client,
     )
-    image_low = meta.get("image_url")
-    image_base = image_low[: -len("/low.webp")] if isinstance(image_low, str) and image_low.endswith("/low.webp") else None
     name_en = str(meta.get("card_name_en") or "")
     market_price = meta.get("market_price_eur")
     id_product = meta.get("cardmarket_id_product")
-    known_prices = (
-        {
+    known_prices: dict[str, Any] | None = None
+    if isinstance(market_price, (int, float)):
+        known_prices = {
             "cardmarket_eur": float(market_price),
             "tcgplayer_usd": None,
             "cardmarket_id_product": id_product if isinstance(id_product, int) else None,
             "average_price": float(market_price),
             "error": None,
         }
-        if isinstance(market_price, (int, float))
-        else None
-    )
+    elif meta.get("source") != "tcgdex":
+        # Carte reprise hors TCGdex (Limitless, TCGplayer) : aucune fiche à coter, la recherche par set échouerait.
+        known_prices = {
+            "cardmarket_eur": None,
+            "tcgplayer_usd": None,
+            "cardmarket_id_product": None,
+            "average_price": None,
+            "error": None,
+        }
     return _preview_payload(
         tcgdx_card_id=tcgdx_card_id,
         set_id=set_id,
@@ -218,9 +223,10 @@ def _preview_without_english_card(
         name_ja=meta.get("card_name_ja"),
         set_name_en=str(meta.get("set_name") or ""),
         rarity=str(meta.get("rarity") or ""),
-        image_base=image_base,
+        image_base=None,
         browse_locale=browse_locale,
         known_prices=known_prices,
+        fallback_image_url_high=meta.get("image_url_high"),
     )
 
 
@@ -245,7 +251,7 @@ def _preview_payload(
     """
     Titre + description d'annonce, prix, amorce de courbe et image HD d'une carte à partir de ses faits TCGdex.
     ``known_prices`` évite la recherche de prix par set/numéro quand la carte est déjà cotée.
-    ``fallback_image_url_high`` remplace l'image HD quand TCGdex n'a pas de scan exploitable.
+    ``fallback_image_url_high`` donne l'image HD déjà résolue (scan de repli, fiche japonaise) au lieu de ``image_base``.
     """
     display_name = _pick_display_pokemon_name(browse_locale, name_en, name_fr, name_ja)
     ocr: GroqVisionCardCollectorResult = {

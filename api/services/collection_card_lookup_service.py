@@ -13,6 +13,7 @@ from services.cardmarket_local_price_service import (
     resolve_market_price_eur,
 )
 from services.catalog_browse_service import readable_set_name
+from services.catalog_external_cards_service import ExternalCard, external_card
 from services.species_locale_names_service import (
     fetch_species_locale_names,
     fetch_species_names_by_dex,
@@ -24,6 +25,7 @@ from services.tcgdex_client_service import (
     infer_pokewallet_set_code,
     normalize_card_number_for_pokewallet,
     split_tcgdex_card_id,
+    tcgdx_image_url_high,
 )
 
 
@@ -95,10 +97,14 @@ def _set_name_from_card(card_payload: dict[str, Any]) -> str:
 
 def _set_logo_from_card(card_payload: dict[str, Any]) -> str | None:
     nested = card_payload.get("set")
-    if isinstance(nested, dict):
-        logo = nested.get("logo")
-        if isinstance(logo, str) and logo.strip():
-            return tcgdx_asset_url_with_webp(logo.strip())
+    return _set_logo_url(nested) if isinstance(nested, dict) else None
+
+
+def _set_logo_url(set_payload: dict[str, Any]) -> str | None:
+    """Logo TCGdex (webp) d'une extension, ``None`` quand TCGdex n'en a pas."""
+    logo = set_payload.get("logo")
+    if isinstance(logo, str) and logo.strip():
+        return tcgdx_asset_url_with_webp(logo.strip())
     return None
 
 
@@ -180,8 +186,21 @@ def fetch_card_for_collection(
             continue
 
     if not cards_by_locale:
-        msg = f"TCGdex has no card {cid!r} in any supported locale."
-        raise ValueError(msg)
+        # Extension japonaise que TCGdex liste sans cartes : fiche reprise de Limitless ou TCGplayer.
+        external = external_card(set_id, local_raw) if lang == "ja" else None
+        if external is None:
+            msg = f"TCGdex has no card {cid!r} in any supported locale."
+            raise ValueError(msg)
+        return _external_card_row(
+            card_id=cid,
+            set_id=set_id,
+            local_id=local_raw,
+            language=lang,
+            set_detail=dict(set_detail),
+            set_code=set_code,
+            card=external,
+            fallback_name_en=fallback_name_en,
+        )
 
     primary = next(
         (cards_by_locale[loc] for loc in locales if loc in cards_by_locale),
@@ -225,10 +244,13 @@ def fetch_card_for_collection(
 
     rarity = _strip(primary.get("rarity"))
     image_url = _resolve_image_url(primary)
+    image_base = _strip(primary.get("image"))
+    image_url_high = tcgdx_image_url_high(image_base) if image_base else None
     if set_detail and (image_url is None or has_lettered_number(local_raw)):
         fallback_image = fallback_card_image(lang, dict(set_detail), local_raw)
         if fallback_image is not None:
             image_url = fallback_image.low
+            image_url_high = fallback_image.high
 
     set_name = readable_set_name(_set_name_from_card(primary) or _strip(set_detail.get("name")))
     display_name = _latin_display_name(name_en, name_fr, name_ja)
@@ -257,7 +279,55 @@ def fetch_card_for_collection(
         "rarity": rarity or None,
         "language": lang,
         "image_url": image_url,
+        "image_url_high": image_url_high,
         "set_logo_url": _set_logo_from_card(primary),
         "cardmarket_id_product": cardmarket_id_product,
         "market_price_eur": market_price_eur,
+        "source": "tcgdex",
+    }
+
+
+def _external_card_row(
+    *,
+    card_id: str,
+    set_id: str,
+    local_id: str,
+    language: str,
+    set_detail: dict[str, Any],
+    set_code: str | None,
+    card: ExternalCard,
+    fallback_name_en: str | None,
+) -> dict[str, Any]:
+    """
+    Colonnes d'une carte japonaise absente de TCGdex (Limitless, TCGplayer) : noms, rareté et scans, sans cote.
+
+    Le nom français vient de l'espèce du nom anglais (« Rowlet » donne « Brindibou »), faute de fiche TCGdex.
+    """
+    name_en = _strip(card.name_en) or _strip(fallback_name_en)
+    name_ja = _strip(card.name_ja)
+    name_fr = name_en
+    if name_en:
+        species = fetch_species_locale_names(name_en)
+        suffix = _card_suffix(name_en)
+        if species.french:
+            name_fr = f"{_strip(species.french)} {suffix}".strip() if suffix else _strip(species.french)
+        name_ja = name_ja or _strip(species.japanese)
+    return {
+        "tcgdex_card_id": card_id,
+        "tcgdex_set_id": set_id,
+        "set_code": set_code or set_id.upper(),
+        "set_name": readable_set_name(_strip(set_detail.get("name"))) or None,
+        "card_number": normalize_card_number_for_pokewallet(local_id),
+        "card_name_en": name_en or None,
+        "card_name_fr": name_fr or None,
+        "card_name_ja": name_ja or None,
+        "display_name": _latin_display_name(name_en, name_fr, name_ja),
+        "rarity": card.rarity,
+        "language": language,
+        "image_url": card.images.low if card.images else None,
+        "image_url_high": card.images.high if card.images else None,
+        "set_logo_url": _set_logo_url(set_detail),
+        "cardmarket_id_product": None,
+        "market_price_eur": None,
+        "source": card.source,
     }

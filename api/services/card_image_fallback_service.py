@@ -6,6 +6,7 @@ anglaises TCGdex (listées ou par convention), données publiques pokemontcg.io 
 CDN Limitless pour les promos et énergies récentes, puis scans TCGplayer (via TCGCSV) pour les kits dresseur,
 promos McDonald's et extensions japonaises que personne d'autre n'illustre. Les réimpressions (McDonald's exclusifs
 à la France, kits dresseur) reprennent en dernier recours la carte d'origine de même nom et même illustrateur.
+Les listes TCGplayer servent aussi à remplir les extensions japonaises que TCGdex liste sans cartes.
 """
 
 from __future__ import annotations
@@ -97,13 +98,23 @@ _TCGPLAYER_ENGLISH_GROUPS: dict[str, int] = {
     "xya": 1938,
 }
 
-# Groupes TCGplayer japonais dont le nom ne commence pas par le code TCGdex (1996 à 2007, « SM1+ » écrit SM1p, Start Deck 100).
+# Groupes TCGplayer japonais sans le code TCGdex en tête (avant 2011, jumeaux XY « XY8-Br », SM1p, Start Deck 100).
 _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
+    "ADV1": 24129,
+    "ADV2": 24139,
+    "ADV3": 24128,
+    "ADV4": 24124,
+    "ADV5": 24119,
     "E1": 23730,
     "E2": 23731,
     "E3": 23732,
     "E4": 23733,
     "E5": 23734,
+    "L1a": 24025,
+    "L1b": 24026,
+    "L2": 24021,
+    "L3": 24024,
+    "LL": 24022,
     "MC": 24567,
     "PCG1": 24117,
     "PCG2": 24114,
@@ -127,6 +138,14 @@ _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
     "SM4p": 23707,
     "SM5p": 23695,
     "VS1": 24180,
+    "XY11a": 23916,
+    "XY11b": 23917,
+    "XY1a": 23914,
+    "XY1b": 23915,
+    "XY5a": 23921,
+    "XY5b": 23922,
+    "XY8a": 23925,
+    "XY8b": 23926,
     "neo1": 23727,
     "neo2": 23728,
     "neo3": 23720,
@@ -209,6 +228,16 @@ class _TcgplayerCard:
     name: str
     is_variant: bool
     urls: CardImageUrls
+
+
+@dataclass(frozen=True)
+class TcgplayerCardListing:
+    """Carte numérotée d'une extension chez TCGplayer : numéro imprimé, nom anglais, rareté, scans vérifiés."""
+
+    number: str
+    name: str
+    rarity: str | None
+    urls: CardImageUrls | None
 
 
 class _TtlCache:
@@ -552,31 +581,105 @@ def _tcgplayer_name(name: str) -> str:
     return _normalize_name(readable)
 
 
+def _tcgplayer_extended_data(product: dict[str, Any]) -> dict[str, str]:
+    """Champs complémentaires d'un produit TCGplayer (``Number``, ``Rarity``…) indexés par nom."""
+    return {
+        str(field.get("name")): str(field.get("value"))
+        for field in product.get("extendedData") or []
+        if isinstance(field, dict) and field.get("value") is not None
+    }
+
+
+def _tcgplayer_image_urls(product: dict[str, Any]) -> CardImageUrls | None:
+    """Vignette et image HD d'un produit TCGplayer, ``None`` quand l'export n'a pas d'image."""
+    image = product.get("imageUrl")
+    if not isinstance(image, str) or not image.endswith("_200w.jpg"):
+        return None
+    return CardImageUrls(
+        low=image.replace("_200w.jpg", "_400w.jpg"),
+        high=image.replace("_200w.jpg", "_in_1000x1000.jpg"),
+    )
+
+
 def _tcgplayer_cards(category: int, group_id: int) -> list[_TcgplayerCard]:
     """Cartes illustrées d'un groupe TCGplayer, dans l'ordre de l'export."""
     cards: list[_TcgplayerCard] = []
     for product in _tcgplayer_json(f"{category}/{group_id}/products"):
-        image = product.get("imageUrl")
-        if not isinstance(image, str) or not image.endswith("_200w.jpg"):
+        urls = _tcgplayer_image_urls(product)
+        if urls is None:
             continue
-        extended = {
-            str(field.get("name")): str(field.get("value"))
-            for field in product.get("extendedData") or []
-            if isinstance(field, dict)
-        }
         name = str(product.get("name") or "")
         cards.append(
             _TcgplayerCard(
-                number=_tcgplayer_number(extended.get("Number", "")),
+                number=_tcgplayer_number(_tcgplayer_extended_data(product).get("Number", "")),
                 name=_tcgplayer_name(name),
                 is_variant="(" in name,
-                urls=CardImageUrls(
-                    low=image.replace("_200w.jpg", "_400w.jpg"),
-                    high=image.replace("_200w.jpg", "_in_1000x1000.jpg"),
-                ),
+                urls=urls,
             )
         )
     return cards
+
+
+def tcgplayer_japanese_card_listings(set_id: str) -> list[TcgplayerCardListing]:
+    """
+    Cartes numérotées d'une extension japonaise chez TCGplayer, une par numéro (impression normale avant ses
+    variantes « Mirror Holofoil »), dans l'ordre des numéros ; vide quand TCGplayer ne couvre pas l'extension.
+
+    Args:
+        set_id: Identifiant TCGdex de l'extension (``ADV1``, ``L1a``, ``PCG10``).
+    """
+    cache_key = f"tcgplayer-listings:{set_id}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+    numbered = _tcgplayer_numbered_products(set_id)
+    images = [_tcgplayer_image_urls(product) for _number, product in numbered]
+    # TCGCSV liste aussi des images jamais mises en ligne (403) : seules les vraies sont gardées.
+    low_urls = [image.low for image in images if image is not None]
+    online = dict(zip(low_urls, _assets_exist(low_urls), strict=True))
+    listings = [
+        TcgplayerCardListing(
+            number=number,
+            name=_tcgplayer_display_name(product),
+            rarity=_tcgplayer_extended_data(product).get("Rarity") or None,
+            urls=image if image is not None and online[image.low] else None,
+        )
+        for (number, product), image in zip(numbered, images, strict=True)
+    ]
+    _cache.set(cache_key, listings)
+    return listings
+
+
+def tcgplayer_japanese_card_names(set_id: str) -> dict[str, str]:
+    """
+    Noms anglais TCGplayer des cartes d'une extension japonaise, par numéro imprimé sans zéros (« 7 »).
+
+    Args:
+        set_id: Identifiant TCGdex de l'extension (``XY8b``).
+    """
+    return {
+        number.lstrip("0") or number: _tcgplayer_display_name(product)
+        for number, product in _tcgplayer_numbered_products(set_id)
+    }
+
+
+def _tcgplayer_numbered_products(set_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """Produit TCGplayer de chaque numéro d'une extension japonaise, impression normale d'abord, par numéro."""
+    group = _tcgplayer_group("ja", set_id)
+    products = _tcgplayer_json(f"{group[0]}/{group[1]}/products") if group else []
+    chosen: dict[str, tuple[bool, dict[str, Any]]] = {}
+    for product in products:
+        number = _tcgplayer_extended_data(product).get("Number", "").split("/")[0].strip()
+        is_variant = "(" in str(product.get("name") or "")
+        if number and (number not in chosen or (chosen[number][0] and not is_variant)):
+            chosen[number] = (is_variant, product)
+    ordered = sorted(chosen.items(), key=lambda item: (not item[0].isdigit(), item[0].zfill(4)))
+    return [(number, product) for number, (_variant, product) in ordered]
+
+
+def _tcgplayer_display_name(product: dict[str, Any]) -> str:
+    """Nom lisible d'un produit TCGplayer, sans variante ni numéro (« Bill (Mirror Holofoil) » donne « Bill »)."""
+    return _TCGPLAYER_NAME_SUFFIX_RE.sub("", str(product.get("name") or "")).strip()
 
 
 def _pick_tcgplayer_card(candidates: list[_TcgplayerCard], english_name: str | None) -> _TcgplayerCard | None:
