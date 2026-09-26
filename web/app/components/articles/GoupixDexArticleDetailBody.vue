@@ -21,23 +21,41 @@
       </div>
 
       <div v-if="showMarketplaceActions" class="flex w-full gap-2">
-        <GoupixDexMarketplaceDelistButton
+        <GoupixDexMarketplaceButton
           v-if="article.published_on_ebay"
-          class="min-w-0 flex-1"
+          class="flex-1"
           marketplace="ebay"
-          :loading="removingEbay"
-          :disabled="removingVinted"
+          action="delist"
+          :is-loading="removingEbay"
+          :is-disabled="removingVinted"
           @click="onRemoveEbay"
         />
-        <GoupixDexMarketplaceDelistButton
+        <GoupixDexMarketplaceButton
           v-if="article.published_on_vinted"
-          class="min-w-0 flex-1"
+          class="flex-1"
           marketplace="vinted"
-          :loading="removingVinted"
-          :disabled="removingEbay"
+          action="delist"
+          :is-loading="removingVinted"
+          :is-disabled="removingEbay"
           @click="onRemoveVinted"
         />
       </div>
+
+      <section v-if="publishableMarketplaces.length" class="space-y-2">
+        <p class="app-label">Mettre en ligne</p>
+        <div class="grid grid-cols-2 gap-2">
+          <GoupixDexMarketplaceButton
+            v-for="marketplace in publishableMarketplaces"
+            :key="marketplace"
+            :marketplace="marketplace"
+            action="publish"
+            :is-loading="publishingMarketplaces.includes(marketplace)"
+            :is-disabled="publishBlockedReason(marketplace) !== null"
+            :disabled-reason="publishBlockedReason(marketplace)"
+            @click="onPublish(marketplace)"
+          />
+        </div>
+      </section>
 
       <div
         v-if="
@@ -326,7 +344,9 @@ import type { Article } from '~/composables/useArticles'
 import { apiErrorMessage } from '~/composables/useApiError'
 import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useMarketSearch'
 import type { PricingLookup } from '~/composables/usePricing'
+import type { Marketplace } from '~/types/Marketplace'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
+import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
 import { DEFAULT_ARTICLE_MARKET_SEARCH_BASE, marketSearchToRouteQuery } from '~/utils/marketSearchQuery'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
@@ -353,6 +373,18 @@ const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarket
 const toast = useToast()
 const { confirm: confirmAction } = useGoupixConfirm()
 const { openCard } = useOpenCardDrawer()
+const {
+  isVintedChannelEnabled,
+  canPublishOnEbay,
+  canPublishOnLeboncoin,
+  loadMarketplaceAvailability,
+  startArticlePublish,
+} = useMarketplacePublishing()
+const publishStreamByMarketplace: Record<Marketplace, ReturnType<typeof useVintedPublishStream>> = {
+  vinted: useVintedPublishStream(),
+  ebay: useVintedPublishStream(),
+  leboncoin: useVintedPublishStream(),
+}
 
 const article: Ref<Article | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
@@ -363,12 +395,31 @@ const ebayLoading: Ref<boolean> = ref(false)
 const ebayError: Ref<string | null> = ref(null)
 const removingEbay: Ref<boolean> = ref(false)
 const removingVinted: Ref<boolean> = ref(false)
+const publishingMarketplaces: Ref<Marketplace[]> = ref([])
 
 const id: ComputedRef<number> = computed(() => props.articleId)
 
 const showMarketplaceActions: ComputedRef<boolean> = computed(() =>
   Boolean(article.value?.published_on_ebay || article.value?.published_on_vinted),
 )
+
+const publishableMarketplaces: ComputedRef<Marketplace[]> = computed(() => {
+  const current = article.value
+  if (!current || current.is_sold) {
+    return []
+  }
+  const marketplaces: Marketplace[] = []
+  if (isVintedChannelEnabled.value && !current.published_on_vinted) {
+    marketplaces.push('vinted')
+  }
+  if (canPublishOnEbay.value && !current.published_on_ebay) {
+    marketplaces.push('ebay')
+  }
+  if (canPublishOnLeboncoin.value && !current.published_on_leboncoin) {
+    marketplaces.push('leboncoin')
+  }
+  return marketplaces
+})
 
 /** Spinner only while eBay loads, or pricing lookup when Cardmarket is not cached on the article. */
 const showMarketReferenceSpinner: ComputedRef<boolean> = computed(() => {
@@ -693,6 +744,7 @@ async function loadPricing(a: Article): Promise<void> {
         suggested_price_eur: null,
         margin_percent_used: 0,
         set_name: null,
+        source: null,
         error: apiErrorMessage(e),
       }
     }
@@ -826,6 +878,65 @@ async function onRemoveVinted(): Promise<void> {
   }
 }
 
+/**
+ * Raison qui empêche de publier l’article sur cette marketplace depuis ce poste.
+ * @param marketplace - Marketplace visée.
+ * @returns {string | null} La raison, ou `null` si la publication est possible.
+ */
+function publishBlockedReason(marketplace: Marketplace): string | null {
+  if (!article.value?.images?.length) {
+    return 'Ajoutez au moins une photo à l’article.'
+  }
+  if (marketplace !== 'ebay' && !isDesktopApp.value) {
+    return 'Disponible dans l’application desktop.'
+  }
+  return null
+}
+
+/**
+ * Publie l’article sans quitter le drawer : suit la progression en arrière-plan puis recharge la fiche.
+ * @param marketplace - Marketplace visée.
+ * @returns {Promise<void>} Résolue quand la publication est terminée (ou n’a pas démarré).
+ */
+async function onPublish(marketplace: Marketplace): Promise<void> {
+  const current = article.value
+  if (!current || publishingMarketplaces.value.includes(marketplace)) {
+    return
+  }
+  publishingMarketplaces.value = [...publishingMarketplaces.value, marketplace]
+  try {
+    const listingPublish = await startArticlePublish(current, marketplace)
+    if (!listingPublish) {
+      return
+    }
+    toast.add({
+      title: `Publication ${MARKETPLACE_NAMES[marketplace]} lancée`,
+      description: 'Vous pouvez continuer : un message confirmera la mise en ligne.',
+      actions: [
+        {
+          label: 'Voir le journal',
+          onClick: async (): Promise<void> => {
+            await navigateTo(listingPublish.journalLocation)
+          },
+        },
+      ],
+    })
+    await publishStreamByMarketplace[marketplace].followStream(listingPublish.streamPath, 'list', {
+      sseBase: listingPublish.sseBase,
+      localWorker: listingPublish.localWorker,
+    })
+    await reloadArticle()
+  } catch (e) {
+    toast.add({
+      title: `Publication ${MARKETPLACE_NAMES[marketplace]}`,
+      description: apiErrorMessage(e),
+      color: 'warning',
+    })
+  } finally {
+    publishingMarketplaces.value = publishingMarketplaces.value.filter((item: Marketplace) => item !== marketplace)
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   pricing.value = null
@@ -867,4 +978,8 @@ watch(
   },
   { immediate: true },
 )
+
+onMounted(async (): Promise<void> => {
+  await loadMarketplaceAvailability()
+})
 </script>

@@ -1,26 +1,12 @@
 <template>
   <div class="inline-flex items-center justify-center gap-1.5" :title="tooltip" :aria-label="tooltip">
-    <span
-      v-if="showVinted"
-      class="flex size-6 items-center justify-center overflow-hidden rounded-md bg-linear-to-tr from-[#186E72] via-[#2E9599] to-[#4CB6BA] transition"
-      :class="{ 'opacity-40 grayscale': !row.published_on_vinted }"
-    >
-      <UIcon name="i-simple-icons-vinted" class="size-4 text-white" aria-hidden="true" />
-    </span>
-    <span
-      v-if="showEbay"
-      class="flex size-6 items-center justify-center overflow-hidden rounded-md bg-white px-0.5 transition"
-      :class="{ 'opacity-40 grayscale': !row.published_on_ebay }"
-    >
-      <GoupixDexEbayLogoGradient tight aria-hidden="true" />
-    </span>
-    <span
+    <GoupixDexMarketplaceAppIcon v-if="showVinted" marketplace="vinted" :is-greyed-out="!row.published_on_vinted" />
+    <GoupixDexMarketplaceAppIcon v-if="showEbay" marketplace="ebay" :is-greyed-out="!row.published_on_ebay" />
+    <GoupixDexMarketplaceAppIcon
       v-if="showLeboncoin"
-      class="flex size-6 overflow-hidden rounded-md transition"
-      :class="{ 'opacity-40 grayscale': !row.published_on_leboncoin }"
-    >
-      <GoupixDexLeboncoinMark aria-hidden="true" />
-    </span>
+      marketplace="leboncoin"
+      :is-greyed-out="!row.published_on_leboncoin"
+    />
   </div>
 </template>
 

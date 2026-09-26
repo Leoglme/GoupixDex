@@ -1,0 +1,161 @@
+import type { Ref } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
+import type { Article } from '~/composables/useArticles'
+import type { ListingProgressLocalWorker, ListingProgressSseBase } from '~/composables/useVintedPublishStream'
+import type { Marketplace } from '~/types/Marketplace'
+import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
+
+export type ListingPublishStart = {
+  streamPath: string
+  sseBase: ListingProgressSseBase
+  localWorker: ListingProgressLocalWorker
+  journalLocation: RouteLocationRaw
+}
+
+/**
+ * Mise en ligne d'un article : canaux disponibles et démarrage de la publication.
+ *
+ * @returns {object} Disponibilité des canaux (`useState` partagé), `loadMarketplaceAvailability`, `ensureLeboncoinPublishReady` et `startArticlePublish`.
+ */
+export function useMarketplacePublishing() {
+  const { getSettings } = useSettings()
+  const { publishArticleToVinted, publishArticleToEbay, publishArticleToLeboncoin } = useArticles()
+  const { isDesktopApp } = useDesktopRuntime()
+  const toast = useToast()
+
+  const isVintedChannelEnabled: Ref<boolean> = useState('goupix-vinted-channel-enabled', () => false)
+  const canPublishOnEbay: Ref<boolean> = useState('goupix-ebay-publish-available', () => false)
+  const canPublishOnLeboncoin: Ref<boolean> = useState('goupix-leboncoin-publish-available', () => false)
+
+  /**
+   * Lit les paramètres pour savoir sur quelles marketplaces l'utilisateur peut publier.
+   *
+   * @returns {Promise<void>} Résolue une fois les drapeaux à jour (tous faux si les paramètres sont illisibles).
+   */
+  async function loadMarketplaceAvailability(): Promise<void> {
+    try {
+      const settings = await getSettings()
+      isVintedChannelEnabled.value = settings.vinted_enabled === true
+      canPublishOnEbay.value =
+        settings.ebay_enabled === true &&
+        settings.ebay_oauth_configured === true &&
+        settings.ebay_connected === true &&
+        settings.ebay_listing_config_complete === true
+      canPublishOnLeboncoin.value = settings.leboncoin_enabled === true && settings.sender_address_complete === true
+    } catch {
+      isVintedChannelEnabled.value = false
+      canPublishOnEbay.value = false
+      canPublishOnLeboncoin.value = false
+    }
+  }
+
+  /**
+   * Vérifie l'adresse d'expédition requise par Leboncoin, sinon ouvre le profil pour la compléter.
+   *
+   * @returns {Promise<boolean>} Vrai si la publication Leboncoin peut partir.
+   */
+  async function ensureLeboncoinPublishReady(): Promise<boolean> {
+    try {
+      const settings = await getSettings()
+      if (settings.sender_address_complete) {
+        return true
+      }
+    } catch {
+      /* fall through */
+    }
+    toast.add({
+      title: 'Adresse expéditeur requise',
+      description: 'Complétez votre adresse dans Mon profil (menu compte) avant de publier sur Leboncoin.',
+      color: 'warning',
+    })
+    const { openProfileDrawer } = useProfileDrawer()
+    openProfileDrawer()
+    return false
+  }
+
+  /**
+   * Lance la publication d'un article sur une marketplace ; les échecs sont annoncés par un toast.
+   *
+   * @param article - Article à publier.
+   * @param marketplace - Marketplace visée.
+   * @returns {Promise<ListingPublishStart | null>} Flux de progression et journal à suivre, ou `null` si rien n'a démarré.
+   */
+  async function startArticlePublish(article: Article, marketplace: Marketplace): Promise<ListingPublishStart | null> {
+    if (marketplace !== 'ebay' && !isDesktopApp.value) {
+      toast.add({
+        title: 'Application desktop requise',
+        description: `La mise en ligne ${MARKETPLACE_NAMES[marketplace]} utilise Chrome sur ce poste.`,
+        color: 'warning',
+      })
+      await navigateTo('/downloads')
+      return null
+    }
+    if (marketplace === 'leboncoin' && !(await ensureLeboncoinPublishReady())) {
+      return null
+    }
+    try {
+      if (marketplace === 'vinted') {
+        const { vinted } = await publishArticleToVinted(article.id)
+        return listingPublishStart(article.id, vinted.stream_path, 'local', 'vinted', { progress: 'local' })
+      }
+      if (marketplace === 'ebay') {
+        const { ebay } = await publishArticleToEbay(article.id)
+        return listingPublishStart(article.id, ebay.stream_path, 'api', 'vinted', {})
+      }
+      const { leboncoin } = await publishArticleToLeboncoin(article.id)
+      return listingPublishStart(article.id, leboncoin.stream_path, 'local', 'leboncoin', {
+        progress: 'local',
+        worker: 'leboncoin',
+      })
+    } catch (e) {
+      toast.add({
+        title: `Publication ${MARKETPLACE_NAMES[marketplace]} impossible`,
+        description: apiErrorMessage(e),
+        color: 'error',
+      })
+      return null
+    }
+  }
+
+  /**
+   * Décrit une publication qui a démarré : son flux de progression et son journal.
+   *
+   * @param articleId - Article publié.
+   * @param streamPath - Chemin SSE renvoyé par le worker ou l'API (vide si la réponse est inattendue).
+   * @param sseBase - Hôte du flux : API distante ou worker local.
+   * @param localWorker - Worker local qui sert le flux.
+   * @param journalQuery - Paramètres du journal propres à la marketplace.
+   * @returns {ListingPublishStart | null} `null` (avec un toast) quand la réponse ne donne aucun flux.
+   */
+  function listingPublishStart(
+    articleId: number,
+    streamPath: string | undefined,
+    sseBase: ListingProgressSseBase,
+    localWorker: ListingProgressLocalWorker,
+    journalQuery: Record<string, string>,
+  ): ListingPublishStart | null {
+    if (!streamPath) {
+      toast.add({
+        title: 'Publication',
+        description: 'Réponse inattendue : aucun suivi de progression disponible.',
+        color: 'warning',
+      })
+      return null
+    }
+    return {
+      streamPath,
+      sseBase,
+      localWorker,
+      journalLocation: { path: '/articles/listing-logs', query: { article: String(articleId), ...journalQuery } },
+    }
+  }
+
+  return {
+    isVintedChannelEnabled,
+    canPublishOnEbay,
+    canPublishOnLeboncoin,
+    loadMarketplaceAvailability,
+    ensureLeboncoinPublishReady,
+    startArticlePublish,
+  }
+}

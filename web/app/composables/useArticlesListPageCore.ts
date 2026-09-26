@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
+import type { Marketplace } from '~/types/Marketplace'
 import { persistRelistQueue, relistEditLocation } from '~/utils/articleRelistQueue'
 import {
   articleEligibleForBulkRelist,
@@ -24,8 +25,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     markSold,
     retryCrossEbayRemoval,
     vintedUnlistAfterEbaySale,
-    publishArticleToVinted,
-    publishArticleToEbay,
     publishArticleToLeboncoin,
     startVintedBatch,
     startVintedBatchDelist,
@@ -33,15 +32,19 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     bulkDelistChannels,
     bulkPrepareForSale,
   } = useArticles()
-  const { getSettings } = useSettings()
   const toast = useToast()
   const { isDesktopApp } = useDesktopRuntime()
   const { startJob } = useWardrobeLocalSync()
+  const {
+    isVintedChannelEnabled: vintedChannelEnabled,
+    canPublishOnEbay: ebayPublishAvailable,
+    canPublishOnLeboncoin: leboncoinPublishAvailable,
+    loadMarketplaceAvailability,
+    ensureLeboncoinPublishReady,
+    startArticlePublish,
+  } = useMarketplacePublishing()
 
   const wardrobeSyncing: Ref<boolean> = ref(false)
-  const ebayPublishAvailable: Ref<boolean> = ref(false)
-  const vintedChannelEnabled: Ref<boolean> = ref(false)
-  const leboncoinPublishAvailable: Ref<boolean> = ref(false)
 
   const allArticles = useState<Article[]>('goupix-articles-listed-cache', () => [])
   const loading: Ref<boolean> = ref(allArticles.value.length === 0)
@@ -145,26 +148,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
     } finally {
       loading.value = false
-    }
-  }
-
-  /**
-   *
-   */
-  async function loadMarketplaceAvailability() {
-    try {
-      const s = await getSettings()
-      vintedChannelEnabled.value = s.vinted_enabled === true
-      ebayPublishAvailable.value =
-        s.ebay_enabled === true &&
-        s.ebay_oauth_configured === true &&
-        s.ebay_connected === true &&
-        s.ebay_listing_config_complete === true
-      leboncoinPublishAvailable.value = s.leboncoin_enabled === true && s.sender_address_complete === true
-    } catch {
-      vintedChannelEnabled.value = false
-      ebayPublishAvailable.value = false
-      leboncoinPublishAvailable.value = false
     }
   }
 
@@ -372,26 +355,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     return { vinted: wantVinted, ebay: wantEbay, leboncoin: wantLeboncoin }
   })
 
-  /** @returns true si l’adresse expéditeur permet une publication Leboncoin. */
-  async function ensureLeboncoinPublishReady(): Promise<boolean> {
-    try {
-      const settings = await getSettings()
-      if (settings.sender_address_complete) {
-        return true
-      }
-    } catch {
-      /* fall through */
-    }
-    toast.add({
-      title: 'Adresse expéditeur requise',
-      description: 'Complétez votre adresse dans Mon profil (menu compte) avant de publier sur Leboncoin.',
-      color: 'warning',
-    })
-    const { openProfileDrawer } = useProfileDrawer()
-    openProfileDrawer()
-    return false
-  }
-
   /**
    *
    */
@@ -552,32 +515,27 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
+   * Publie un article depuis la liste puis ouvre le journal de sa publication.
    *
-   * @param a
+   * @param a - Article à publier.
+   * @param marketplace - Marketplace visée.
+   * @returns {Promise<void>} Résolue après la navigation vers le journal (ou l’échec annoncé).
    */
-  async function onPublishEbay(a: Article) {
-    try {
-      const { ebay } = await publishArticleToEbay(a.id)
-      if (ebay?.status === 'running' && ebay?.stream_path) {
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { article: String(a.id) },
-        })
-        return
-      }
-      toast.add({
-        title: 'Mise en ligne sur eBay',
-        description: 'La publication est lancée. La liste se mettra à jour dans quelques instants.',
-        color: 'success',
-      })
-      await refresh()
-    } catch (e) {
-      toast.add({
-        title: 'Impossible de publier sur eBay',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
+  async function publishArticleAndOpenJournal(a: Article, marketplace: Marketplace): Promise<void> {
+    const listingPublish = await startArticlePublish(a, marketplace)
+    if (listingPublish) {
+      await navigateTo(listingPublish.journalLocation)
     }
+  }
+
+  /**
+   * Publie un article sur eBay depuis la liste.
+   *
+   * @param a - Article à publier.
+   * @returns {Promise<void>} Résolue après l’ouverture du journal.
+   */
+  async function onPublishEbay(a: Article): Promise<void> {
+    await publishArticleAndOpenJournal(a, 'ebay')
   }
 
   /**
@@ -1000,79 +958,23 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
+   * Publie un article sur Leboncoin depuis la liste.
    *
+   * @param a - Article à publier.
+   * @returns {Promise<void>} Résolue après l’ouverture du journal.
    */
-  async function onPublishLeboncoin(a: Article) {
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Application desktop requise',
-        description: 'La mise en ligne Leboncoin utilise Chrome sur ce poste.',
-        color: 'warning',
-      })
-      await navigateTo('/downloads')
-      return
-    }
-    if (!(await ensureLeboncoinPublishReady())) {
-      return
-    }
-    try {
-      const { leboncoin } = await publishArticleToLeboncoin(a.id)
-      if (leboncoin?.stream_path) {
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { article: String(a.id), progress: 'local', worker: 'leboncoin' },
-        })
-        return
-      }
-      toast.add({
-        title: 'Publication Leboncoin',
-        description: 'Réponse inattendue du worker local.',
-        color: 'warning',
-      })
-    } catch (e) {
-      toast.add({
-        title: 'Publication Leboncoin impossible',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
-    }
+  async function onPublishLeboncoin(a: Article): Promise<void> {
+    await publishArticleAndOpenJournal(a, 'leboncoin')
   }
 
   /**
+   * Publie un article sur Vinted depuis la liste.
    *
+   * @param a - Article à publier.
+   * @returns {Promise<void>} Résolue après l’ouverture du journal.
    */
-  async function onPublishVinted(a: Article) {
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Version web',
-        description: "La mise en ligne Vinted est disponible uniquement dans l'application desktop.",
-        color: 'warning',
-      })
-      await navigateTo('/downloads')
-      return
-    }
-    try {
-      const { vinted } = await publishArticleToVinted(a.id)
-      if (vinted.status === 'running' && vinted.stream_path) {
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { article: String(a.id), progress: 'local' },
-        })
-        return
-      }
-      toast.add({
-        title: 'Publication Vinted',
-        description: 'Réponse inattendue du serveur (pas de flux SSE).',
-        color: 'warning',
-      })
-      await refresh()
-    } catch (e) {
-      toast.add({
-        title: 'Publication Vinted impossible',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
-    }
+  async function onPublishVinted(a: Article): Promise<void> {
+    await publishArticleAndOpenJournal(a, 'vinted')
   }
 
   return {
