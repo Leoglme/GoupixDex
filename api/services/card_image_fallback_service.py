@@ -134,8 +134,7 @@ _TCGPLAYER_JAPANESE_GROUPS: dict[str, int] = {
     "web1": 24141,
 }
 
-# Réimpressions de cartes existantes : McDonald's exclusifs à la France (absents de TCGplayer) et kits dresseur
-# (TCGplayer liste des images inexistantes pour une partie de leurs cartes).
+# Réimpressions de cartes existantes (McDonald's exclusifs à la France), en plus des kits dresseur (préfixe tk-).
 _REPRINT_ARTWORK_SETS: frozenset[str] = frozenset({"2013bw", "2018sm-fr", "2019sm-fr"})
 _TRAINER_KIT_SET_PREFIX = "tk-"
 # Kits dont TCGdex ignore l'illustrateur : série de leur ère et extension de base (énergies de base identiques).
