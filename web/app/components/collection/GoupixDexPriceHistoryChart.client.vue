@@ -69,7 +69,7 @@ import type {
   GoupixDexPriceHistoryChartRecord,
 } from '~/types/GoupixDexPriceHistoryChart'
 import type { GoupixPriceHistoryPoint } from '~/types/PriceHistory'
-import { format } from 'date-fns'
+import { differenceInCalendarDays, format, startOfToday, subDays } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { VisXYContainer, VisLine, VisArea, VisAxis, VisCrosshair, VisTooltip } from '@unovis/vue'
 
@@ -88,7 +88,6 @@ const props: GoupixDexPriceHistoryChartProps = defineProps({
 const chartRef = useTemplateRef<HTMLElement | null>('chartRef')
 const { width } = useElementSize(chartRef)
 
-const DAY_MS: number = 24 * 60 * 60 * 1000
 const Y_DOMAIN_MARGIN_RATIO: number = 0.2
 const Y_DOMAIN_MIN_MARGIN_PRICE_RATIO: number = 0.02
 const Y_DOMAIN_MIN_MARGIN_EUR: number = 0.05
@@ -144,7 +143,8 @@ const selectedRangeKey: Ref<string> = ref('1m')
 const allData: ComputedRef<GoupixDexPriceHistoryChartRecord[]> = computed(() =>
   props.points.map(
     (point: GoupixPriceHistoryPoint): GoupixDexPriceHistoryChartRecord => ({
-      date: new Date(point.date),
+      // Minuit local du jour relevé : lu en UTC, le point J-30 sortait de la fenêtre « 1 mois ».
+      date: new Date(`${point.date.slice(0, 10)}T00:00:00`),
       price: point.price_eur,
     }),
   ),
@@ -155,8 +155,8 @@ const dataSpanDays: ComputedRef<number> = computed(() => {
   if (allData.value.length < 2) {
     return 0
   }
-  const oldest = allData.value[0]?.date.getTime() ?? Date.now()
-  return (Date.now() - oldest) / DAY_MS
+  const oldest = allData.value[0]?.date
+  return oldest ? differenceInCalendarDays(startOfToday(), oldest) : 0
 })
 
 /** Périodes réellement couvertes par les données : chaque cran apparaît quand l'historique le dépasse. */
@@ -196,7 +196,7 @@ const data: ComputedRef<GoupixDexPriceHistoryChartRecord[]> = computed(() => {
   if (!range || range.days == null) {
     return allData.value
   }
-  const cutoff = Date.now() - range.days * DAY_MS
+  const cutoff = subDays(startOfToday(), range.days).getTime()
   return allData.value.filter((record: GoupixDexPriceHistoryChartRecord): boolean => record.date.getTime() >= cutoff)
 })
 

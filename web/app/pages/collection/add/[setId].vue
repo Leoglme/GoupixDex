@@ -96,10 +96,9 @@ const catalogLocale = computed<CatalogLocale>(() => {
   return catalogLanguage.value
 })
 
-const backToCatalogLink = computed(() => {
-  const loc = catalogLocale.value
-  return loc === 'fr' ? '/collection/add' : `/collection/add?locale=${encodeURIComponent(loc)}`
-})
+const backToCatalogLink: ComputedRef<string> = computed(
+  (): string => `/collection/add?locale=${encodeURIComponent(catalogLocale.value)}`,
+)
 
 function languageLabel(code: CatalogLocale): string {
   switch (code) {

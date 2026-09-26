@@ -78,8 +78,7 @@ function cardCountLabel(set: TcgdexSetBrief): string | null {
 }
 
 function setLink(setId: string): string {
-  const loc = props.catalogLocale
-  const q = loc === 'fr' ? '' : `?locale=${encodeURIComponent(loc)}`
-  return `/collection/add/${encodeURIComponent(setId)}${q}`
+  // Langue toujours explicite : sans elle, la page d'un set FR s'ouvrait dans la dernière langue choisie (JA : introuvable).
+  return `/collection/add/${encodeURIComponent(setId)}?locale=${encodeURIComponent(props.catalogLocale)}`
 }
 </script>

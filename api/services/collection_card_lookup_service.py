@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 from app_types.tcgdex import TcgdexSetDetail
@@ -164,13 +165,17 @@ def fetch_card_for_collection(
     set_id, local_raw = split_tcgdex_card_id(cid)
     locales = _locale_priority(lang)
 
-    set_detail = _first_resolvable_set(client, set_id, locales)
+    # Extension et fiches des trois langues sont indépendantes : lues en parallèle plutôt qu'à la suite.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        set_future = pool.submit(_first_resolvable_set, client, set_id, locales)
+        card_futures = {loc: pool.submit(client.get_card, loc, cid) for loc in ("en", "fr", "ja")}
+    set_detail = set_future.result()
     set_code = infer_pokewallet_set_code(set_detail) if set_detail else None
 
     cards_by_locale: dict[str, dict[str, Any]] = {}
-    for loc in ("en", "fr", "ja"):
+    for loc, card_future in card_futures.items():
         try:
-            cards_by_locale[loc] = dict(client.get_card(loc, cid))
+            cards_by_locale[loc] = dict(card_future.result())
         except (RuntimeError, ValueError):
             continue
 
