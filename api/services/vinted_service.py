@@ -2127,7 +2127,7 @@ class VintedService:
 
     @classmethod
     async def _member_id_from_users_current_fetch(cls, tab: Tab) -> int | None:
-        """Fallback: same-origin ``fetch`` to ``/api/v2/users/current``."""
+        """Same-origin ``fetch`` to ``/api/v2/users/current``."""
         raw = await tab.evaluate(
             r"""
             (async () => {
@@ -2161,8 +2161,8 @@ class VintedService:
     @classmethod
     async def fetch_logged_in_vinted_user_numeric_id(cls) -> int:
         """
-        After nodriver login, read member id from the “My profile” menu,
-        falling back to ``/api/v2/users/current`` if needed.
+        After nodriver login, read member id from ``/api/v2/users/current``,
+        falling back to the “My profile” menu if needed.
 
         Returns:
             Vinted member id (integer).
@@ -2186,6 +2186,12 @@ class VintedService:
                 cur[:220],
             )
 
+        mid = await cls._member_id_from_users_current_fetch(tab)
+        if mid is not None:
+            logger.info("Vinted member id read from users/current: %s", mid)
+            return mid
+
+        logger.info("users/current failed, trying the profile menu…")
         # Short: without OneTrust banner we do not block 8s; before menu (otherwise banner can hide it).
         await cls._accept_onetrust_cookies(tab, total_timeout_sec=2.0)
         await cls._wait_vinted_user_menu_usable(tab)
@@ -2196,14 +2202,8 @@ class VintedService:
             logger.info("Vinted member id read from profile menu: %s", mid)
             return mid
 
-        logger.info("Profile menu failed, trying users/current…")
-        mid = await cls._member_id_from_users_current_fetch(tab)
-        if mid is not None:
-            logger.info("Vinted member id read from users/current: %s", mid)
-            return mid
-
         raise RuntimeError(
-            "Could not read Vinted member id (user menu + users/current). "
+            "Could not read Vinted member id (users/current + user menu). "
             "Ensure the session is logged in on the home page."
         )
 
@@ -2499,6 +2499,29 @@ class VintedService:
         return await tab.select(f'[data-goupix-marker="{marker}"]', timeout=3)
 
     @classmethod
+    async def _wait_until_react_handles_clicks(cls, tab: "Tab", selector: str, *, timeout_sec: float = 10.0) -> None:
+        """
+        Attend que React ait branché ses gestionnaires sur l’élément : la page Vinted arrive en HTML statique et un clic envoyé avant est perdu.
+
+        Args:
+            tab: Onglet nodriver.
+            selector: Sélecteur CSS de l’élément à cliquer.
+            timeout_sec: Attente maximale, après quoi on clique quand même.
+        """
+        js = f"""
+        (() => {{
+          const el = document.querySelector({json.dumps(selector)});
+          return !!el && Object.keys(el).some((key) => key.startsWith('__reactProps'));
+        }})()
+        """
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            if await tab.evaluate(js, return_by_value=True) is True:
+                return
+            await asyncio.sleep(0.15)
+        logger.warning("React did not take over %s within %.0fs — clicking anyway.", selector, timeout_sec)
+
+    @classmethod
     async def delete_vinted_item_listing(
         cls,
         tab: "Tab",
@@ -2514,27 +2537,33 @@ class VintedService:
         """
         origin = site_origin.rstrip("/")
         await tab.get(f"{origin}/items/{int(item_id)}")
-        await asyncio.sleep(1.0)
-        del_btn = await tab.select('[data-testid="item-delete-button"]', timeout=15)
-        if del_btn is None:
-            del_btn = await cls._select_button_by_exact_text(tab, ("supprimer",), marker="item-delete")
-        if del_btn is None:
+        delete_button_selector = '[data-testid="item-delete-button"]'
+        delete_button = await tab.select(delete_button_selector, timeout=15)
+        if delete_button is None:
+            delete_button = await cls._select_button_by_exact_text(tab, ("supprimer",), marker="item-delete")
+            delete_button_selector = '[data-goupix-marker="item-delete"]'
+        if delete_button is None:
             raise RuntimeError(
                 f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
             )
-        await del_btn.scroll_into_view()
-        await del_btn.click()
-        conf = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=15)
-        if conf is None:
-            conf = await cls._select_button_by_exact_text(
+        await cls._wait_until_react_handles_clicks(tab, delete_button_selector)
+        confirmation_button = None
+        for _ in range(3):
+            await delete_button.scroll_into_view()
+            await delete_button.click()
+            confirmation_button = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=4)
+            if confirmation_button is not None:
+                break
+        if confirmation_button is None:
+            confirmation_button = await cls._select_button_by_exact_text(
                 tab,
                 ("supprimer", "oui, supprimer", "confirmer"),
                 scope_selector='[role="dialog"]',
                 marker="item-delete-confirm",
             )
-        if conf is None:
+        if confirmation_button is None:
             raise RuntimeError(f"Confirmation de suppression introuvable sur la fiche Vinted #{item_id}.")
-        await conf.click()
+        await confirmation_button.click()
         member_id: int | None = None
         deadline = time.monotonic() + 35.0
         while member_id is None and time.monotonic() < deadline:
