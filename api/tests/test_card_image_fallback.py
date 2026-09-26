@@ -3,7 +3,11 @@ from typing import Any
 import pytest
 
 from services import card_image_fallback_service as fallback
-from services.catalog_browse_service import _ghost_set_ids, _merge_subset_rows, readable_set_name
+from services.catalog_browse_service import (
+    _ghost_set_ids,
+    _merge_subset_rows,
+    readable_set_name,
+)
 
 
 def _pokemontcg_card(number: str, name: str) -> dict[str, Any]:
@@ -126,3 +130,78 @@ def test_ghost_sets_are_empty_twins_or_repeated_placeholders() -> None:
     }
 
     assert _ghost_set_ids(series, facts) == {"SM1+", "CS1a", "CS1b", "CS2a"}
+
+
+def _tcgplayer_card(number: str, name: str, product_id: int) -> fallback._TcgplayerCard:
+    return fallback._TcgplayerCard(
+        number=fallback._tcgplayer_number(number),
+        name=fallback._tcgplayer_name(name),
+        is_variant="(" in name,
+        urls=fallback.CardImageUrls(low=f"https://tcg.test/{product_id}_400w.jpg", high=f"https://tcg.test/{product_id}_hd.jpg"),
+    )
+
+
+def test_tcgplayer_trainer_kit_half_is_chosen_by_name_never_guessed(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards = [
+        _tcgplayer_card("8/30", "Fairy Energy (#8)", 1),
+        _tcgplayer_card("8/30", "Psychic Energy (#8)", 2),
+        _tcgplayer_card("9/30", "Noibat (#9)", 3),
+        _tcgplayer_card("9/30", "Spritzee (#9)", 4),
+    ]
+    monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (3, 1532))
+    monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+
+    found = fallback._match_tcgplayer("fr", {"id": "tk-xy-n"}, ["8", "9"], {"8": "psychicenergy", "9": "pumpkaboo"})
+
+    assert found == {"8": cards[1].urls}
+
+
+def test_tcgplayer_japanese_number_prefers_the_regular_print(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards = [_tcgplayer_card("122/100", "Elesa's Sparkle (Master Ball)", 1), _tcgplayer_card("122/100", "Elesa's Sparkle - 122/100", 2)]
+    monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (85, 23627))
+    monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+
+    found = fallback._match_tcgplayer("ja", {"id": "S8"}, ["122"], {})
+
+    assert found == {"122": cards[1].urls}
+
+
+def test_tcgplayer_unnumbered_japanese_group_matches_english_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards = [_tcgplayer_card("", "Dark Crobat", 1), _tcgplayer_card("", "Nidoran M", 2), _tcgplayer_card("", "Pikachu", 3)]
+    monkeypatch.setattr(fallback, "_tcgplayer_group", lambda _locale, _set_id: (85, 23729))
+    monkeypatch.setattr(fallback, "_tcgplayer_cards", lambda _category, _group: cards)
+    monkeypatch.setattr(
+        fallback,
+        "_japanese_card_english_names",
+        lambda _detail, _local_ids: {"001": "darkcrobat", "002": "nidoranm", "003": "raichu"},
+    )
+
+    found = fallback._match_tcgplayer("ja", {"id": "neo4"}, ["001", "002", "003"], {})
+
+    assert found == {"001": cards[0].urls, "002": cards[1].urls}
+
+
+def test_japanese_english_name_uses_prefix_species_and_energy_types() -> None:
+    assert fallback._japanese_english_name("暗いクロバット", 169) == "Dark Crobat"
+    assert fallback._japanese_english_name("R団のファイヤー", 146) == "Rocket's Moltres"
+    assert fallback._japanese_english_name("基本闘エネルギー", None) == "Fighting Energy"
+    assert fallback._japanese_english_name("オーキドはかせ", None) is None
+    assert fallback._tcgplayer_name(fallback._japanese_english_name("ニドラン♂", 32) or "") == "nidoranm"
+
+
+def test_reprint_artwork_skips_the_same_set_and_tcg_pocket(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = {
+        "fr/cards/2018sm-fr-2": {"illustrator": "Akira Komayama"},
+        "fr/cards": [
+            {"id": "2018sm-fr-2", "image": "https://assets.test/fr/sm/2018sm-fr/2"},
+            {"id": "A3-018", "image": "https://assets.test/fr/tcgp/A3/018"},
+            {"id": "sm1-18", "image": "https://assets.test/fr/sm/sm1/18"},
+        ],
+    }
+    monkeypatch.setattr(fallback, "_tcgdex_json", lambda path, params=None: responses.get(path))
+
+    found = fallback._match_reprint_artwork(
+        "fr", {"id": "2018sm-fr", "cards": [{"id": "2018sm-fr-2", "localId": "2", "name": "Croquine"}]}, ["2"]
+    )
+
+    assert found == {"2": fallback.CardImageUrls(low="https://assets.test/fr/sm/sm1/18/low.webp", high="https://assets.test/fr/sm/sm1/18/high.webp")}

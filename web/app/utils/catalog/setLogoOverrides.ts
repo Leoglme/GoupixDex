@@ -1,5 +1,5 @@
-// Logos de set embarqués (source: repo TailTCG) pour les sets sans logo TCGdex.
-// Généré depuis set-logos.json ; clé = id de set TCGdex (minuscule en FR/EN, casse d'origine en JA).
+// Logos de set embarqués (repo TailTCG, Pokellector) pour les sets sans logo TCGdex.
+// Clé = id de set TCGdex (minuscule en FR/EN, casse d'origine en JA).
 
 import type { CatalogLocale } from '~/composables/useCardCatalog'
 
@@ -22,6 +22,7 @@ const INTERNATIONAL_SET_LOGOS: Record<string, string> = {
   jumbo: '/set-logos/fr/jumbo.webp',
   mee: '/set-logos/fr/mee.webp',
   mep: '/set-logos/fr/mep.webp',
+  mfb: '/set-logos/fr/tp-23330.webp',
   sma: '/set-logos/fr/sma.webp',
   swsh10tg: '/set-logos/fr/swsh10tg.webp',
   swsh11tg: '/set-logos/fr/swsh11tg.webp',
@@ -59,11 +60,18 @@ const SET_LOGO_OVERRIDES: Record<CatalogLocale, Record<string, string>> = {
   },
   en: INTERNATIONAL_SET_LOGOS,
   ja: {
+    E2: '/set-logos/ja/E2.webp',
     E3: '/set-logos/ja/E3.webp',
     E4: '/set-logos/ja/E4.webp',
     E5: '/set-logos/ja/E5.webp',
     L1a: '/set-logos/ja/L1a.webp',
     L1b: '/set-logos/ja/L1b.webp',
+    PMCG1: '/set-logos/ja/PMCG1.webp',
+    PMCG2: '/set-logos/ja/PMCG2.webp',
+    PMCG3: '/set-logos/ja/PMCG3.webp',
+    PMCG4: '/set-logos/ja/PMCG4.webp',
+    PMCG5: '/set-logos/ja/PMCG5.webp',
+    PMCG6: '/set-logos/ja/PMCG6.webp',
     VS1: '/set-logos/ja/VS1.webp',
     web1: '/set-logos/ja/web1.webp',
     XY11a: '/set-logos/ja/XY11a.webp',
