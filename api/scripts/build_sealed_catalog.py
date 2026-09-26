@@ -31,6 +31,8 @@ import httpx
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 OUT_DIR = REPO_ROOT / "web" / "public" / "sealed-catalog"
+#: Logos embarqués des groupes TCGplayer hors TCGdex (Delta Reign, Battle Academy…), nommés ``tp-<groupId>.webp``.
+GROUP_LOGO_DIR = REPO_ROOT / "web" / "public" / "set-logos" / "fr"
 HISTORY_DIR = OUT_DIR / "history"
 HISTORY_VERSION = 1
 HISTORY_SHARDS = 64  # doit rester égal à PRICE_HISTORY_SHARDS de web/app/composables/useSealedCatalog.ts
@@ -200,6 +202,12 @@ def load_pokemontcg_logos() -> dict[str, str]:
         if isinstance(images, dict) and images.get("logo"):
             logos.setdefault(norm(pokemontcg_set.get("name", "")), images["logo"])
     return logos
+
+
+def embedded_group_logo(group: dict) -> str | None:
+    """Logo embarqué dans le site pour ce groupe TCGplayer, prioritaire : les sources externes n'en ont pas."""
+    path = GROUP_LOGO_DIR / f"tp-{group['group_id']}.webp"
+    return f"/set-logos/fr/{path.name}" if path.exists() else None
 
 
 def unmatched_group_logo(group: dict, pokemontcg_logos: dict[str, str]) -> str | None:
@@ -432,6 +440,7 @@ def load_tcgcsv_group(group: dict) -> dict | None:
     if not sealed:
         return None
     return {
+        "group_id": gid,
         "name": group["name"],
         "abbr": group.get("abbreviation") or "",
         "published_on": group.get("publishedOn") or "",
@@ -491,12 +500,12 @@ def build() -> dict[str, Any]:
             print_run = PRINT_RUN_RE.search(set_norm)
             # Sans le tirage, deux groupes (Set de Base / Shadowless) auraient le même nom, donc le même lien.
             exp_name = f"{td['fr_name']} ({PRINT_RUN_LABELS[print_run.group(1)]})" if print_run else td["fr_name"]
-            exp_logo = td["logo"]
+            exp_logo = embedded_group_logo(group) or td["logo"]
             serie_name = td["serie_name"]
         else:
             exp_name = re.sub(r"^(SM|SWSH|SV|BW|DP|HGSS|XY|ME|EX)\s+-\s+", "", set_clean, flags=re.IGNORECASE)
             exp_name = exp_name.strip() or group["name"]
-            exp_logo = unmatched_group_logo(group, pokemontcg_logos)
+            exp_logo = embedded_group_logo(group) or unmatched_group_logo(group, pokemontcg_logos)
             serie_name = fallback_serie_name(group["name"], serie_names)
             serie_logo.setdefault(serie_name, None)
         if exp_logo:

@@ -37,23 +37,41 @@
     <div class="flex min-w-0 flex-1 flex-col gap-0.5 p-3">
       <p class="text-highlighted line-clamp-2 min-h-[2.5em] text-sm leading-tight font-semibold">{{ props.name }}</p>
       <p class="text-muted truncate text-xs">{{ productTypeAndSetLabel }}</p>
-      <div class="mt-auto flex items-baseline justify-between gap-2 pt-2">
-        <span class="text-muted truncate text-xs tabular-nums">{{ props.purchaseLabel }}</span>
-        <span
-          class="shrink-0 font-mono text-sm font-bold tabular-nums"
-          :class="props.priceLabel ? 'text-highlighted' : 'text-(--app-faint)'"
-        >
-          {{ props.priceLabel ?? '—' }}
-        </span>
+      <div class="mt-auto space-y-0.5 pt-2">
+        <div class="flex items-center justify-between gap-2">
+          <span
+            class="text-base font-bold tabular-nums"
+            :class="props.priceLabel ? 'text-highlighted' : 'text-(--app-faint)'"
+          >
+            {{ props.priceLabel ?? '—' }}
+          </span>
+          <span
+            v-if="props.gain?.percentLabel"
+            class="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+            :class="GAIN_BADGE_CLASSES[props.gain.direction]"
+            title="Plus-value sur le prix d'achat"
+          >
+            {{ props.gain.percentLabel }}
+          </span>
+        </div>
+        <div v-if="props.purchaseLabel" class="flex items-baseline justify-between gap-2 text-xs tabular-nums">
+          <span class="text-muted truncate">{{ props.purchaseLabel }}</span>
+          <span v-if="props.gain" class="shrink-0 font-semibold" :class="GAIN_TEXT_CLASSES[props.gain.direction]">
+            {{ props.gain.amountLabel }}
+          </span>
+        </div>
       </div>
-      <slot name="footer" />
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
 import type { ComputedRef, PropType, Ref } from 'vue'
-import type { GoupixDexSealedProductTileProps } from '~/types/GoupixDexSealedProductTile'
+import type {
+  GoupixDexSealedProductTileGain,
+  GoupixDexSealedProductTileGainDirection,
+  GoupixDexSealedProductTileProps,
+} from '~/types/GoupixDexSealedProductTile'
 import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
 const props: GoupixDexSealedProductTileProps = defineProps({
@@ -81,6 +99,10 @@ const props: GoupixDexSealedProductTileProps = defineProps({
     type: String as PropType<string | null>,
     default: null,
   },
+  gain: {
+    type: Object as PropType<GoupixDexSealedProductTileGain | null>,
+    default: null,
+  },
   ownedQuantity: {
     type: Number,
     default: 0,
@@ -99,6 +121,18 @@ const emit = defineEmits<{
   select: []
   add: []
 }>()
+
+const GAIN_BADGE_CLASSES: Record<GoupixDexSealedProductTileGainDirection, string> = {
+  up: 'bg-success/15 text-success',
+  down: 'bg-error/15 text-error',
+  flat: 'bg-elevated text-muted',
+}
+
+const GAIN_TEXT_CLASSES: Record<GoupixDexSealedProductTileGainDirection, string> = {
+  up: 'text-success',
+  down: 'text-error',
+  flat: 'text-muted',
+}
 
 // Certaines images listées par TCGplayer n'existent pas sur leur CDN : l'icône du type prend alors le relais.
 const hasImageLoadFailed: Ref<boolean> = ref(false)

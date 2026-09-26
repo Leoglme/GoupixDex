@@ -105,3 +105,8 @@ def test_print_run_groups_keep_distinct_names() -> None:
     assert build.PRINT_RUN_RE.search(build.norm("Base Set (Shadowless)")).group(1) == "shadowless"
     assert build.PRINT_RUN_RE.search(build.norm("Base Set")) is None
     assert "base set" in build.set_keys("Base Set (Shadowless)")
+
+
+def test_embedded_group_logo_points_to_the_bundled_file() -> None:
+    assert build.embedded_group_logo({"group_id": 24831}) == "/set-logos/fr/tp-24831.webp"
+    assert build.embedded_group_logo({"group_id": 1}) is None

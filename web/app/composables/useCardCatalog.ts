@@ -1,5 +1,7 @@
 /** TCGdex-backed catalog API (authenticated proxy through GoupixDex). */
 
+import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
+
 export type CatalogLocale = 'en' | 'fr' | 'ja'
 
 export interface TcgdexSetBrief {
@@ -122,8 +124,11 @@ export interface CatalogCardPreviewResponse {
     cardmarket_eur: number | null
     tcgplayer_usd: number | null
     average_price_eur: number | null
+    cardmarket_id_product?: number | null
     error: string | null
   }
+  /** Amorce J-30 / J-7 / J-1 / J du guide Cardmarket, ou courbe réelle quand la carte est déjà possédée. */
+  price_history?: GoupixPriceHistoryResponse
   image_url_high: string | null
   margin_percent_used: number
   /** Exemplaires déjà dans « Ma collection » (langue du catalogue, cartes en vente comprises). */

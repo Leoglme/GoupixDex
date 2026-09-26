@@ -127,6 +127,7 @@
             :purchase-label="
               product.line_purchase_eur != null ? `payé ${eur.format(product.line_purchase_eur)}` : 'prix non renseigné'
             "
+            :gain="productGain(product)"
             @select="openSealed(product.id)"
           >
             <template #badges>
@@ -143,22 +144,6 @@
               >
                 <UIcon name="i-lucide-tag" class="size-3" />
               </span>
-            </template>
-            <template #footer>
-              <p class="flex items-baseline justify-between gap-2 text-xs font-semibold tabular-nums">
-                <span class="font-normal text-(--app-faint)">plus-value</span>
-                <span
-                  v-if="product.gain_eur != null"
-                  class="truncate"
-                  :class="product.gain_eur >= 0 ? 'text-success' : 'text-error'"
-                >
-                  {{ formatSignedEur(product.gain_eur) }}
-                  <span v-if="product.gain_percent != null" class="text-muted font-normal">
-                    {{ formatSignedPercent(product.gain_percent) }}
-                  </span>
-                </span>
-                <span v-else class="font-normal text-(--app-faint)">—</span>
-              </p>
             </template>
           </GoupixDexSealedProductTile>
         </div>
@@ -244,6 +229,7 @@
 <script setup lang="ts">
 import type { ComputedRef } from 'vue'
 import type { SealedListResponse, SealedProduct, SealedStats } from '~/composables/useSealed'
+import type { GoupixDexSealedProductTileGain } from '~/types/GoupixDexSealedProductTile'
 import {
   SEALED_TYPE_LABELS,
   formatSignedEur,
@@ -351,6 +337,22 @@ const filteredItems = computed<SealedProduct[]>(() => {
     return product.name.toLowerCase().includes(q) || (product.set_name?.toLowerCase().includes(q) ?? false)
   })
 })
+
+/**
+ * Plus-value d'un produit pour sa tuile, `null` tant que son prix d'achat ou sa cote manque.
+ * @param product - Produit scellé possédé.
+ * @returns Les libellés € et % avec le sens de la variation.
+ */
+function productGain(product: SealedProduct): GoupixDexSealedProductTileGain | null {
+  if (product.gain_eur == null) {
+    return null
+  }
+  return {
+    amountLabel: formatSignedEur(product.gain_eur),
+    percentLabel: product.gain_percent != null ? formatSignedPercent(product.gain_percent) : null,
+    direction: product.gain_eur > 0 ? 'up' : product.gain_eur < 0 ? 'down' : 'flat',
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true

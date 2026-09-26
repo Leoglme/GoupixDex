@@ -38,7 +38,7 @@ def _empty_result(error: str | None, source: str | None = None) -> dict[str, Any
     }
 
 
-def _average_eur(cardmarket_eur: float | None, tcgplayer_usd: float | None) -> float | None:
+def average_eur(cardmarket_eur: float | None, tcgplayer_usd: float | None) -> float | None:
     """EUR-basis average of the two marketplaces (single-source value when one is missing)."""
     settings = get_settings()
     tcg_eur: float | None = None
@@ -92,7 +92,7 @@ def _fetch_prices_via_cardmarket_local(
             "cardmarket_eur": cardmarket_eur,
             "tcgplayer_usd": tcgplayer_usd,
             "cardmarket_id_product": id_product if isinstance(id_product, int) else None,
-            "average_price": _average_eur(cardmarket_eur, tcgplayer_usd),
+            "average_price": average_eur(cardmarket_eur, tcgplayer_usd),
             "card": None,
             "source": "cardmarket_local",
             "error": None,
@@ -175,7 +175,7 @@ def _fetch_prices_via_pokewallet(
         "cardmarket_eur": float(cm_eur) if cm_eur is not None else None,
         "tcgplayer_usd": float(tcg_usd) if tcg_usd is not None else None,
         "cardmarket_id_product": None,
-        "average_price": _average_eur(
+        "average_price": average_eur(
             float(cm_eur) if cm_eur is not None else None,
             float(tcg_usd) if tcg_usd is not None else None,
         ),

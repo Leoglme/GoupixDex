@@ -35,6 +35,21 @@
       </p>
     </div>
 
+    <!-- Évolution du prix -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <p class="app-label">Évolution du prix</p>
+        <span v-if="priceHistory?.approximate" class="text-muted text-[10px]">tendance approximative</span>
+      </div>
+      <div
+        v-if="loadingPrice"
+        class="border-default flex h-40 items-center justify-center rounded-xl border border-dashed"
+      >
+        <UIcon name="i-lucide-loader-2" class="text-muted size-5 animate-spin" />
+      </div>
+      <GoupixDexPriceHistoryChart v-else :points="priceHistory?.points ?? []" />
+    </section>
+
     <!-- Cardmarket -->
     <UButton
       :to="cardmarketLink"
@@ -62,9 +77,11 @@
 </template>
 
 <script setup lang="ts">
+import type { Ref } from 'vue'
 import type { CollectionCard } from '~/composables/useCollection'
 import type { CatalogLocale } from '~/composables/useCardCatalog'
 import type { GoupixCatalogCardRef } from '~/types/GoupixDrawerStack'
+import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { parseEuroAmount } from '~/utils/sealedProducts'
 
@@ -90,6 +107,8 @@ const loadingPrice = ref(false)
 const adding = ref(false)
 const ownedQuantity = ref(0)
 const purchaseText = ref('')
+const cardmarketIdProduct: Ref<number | null> = ref<number | null>(null)
+const priceHistory: Ref<GoupixPriceHistoryResponse | null> = ref<GoupixPriceHistoryResponse | null>(null)
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -100,8 +119,10 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
 /** Prix marché Cardmarket, avec repli sur la moyenne connue. */
 const displayPriceEur = computed<number | null>(() => marketPriceEur.value ?? averagePriceEur.value)
 
-/** Lien Cardmarket de la carte (recherche par nom + numéro, l'idProduct n'étant pas exposé au catalogue). */
-const cardmarketLink = computed<string>(() => cardmarketUrl({ name: props.card.name, localId: props.card.localId }))
+/** Lien Cardmarket de la carte : fiche produit dès que l'aperçu connaît l'idProduct, recherche par nom + numéro avant. */
+const cardmarketLink = computed<string>(() =>
+  cardmarketUrl({ idProduct: cardmarketIdProduct.value, name: props.card.name, localId: props.card.localId }),
+)
 
 const priceSourceLabel = computed<string | null>(() => {
   if (marketPriceEur.value == null && averagePriceEur.value != null) {
@@ -139,12 +160,15 @@ async function loadPreview(): Promise<void> {
     ownedQuantity.value = data.owned_quantity ?? 0
     marketPriceEur.value = data.pricing.cardmarket_eur
     averagePriceEur.value = data.pricing.average_price_eur
+    cardmarketIdProduct.value = data.pricing.cardmarket_id_product ?? null
+    priceHistory.value = data.price_history ?? null
     if (data.image_url_high) {
       previewImageUrl.value = data.image_url_high
     }
   } catch {
     marketPriceEur.value = null
     averagePriceEur.value = null
+    priceHistory.value = null
   } finally {
     loadingPrice.value = false
   }
@@ -184,6 +208,8 @@ watch(
     ownedQuantity.value = 0
     marketPriceEur.value = null
     averagePriceEur.value = null
+    cardmarketIdProduct.value = null
+    priceHistory.value = null
     purchaseText.value = ''
     previewImageUrl.value = props.card.image
     void loadPreview()

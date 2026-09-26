@@ -66,6 +66,21 @@ def snapshot_all_collection_cards(db: Session) -> int:
     return len(rows)
 
 
+def owned_card_price_history(
+    db: Session, user_id: int, tcgdex_card_id: str, language: str | None
+) -> dict[str, Any] | None:
+    """Courbe de la carte quand l'utilisateur la possède déjà (même règle que « Déjà ×N »), ``None`` sinon."""
+    query = db.query(CollectionCard).filter(
+        CollectionCard.user_id == user_id,
+        CollectionCard.tcgdex_card_id == tcgdex_card_id,
+        CollectionCard.is_placeholder.is_(False),
+    )
+    if language:
+        query = query.filter(CollectionCard.language == language.strip().lower())
+    card = query.order_by(CollectionCard.id.asc()).first()
+    return price_history(db, card) if card is not None else None
+
+
 def price_history(db: Session, card: CollectionCard) -> dict[str, Any]:
     """
     Courbe de prix d'une carte : historique réel, complété par l'amorce approximative

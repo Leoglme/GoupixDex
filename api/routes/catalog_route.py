@@ -17,7 +17,7 @@ from core.database import get_db
 from core.deps import get_current_user
 from models.margin_settings import MarginSettings
 from models.user import User
-from services import collection_card_service
+from services import collection_card_price_history_service, collection_card_service
 from services.catalog_browse_service import (
     browse_catalog_for_ui,
     get_series_for_ui,
@@ -205,4 +205,10 @@ def get_catalog_card_preview(
     body["margin_percent_used"] = margin
     # « Déjà ×N » dès l'ouverture de l'aperçu (cartes en vente comprises), comme la grille du catalogue.
     body["owned_quantity"] = collection_card_service.owned_quantity(db, user.id, tcgdx_card_id.strip(), bl)
+    # Carte déjà possédée : sa courbe réelle (relevés nocturnes) remplace l'amorce dès qu'elle trace une ligne.
+    owned_history = collection_card_price_history_service.owned_card_price_history(
+        db, user.id, tcgdx_card_id.strip(), bl
+    )
+    if owned_history is not None and len(owned_history["points"]) >= 2:
+        body["price_history"] = owned_history
     return body
