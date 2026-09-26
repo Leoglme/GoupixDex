@@ -8,11 +8,11 @@
     </div>
     <div class="mt-auto w-full min-w-0">
       <p class="text-highlighted truncate text-sm leading-tight font-medium">{{ props.name }}</p>
-      <p class="text-muted mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs tabular-nums">
-        <span v-if="props.setCode" class="bg-muted/30 rounded px-1.5 py-0.5 font-mono uppercase">{{
+      <p class="text-muted mt-1 flex items-center justify-center gap-x-2 text-xs tabular-nums">
+        <span v-if="props.setCode" class="bg-muted/30 min-w-0 truncate rounded px-1.5 py-0.5 font-mono uppercase">{{
           props.setCode
         }}</span>
-        <span v-if="props.summaryLabel">{{ props.summaryLabel }}</span>
+        <span v-if="props.summaryLabel" class="shrink-0">{{ props.summaryLabel }}</span>
       </p>
     </div>
   </NuxtLink>
