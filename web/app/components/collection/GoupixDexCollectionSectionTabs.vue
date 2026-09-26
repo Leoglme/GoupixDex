@@ -4,6 +4,7 @@
       v-for="tab in tabs"
       :key="tab.value"
       :to="tab.to"
+      replace
       class="-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
       :class="
         tab.value === props.active

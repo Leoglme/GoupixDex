@@ -69,7 +69,7 @@
         </template>
 
         <template v-else-if="searchMode === 'loading'">
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div class="app-pokemon-card-grid">
             <div v-for="i in 10" :key="i" class="bg-muted/20 aspect-[63/88] animate-pulse rounded-xl" />
           </div>
         </template>
@@ -97,49 +97,21 @@
               searchHits.length > 1 ? 's' : ''
             }}
           </p>
-          <ul class="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            <li v-for="card in searchHits" :key="card.id">
-              <div
-                role="button"
-                tabindex="0"
-                class="group focus-visible:ring-primary block cursor-pointer rounded-xl text-left focus-visible:ring-2 focus-visible:outline-none"
-                @click="openCardPreview(card)"
-                @keydown.enter.prevent="openCardPreview(card)"
-              >
-                <div class="border-default bg-elevated/30 relative aspect-[63/88] overflow-hidden rounded-xl border">
-                  <GoupixDexCardImage
-                    :image-url="cardThumb(card)"
-                    :tcgdex-card-id="card.id"
-                    :alt="cardLabel(card)"
-                    img-class="h-full w-full object-contain transition group-hover:scale-[1.03]"
-                  />
-                  <span
-                    v-if="ownedCount(card.id) > 0"
-                    class="bg-success/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  >
-                    ×{{ ownedCount(card.id) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="bg-elevated/95 text-highlighted focus-visible:ring-primary absolute right-1.5 bottom-1.5 flex size-7 items-center justify-center rounded-full backdrop-blur-sm transition-colors hover:bg-(--app-accent) hover:text-white focus-visible:ring-2 focus-visible:outline-none"
-                    :disabled="pendingCardId === card.id"
-                    :aria-label="`Ajouter ${cardLabel(card)} directement`"
-                    @click.stop="addCard(card.id, cardLabel(card))"
-                  >
-                    <UIcon
-                      :name="pendingCardId === card.id ? 'i-lucide-loader-2' : 'i-lucide-plus'"
-                      class="size-4"
-                      :class="pendingCardId === card.id ? 'animate-spin' : ''"
-                    />
-                  </button>
-                </div>
-                <p class="text-highlighted group-hover:text-primary mt-2 truncate text-sm font-medium">
-                  {{ cardLabel(card) }}
-                </p>
-                <p class="text-muted truncate text-xs">{{ card.set_name }} · #{{ card.localId }}</p>
-              </div>
-            </li>
-          </ul>
+          <div class="app-pokemon-card-grid">
+            <GoupixDexPokemonCardTile
+              v-for="card in searchHits"
+              :key="card.id"
+              :name="cardLabel(card)"
+              :image-url="cardThumb(card) ?? null"
+              :tcgdex-card-id="card.id"
+              :set-number-label="`${card.set_name} · #${card.localId}`"
+              :owned-quantity="ownedCount(card.id)"
+              is-addable
+              :is-adding="pendingCardId === card.id"
+              @select="openCardPreview(card)"
+              @add="addCard(card.id, cardLabel(card))"
+            />
+          </div>
         </template>
       </div>
     </template>

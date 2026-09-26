@@ -30,6 +30,7 @@
                 :symbol="setDetail.symbol"
                 :cover="setDetail.cover"
                 :set-id="setDetail.id"
+                :locale="catalogLocale"
                 :name="setDisplayName"
                 large
               />
@@ -71,8 +72,9 @@
 </template>
 
 <script setup lang="ts">
-import type { CatalogLocale, TcgdexSetDetail } from '~/composables/useCardCatalog'
-import type { CatalogSetCardRow } from '~/components/collection/GoupixDexCatalogSetCards.vue'
+import type { ComputedRef } from 'vue'
+import type { CatalogLocale, TcgdexCardInSetBrief, TcgdexSetDetail } from '~/composables/useCardCatalog'
+import type { CatalogSetCardRow } from '~/types/GoupixDexCatalogSetCards'
 import { cardThumbFromImage } from '~/utils/catalogAssets'
 
 definePageMeta({ middleware: 'auth' })
@@ -146,16 +148,24 @@ const scansMissing = computed(() => {
   return cards.length > 0 && cards.every((c) => !c.image && !c.image_low)
 })
 
-const cardRows = computed<CatalogSetCardRow[]>(() => {
-  const raw = setDetail.value?.cards ?? []
+const cardRows: ComputedRef<CatalogSetCardRow[]> = computed((): CatalogSetCardRow[] => {
+  const raw: TcgdexCardInSetBrief[] = setDetail.value?.cards ?? []
+  // Les cartes d'une sous-extension fusionnée (Collection Classique) restent groupées après celles de l'extension.
   return [...raw]
-    .sort((a, b) => a.localId.localeCompare(b.localId, 'en', { numeric: true }))
-    .map((c) => ({
-      id: c.id,
-      localId: c.localId,
-      displayName: c.display_name?.trim() || c.name,
-      thumbUrl: cardThumbFromImage(c.image, c.image_low),
-    }))
+    .sort(
+      (left: TcgdexCardInSetBrief, right: TcgdexCardInSetBrief): number =>
+        Number(Boolean(left.merged_from)) - Number(Boolean(right.merged_from)) ||
+        left.localId.localeCompare(right.localId, 'en', { numeric: true }),
+    )
+    .map(
+      (card: TcgdexCardInSetBrief): CatalogSetCardRow => ({
+        id: card.id,
+        localId: card.localId,
+        numberLabel: card.display_local_id ?? card.localId,
+        displayName: card.display_name?.trim() || card.name,
+        thumbUrl: cardThumbFromImage(card.image, card.image_low),
+      }),
+    )
 })
 
 watch([setId, catalogLocale], () => {
@@ -198,7 +208,7 @@ function onPreviewCard(c: CatalogSetCardRow): void {
     id: c.id,
     name: c.displayName,
     setName: setDisplayName.value,
-    localId: c.localId,
+    localId: c.numberLabel,
     image: c.thumbUrl ?? null,
     locale: catalogLocale.value,
   })

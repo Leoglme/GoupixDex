@@ -19,6 +19,8 @@
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/articles" />
+
         <GoupixDexPageHeader
           title="Marché eBay"
           description="Estimez une carte ou un produit scellé : annonces actives et prix min / médian / moyen / max sur eBay France."

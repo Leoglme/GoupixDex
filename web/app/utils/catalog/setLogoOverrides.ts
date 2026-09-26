@@ -1,7 +1,9 @@
 // Logos de set embarqués (source: repo TailTCG) pour les sets sans logo TCGdex.
-// Généré depuis set-logos.json ; clé = id de set TCGdex (minuscule).
+// Généré depuis set-logos.json ; clé = id de set TCGdex (minuscule en FR/EN, casse d'origine en JA).
 
-const SET_LOGO_OVERRIDES: Record<string, string> = {
+import type { CatalogLocale } from '~/composables/useCardCatalog'
+
+const INTERNATIONAL_SET_LOGOS: Record<string, string> = {
   '2011bw': '/set-logos/fr/2011bw.webp',
   '2012bw': '/set-logos/fr/2012bw.webp',
   '2013bw': '/set-logos/fr/2013bw.webp',
@@ -18,6 +20,8 @@ const SET_LOGO_OVERRIDES: Record<string, string> = {
   '30th-c': '/set-logos/fr/30th-c.webp',
   cel25cc: '/set-logos/fr/cel25cc.webp',
   jumbo: '/set-logos/fr/jumbo.webp',
+  mee: '/set-logos/fr/mee.webp',
+  mep: '/set-logos/fr/mep.webp',
   sma: '/set-logos/fr/sma.webp',
   swsh10tg: '/set-logos/fr/swsh10tg.webp',
   swsh11tg: '/set-logos/fr/swsh11tg.webp',
@@ -46,14 +50,40 @@ const SET_LOGO_OVERRIDES: Record<string, string> = {
   'tk-xy-w': '/set-logos/fr/tk-xy-w.webp',
 }
 
+const SET_LOGO_OVERRIDES: Record<CatalogLocale, Record<string, string>> = {
+  fr: {
+    ...INTERNATIONAL_SET_LOGOS,
+    '30th': '/set-logos/fr/30th.webp',
+    sve: '/set-logos/fr/sve.webp',
+    svp: '/set-logos/fr/svp.webp',
+  },
+  en: INTERNATIONAL_SET_LOGOS,
+  ja: {
+    E3: '/set-logos/ja/E3.webp',
+    E4: '/set-logos/ja/E4.webp',
+    E5: '/set-logos/ja/E5.webp',
+    L1a: '/set-logos/ja/L1a.webp',
+    L1b: '/set-logos/ja/L1b.webp',
+    VS1: '/set-logos/ja/VS1.webp',
+    web1: '/set-logos/ja/web1.webp',
+    XY11a: '/set-logos/ja/XY11a.webp',
+    XY1a: '/set-logos/ja/XY1a.webp',
+    XY5a: '/set-logos/ja/XY5a.webp',
+    XY5b: '/set-logos/ja/XY5b.webp',
+    XY8a: '/set-logos/ja/XY8a.webp',
+  },
+}
+
 /**
- * Logo de set embarqué pour un id de set dépourvu de logo TCGdex.
+ * Logo de set embarqué pour un id de set dépourvu de logo TCGdex dans la langue du catalogue.
  * @param setId Identifiant du set TCGdex.
+ * @param locale Langue du catalogue (les ids japonais gardent leur casse).
  * @returns Le chemin public du logo embarqué, ou null.
  */
-export function setLogoOverride(setId: string | null | undefined): string | null {
+export function setLogoOverride(setId: string | null | undefined, locale: CatalogLocale): string | null {
   if (!setId) {
     return null
   }
-  return SET_LOGO_OVERRIDES[setId.toLowerCase()] ?? null
+  const key: string = locale === 'ja' ? setId : setId.toLowerCase()
+  return SET_LOGO_OVERRIDES[locale][key] ?? null
 }

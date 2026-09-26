@@ -5,16 +5,12 @@
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
-        <template #right>
-          <UButton to="/collection/produits" color="neutral" variant="ghost" icon="i-lucide-arrow-left">
-            Produits scellés
-          </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page mx-auto w-full max-w-2xl">
+        <GoupixDexBackLink to="/collection/produits" />
         <GoupixDexSealedProductDetailBody :sealed-id="id" @deleted="onDeleted" />
       </div>
     </template>

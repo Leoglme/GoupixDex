@@ -19,6 +19,8 @@
 
     <template #body>
       <div class="app-dashboard-page">
+        <GoupixDexBackLink to="/dashboard" />
+
         <GoupixDexPageHeader
           title="Utilisateurs"
           description="Approuvez, refusez ou bannissez les demandes d'accès, et générez les liens de mot de passe."

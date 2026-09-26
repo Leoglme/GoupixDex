@@ -16,6 +16,8 @@
 
     <template #body>
       <div class="app-dashboard-page">
+        <GoupixDexBackLink to="/orders" />
+
         <GoupixDexPageHeader
           title="Paniers Cardmarket"
           description="Collez vos liens de singles, GoupixDex classe les vendeurs par couverture et surcoût pour limiter les frais de port."

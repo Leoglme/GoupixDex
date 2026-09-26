@@ -76,13 +76,8 @@
           <!-- Form state -->
           <template v-else>
             <div class="mb-10 space-y-2">
-              <div class="mb-4 flex items-center gap-2">
-                <NuxtLink
-                  to="/"
-                  class="text-muted hover:bg-default hover:text-highlighted flex size-8 items-center justify-center rounded-lg transition-colors"
-                >
-                  <UIcon name="i-lucide-arrow-left" class="size-4" />
-                </NuxtLink>
+              <div class="mb-4">
+                <GoupixDexBackLink to="/" />
               </div>
               <h2 class="text-highlighted text-2xl font-semibold">Demander l'accès</h2>
               <p class="text-muted text-sm">

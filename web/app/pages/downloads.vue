@@ -16,6 +16,8 @@
 
     <template #body>
       <div class="app-dashboard-page mx-auto w-full max-w-7xl">
+        <GoupixDexBackLink to="/dashboard" />
+
         <GoupixDexPageHeader
           title="Télécharger l'application"
           description="Windows ou macOS, choisissez la ligne adaptée à votre processeur. La publication Vinted n'existe que dans l'app desktop — le site web gère le reste."

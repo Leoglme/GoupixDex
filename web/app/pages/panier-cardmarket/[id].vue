@@ -3,7 +3,7 @@
     <template #header>
       <UDashboardNavbar :title="detail?.name || 'Panier Cardmarket'">
         <template #leading>
-          <UButton to="/panier-cardmarket" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
+          <UDashboardSidebarCollapse />
         </template>
         <template #right>
           <div class="flex items-center gap-2">
@@ -33,6 +33,8 @@
 
     <template #body>
       <div class="app-dashboard-page space-y-6">
+        <GoupixDexBackLink to="/panier-cardmarket" />
+
         <UAlert
           v-if="!isDesktopApp"
           color="warning"

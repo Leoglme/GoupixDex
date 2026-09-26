@@ -61,6 +61,21 @@ export function formatSignedPercent(percent: number): string {
   return `${sign}${percent.toFixed(1).replace('.', ',')} %`
 }
 
+const EURO_FORMATTER: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
+
+/**
+ * Formate une plus-value en euros avec signe explicite.
+ * @param amount - Montant de la plus-value.
+ * @returns La chaîne signée (ex. « +12,50 € »).
+ */
+export function formatSignedEur(amount: number): string {
+  return `${amount >= 0 ? '+' : ''}${EURO_FORMATTER.format(amount)}`
+}
+
 /**
  * Convertit un champ texte de montant (virgule ou point) en nombre positif.
  * @param text - Valeur brute du champ.

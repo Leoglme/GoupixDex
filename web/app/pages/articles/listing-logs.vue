@@ -13,7 +13,6 @@
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-list"> Articles </UButton>
           <UButton to="/articles/batch-create" color="neutral" variant="subtle" icon="i-lucide-layers">
             Création groupée
           </UButton>
@@ -23,6 +22,8 @@
 
     <template #body>
       <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6 lg:min-h-[calc(100dvh-7rem)]">
+        <GoupixDexBackLink to="/articles" />
+
         <UAlert
           v-if="idleMessage && !loading"
           color="neutral"

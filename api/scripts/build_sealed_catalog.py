@@ -42,19 +42,95 @@ USD_TO_EUR = 0.92  # repli approximatif quand le prix Cardmarket manque.
 
 CARDMARKET_NONSINGLES = "https://downloads.s3.cardmarket.com/productCatalog/productList/products_nonsingles_6.json"
 
-#: Préfixe de nom TCGplayer vers série FR (repli quand TCGdex ne matche pas l'extension).
-SERIE_BY_PREFIX: dict[str, str] = {
-    "SV": "Écarlate et Violet",
-    "SVE": "Écarlate et Violet",
-    "ME": "Méga-Évolution",
-    "MEE": "Méga-Évolution",
-    "SWSH": "Épée et Bouclier",
-    "SM": "Soleil et Lune",
-    "XY": "XY",
-    "BW": "Noir & Blanc",
-    "HGSS": "HeartGold SoulSilver",
-    "DP": "Diamant & Perle",
+#: Préfixe de nom TCGplayer (« SV08: », « SM - »…) vers id de série TCGdex (repli quand l'extension n'est pas appariée).
+SERIE_ID_BY_PREFIX: dict[str, str] = {
+    "col": "col",
+    "dp": "dp",
+    "ex": "ex",
+    "hgss": "hgss",
+    "hs": "hgss",
+    "me": "me",
+    "mee": "me",
+    "neo": "neo",
+    "pl": "pl",
+    "pop": "pop",
+    "sm": "sm",
+    "sv": "sv",
+    "sve": "sv",
+    "swsh": "swsh",
+    "tk": "tk",
+    "bw": "bw",
+    "xy": "xy",
 }
+#: Début de nom TCGplayer (normalisé) vers id de série TCGdex, pour les groupes sans préfixe.
+SERIE_ID_BY_PHRASE: tuple[tuple[str, str], ...] = (
+    ("scarlet violet", "sv"),
+    ("sword shield", "swsh"),
+    ("sun moon", "sm"),
+    ("black white", "bw"),
+    ("black and white", "bw"),
+    ("diamond pearl", "dp"),
+    ("diamond and pearl", "dp"),
+    ("platinum", "pl"),
+    ("heartgold soulsilver", "hgss"),
+    ("call of legends", "col"),
+    ("mega evolution", "me"),
+    ("pop series", "pop"),
+    ("mcdonald", "mc"),
+    ("expedition", "ecard"),
+    ("aquapolis", "ecard"),
+    ("skyridge", "ecard"),
+    ("base set", "base"),
+    ("jungle", "base"),
+    ("fossil", "base"),
+    ("team rocket", "base"),
+    ("gym ", "base"),
+    ("legendary collection", "base"),
+    ("neo ", "neo"),
+    ("southern islands", "neo"),
+    ("ex ", "ex"),
+)
+#: Préfixe de série vers nom (normalisé) du premier set de la série, pour « SM Base Set », « XY Base Set »…
+SERIE_BASE_SET_NAMES: dict[str, str] = {
+    "black and white": "black white",
+    "bw": "black white",
+    "diamond and pearl": "diamond pearl",
+    "dp": "diamond pearl",
+    "scarlet violet": "scarlet violet",
+    "sm": "sun moon",
+    "sv": "scarlet violet",
+    "sword shield": "sword shield",
+    "swsh": "sword shield",
+    "xy": "xy",
+}
+#: Noms de série qui précèdent le nom d'extension chez TCGplayer (« Scarlet & Violet 151 »).
+SERIE_NAME_PHRASES: tuple[str, ...] = (
+    "scarlet violet",
+    "sword shield",
+    "sun moon",
+    "black white",
+    "diamond pearl",
+    "heartgold soulsilver",
+    "mega evolution",
+)
+#: Groupes TCGplayer dont le nom ne ressemble pas à celui de l'extension TCGdex (kits dresseur, promos McDonald's).
+TCGDEX_ID_BY_GROUP_NAME: dict[str, str] = {
+    "bw trainer kit excadrill zoroark": "tk-bw-e",
+    "dp trainer kit manaphy lucario": "tk-dp-m",
+    "ex trainer kit 1 latias latios": "tk-ex-latia",
+    "ex trainer kit 2 plusle minun": "tk-ex-p",
+    "hgss trainer kit gyarados raichu": "tk-hs-g",
+    "mcdonald s 25th anniversary promos": "2021swsh",
+    "sm trainer kit lycanroc alolan raichu": "tk-sm-r",
+    "xy trainer kit bisharp wigglytuff": "tk-xy-b",
+    "xy trainer kit latias latios": "tk-xy-latia",
+    "xy trainer kit pikachu libre suicune": "tk-xy-p",
+    "xy trainer kit sylveon noivern": "tk-xy-sy",
+}
+#: Groupes TCGplayer hors TCGdex dont le logo existe sous un autre nom chez pokemontcg.io.
+POKEMONTCG_NAME_BY_GROUP_NAME: dict[str, str] = {"wotc promo": "wizards black star promos"}
+POKEMONTCG_SETS = "https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master/sets/en.json"
+POKECARDEX_LOGOS = "https://pokecardex.b-cdn.net/assets/images/logos/{code}.png"
 SERIE_OTHER = "Autres"
 
 
@@ -67,9 +143,74 @@ def norm(value: str) -> str:
 
 
 def name_prefix(name: str) -> str:
-    """Préfixe de série d'un nom TCGplayer (« SV08: Surging Sparks » vers « SV »)."""
-    match = re.match(r"^([A-Za-z]+)\d", name) or re.match(r"^([A-Za-z]+):", name)
-    return match.group(1).upper() if match else ""
+    """Préfixe de série d'un nom TCGplayer (« SV08: Surging Sparks » ou « SM - Team Up » donnent « sv » / « sm »)."""
+    match = re.match(r"^([A-Za-z]+)\d", name) or re.match(r"^([A-Za-z]+)\s*[:—-]", name)
+    return match.group(1).lower() if match else ""
+
+
+def set_keys(group_name: str) -> list[str]:
+    """Clés candidates d'une extension TCGdex pour un groupe TCGplayer, de la plus précise à la plus large."""
+    name = norm(group_name)
+    without_print_run = re.sub(r"\s+(shadowless|1st edition|unlimited)$", "", name)
+    keys: list[str] = [name, without_print_run, name.replace(" and ", " ")]
+    base_match = re.match(r"^(.*?)\s+base set$", name)
+    if base_match:
+        base = base_match.group(1)
+        keys.extend([SERIE_BASE_SET_NAMES.get(base, base), base])
+    without_prefix = re.sub(r"^(sm|swsh|sv|bw|dp|hgss|xy|me|ex)\s+", "", name)
+    for phrase in SERIE_NAME_PHRASES:
+        for source in (name, without_prefix):
+            if source.startswith(f"{phrase} ") and source[len(phrase) + 1 :] != "base set":
+                keys.append(source[len(phrase) + 1 :])
+    # Jamais réduit à « base set » : ce serait le Set de Base de 1999.
+    if without_prefix != name and without_prefix != "base set":
+        keys.append(without_prefix)
+    variants = [variant for key in keys for variant in (key, key.replace(" and ", " "), key.replace(" promos ", " collection "))]
+    return list(dict.fromkeys(key for key in variants if key))
+
+
+def fallback_serie_name(group_name: str, serie_names: dict[str, str]) -> str:
+    """Série FR d'un groupe TCGplayer sans extension TCGdex : par préfixe, puis par début de nom, sinon « Autres »."""
+    serie_id = SERIE_ID_BY_PREFIX.get(name_prefix(group_name))
+    if serie_id is None:
+        name = norm(group_name)
+        serie_id = next(
+            (target for phrase, target in SERIE_ID_BY_PHRASE if name == phrase.strip() or name.startswith(phrase)),
+            None,
+        )
+    return serie_names.get(serie_id, SERIE_OTHER) if serie_id else SERIE_OTHER
+
+
+def _url_exists(url: str) -> bool:
+    """Vrai quand l'URL répond 200 (requête HEAD)."""
+    try:
+        return httpx.head(url, headers=UA, timeout=20.0, follow_redirects=True).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def load_pokemontcg_logos() -> dict[str, str]:
+    """Logos des sets pokemontcg.io indexés par nom normalisé (repli pour les groupes absents de TCGdex)."""
+    logos: dict[str, str] = {}
+    for pokemontcg_set in _fetch_json(POKEMONTCG_SETS, cache=True):
+        images = pokemontcg_set.get("images")
+        if isinstance(images, dict) and images.get("logo"):
+            logos.setdefault(norm(pokemontcg_set.get("name", "")), images["logo"])
+    return logos
+
+
+def unmatched_group_logo(group: dict, pokemontcg_logos: dict[str, str]) -> str | None:
+    """Logo d'un groupe TCGplayer sans extension TCGdex : set pokemontcg.io du même nom (ou de son alias), sinon logo Pokécardex de son code."""
+    alias = POKEMONTCG_NAME_BY_GROUP_NAME.get(norm(group["name"]))
+    for key in ([alias] if alias else []) + set_keys(group["name"]):
+        if key in pokemontcg_logos:
+            return pokemontcg_logos[key]
+    code = (group.get("abbr") or "").strip()
+    if len(code) >= 3 and re.fullmatch(r"[A-Za-z0-9]+", code):
+        url = POKECARDEX_LOGOS.format(code=code.upper())
+        if _url_exists(url):
+            return url
+    return None
 
 
 _TYPE_RULES: tuple[tuple[str, str], ...] = (
@@ -225,8 +366,9 @@ def load_cardmarket() -> tuple[dict[str, int], dict[str, dict[str, int]]]:
 
 
 def load_tcgdex_sets() -> tuple[dict[str, dict], list[dict]]:
-    """Index TCGdex ``norm(nom)`` vers infos extension (FR + logo + série), et la liste des séries."""
+    """Index TCGdex ``norm(nom)`` vers infos extension (FR + logo + série), sets connus seulement en anglais compris."""
     fr_series = _fetch_json("https://api.tcgdex.net/v2/fr/series", cache=True)
+    en_series = _fetch_json("https://api.tcgdex.net/v2/en/series", cache=True)
     en_sets = {s["id"]: s.get("name", "") for s in _fetch_json("https://api.tcgdex.net/v2/en/sets", cache=True)}
     index: dict[str, dict] = {}
     series_meta: list[dict] = []
@@ -247,6 +389,25 @@ def load_tcgdex_sets() -> tuple[dict[str, dict], list[dict]]:
             for key in {norm(en_sets.get(st["id"], "")), norm(st.get("name", ""))}:
                 if key:
                     index.setdefault(key, info)
+    fr_serie_names = {meta["id"]: meta["name"] for meta in series_meta}
+    for serie in en_series:
+        if serie["id"] == "tcgp":
+            continue
+        detail = _fetch_json(f"https://api.tcgdex.net/v2/en/series/{serie['id']}", cache=True)
+        if serie["id"] not in fr_serie_names:
+            series_meta.append(
+                {"id": serie["id"], "name": serie.get("name", ""), "logo": serie.get("logo"), "english_only": True}
+            )
+        for st in detail.get("sets", []):
+            key = norm(st.get("name", ""))
+            if key and key not in index:
+                index[key] = {
+                    "set_id": st["id"],
+                    "fr_name": st.get("name", ""),
+                    "logo": st.get("logo") or f"https://assets.tcgdex.net/en/{serie['id']}/{st['id']}/logo",
+                    "serie_id": serie["id"],
+                    "serie_name": fr_serie_names.get(serie["id"]) or serie.get("name", ""),
+                }
     return index, series_meta
 
 
@@ -286,26 +447,35 @@ def build() -> dict[str, Any]:
     """Assemble le catalogue série vers extension vers produits."""
     global_cm, exp_cm = load_cardmarket()
     tcgdex, series_meta = load_tcgdex_sets()
+    tcgdex_by_id = {info["set_id"]: info for info in tcgdex.values()}
+    pokemontcg_logos = load_pokemontcg_logos()
     groups = load_tcgcsv_groups()
 
     serie_logo = {s["name"]: s["logo"] for s in series_meta}
+    serie_names = {s["id"]: s["name"] for s in series_meta}
     series: dict[str, dict] = {}
 
-    stat_img = stat_total = stat_cm_price = 0
+    stat_img = stat_total = stat_cm_price = stat_matched = stat_logo = 0
     for group in groups:
         set_norm = norm(group["name"])
         set_clean = re.sub(r"^[A-Za-z]+\d*(?:\.\d+)?[a-z]?:\s*", "", group["name"]).strip()
         cm_bucket = exp_cm.get(set_norm)
-        td = tcgdex.get(set_norm)
+        td = tcgdex_by_id.get(TCGDEX_ID_BY_GROUP_NAME.get(set_norm, "")) or next(
+            (tcgdex[key] for key in set_keys(group["name"]) if key in tcgdex), None
+        )
         if td:
+            stat_matched += 1
             exp_name = td["fr_name"]
             exp_logo = td["logo"]
             serie_name = td["serie_name"]
         else:
-            exp_name = re.sub(r"^[A-Za-z]+\d*(?:\.\d+)?:\s*", "", group["name"]).strip() or group["name"]
-            exp_logo = None
-            serie_name = SERIE_BY_PREFIX.get(name_prefix(group["name"]), SERIE_OTHER)
+            exp_name = re.sub(r"^(SM|SWSH|SV|BW|DP|HGSS|XY|ME|EX)\s+-\s+", "", set_clean, flags=re.IGNORECASE)
+            exp_name = exp_name.strip() or group["name"]
+            exp_logo = unmatched_group_logo(group, pokemontcg_logos)
+            serie_name = fallback_serie_name(group["name"], serie_names)
             serie_logo.setdefault(serie_name, None)
+        if exp_logo:
+            stat_logo += 1
 
         products: list[dict] = []
         for tp in group["products"]:
@@ -346,6 +516,7 @@ def build() -> dict[str, Any]:
         bucket["expansions"].append(
             {
                 "id": group["abbr"] or set_norm,
+                "tcgdex_id": td["set_id"] if td else None,
                 "name": exp_name,
                 "logo": exp_logo,
                 "published_on": group["published_on"],
@@ -358,7 +529,7 @@ def build() -> dict[str, Any]:
     # inverse de TCGdex (série la plus récente d'abord), inconnues puis « Autres » en dernier.
     for serie in series.values():
         serie["expansions"].sort(key=lambda e: e["published_on"], reverse=True)
-    serie_pos = {s["name"]: i for i, s in enumerate(series_meta)}
+    serie_pos = {s["name"]: i for i, s in enumerate(series_meta) if not s.get("english_only")}
     last = len(series_meta)
 
     def _serie_rank(serie: dict[str, Any]) -> int:
@@ -373,6 +544,7 @@ def build() -> dict[str, Any]:
     print(
         f"produits {stat_total} | images {stat_img} ({100 * stat_img // max(stat_total, 1)}%) "
         f"| idProduct Cardmarket {stat_cm_price} ({100 * stat_cm_price // max(stat_total, 1)}%) "
+        f"| extensions TCGdex {stat_matched}/{len(groups)} | logos {stat_logo}/{len(groups)} "
         f"| séries {len(ordered)}"
     )
     return {"version": CATALOG_VERSION, "generated_at": generated_at, "series": ordered}

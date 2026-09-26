@@ -6,10 +6,12 @@ import re
 from typing import Any, cast
 
 from app_types.tcgdex import TcgdexSetDetail
+from services.card_image_fallback_service import fallback_card_image, has_lettered_number
 from services.cardmarket_local_price_service import (
     extract_cardmarket_block,
     resolve_market_price_eur,
 )
+from services.catalog_browse_service import readable_set_name
 from services.species_locale_names_service import (
     fetch_species_locale_names,
     fetch_species_names_by_dex,
@@ -218,8 +220,12 @@ def fetch_card_for_collection(
 
     rarity = _strip(primary.get("rarity"))
     image_url = _resolve_image_url(primary)
+    if set_detail and (image_url is None or has_lettered_number(local_raw)):
+        fallback_image = fallback_card_image(lang, dict(set_detail), local_raw)
+        if fallback_image is not None:
+            image_url = fallback_image.low
 
-    set_name = _set_name_from_card(primary) or _strip(set_detail.get("name"))
+    set_name = readable_set_name(_set_name_from_card(primary) or _strip(set_detail.get("name")))
     display_name = _latin_display_name(name_en, name_fr, name_ja)
 
     # Cardmarket mapping + market price come for free in the payloads we already

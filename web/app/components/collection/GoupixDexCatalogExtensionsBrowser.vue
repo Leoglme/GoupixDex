@@ -14,32 +14,26 @@
         >
       </div>
 
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        <NuxtLink
+      <div class="app-tile-grid">
+        <GoupixDexExtensionTile
           v-for="set in serie.sets"
           :key="set.id"
           :to="setLink(set.id)"
-          class="border-default bg-elevated/40 group hover:border-primary/40 flex flex-col gap-3 rounded-xl border p-4 transition hover:shadow-md"
+          :name="setLabel(set)"
+          :set-code="set.id"
+          :summary-label="cardCountLabel(set)"
         >
-          <div class="flex h-14 items-center justify-center">
+          <template #logo>
             <GoupixDexCatalogSetLogo
               :logo="set.logo"
               :symbol="set.symbol"
               :cover="set.cover"
               :set-id="set.id"
+              :locale="catalogLocale"
               :name="setLabel(set)"
             />
-          </div>
-          <div class="mt-auto min-w-0">
-            <p class="text-highlighted group-hover:text-primary truncate text-sm leading-tight font-medium">
-              {{ setLabel(set) }}
-            </p>
-            <p class="text-muted mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <span class="bg-muted/30 num rounded px-1.5 py-0.5 font-mono uppercase">{{ set.id }}</span>
-              <span v-if="cardCountLabel(set)" class="tabular-nums">{{ cardCountLabel(set) }}</span>
-            </p>
-          </div>
-        </NuxtLink>
+          </template>
+        </GoupixDexExtensionTile>
       </div>
     </section>
   </div>

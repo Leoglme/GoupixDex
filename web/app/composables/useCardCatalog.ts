@@ -83,6 +83,8 @@ export interface TcgdexCardInSetBrief {
   image?: string
   /** Ready-to-use thumbnail URL (``…/low.webp``), set by GoupixDex ``GET /catalog/sets/:id``. */
   image_low?: string
+  display_local_id?: string
+  merged_from?: string
 }
 
 export interface TcgdexSetDetail extends TcgdexSetBrief {

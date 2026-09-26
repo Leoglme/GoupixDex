@@ -211,6 +211,15 @@ html.dark {
     @apply -mx-3 overflow-x-auto px-3 [-ms-overflow-style:none] [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden;
   }
 
+  /* Colonnes en requêtes de conteneur : ces grilles doivent vivre dans .app-dashboard-page. */
+  .app-pokemon-card-grid {
+    @apply grid grid-cols-2 gap-3 @xl:grid-cols-3 @3xl:grid-cols-4 @5xl:grid-cols-5 @7xl:grid-cols-6;
+  }
+
+  .app-tile-grid {
+    @apply grid grid-cols-2 gap-3 @xl:grid-cols-3 @4xl:grid-cols-4 @6xl:grid-cols-5 @7xl:grid-cols-6;
+  }
+
   /* Page header CTAs — pleine largeur et zone tactile confortable sur mobile. */
   .app-page-header-actions > * {
     @apply max-md:min-h-11 max-md:w-full max-md:justify-center;

@@ -21,8 +21,10 @@ export interface SealedCatalogProduct {
 
 export interface SealedCatalogExpansion {
   id: string
+  tcgdex_id?: string | null
   name: string
   logo: string | null
+  published_on?: string | null
   count: number
   products: SealedCatalogProduct[]
 }
@@ -42,6 +44,11 @@ export interface SealedCatalog {
 export interface SealedCatalogSearchHit {
   product: SealedCatalogProduct
   expansionName: string
+}
+
+export type SealedCatalogSearchGroup = {
+  expansionName: string
+  hits: SealedCatalogSearchHit[]
 }
 
 /** Nombre de fichiers `history/{n}.json` ; doit rester égal à `HISTORY_SHARDS` de `api/scripts/build_sealed_catalog.py`. */

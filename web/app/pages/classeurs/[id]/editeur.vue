@@ -20,18 +20,13 @@
       </div>
 
       <div v-else-if="loadError" class="app-dashboard-page space-y-4">
-        <NuxtLink
-          :to="`/classeurs/${binderId}`"
-          class="inline-flex w-fit items-center gap-1 text-sm font-medium text-(--app-accent) underline-offset-4 transition hover:underline"
-        >
-          <UIcon name="i-lucide-arrow-left" class="size-4 shrink-0" aria-hidden />
-          Retour
-        </NuxtLink>
+        <GoupixDexBackLink :to="`/classeurs/${binderId}`" />
         <UAlert color="error" title="Impossible de charger l'éditeur" description="Réessaie ou reviens au classeur." />
         <UButton color="neutral" variant="outline" @click="load">Réessayer</UButton>
       </div>
 
       <div v-else-if="editorReady" class="app-dashboard-page">
+        <GoupixDexBackLink :to="`/classeurs/${binderId}`" />
         <GoupixDexBinderEditor
           :binder-id="binderId"
           :name="binderName"

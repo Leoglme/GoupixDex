@@ -9,6 +9,7 @@
         v-for="item in props.items"
         :key="item.to"
         :to="item.to"
+        replace
         class="relative flex min-h-11 items-center justify-center gap-1.5 rounded-t px-4 py-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-(--app-ink-soft) focus-visible:outline-none max-md:min-w-0 max-md:flex-1 max-md:px-2"
         :class="isActive(item) ? 'text-(--app-ink)' : 'text-(--app-ink-soft) hover:text-(--app-ink)'"
         :aria-current="isActive(item) ? 'page' : undefined"

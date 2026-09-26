@@ -50,16 +50,16 @@
             icon="i-lucide-euro"
           />
           <GoupixDexStatsCard
-            title="Cartes uniques"
-            :value="stats.unique_cards"
-            description="Cartes distinctes dans le binder"
-            icon="i-lucide-layers"
+            title="Plus-value"
+            :value="stats.gain_percent != null ? formatSignedEur(stats.gain_eur) : '—'"
+            :description="gainDescription"
+            icon="i-lucide-trending-up"
           />
           <GoupixDexStatsCard
-            title="Exemplaires"
+            title="Cartes"
             :value="stats.total_quantity"
-            description="Quantité totale possédée"
-            icon="i-lucide-package"
+            :description="`${stats.unique_cards} carte${stats.unique_cards > 1 ? 's' : ''} distincte${stats.unique_cards > 1 ? 's' : ''}`"
+            icon="i-lucide-layers"
           />
           <GoupixDexStatsCard
             title="Extensions"
@@ -123,25 +123,17 @@
           <UButton color="primary" icon="i-lucide-plus" to="/collection/add"> Ajouter ma première carte </UButton>
         </UCard>
 
-        <div
-          v-else-if="viewMode === 'grid'"
-          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
-        >
-          <button
+        <div v-else-if="viewMode === 'grid'" class="app-pokemon-card-grid">
+          <GoupixDexPokemonCardTile
             v-for="card in filteredItems"
             :key="card.id"
-            type="button"
-            class="border-default bg-elevated/30 group focus-visible:ring-primary block overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
-            @click="openCardFromClick(card.id, $event)"
-            @keydown.enter.prevent="openCard(card.id)"
+            :name="card.display_name"
+            :image-url="card.image_url"
+            :tcgdex-card-id="card.tcgdex_card_id"
+            :set-number-label="`${card.set_code || card.tcgdex_set_id} · #${card.card_number}`"
+            @select="openCard(card.id)"
           >
-            <div class="bg-muted/20 relative aspect-[63/88] w-full overflow-hidden">
-              <GoupixDexCardImage
-                :image-url="card.image_url"
-                :tcgdex-card-id="card.tcgdex_card_id"
-                :alt="card.display_name"
-                img-class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-              />
+            <template #badges>
               <span
                 class="bg-primary/90 text-inverted absolute top-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm"
               >
@@ -166,16 +158,8 @@
               >
                 <UIcon name="i-lucide-tag" class="size-3" />
               </span>
-            </div>
-            <div class="space-y-0.5 p-2">
-              <p class="text-highlighted truncate text-xs leading-snug font-medium">
-                {{ card.display_name }}
-              </p>
-              <p class="text-muted truncate text-[10px]">
-                {{ card.set_code || card.tcgdex_set_id }} · #{{ card.card_number }}
-              </p>
-            </div>
-          </button>
+            </template>
+          </GoupixDexPokemonCardTile>
         </div>
 
         <div v-else class="app-card overflow-hidden">
@@ -245,8 +229,10 @@
 </template>
 
 <script setup lang="ts">
+import type { ComputedRef } from 'vue'
 import type { CollectionCard, CollectionListResponse, CollectionStats } from '~/composables/useCollection'
 import type { ScanEvent } from '~/composables/useScanStream'
+import { formatSignedEur, formatSignedPercent } from '~/utils/sealedProducts'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -257,7 +243,7 @@ useGoupixPageSeo(
 
 const { listCollection } = useCollection()
 const { isDesktopApp } = useDesktopRuntime()
-const { openCard, openCardFromClick } = useOpenCardDrawer()
+const { openCard } = useOpenCardDrawer()
 const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
@@ -296,8 +282,23 @@ const stats = computed<CollectionStats>(() => {
       with_article: 0,
       estimated_value_eur: 0,
       priced_cards: 0,
+      purchase_value_eur: 0,
+      gain_eur: 0,
+      gain_percent: null,
+      invested_cards: 0,
     }
   )
+})
+
+const gainDescription: ComputedRef<string> = computed((): string => {
+  if (stats.value.gain_percent == null) {
+    return 'Renseignez un prix d’achat'
+  }
+  const coverage: string =
+    stats.value.invested_cards < stats.value.unique_cards
+      ? ` · prix connu pour ${stats.value.invested_cards}/${stats.value.unique_cards}`
+      : ''
+  return `${formatSignedPercent(stats.value.gain_percent)} sur le prix d’achat${coverage}`
 })
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {

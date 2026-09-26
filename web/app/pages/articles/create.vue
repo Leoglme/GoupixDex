@@ -11,14 +11,13 @@
             Vente
           </span>
         </template>
-        <template #right>
-          <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-store"> Mes articles </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/articles" />
+
         <GoupixDexPageHeader
           title="Nouvel article"
           description="Importez une photo, laissez GoupixDex lire le set, le numéro et les prix de référence, puis ajustez la fiche avant publication."

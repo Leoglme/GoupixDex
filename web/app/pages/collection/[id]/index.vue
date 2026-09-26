@@ -5,14 +5,12 @@
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
-        <template #right>
-          <UButton to="/collection" color="neutral" variant="ghost" icon="i-lucide-arrow-left"> Ma collection </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page mx-auto w-full max-w-2xl">
+        <GoupixDexBackLink to="/collection" />
         <GoupixDexCollectionCardDetailBody :card-id="id" @deleted="onDeleted" />
       </div>
     </template>

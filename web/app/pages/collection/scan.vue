@@ -11,14 +11,13 @@
             Collection
           </span>
         </template>
-        <template #right>
-          <UButton to="/collection" color="neutral" variant="ghost" icon="i-lucide-album"> Ma collection </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page w-full space-y-3 sm:space-y-5">
+        <GoupixDexBackLink to="/collection" />
+
         <GoupixDexPageHeader
           title="Scanner mes cartes"
           description="Photographiez vos cartes à la chaîne : langue reconnue automatiquement, capture en mode caisse (HTTPS) et arrivée en temps réel dans la collection."

@@ -4,14 +4,6 @@
 
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
-        <NuxtLink
-          :to="backHref"
-          aria-label="Retour au classeur"
-          title="Retour au classeur"
-          class="text-muted flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--app-line) transition hover:border-(--app-ink-soft) hover:text-(--app-ink)"
-        >
-          <UIcon name="i-lucide-chevron-left" class="size-4" aria-hidden />
-        </NuxtLink>
         <div class="min-w-0">
           <h1 class="font-display truncate text-2xl font-bold tracking-tight">Personnaliser « {{ name }} »</h1>
           <p class="text-muted text-xs">L'aperçu suit tes choix ; rien n'est enregistré avant « Enregistrer ».</p>

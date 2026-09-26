@@ -12,16 +12,15 @@
           </span>
         </template>
         <template #right>
-          <div class="flex flex-wrap items-center gap-2">
-            <UButton :to="`/articles/${id}`" color="neutral" variant="ghost" icon="i-lucide-eye"> Fiche </UButton>
-            <UButton to="/articles" color="neutral" variant="ghost" icon="i-lucide-store"> Mes articles </UButton>
-          </div>
+          <UButton :to="`/articles/${id}`" color="neutral" variant="ghost" icon="i-lucide-eye"> Fiche </UButton>
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/articles" />
+
         <div v-if="loading" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
         </div>

@@ -1,9 +1,12 @@
 <template>
   <div class="app-dashboard-page w-full space-y-10">
-    <GoupixDexPageHeader
-      title="Paramètres"
-      description="Marge sur les prix suggérés, canaux de vente et comptes marketplace — tout au même endroit."
-    />
+    <div class="space-y-3 sm:space-y-4">
+      <GoupixDexBackLink to="/dashboard" />
+      <GoupixDexPageHeader
+        title="Paramètres"
+        description="Marge sur les prix suggérés, canaux de vente et comptes marketplace — tout au même endroit."
+      />
+    </div>
 
     <UAlert
       v-if="!loading && s && !s.ebay_oauth_configured"

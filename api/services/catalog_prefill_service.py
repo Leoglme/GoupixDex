@@ -7,6 +7,7 @@ from typing import Any
 from app_types.groq_vision import GroqVisionCardCollectorResult
 from app_types.tcgdex import TcgdexCardDetail, TcgdexSetDetail
 from services import pricing_service
+from services.card_image_fallback_service import fallback_card_image, has_lettered_number
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.scan_service import build_title_and_description
 from services.species_locale_names_service import fetch_species_locale_names
@@ -112,6 +113,11 @@ def build_catalog_card_preview(
         rarity = raw_r.strip()
 
     image_base = card_en.get("image")
+    fallback_image = (
+        fallback_card_image("en", dict(set_detail), local_raw)
+        if not image_base or has_lettered_number(local_raw)
+        else None
+    )
     return _preview_payload(
         tcgdx_card_id=tcgdx_card_id,
         set_id=set_id,
@@ -125,6 +131,7 @@ def build_catalog_card_preview(
         rarity=rarity,
         image_base=image_base if isinstance(image_base, str) else None,
         browse_locale=browse_locale,
+        fallback_image_url_high=fallback_image.high if fallback_image else None,
     )
 
 
@@ -183,10 +190,12 @@ def _preview_payload(
     image_base: str | None,
     browse_locale: str | None,
     fallback_cardmarket_eur: float | None = None,
+    fallback_image_url_high: str | None = None,
 ) -> dict[str, Any]:
     """
     Titre + description d'annonce, prix et image HD d'une carte à partir de ses faits TCGdex.
     ``fallback_cardmarket_eur`` sert de cote quand la recherche de prix par set/numéro ne répond pas.
+    ``fallback_image_url_high`` remplace l'image HD quand TCGdex n'a pas de scan exploitable.
     """
     display_name = _pick_display_pokemon_name(browse_locale, name_en, name_fr, name_ja)
     ocr: GroqVisionCardCollectorResult = {
@@ -216,8 +225,8 @@ def _preview_payload(
     if cardmarket_eur is None and fallback_cardmarket_eur is not None:
         cardmarket_eur = fallback_cardmarket_eur
         average_price = average_price if average_price is not None else fallback_cardmarket_eur
-    image_url_high: str | None = None
-    if image_base and image_base.strip():
+    image_url_high: str | None = fallback_image_url_high
+    if image_url_high is None and image_base and image_base.strip():
         image_url_high = tcgdx_image_url_high(image_base.strip())
 
     return {

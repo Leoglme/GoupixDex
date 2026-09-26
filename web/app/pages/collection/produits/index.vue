@@ -41,21 +41,21 @@
           />
           <GoupixDexStatsCard
             title="Plus-value"
-            :value="gainLabel"
+            :value="stats.gain_percent != null ? gainLabel : '—'"
             :description="gainDescription"
             icon="i-lucide-trending-up"
           />
           <GoupixDexStatsCard
             title="Produits"
-            :value="stats.unique_products"
-            description="Références distinctes"
+            :value="stats.total_quantity"
+            :description="`${stats.unique_products} référence${stats.unique_products > 1 ? 's' : ''} distincte${stats.unique_products > 1 ? 's' : ''}`"
             icon="i-lucide-box"
           />
           <GoupixDexStatsCard
-            title="Exemplaires"
-            :value="stats.total_quantity"
-            description="Quantité totale possédée"
-            icon="i-lucide-package"
+            title="Meilleure plus-value"
+            :value="bestGainProduct ? formatSignedEur(bestGainProduct.gain_eur ?? 0) : '—'"
+            :description="bestGainProduct ? bestGainProduct.name : 'Renseignez un prix d’achat'"
+            icon="i-lucide-trophy"
           />
           <GoupixDexStatsCard
             title="En vente"
@@ -115,56 +115,51 @@
           </UButton>
         </UCard>
 
-        <div
-          v-else-if="viewMode === 'grid'"
-          class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-        >
-          <button
+        <div v-else-if="viewMode === 'grid'" class="app-tile-grid">
+          <GoupixDexSealedProductTile
             v-for="product in filteredItems"
             :key="product.id"
-            type="button"
-            class="border-default bg-elevated/30 group focus-visible:ring-primary block overflow-hidden rounded-xl border text-left transition-all hover:border-(--app-accent) hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
-            @click="onProductClick(product.id, $event)"
-            @keydown.enter.prevent="openSealed(product.id)"
+            :name="product.name"
+            :image-url="product.image_url"
+            :product-type="product.product_type"
+            :set-name="product.set_name"
+            :price-label="product.line_market_eur != null ? eur.format(product.line_market_eur) : null"
+            :purchase-label="
+              product.line_purchase_eur != null ? `payé ${eur.format(product.line_purchase_eur)}` : 'prix non renseigné'
+            "
+            @select="openSealed(product.id)"
           >
-            <div
-              class="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden bg-[var(--app-surface-2)] p-2"
-            >
-              <img
-                v-if="product.image_url"
-                :src="product.image_url"
-                :alt="product.name"
-                class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                referrerpolicy="no-referrer"
-                decoding="async"
-                loading="lazy"
-              />
-              <UIcon v-else name="i-lucide-box" class="text-muted size-8" />
+            <template #badges>
               <span
                 v-if="product.quantity > 1"
-                class="bg-elevated/95 text-highlighted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                class="bg-elevated/95 text-highlighted absolute top-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums shadow-sm"
               >
                 ×{{ product.quantity }}
               </span>
               <span
-                v-if="product.market_price_eur != null"
-                class="bg-elevated/95 text-highlighted absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
+                v-if="product.article_id"
+                class="bg-success/90 text-inverted absolute top-1.5 left-1.5 rounded-full p-1"
+                title="Article créé"
               >
-                {{ eur.format(product.market_price_eur) }}
+                <UIcon name="i-lucide-tag" class="size-3" />
               </span>
-              <span
-                v-if="product.gain_percent != null"
-                class="absolute right-1.5 bottom-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm"
-                :class="product.gain_percent >= 0 ? 'bg-success/90 text-inverted' : 'bg-error/90 text-inverted'"
+            </template>
+            <template #footer>
+              <p
+                v-if="product.gain_eur != null"
+                class="flex items-baseline justify-between gap-2 text-xs font-semibold tabular-nums"
+                :class="product.gain_eur >= 0 ? 'text-success' : 'text-error'"
               >
-                {{ formatSignedPercent(product.gain_percent) }}
-              </span>
-            </div>
-            <div class="p-2">
-              <p class="text-highlighted truncate text-xs leading-snug font-medium">{{ product.name }}</p>
-              <p class="text-muted truncate text-[10px]">{{ product.set_name || '—' }}</p>
-            </div>
-          </button>
+                <span class="font-normal text-(--app-faint)">plus-value</span>
+                <span class="truncate">
+                  {{ formatSignedEur(product.gain_eur) }}
+                  <span v-if="product.gain_percent != null" class="text-muted font-normal">
+                    {{ formatSignedPercent(product.gain_percent) }}
+                  </span>
+                </span>
+              </p>
+            </template>
+          </GoupixDexSealedProductTile>
         </div>
 
         <div v-else class="app-card overflow-hidden">
@@ -246,8 +241,14 @@
 </template>
 
 <script setup lang="ts">
+import type { ComputedRef } from 'vue'
 import type { SealedListResponse, SealedProduct, SealedStats } from '~/composables/useSealed'
-import { SEALED_TYPE_LABELS, formatSignedPercent, sealedProductTypeLabel } from '~/utils/sealedProducts'
+import {
+  SEALED_TYPE_LABELS,
+  formatSignedEur,
+  formatSignedPercent,
+  sealedProductTypeLabel,
+} from '~/utils/sealedProducts'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -307,17 +308,31 @@ const stats = computed<SealedStats>(() => {
   )
 })
 
-const gainLabel = computed<string>(() => {
-  const sign = stats.value.gain_eur >= 0 ? '+' : ''
-  return `${sign}${eur.format(stats.value.gain_eur)}`
-})
+const gainLabel: ComputedRef<string> = computed((): string => formatSignedEur(stats.value.gain_eur))
 
-const gainDescription = computed<string>(() => {
+const purchasePricedProductCount: ComputedRef<number> = computed(
+  (): number =>
+    (payload.value?.items ?? []).filter((product: SealedProduct): boolean => product.purchase_price_eur != null).length,
+)
+
+const gainDescription: ComputedRef<string> = computed((): string => {
   if (stats.value.gain_percent == null) {
     return 'Renseignez un prix d’achat'
   }
-  return `${formatSignedPercent(stats.value.gain_percent)} vs prix d’achat`
+  const coverage: string =
+    purchasePricedProductCount.value < stats.value.unique_products
+      ? ` · prix connu pour ${purchasePricedProductCount.value}/${stats.value.unique_products}`
+      : ''
+  return `${formatSignedPercent(stats.value.gain_percent)} sur le prix d’achat${coverage}`
 })
+
+const bestGainProduct: ComputedRef<SealedProduct | null> = computed(
+  (): SealedProduct | null =>
+    (payload.value?.items ?? [])
+      .filter((product: SealedProduct): boolean => (product.gain_eur ?? 0) > 0)
+      .sort((left: SealedProduct, right: SealedProduct): number => (right.gain_eur ?? 0) - (left.gain_eur ?? 0))[0] ??
+    null,
+)
 
 const filteredItems = computed<SealedProduct[]>(() => {
   const items = payload.value?.items ?? []

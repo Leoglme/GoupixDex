@@ -11,14 +11,13 @@
             Vente
           </span>
         </template>
-        <template #right>
-          <UButton color="neutral" variant="ghost" icon="i-lucide-store" to="/articles"> Mes articles </UButton>
-        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/articles" />
+
         <GoupixDexPageHeader
           title="Création groupée"
           description="Remplissez plusieurs fiches puis lancez la création (et la publication Vinted groupée) en un clic — idéal après une session de scan."

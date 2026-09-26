@@ -30,6 +30,8 @@
 
     <template #body>
       <div class="w-full space-y-6 p-4 sm:p-6">
+        <GoupixDexBackLink to="/orders" />
+
         <div v-if="loading" class="flex justify-center py-20">
           <UIcon name="i-lucide-loader-2" class="text-primary size-10 animate-spin" />
         </div>

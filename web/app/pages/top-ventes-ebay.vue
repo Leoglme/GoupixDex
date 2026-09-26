@@ -16,6 +16,8 @@
 
     <template #body>
       <div class="app-dashboard-page w-full">
+        <GoupixDexBackLink to="/articles" />
+
         <GoupixDexPageHeader
           title="Marché eBay"
           description="Ventes récemment conclues sur eBay France : dernier prix constaté sur la fenêtre de votre choix (24 h à 30 jours)."

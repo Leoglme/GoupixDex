@@ -22,13 +22,7 @@
       <div v-else-if="binder" class="flex min-h-0 min-w-0 flex-col overflow-x-hidden">
         <div class="app-dashboard-page w-full space-y-4 sm:space-y-5">
           <div class="flex items-center justify-between gap-3">
-            <NuxtLink
-              to="/classeurs"
-              class="inline-flex min-w-0 items-center gap-1 text-sm font-medium text-(--app-accent) underline-offset-4 transition hover:underline"
-            >
-              <UIcon name="i-lucide-arrow-left" class="size-4 shrink-0" aria-hidden />
-              Retour
-            </NuxtLink>
+            <GoupixDexBackLink to="/classeurs" />
             <UButton
               size="sm"
               color="error"
@@ -257,7 +251,7 @@
             <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
               Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
             </p>
-            <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div v-else class="app-pokemon-card-grid">
               <button
                 v-for="item in gridItems"
                 :key="item.id"

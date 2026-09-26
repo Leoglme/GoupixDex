@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from services.card_image_fallback_service import pokemontcg_set_id
 from services.tcgdex_asset_url import (
     fill_missing_set_visuals,
     normalize_set_logo_url,
@@ -79,6 +80,32 @@ def pokecardex_jp_set_logo_url(set_id: str) -> str | None:
     return None
 
 
+# Sous-extensions sans logo propre : logo de l'extension ou de la collection promo dont elles sont issues.
+_PARENT_SET_LOGOS: dict[str, str] = {
+    "exu": "https://assets.tcgdex.net/{locale}/ex/ex10/logo.webp",
+    "rc": "https://assets.tcgdex.net/en/bw/bw11/logo.webp",
+    "wp": "https://images.pokemontcg.io/basep/logo.png",
+}
+
+
+def parent_set_logo_url(locale: str, set_id: str) -> str | None:
+    """Logo de l'extension d'origine d'une sous-extension sans logo propre, quand l'image existe."""
+    template = _PARENT_SET_LOGOS.get((set_id or "").strip().lower())
+    if template is None:
+        return None
+    url = template.format(locale=locale)
+    return url if _head_ok(url) else None
+
+
+def pokemontcg_set_logo_url(set_id: str) -> str | None:
+    """Logo anglais pokemontcg.io d'un set international quand l'image existe, sinon ``None``."""
+    sid = (set_id or "").strip()
+    if not sid:
+        return None
+    url = f"https://images.pokemontcg.io/{pokemontcg_set_id(sid)}/logo.png"
+    return url if _head_ok(url) else None
+
+
 def limitless_set_logo_url(locale: str, set_id: str) -> str | None:
     """Return a Limitless CDN logo URL when the asset exists, else ``None``."""
     loc = (locale or "").strip().lower()
@@ -93,7 +120,7 @@ def limitless_set_logo_url(locale: str, set_id: str) -> str | None:
 
 
 def apply_external_logo_to_row(row: dict[str, Any], locale: str) -> None:
-    """Set ``logo`` from Pokécardex (JA) or Limitless when TCGdex omitted it."""
+    """Set ``logo`` from Pokécardex (JA), pokemontcg.io or Limitless when TCGdex omitted it."""
     if row.get("logo"):
         return
     sid = row.get("id")
@@ -103,6 +130,8 @@ def apply_external_logo_to_row(row: dict[str, Any], locale: str) -> None:
     url: str | None = None
     if loc == "ja":
         url = pokecardex_jp_set_logo_url(sid)
+    else:
+        url = parent_set_logo_url(loc, sid) or pokemontcg_set_logo_url(sid)
     if url is None:
         url = limitless_set_logo_url(loc, sid)
     if url:

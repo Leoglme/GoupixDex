@@ -17,11 +17,13 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
+from services.card_image_fallback_service import fallback_card_images
 from services.catalog_set_logos import enrich_browse_series_tree, enrich_set_visuals_row
 from services.tcgdex_asset_url import (
     card_image_low_webp,
@@ -39,9 +41,52 @@ from services.catalog_limitless_ja_service import (
 from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService
 
 _CACHE_TTL_SEC = 600.0
-_CACHE_VERSION = "latin-labels-v8"
+_CACHE_VERSION = "latin-labels-v9"
 _CACHE_TTL_BROWSE_SEC = 3600.0
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_GLUED_NUMBER_RE = re.compile(r"(?<=[a-z\u00e0-\u00ff]{3})(?=\d)")
+
+# Sous-extensions que TCGdex s\u00e9pare mais que Cardmarket vend comme une seule extension.
+_MERGED_SUBSET_PARENTS: dict[str, str] = {"30th-c": "30th"}
+
+# Num\u00e9ros imprim\u00e9s de la Collection Classique (num\u00e9ros des cartes d'origine) ; TCGdex les num\u00e9rote 001 \u00e0 030.
+_MERGED_PRINTED_NUMBERS: dict[str, str] = {
+    "30th-c-001": "4/102",
+    "30th-c-002": "5/109",
+    "30th-c-003": "11/113",
+    "30th-c-004": "11/101",
+    "30th-c-005": "18/132",
+    "30th-c-006": "19/109",
+    "30th-c-007": "25/111",
+    "30th-c-008": "33/181",
+    "30th-c-009": "41/122",
+    "30th-c-010": "43/146",
+    "30th-c-011": "47/127",
+    "30th-c-012": "50/185",
+    "30th-c-013": "57/111",
+    "30th-c-014": "58/102",
+    "30th-c-015": "69/132",
+    "30th-c-016": "85/124",
+    "30th-c-017": "89/149",
+    "30th-c-018": "94/102",
+    "30th-c-019": "99/102",
+    "30th-c-020": "100/102",
+    "30th-c-021": "101/101",
+    "30th-c-022": "106/106",
+    "30th-c-023": "106/160",
+    "30th-c-024": "106/105",
+    "30th-c-025": "108/115",
+    "30th-c-026": "114/264",
+    "30th-c-027": "123/172",
+    "30th-c-028": "138/202",
+    "30th-c-029": "149/147",
+    "30th-c-030": "203/193",
+}
+
+
+def readable_set_name(name: str) -> str:
+    """Nom d'extension lisible : TCGdex colle parfois un mot et un nombre (\u00ab Collection Classique30\u1d49 \u00bb)."""
+    return _GLUED_NUMBER_RE.sub(" ", name)
 
 
 def _is_japanese_script(text: str | None) -> bool:
@@ -559,17 +604,95 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
             return
         sets.sort(key=lambda s: (s.get("releaseDate") or ""), reverse=True)
 
+    set_facts = _set_release_facts(
+        loc,
+        [
+            str(row["id"])
+            for serie in details
+            for row in serie.get("sets") or []
+            if isinstance(row, dict) and isinstance(row.get("id"), str)
+        ],
+    )
+    ghost_set_ids = _ghost_set_ids(details, set_facts)
     for serie in details:
         sets = serie.get("sets")
         if isinstance(sets, list):
-            typed = [s for s in sets if isinstance(s, dict)]
+            typed = [s for s in sets if isinstance(s, dict) and str(s.get("id")) not in ghost_set_ids]
+            for row in typed:
+                release_date = set_facts.get(str(row.get("id")), (None, -1))[0]
+                if release_date and not row.get("releaseDate"):
+                    row["releaseDate"] = release_date
             _sort_sets(typed)
             serie["sets"] = typed
 
+    details = [serie for serie in details if serie.get("sets")]
     details.sort(key=lambda s: (s.get("releaseDate") or ""), reverse=True)
     enrich_browse_series_tree(details, loc, verify_limitless=True)
+    details = _merge_subset_rows(details, loc)
     _cache.set(cache_key, details, ttl_seconds=_CACHE_TTL_BROWSE_SEC)
     return details
+
+
+def _ghost_set_ids(
+    series_details: list[dict[str, Any]], set_facts: dict[str, tuple[str | None, int]]
+) -> set[str]:
+    """Fiches TCGdex fantômes : extension vide copiant une extension garnie (même nom, même date) ou nom répété en série."""
+    rows = [row for serie in series_details for row in serie.get("sets") or [] if isinstance(row, dict)]
+    name_counts = Counter(str(row.get("name")) for row in rows)
+    filled_twins = {
+        (str(row.get("name")), set_facts.get(str(row.get("id")), (None, -1))[0])
+        for row in rows
+        if set_facts.get(str(row.get("id")), (None, -1))[1] > 0
+    }
+    ghosts: set[str] = set()
+    for row in rows:
+        release_date, card_total = set_facts.get(str(row.get("id")), (None, -1))
+        name = str(row.get("name"))
+        if card_total == 0 and ((name, release_date) in filled_twins or name_counts[name] > 2):
+            ghosts.add(str(row.get("id")))
+    return ghosts
+
+
+def _set_release_facts(loc: str, set_ids: list[str]) -> dict[str, tuple[str | None, int]]:
+    """Date de sortie et nombre réel de cartes de chaque extension (absents des fiches de série TCGdex), -1 si illisible."""
+    client = _client()
+
+    def _facts(set_id: str) -> tuple[str | None, int]:
+        try:
+            detail = client.get_set(loc, set_id)
+        except (RuntimeError, ValueError):
+            return (None, -1)
+        release_date = detail.get("releaseDate")
+        cards = detail.get("cards")
+        return (release_date if isinstance(release_date, str) else None, len(cards) if isinstance(cards, list) else -1)
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        return dict(zip(set_ids, pool.map(_facts, set_ids), strict=True))
+
+
+def _merge_subset_rows(series_details: list[dict[str, Any]], loc: str) -> list[dict[str, Any]]:
+    """Copie du navigateur sans les sous-extensions fusionnées, leurs cartes comptées dans l'extension parente."""
+    merged = [{**serie, "sets": [dict(row) for row in serie.get("sets") or []]} for serie in series_details]
+    rows_by_id = {row["id"]: row for serie in merged for row in serie["sets"] if isinstance(row.get("id"), str)}
+    absorbed: set[str] = set()
+    for child_id, parent_id in _MERGED_SUBSET_PARENTS.items():
+        child = rows_by_id.get(child_id)
+        parent = rows_by_id.get(parent_id)
+        if child is None or parent is None:
+            continue
+        absorbed.add(child_id)
+        child_total = _card_count_tuple(child)[0]
+        parent_count = parent.get("cardCount")
+        if child_total and isinstance(parent_count, dict) and isinstance(parent_count.get("total"), int):
+            parent["cardCount"] = {**parent_count, "total": parent_count["total"] + child_total}
+    for serie in merged:
+        serie["sets"] = [row for row in serie["sets"] if row.get("id") not in absorbed]
+        if loc != "ja":
+            for row in serie["sets"]:
+                label = row.get("display_name") or row.get("name")
+                if isinstance(label, str):
+                    row["display_name"] = readable_set_name(label)
+    return merged
 
 
 def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
@@ -696,7 +819,8 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
             latin_set = latin_display_name_for_ja_set(set_id)
             row["set_name"] = latin_set or set_id.upper()
         else:
-            row["set_name"] = set_name_by_id.get(set_id) or set_id
+            set_name = set_name_by_id.get(set_id)
+            row["set_name"] = readable_set_name(set_name) if set_name else set_id
         out.append(row)
 
     _cache.set(cache_key, out)
@@ -746,7 +870,48 @@ def get_set_for_ui(locale: str, set_id: str) -> dict[str, Any]:
                 if isinstance(c, dict):
                     _attach_display_name(c, None)
         nm = detail.get("name")
-        detail["display_name"] = nm if isinstance(nm, str) else detail.get("id")
+        detail["display_name"] = readable_set_name(nm) if isinstance(nm, str) else detail.get("id")
 
+    _fill_missing_card_images(cast(dict[str, Any], detail), loc)
+    _append_merged_subset_cards(cast(dict[str, Any], detail), loc)
     _cache.set(cache_key, detail)
     return detail
+
+
+def _fill_missing_card_images(detail: dict[str, Any], loc: str) -> None:
+    """Donne une vignette (``image_low``) aux cartes sans scan TCGdex exploitable à partir des scans de repli."""
+    fallbacks = fallback_card_images(loc, detail)
+    if not fallbacks:
+        return
+    for card in detail.get("cards") or []:
+        if isinstance(card, dict):
+            urls = fallbacks.get(str(card.get("localId")))
+            if urls is not None:
+                card["image_low"] = urls.low
+
+
+def _append_merged_subset_cards(detail: dict[str, Any], loc: str) -> None:
+    """Ajoute à une extension les cartes de ses sous-extensions fusionnées, avec leur numéro imprimé."""
+    parent_id = detail.get("id")
+    for child_id, merged_parent_id in _MERGED_SUBSET_PARENTS.items():
+        if merged_parent_id != parent_id:
+            continue
+        try:
+            child = get_set_for_ui(loc, child_id)
+        except (RuntimeError, ValueError):
+            continue
+        child_cards: list[dict[str, Any]] = []
+        for card in child.get("cards") or []:
+            if not isinstance(card, dict):
+                continue
+            merged_card = {**card, "merged_from": child_id}
+            printed_number = _MERGED_PRINTED_NUMBERS.get(str(card.get("id")))
+            if printed_number:
+                merged_card["display_local_id"] = printed_number
+            child_cards.append(merged_card)
+        if not child_cards:
+            continue
+        detail["cards"] = [*(detail.get("cards") or []), *child_cards]
+        card_count = detail.get("cardCount")
+        if isinstance(card_count, dict) and isinstance(card_count.get("total"), int):
+            detail["cardCount"] = {**card_count, "total": card_count["total"] + len(child_cards)}
