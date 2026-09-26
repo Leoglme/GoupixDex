@@ -5,10 +5,10 @@
   >
     <div class="flex h-14 items-stretch">
       <GoupixDexMobileTabBarTab
-        icon="i-lucide-search"
-        :is-active="isPaletteOpen"
-        aria-label="Rechercher"
-        @click="openPalette()"
+        icon="i-lucide-layout-dashboard"
+        to="/dashboard"
+        :is-active="isDashboardActive"
+        aria-label="Tableau de bord"
       />
       <GoupixDexMobileTabBarTab
         icon="i-lucide-album"
@@ -35,10 +35,10 @@
         aria-label="Mes articles"
       />
       <GoupixDexMobileTabBarTab
-        icon="i-lucide-layout-dashboard"
-        to="/dashboard"
-        :is-active="isDashboardActive"
-        aria-label="Tableau de bord"
+        icon="i-lucide-search"
+        :is-active="isPaletteOpen"
+        aria-label="Rechercher"
+        @click="openPalette()"
       />
     </div>
   </nav>
