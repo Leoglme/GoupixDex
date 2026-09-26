@@ -41,6 +41,8 @@ jobs:
             exit 0
           fi
           git commit -m "chore(catalog): refresh static browse index"
+          # Le build dure un quart d'heure : d'autres commits ont pu arriver sur main entre-temps.
+          git pull --rebase origin main
           git push
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
