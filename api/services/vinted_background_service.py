@@ -46,7 +46,9 @@ class VintedBackgroundService:
                 progress=on_progress,
             )
             if bool(result.get("published")):
-                article_service.mark_article_published_on_vinted(article_id, user_id)
+                article_service.mark_article_published_on_vinted(
+                    article_id, user_id, vinted_id=result.get("vinted_id")
+                )
             if finish_session:
                 await vp.finish(article_id, {"vinted": result})
         except Exception as exc:  # noqa: BLE001

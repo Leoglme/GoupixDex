@@ -7,6 +7,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -41,6 +42,41 @@ def _vinted_condition(article: Article) -> str:
         return "Neuf avec étiquette"
     key = (article.condition or "").strip()
     return _CONDITION_TO_VINTED.get(key, "Neuf sans étiquette")
+
+
+def listed_vinted_price(article: Article) -> Decimal:
+    """
+    Prix affiché sur l’annonce Vinted : prix de vente, à défaut prix d’achat.
+
+    Args:
+        article: Article publié (ou à publier) sur Vinted.
+
+    Returns:
+        Le prix saisi dans le formulaire Vinted.
+    """
+    return article.sell_price if article.sell_price is not None else article.purchase_price
+
+
+async def _resolve_published_vinted_id(article: Article, price: float) -> int | None:
+    """
+    Lit sur le dressing l’id Vinted de l’annonce tout juste publiée, tant que l’onglet est encore ouvert.
+
+    Args:
+        article: Article qui vient d’être publié.
+        price: Prix saisi sur Vinted.
+
+    Returns:
+        L’id Vinted, ou ``None`` s’il n’a pas pu être lu (la publication reste valide).
+    """
+    try:
+        return await VintedService.find_member_listing_item_id_for_match(
+            VintedService._require_tab(),
+            title=article.title or "",
+            sell_price=price,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("vinted_id resolve after publish failed article_id=%s: %s", article.id, exc)
+        return None
 
 
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
@@ -156,7 +192,7 @@ async def run_single_vinted_listing(
         detail=f"{len(basenames)} file(s)",
     )
 
-    price = float(article.sell_price if article.sell_price is not None else article.purchase_price)
+    price = float(listed_vinted_price(article))
     payload: ItemPayload = {
         "title": article.title,
         "description": article.description,
@@ -189,7 +225,8 @@ async def run_single_vinted_listing(
     await _emit(progress, "publish", f"{prefix}Submitting the listing…", form_step="publish_click")
     await VintedService.publish(progress=progress)
     await TimerService.wait(500)
-    return {"published": True, "detail": "published", "article_id": article.id}
+    vinted_id = await _resolve_published_vinted_id(article, price)
+    return {"published": True, "detail": "published", "article_id": article.id, "vinted_id": vinted_id}
 
 
 async def publish_article_to_vinted(
@@ -232,9 +269,9 @@ async def publish_article_to_vinted(
         await _emit(progress, "auth", "Signing in to Vinted…", form_step="auth_start")
         await VintedService.ensure_sign_in(email, password, form_progress=progress)
         await _emit(progress, "auth", "Signed in.", form_step="auth_ok")
-        await run_single_vinted_listing(article, user, stored_image_sources, progress)
+        listing = await run_single_vinted_listing(article, user, stored_image_sources, progress)
         await _emit(progress, "browser", "Closing browser…", form_step="browser_close")
-        return {"published": True, "detail": "published"}
+        return {"published": True, "detail": "published", "vinted_id": listing.get("vinted_id")}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Vinted publish failed article_id=%s", article.id)
         await _emit(progress, "error", f"Error: {exc}", form_step="failed", detail=str(exc))

@@ -96,7 +96,8 @@
             <template #header>
               <div class="flex flex-wrap items-center gap-2">
                 <span class="text-highlighted font-medium">Journal serveur</span>
-                <UBadge v-if="finished || singleFinished || wardrobeFinished" color="success" variant="subtle">
+                <UBadge v-if="hasBatchFailedListings" color="error" variant="subtle"> Terminé avec des échecs </UBadge>
+                <UBadge v-else-if="finished || singleFinished || wardrobeFinished" color="success" variant="subtle">
                   Terminé
                 </UBadge>
                 <UBadge v-else-if="streamMode === 'wardrobe' && !loading" color="neutral" variant="subtle">
@@ -219,6 +220,9 @@ const progress: ComputedRef<{ current: number; total: number; title?: string } |
 const finished: ComputedRef<boolean> = computed(() =>
   streamMode.value === 'batch' ? batchStream.finished.value : false,
 )
+const hasBatchFailedListings: ComputedRef<boolean> = computed(
+  () => finished.value && batchStream.hasFailedListings.value,
+)
 const wardrobeFinished: Ref<boolean> = ref(false)
 const singleFinished: Ref<boolean> = ref(false)
 const lastSummary: ComputedRef<unknown> = computed(() =>
@@ -258,7 +262,10 @@ async function connectBatchJob(jobId: string): Promise<void> {
       quiet: true,
     })
     const after = typeof route.query.after === 'string' ? route.query.after.trim().toLowerCase() : ''
-    if (after === 'relist') {
+    if (after === 'relist' && batchStream.hasFailedListings.value) {
+      streamError.value =
+        'Retrait Vinted incomplet : remise en vente interrompue pour ne pas créer de doublon. Détails dans le journal ci-dessous.'
+    } else if (after === 'relist') {
       await navigateToRelistEditorFromStorage()
     }
   } catch (e) {

@@ -7,11 +7,12 @@ from typing import Any
 
 import httpx
 
+from app_types.vinted import VintedListingRemovalOutcome
 from services.desktop_stubs_service import DesktopStubsService
 from services.vinted_batch_orchestrator_service import VintedBatchOrchestratorService
 from services.vinted_batch_session_service import VintedBatchSessionService as batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as vp
-from services.vinted_publish_service import publish_article_to_vinted
+from services.vinted_publish_service import ProgressFn, listed_vinted_price, publish_article_to_vinted
 from services.vinted_service import VintedService
 
 logger = logging.getLogger(__name__)
@@ -58,24 +59,8 @@ class DesktopVintedRunnerService:
                 vinted_password_plain=pwd_plain,
             )
             if bool(result.get("published")):
-                vid_found: int | None = None
-                try:
-                    tab_x = VintedService._require_tab()
-                    sp = article.sell_price
-                    vid_found = await VintedService.find_member_listing_item_id_for_match(
-                        tab_x,
-                        title=article.title or "",
-                        sell_price=float(sp) if sp is not None else None,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "vinted_id resolve after publish failed article_id=%s: %s",
-                        article_id,
-                        exc,
-                    )
-                payload: dict[str, Any] = {}
-                if vid_found is not None:
-                    payload["vinted_id"] = vid_found
+                vinted_id = result.get("vinted_id")
+                payload: dict[str, Any] = {"vinted_id": vinted_id} if isinstance(vinted_id, int) else {}
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     r = await client.post(
                         f"{remote_base}/articles/{article_id}/confirm-vinted-publish",
@@ -108,20 +93,71 @@ class DesktopVintedRunnerService:
         user_id: int,
         token: str,
         remote_base: str,
-    ) -> None:
-        """Delete the Vinted listing in Chrome and call ``confirm-vinted-unlist`` on success."""
+        *,
+        progress: ProgressFn | None = None,
+        batch_position_label: str = "",
+    ) -> VintedListingRemovalOutcome:
+        """
+        Supprime l’annonce Vinted dans Chrome puis confirme le retrait à GoupixDex, ou y enregistre l’échec.
+
+        Args:
+            article_id: Article GoupixDex dont l’annonce Vinted doit disparaître.
+            user_id: Propriétaire attendu de l’article.
+            token: JWT de l’utilisateur pour l’API distante.
+            remote_base: URL de l’API GoupixDex.
+            progress: Journal du lot où écrire chaque étape, optionnel.
+            batch_position_label: Position dans le lot (``"1/3"``) en tête de chaque ligne de journal.
+
+        Returns:
+            Le résultat réel : ``delisted`` n’est vrai que si Vinted ne liste plus l’annonce.
+        """
         hdrs = _headers(token)
         hdrs_json = {**hdrs, "Content-Type": "application/json"}
+        log_prefix = f"{batch_position_label} — " if batch_position_label else ""
+
+        async def log_step(message: str, form_step: str) -> None:
+            """Écrit une étape du retrait dans le journal du lot, s’il y en a un."""
+            if progress is not None:
+                await progress(
+                    {"type": "log", "step": "delist", "message": f"{log_prefix}{message}", "form_step": form_step}
+                )
+
+        async def record_failure(detail: str, vinted_id: int | None) -> VintedListingRemovalOutcome:
+            """Journalise l’échec, l’enregistre sur l’article et le renvoie."""
+            await log_step(f"Échec du retrait : {detail}", "failed")
+            try:
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    await client.post(
+                        f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
+                        headers=hdrs_json,
+                        json={"detail": detail[:480]},
+                    )
+            except httpx.HTTPError as exc:
+                logger.warning("fail-vinted-cross-removal failed article_id=%s: %s", article_id, exc)
+            return {"article_id": article_id, "delisted": False, "vinted_id": vinted_id, "detail": detail}
+
         browser_started = False
+        item_id: int | None = None
         try:
             async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
                 ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
                 ar.raise_for_status()
                 article_d = ar.json()
                 if article_d.get("user_id") != user_id:
-                    return
+                    return {
+                        "article_id": article_id,
+                        "delisted": False,
+                        "vinted_id": None,
+                        "detail": "Article introuvable sur ce compte.",
+                    }
                 if not article_d.get("published_on_vinted"):
-                    return
+                    await log_step("Aucune annonce Vinted active dans GoupixDex — rien à retirer.", "delisted")
+                    return {
+                        "article_id": article_id,
+                        "delisted": True,
+                        "vinted_id": None,
+                        "detail": "Déjà retiré de Vinted.",
+                    }
 
                 cr = await client.get(f"{remote_base}/users/me/vinted-decrypted", headers=hdrs)
                 cr.raise_for_status()
@@ -136,38 +172,41 @@ class DesktopVintedRunnerService:
             email = user.vinted_email or ""
             password = pwd_plain or ""
             if not email or not password:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    await client.post(
-                        f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
-                        headers=hdrs_json,
-                        json={"detail": "Identifiants Vinted manquants (paramètres ou worker)."},
-                    )
-                return
+                return await record_failure("Identifiants Vinted manquants (paramètres ou worker).", None)
 
             raw_vid = article_d.get("vinted_id")
             item_id = int(raw_vid) if raw_vid is not None else None
 
+            await log_step("Connexion à Vinted…", "auth")
             browser_started = await VintedService.ensure_browser_session()
             await VintedService.ensure_sign_in(email, password, form_progress=None)
             tab = VintedService._require_tab()
             if item_id is None:
-                sp = article.sell_price
+                await log_step(f"Recherche de l’annonce « {article.title} » sur votre dressing…", "search")
                 item_id = await VintedService.find_member_listing_item_id_for_match(
                     tab,
                     title=article.title or "",
-                    sell_price=float(sp) if sp is not None else None,
+                    sell_price=listed_vinted_price(article),
                 )
             if item_id is None:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    await client.post(
-                        f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
-                        headers=hdrs_json,
-                        json={
-                            "detail": "Annonce Vinted introuvable sur le dressing (recoupement titre/prix).",
-                        },
-                    )
-                return
-            await VintedService.delete_vinted_item_listing(tab, int(item_id))
+                return await record_failure(
+                    "Annonce introuvable sur votre dressing Vinted (titre ou prix modifié depuis la publication ?).",
+                    None,
+                )
+            await log_step(f"Suppression de l’annonce Vinted #{item_id}…", "delete")
+            await VintedService.delete_vinted_item_listing(tab, item_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Vinted listing removal failed article_id=%s", article_id)
+            return await record_failure(str(exc) or type(exc).__name__, item_id)
+        finally:
+            if browser_started:
+                try:
+                    VintedService.close_browser()
+                except Exception:
+                    pass
+
+        await log_step(f"Annonce Vinted #{item_id} supprimée.", "delisted")
+        try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 r = await client.post(
                     f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
@@ -175,23 +214,15 @@ class DesktopVintedRunnerService:
                     json={"hide_when_off_all_platforms": True},
                 )
                 r.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Vinted listing removal failed article_id=%s", article_id)
-            try:
-                async with httpx.AsyncClient(timeout=25.0) as client:
-                    await client.post(
-                        f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
-                        headers=hdrs_json,
-                        json={"detail": str(exc)[:480]},
-                    )
-            except Exception:
-                pass
-        finally:
-            if browser_started:
-                try:
-                    VintedService.close_browser()
-                except Exception:
-                    pass
+        except httpx.HTTPError as exc:
+            logger.warning("confirm-vinted-unlist failed article_id=%s: %s", article_id, exc)
+            return {
+                "article_id": article_id,
+                "delisted": True,
+                "vinted_id": item_id,
+                "detail": "Supprimée sur Vinted, mais la fiche GoupixDex n’a pas pu être mise à jour.",
+            }
+        return {"article_id": article_id, "delisted": True, "vinted_id": item_id, "detail": None}
 
     @staticmethod
     async def run_remove_vinted_listing(article_id: int, user_id: int, token: str, remote_base: str) -> None:
@@ -275,12 +306,13 @@ class DesktopVintedRunnerService:
             user = DesktopStubsService.user_stub(me_d["id"], me_d["email"], creds.get("vinted_email"))
             pwd_plain = creds.get("vinted_password")
 
-            async def mark_pub(aid: int, uid: int) -> None:
+            async def mark_pub(aid: int, uid: int, vinted_id: int | None) -> None:
                 _ = uid
                 async with httpx.AsyncClient(timeout=60.0) as c:
                     r = await c.post(
                         f"{remote_base}/articles/{aid}/confirm-vinted-publish",
                         headers=hdrs,
+                        json={"vinted_id": vinted_id} if vinted_id is not None else None,
                     )
                     r.raise_for_status()
 
@@ -318,9 +350,14 @@ class DesktopVintedRunnerService:
         token: str,
         remote_base: str,
     ) -> None:
-        """Retire plusieurs annonces Vinted dans une session Chrome."""
+        """Retire plusieurs annonces Vinted (une session Chrome chacune) et écrit le résultat réel de chaque retrait dans le journal du lot."""
         n = len(article_ids)
-        summary: list[dict[str, Any]] = []
+        summary: list[VintedListingRemovalOutcome] = []
+
+        async def forward_progress(ev: dict[str, Any]) -> None:
+            """Relaie les étapes d’un retrait dans le journal du lot."""
+            await batch_hub.emit_event(job_id, ev)
+
         try:
             await batch_hub.emit_event(
                 job_id,
@@ -336,15 +373,33 @@ class DesktopVintedRunnerService:
                         "article_id": aid,
                     },
                 )
-                try:
-                    await DesktopVintedRunnerService._run_vinted_listing_removal(aid, user_id, token, remote_base)
-                    summary.append({"article_id": aid, "delisted": True})
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("Vinted batch delist failed article_id=%s", aid)
-                    summary.append({"article_id": aid, "delisted": False, "detail": str(exc)[:200]})
+                summary.append(
+                    await DesktopVintedRunnerService._run_vinted_listing_removal(
+                        aid,
+                        user_id,
+                        token,
+                        remote_base,
+                        progress=forward_progress,
+                        batch_position_label=f"{i + 1}/{n}",
+                    )
+                )
+            removed_count = sum(1 for outcome in summary if outcome["delisted"])
+            has_removed_all = removed_count == n
+            await batch_hub.emit_event(
+                job_id,
+                {
+                    "type": "log",
+                    "step": "done" if has_removed_all else "error",
+                    "message": f"Retrait terminé : {removed_count}/{n} annonce(s) retirée(s) de Vinted.",
+                    "form_step": "done" if has_removed_all else "failed",
+                },
+            )
             await batch_hub.finish_job(
                 job_id,
-                {"summary": summary, "vinted": {"delisted": True, "count": len(summary)}},
+                {
+                    "summary": summary,
+                    "vinted": {"delisted": has_removed_all, "count": n, "removed": removed_count},
+                },
             )
         except Exception:
             logger.exception("Vinted batch delist crashed job_id=%s", job_id)

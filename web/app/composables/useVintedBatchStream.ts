@@ -26,6 +26,7 @@ export function useVintedBatchStream() {
   const logEl: Ref<HTMLElement | null> = ref(null)
   const progress: Ref<VintedBatchProgress | null> = ref(null)
   const finished: Ref<boolean> = ref(false)
+  const hasFailedListings: Ref<boolean> = ref(false)
   const lastSummary: Ref<unknown> = ref(null)
 
   let eventSource: EventSource | null = null
@@ -88,6 +89,7 @@ export function useVintedBatchStream() {
     logEntries.value = []
     progress.value = null
     finished.value = false
+    hasFailedListings.value = false
     lastSummary.value = null
 
     const t = token.value ?? (import.meta.client ? localStorage.getItem('goupix_token') : null)
@@ -118,7 +120,7 @@ export function useVintedBatchStream() {
             article_id?: number
             title?: string
             summary?: unknown
-            vinted?: { published?: boolean; detail?: string }
+            vinted?: { published?: boolean; delisted?: boolean; detail?: string }
           }
           if (data.type === 'progress') {
             const cur = data.current ?? 0
@@ -141,6 +143,7 @@ export function useVintedBatchStream() {
             lastSummary.value = data.summary ?? data
             close()
             const v = data.vinted
+            hasFailedListings.value = v?.published === false || v?.delisted === false
             if (!opts?.quiet) {
               if (v?.published) {
                 toast.add({
@@ -165,6 +168,7 @@ export function useVintedBatchStream() {
           if (data.type === 'error') {
             settled = true
             finished.value = true
+            hasFailedListings.value = true
             close()
             if (!opts?.quiet) {
               toast.add({
@@ -200,6 +204,7 @@ export function useVintedBatchStream() {
     logEl,
     progress,
     finished,
+    hasFailedListings,
     lastSummary,
     followBatchStream,
     closeBatchStream: close,

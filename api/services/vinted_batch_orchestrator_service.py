@@ -39,7 +39,7 @@ class VintedBatchOrchestratorService:
         user: User,
         *,
         vinted_password_plain: str | None = None,
-        mark_published: Callable[[int, int], Awaitable[None]] | None = None,
+        mark_published: Callable[[int, int, int | None], Awaitable[None]] | None = None,
     ) -> None:
         """
         One browser session: sign in to Vinted once, then ``run_single_vinted_listing`` for each article.
@@ -126,10 +126,13 @@ class VintedBatchOrchestratorService:
                     )
                     summary.append({"article_id": article.id, **r})
                     if bool(r.get("published")):
+                        vinted_id: int | None = r.get("vinted_id")
                         if mark_published is not None:
-                            await mark_published(article.id, user_id)
+                            await mark_published(article.id, user_id, vinted_id)
                         else:
-                            article_service.mark_article_published_on_vinted(article.id, user_id)
+                            article_service.mark_article_published_on_vinted(
+                                article.id, user_id, vinted_id=vinted_id
+                            )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Vinted batch item failed article_id=%s", article.id)
                     await VintedBatchOrchestratorService._emit_job(

@@ -1,6 +1,6 @@
-"""Vinted-related literal types (condition labels, package size)."""
+"""Vinted-related types (condition labels, package size, listing removal outcome)."""
 
-from typing import Literal
+from typing import Literal, TypedDict
 
 VintedConditions = Literal[
     "Neuf avec étiquette",
@@ -19,3 +19,12 @@ VINTED_CONDITIONS: tuple[str, ...] = (
     "Bon état",
     "Satisfaisant",
 )
+
+
+class VintedListingRemovalOutcome(TypedDict):
+    """Résultat réel d’un retrait d’annonce Vinted : ``delisted`` n’est vrai que si Vinted ne liste plus l’annonce."""
+
+    article_id: int
+    delisted: bool
+    vinted_id: int | None
+    detail: str | None

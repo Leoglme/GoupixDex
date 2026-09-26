@@ -2126,13 +2126,13 @@ class VintedService:
         return None
 
     @classmethod
-    async def _member_id_from_users_me_fetch(cls, tab: Tab) -> int | None:
-        """Fallback: same-origin ``fetch`` to ``/api/v2/users/me``."""
+    async def _member_id_from_users_current_fetch(cls, tab: Tab) -> int | None:
+        """Fallback: same-origin ``fetch`` to ``/api/v2/users/current``."""
         raw = await tab.evaluate(
             r"""
             (async () => {
               try {
-                const r = await fetch('https://www.vinted.fr/api/v2/users/me', {
+                const r = await fetch('https://www.vinted.fr/api/v2/users/current', {
                   credentials: 'include',
                   headers: { 'Accept': 'application/json' },
                 });
@@ -2153,6 +2153,7 @@ class VintedService:
               }
             })()
             """,
+            await_promise=True,
             return_by_value=True,
         )
         return cls._parse_vinted_member_id_from_eval_json(raw)
@@ -2161,7 +2162,7 @@ class VintedService:
     async def fetch_logged_in_vinted_user_numeric_id(cls) -> int:
         """
         After nodriver login, read member id from the “My profile” menu,
-        falling back to ``/api/v2/users/me`` if needed.
+        falling back to ``/api/v2/users/current`` if needed.
 
         Returns:
             Vinted member id (integer).
@@ -2195,14 +2196,14 @@ class VintedService:
             logger.info("Vinted member id read from profile menu: %s", mid)
             return mid
 
-        logger.info("Profile menu failed, trying users/me…")
-        mid = await cls._member_id_from_users_me_fetch(tab)
+        logger.info("Profile menu failed, trying users/current…")
+        mid = await cls._member_id_from_users_current_fetch(tab)
         if mid is not None:
-            logger.info("Vinted member id read from users/me: %s", mid)
+            logger.info("Vinted member id read from users/current: %s", mid)
             return mid
 
         raise RuntimeError(
-            "Could not read Vinted member id (user menu + users/me). "
+            "Could not read Vinted member id (user menu + users/current). "
             "Ensure the session is logged in on the home page."
         )
 
@@ -2266,6 +2267,115 @@ class VintedService:
                 continue
         return hits[0] if hits else None
 
+    @staticmethod
+    def _price_in_cents(amount: Any) -> int | None:
+        """Montant en centimes (``"4.0"`` de l’API, ``Decimal("4.00")`` de GoupixDex…) ; ``None`` si absent ou illisible."""
+        if amount is None or amount == "":
+            return None
+        try:
+            return int((Decimal(str(amount)) * 100).quantize(Decimal("1")))
+        except (ArithmeticError, ValueError):
+            return None
+
+    @staticmethod
+    def _wardrobe_row_item_id(row: dict[str, Any]) -> int | None:
+        """Id Vinted (strictement positif) d’une ligne renvoyée par :meth:`_fetch_member_wardrobe_rows`."""
+        try:
+            item_id = int(row["id"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        return item_id if item_id > 0 else None
+
+    @classmethod
+    def _pick_wardrobe_item_match(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        title: str,
+        sell_price: Decimal | float | int | None,
+    ) -> int | None:
+        """
+        Annonce en ligne portant exactement ce titre : la plus récente au prix attendu, sinon la seule à porter ce titre.
+
+        Returns:
+            Id Vinted, ou ``None`` si aucune annonce ne correspond ou si plusieurs sont possibles sans prix pour trancher.
+        """
+        normalized_title = cls._normalize_match_token(title)
+        if not normalized_title:
+            return None
+        same_title_listings: list[tuple[int, dict[str, Any]]] = []
+        for row in rows:
+            if row.get("is_closed") or row.get("is_draft"):
+                continue
+            if cls._normalize_match_token(str(row.get("title") or "")) != normalized_title:
+                continue
+            item_id = cls._wardrobe_row_item_id(row)
+            if item_id is not None:
+                same_title_listings.append((item_id, row))
+        expected_price_cents = cls._price_in_cents(sell_price)
+        if expected_price_cents is not None:
+            for item_id, row in same_title_listings:
+                if cls._price_in_cents(row.get("price")) == expected_price_cents:
+                    return item_id
+        if len(same_title_listings) == 1:
+            return same_title_listings[0][0]
+        return None
+
+    @classmethod
+    async def _fetch_member_wardrobe_rows(cls, tab: "Tab", member_id: int) -> list[dict[str, Any]] | None:
+        """
+        Lit toutes les annonces du dressing, des plus récentes aux plus anciennes, via ``/api/v2/wardrobe/{id}/items`` appelée depuis l’onglet connecté.
+
+        Args:
+            tab: Onglet nodriver déjà sur un domaine Vinted.
+            member_id: Id du membre dont on lit le dressing.
+
+        Returns:
+            Lignes ``{id, title, price, is_closed, is_draft}``, ou ``None`` si l’API n’a pas répondu.
+        """
+        wardrobe_items_url = f"/api/v2/wardrobe/{int(member_id)}/items?order=newest_first&per_page=96"
+        js = f"""
+        (async () => {{
+          try {{
+            const rows = [];
+            for (let page = 1; page <= 20; page++) {{
+              const r = await fetch({json.dumps(wardrobe_items_url)} + '&page=' + page, {{
+                credentials: 'include',
+                headers: {{ Accept: 'application/json' }},
+              }});
+              if (!r.ok) return JSON.stringify({{ ok: false, status: r.status }});
+              const data = await r.json();
+              const items = Array.isArray(data.items) ? data.items : [];
+              for (const it of items) {{
+                rows.push({{
+                  id: it.id,
+                  title: it.title || '',
+                  price: it.price && it.price.amount != null ? String(it.price.amount) : '',
+                  is_closed: !!it.is_closed,
+                  is_draft: !!it.is_draft,
+                }});
+              }}
+              const totalPages = (data.pagination && data.pagination.total_pages) || 1;
+              if (!items.length || page >= totalPages) break;
+            }}
+            return JSON.stringify({{ ok: true, rows }});
+          }} catch (e) {{
+            return JSON.stringify({{ ok: false, err: String(e) }});
+          }}
+        }})()
+        """
+        try:
+            raw = await tab.evaluate(js, await_promise=True, return_by_value=True)
+            parsed = _parse_eval_dict_result(raw, context="member_wardrobe_api")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Vinted wardrobe API call failed member_id=%s: %s", member_id, exc)
+            return None
+        rows = parsed.get("rows")
+        if not parsed.get("ok") or not isinstance(rows, list):
+            logger.warning("Vinted wardrobe API unusable member_id=%s: %s", member_id, parsed)
+            return None
+        return [row for row in rows if isinstance(row, dict)]
+
     @classmethod
     async def find_member_listing_item_id_for_match(
         cls,
@@ -2275,21 +2385,36 @@ class VintedService:
         sell_price: Decimal | float | int | None,
         site_origin: str = "https://www.vinted.fr",
     ) -> int | None:
-        """Sur le dressing, retrouve l’id Vinted d’un article en recoupant titre et prix avec les vignettes (``product-item-id-{id}--overlay-link``), en faisant défiler la grille jusqu’en bas."""
-        origin = site_origin.rstrip("/")
-        url_now = (tab.target.url or "").lower()
-        if "/member/" not in url_now:
-            mid = await cls.fetch_logged_in_vinted_user_numeric_id()
-            await tab.get(f"{origin}/member/{mid}")
-            await asyncio.sleep(1.2)
+        """
+        Retrouve l’id Vinted d’un article du dressing connecté par titre et prix, via l’API wardrobe ou, à défaut, les vignettes du profil.
 
+        Returns:
+            Id Vinted, ou ``None`` si aucune annonce ne correspond.
+        """
         nt = cls._normalize_match_token(title)
         if not nt:
             return None
+        member_id = await cls.fetch_logged_in_vinted_user_numeric_id()
+        wardrobe_rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
+        if wardrobe_rows is not None:
+            picked = cls._pick_wardrobe_item_match(wardrobe_rows, title=title, sell_price=sell_price)
+            if picked is None:
+                logger.info(
+                    "Vinted wardrobe API: no listing matched title=%r price=%s among %d listing(s)",
+                    title,
+                    sell_price,
+                    len(wardrobe_rows),
+                )
+            return picked
+
+        logger.warning("Vinted wardrobe API unavailable — scanning the member page tiles instead.")
+        if "/member/" not in (tab.target.url or "").lower():
+            await tab.get(f"{site_origin.rstrip('/')}/member/{member_id}")
+            await asyncio.sleep(1.2)
         price_frags = cls._price_match_fragments(sell_price)
 
         js = r"""
-        () => {
+        (() => {
           const items = [];
           const seen = new Set();
           const overlays = document.querySelectorAll(
@@ -2316,7 +2441,7 @@ class VintedService:
           const doc = document.documentElement;
           const atBottom = window.scrollY + window.innerHeight >= doc.scrollHeight - 8;
           return JSON.stringify({ ok: true, items, atBottom });
-        }
+        })()
         """
 
         last_count = -1
@@ -2381,7 +2506,12 @@ class VintedService:
         *,
         site_origin: str = "https://www.vinted.fr",
     ) -> None:
-        """Ouvre la fiche article, supprime (bouton + modal de confirmation), attend le retour ``/member/``."""
+        """
+        Supprime l’annonce depuis sa fiche (bouton puis modale), attend le retour au dressing et vérifie qu’elle n’y figure plus.
+
+        Raises:
+            RuntimeError: Bouton ou confirmation introuvable, pas de retour au dressing, ou annonce toujours listée.
+        """
         origin = site_origin.rstrip("/")
         await tab.get(f"{origin}/items/{int(item_id)}")
         await asyncio.sleep(1.0)
@@ -2389,7 +2519,9 @@ class VintedService:
         if del_btn is None:
             del_btn = await cls._select_button_by_exact_text(tab, ("supprimer",), marker="item-delete")
         if del_btn is None:
-            raise RuntimeError("item_delete_button_not_found")
+            raise RuntimeError(
+                f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
+            )
         await del_btn.scroll_into_view()
         await del_btn.click()
         conf = await tab.select('[data-testid="item-delete-confirmation-button"]', timeout=15)
@@ -2401,15 +2533,37 @@ class VintedService:
                 marker="item-delete-confirm",
             )
         if conf is None:
-            raise RuntimeError("item_delete_confirmation_not_found")
+            raise RuntimeError(f"Confirmation de suppression introuvable sur la fiche Vinted #{item_id}.")
         await conf.click()
+        member_id: int | None = None
         deadline = time.monotonic() + 35.0
-        while time.monotonic() < deadline:
-            u = (tab.target.url or "").lower()
-            if "/member/" in u:
-                return
+        while member_id is None and time.monotonic() < deadline:
             await asyncio.sleep(0.35)
-        raise RuntimeError("vinted_delete_no_member_redirect")
+            member_id = cls._member_id_from_tab_url(tab)
+        if member_id is None:
+            raise RuntimeError(f"Vinted n’a pas confirmé la suppression de l’annonce #{item_id} (pas de retour au dressing).")
+        await cls._ensure_listing_left_wardrobe(tab, member_id, item_id)
+
+    @classmethod
+    async def _ensure_listing_left_wardrobe(cls, tab: "Tab", member_id: int, item_id: int) -> None:
+        """
+        Vérifie pendant une dizaine de secondes que l’annonce a quitté le dressing ; si l’API ne répond jamais, le retour au dressing fait foi.
+
+        Raises:
+            RuntimeError: L’annonce figure toujours sur le dressing.
+        """
+        has_wardrobe_api_answered = False
+        for delay_sec in (1.0, 1.5, 3.0, 5.0):
+            await asyncio.sleep(delay_sec)
+            rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
+            if rows is None:
+                continue
+            has_wardrobe_api_answered = True
+            if all(cls._wardrobe_row_item_id(row) != item_id for row in rows):
+                return
+        if has_wardrobe_api_answered:
+            raise RuntimeError(f"L’annonce Vinted #{item_id} figure toujours sur le dressing après la suppression.")
+        logger.warning("Vinted wardrobe API silent after deleting item %s — trusting the /member/ redirect.", item_id)
 
     #: Typical Vinted session cookie names / fragments (domain sometimes empty in CDP).
     _VINTED_COOKIE_NAME_HINTS: tuple[str, ...] = (
