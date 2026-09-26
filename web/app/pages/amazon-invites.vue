@@ -45,12 +45,12 @@
         </GoupixDexPageHeader>
 
         <GoupixDexDesktopOnlyNotice
-          v-if="!isDesktopApp"
+          v-if="isDesktopAppUnreachable"
           feature-label="Invitations Amazon"
-          reason="La récupération des invitations pilote une fenêtre Chrome locale (worker Amazon) : elle n'existe que dans l'application desktop."
+          reason="La récupération des invitations pilote une fenêtre Chrome sur votre PC (worker Amazon) : ouvrez GoupixDex sur votre ordinateur pour y accéder depuis cet appareil."
         />
 
-        <template v-else>
+        <template v-else-if="canUseDesktopWorkers">
           <UCard>
             <template #header>
               <p class="text-highlighted font-medium">Invitations</p>
@@ -166,6 +166,7 @@
 import type { ComputedRef } from 'vue'
 import type { AmazonConnectionBadge } from '~/utils/amazonConnectionUi'
 import type { AmazonStatusFilter } from '~/types/amazonInvites'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { amazonSessionBadge } from '~/utils/amazonConnectionUi'
 
 const STATUS_FILTER_LABELS: Record<AmazonStatusFilter, string> = {
@@ -182,7 +183,7 @@ useGoupixPageSeo(
   'Produits Pokémon Amazon sur invitation : suivez le statut de chaque demande et lancez une invitation depuis GoupixDex lorsque c’est possible.',
 )
 
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
 const route = useRoute()
 const router = useRouter()
 
@@ -274,13 +275,20 @@ const connectionBadge: ComputedRef<AmazonConnectionBadge | null> = computed(() =
 
 onMounted((): void => {
   maybeOpenAccountsFromQuery()
-  if (isDesktopApp.value) {
-    void load()
-  }
 })
 
 watch(
   () => route.query.accounts,
   () => maybeOpenAccountsFromQuery(),
+)
+
+watch(
+  canUseDesktopWorkers,
+  (isAvailable: boolean): void => {
+    if (isAvailable) {
+      load()
+    }
+  },
+  { immediate: true },
 )
 </script>

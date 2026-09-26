@@ -194,6 +194,7 @@ import type {
   SealedProduct,
   SealedProductType,
 } from '~/composables/useSealed'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import {
   formatSignedPercent,
   parseEuroAmount,
@@ -221,7 +222,7 @@ const emit = defineEmits<{
 const { getSealed, getPriceHistory, patchSealed, deleteSealed, prepareArticlePrefill, attachArticle } = useSealed()
 const { loadProductPriceHistory } = useSealedCatalog()
 const { createArticle, publishArticleToVinted } = useArticles()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
 const toast = useToast()
 
@@ -499,7 +500,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
   if (!product.value) {
     return
   }
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     fd.set('publish_to_vinted', 'false')
   }
   submitting.value = true
@@ -510,7 +511,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
     } catch {
       /* lien best-effort */
     }
-    if (isDesktopApp.value && vinted.desktop_local && vinted.stream_path) {
+    if (canUseDesktopWorkers.value && vinted.desktop_local && vinted.stream_path) {
       try {
         await publishArticleToVinted(article.id)
       } catch (e) {

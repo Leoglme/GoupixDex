@@ -17,9 +17,10 @@ import {
   saveAmazonInvitesPrefs,
   saveInvitesCacheForAccount,
 } from '~/composables/useAmazonInvitesPersistence'
-import { buildAmazonProgressWebSocketUrl, useAmazonWorker } from '~/composables/useAmazonWorker'
+import { desktopRelayErrorMessage } from '~/composables/useApiError'
+import { useAmazonWorker } from '~/composables/useAmazonWorker'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { formatAmazonWorkerProgressLine } from '~/utils/amazonWorkerProgressFormat'
-import { openAmazonProgressWebSocket } from '~/utils/amazonProgressWebSocket'
 import {
   clampMaxItems,
   DEFAULT_AMAZON_INVITES_MAX_ITEMS,
@@ -46,6 +47,10 @@ function trimInvitesToMaxItems(list: AmazonInvite[], maxItems: number): AmazonIn
  * @returns {string} User-visible error line.
  */
 function errorMessageFromUnknown(e: unknown, fallback: string): string {
+  const pcFailureMessage: string | null = desktopRelayErrorMessage(e)
+  if (pcFailureMessage) {
+    return pcFailureMessage
+  }
   if (isAxiosError(e)) {
     const status = e.response?.status
     if (status === 401) {
@@ -72,6 +77,7 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
 export function useAmazonInvitesPage() {
   const { fetchSession, fetchInvites, refreshInvites, verifyAllAccounts, requestInvite } = useAmazonWorker()
   const { fetchOverview, setActiveAccount } = useAmazonAccounts()
+  const { openWorkerSocketStream } = useDesktopWorkers()
   const toast = useToast()
 
   const loading: Ref<boolean> = ref(false)
@@ -379,29 +385,27 @@ export function useAmazonInvitesPage() {
     refreshPhaseHint.value = ''
     streamingInvites.value = []
 
-    const wsTarget = buildAmazonProgressWebSocketUrl()
-    let ws: WebSocket | null = null
-    if (wsTarget) {
-      ws = await openAmazonProgressWebSocket(
-        wsTarget.url,
-        (payload: AmazonWorkerProgressPayload) => {
-          if (payload.message) {
-            refreshPhaseHint.value = payload.message
-          }
-          mergeInvitePreviewFromWs(payload)
-          refreshLogLines.value = [...refreshLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
-        },
-        5000,
-        wsTarget.protocols,
-      )
-      if (!ws) {
-        refreshLogLines.value = [
-          '[info] Connexion au flux temps réel impossible — la recherche continue (logs détaillés indisponibles).',
-        ]
-      }
-    } else {
+    const progressChannel = await openWorkerSocketStream(
+      'amazon',
+      '/ws/progress',
+      (data: string): void => {
+        let payload: AmazonWorkerProgressPayload
+        try {
+          payload = JSON.parse(data) as AmazonWorkerProgressPayload
+        } catch {
+          return
+        }
+        if (payload.message) {
+          refreshPhaseHint.value = payload.message
+        }
+        mergeInvitePreviewFromWs(payload)
+        refreshLogLines.value = [...refreshLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
+      },
+      { authSubprotocol: true, openTimeoutMs: 5000 },
+    )
+    if (!progressChannel) {
       refreshLogLines.value = [
-        '[info] Flux temps réel non disponible (session ou URL du worker manquante). La recherche continue.',
+        '[info] Connexion au flux temps réel impossible — la recherche continue (logs détaillés indisponibles).',
       ]
     }
 
@@ -432,11 +436,7 @@ export function useAmazonInvitesPage() {
       error.value = errorMessageFromUnknown(e, 'Impossible de mettre à jour la liste. Réessayez.')
       streamingInvites.value = []
     } finally {
-      try {
-        ws?.close()
-      } catch {
-        /* ignore */
-      }
+      progressChannel?.close()
       refreshing.value = false
     }
   }

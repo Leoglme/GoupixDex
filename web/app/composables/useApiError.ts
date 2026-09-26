@@ -1,3 +1,7 @@
+import { isAxiosError } from 'axios'
+
+export const DESKTOP_RELAY_ERROR_CODE: string = 'ERR_DESKTOP_RELAY'
+
 /**
  * Turn an Axios-style or unknown error into a short user-facing French message.
  *
@@ -53,4 +57,18 @@ export function apiErrorMessage(e: unknown): string {
     return `Erreur HTTP ${status}`
   }
   return 'Erreur'
+}
+
+/**
+ * User-facing message of a failure that came from the PC (PC offline, local worker down, PC session expired).
+ *
+ * @param error - Rejection of a local worker call.
+ * @returns {string | null} The relay message, or `null` for an error returned by the worker itself.
+ */
+export function desktopRelayErrorMessage(error: unknown): string | null {
+  if (!isAxiosError(error) || error.code !== DESKTOP_RELAY_ERROR_CODE) {
+    return null
+  }
+  const detail: unknown = (error.response?.data as { detail?: unknown } | undefined)?.detail
+  return typeof detail === 'string' ? detail : null
 }

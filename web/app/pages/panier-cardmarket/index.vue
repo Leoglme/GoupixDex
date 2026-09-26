@@ -28,12 +28,16 @@
         </GoupixDexPageHeader>
 
         <GoupixDexDesktopOnlyNotice
-          v-if="!isDesktopApp"
+          v-if="isDesktopAppUnreachable"
           feature-label="Analyse des paniers"
-          reason="L'analyse pilote Chrome sur votre machine (nodriver) : lancez une recherche depuis l'application desktop."
+          reason="L'analyse pilote Chrome sur votre PC (nodriver) : ouvrez GoupixDex sur votre ordinateur pour la lancer depuis cet appareil."
         />
 
-        <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
+        <GoupixDexCardmarketSessionBanner
+          v-if="canUseDesktopWorkers"
+          :session="cmSession"
+          :loading="cmSessionLoading"
+        />
 
         <UAlert
           v-if="error"
@@ -101,6 +105,7 @@ import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/table-core'
 import type { CardmarketSearchListRow } from '~/types/CardmarketSearch'
 import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -110,8 +115,9 @@ useGoupixPageSeo(
 )
 
 const toast = useToast()
-const { listSearches, createSearch, deleteSearch, isDesktopApp } = useCardmarketSearches()
+const { listSearches, createSearch, deleteSearch, canUseDesktopWorkers } = useCardmarketSearches()
 const { fetchSession: fetchCmSession } = useCardmarketWorker()
+const { isDesktopAppUnreachable } = useDesktopWorkers()
 
 const rows: Ref<CardmarketSearchListRow[]> = ref([])
 const loading: Ref<boolean> = ref(true)
@@ -124,7 +130,7 @@ const cmSession: Ref<CardmarketSessionResponse | null> = ref(null)
 const cmSessionLoading: Ref<boolean> = ref(false)
 
 async function loadCardmarketSession(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     cmSession.value = null
     return
   }
@@ -287,8 +293,8 @@ onMounted((): void => {
   void loadCardmarketSession()
 })
 
-watch(isDesktopApp, (desktop) => {
-  if (desktop) {
+watch(canUseDesktopWorkers, (isAvailable: boolean): void => {
+  if (isAvailable) {
     void loadCardmarketSession()
   } else {
     cmSession.value = null

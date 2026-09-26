@@ -40,7 +40,7 @@
               </UButton>
             </UTooltip>
             <UButton
-              v-if="isDesktopApp"
+              v-if="canUseDesktopWorkers"
               color="primary"
               variant="soft"
               icon="i-lucide-cloud-download"
@@ -51,7 +51,7 @@
               Synchroniser Cardmarket
             </UButton>
             <UButton
-              v-if="isDesktopApp && syncRunning"
+              v-if="canUseDesktopWorkers && syncRunning"
               color="error"
               variant="soft"
               icon="i-lucide-square"
@@ -65,7 +65,11 @@
             </UButton>
           </template>
         </GoupixDexPageHeader>
-        <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
+        <GoupixDexCardmarketSessionBanner
+          v-if="canUseDesktopWorkers"
+          :session="cmSession"
+          :loading="cmSessionLoading"
+        />
 
         <UAlert
           v-if="cloudflareWaiting"
@@ -199,7 +203,8 @@ const pdfInputRef = useTemplateRef<HTMLInputElement>('pdfInputRef')
 const syncLogEl = useTemplateRef<HTMLElement>('syncLogEl')
 
 const { listOrders, importOrderPdf } = useOrders()
-const { isDesktopApp, getActiveSync, cancelSync, openProgressSocket, runWithProgress } = useCardmarketOrdersSync()
+const { canUseDesktopWorkers, getActiveSync, cancelSync, openProgressSocket, runWithProgress } =
+  useCardmarketOrdersSync()
 const { fetchSession: fetchCmSession } = useCardmarketWorker()
 
 const orders: Ref<OrderListRow[]> = ref([])
@@ -633,7 +638,7 @@ function resetSyncState(): void {
  * Trigger the desktop worker sync and stream progress live.
  */
 async function onSync(): Promise<void> {
-  if (!isDesktopApp.value || syncRunning.value) {
+  if (!canUseDesktopWorkers.value || syncRunning.value) {
     return
   }
   resetSyncState()
@@ -668,7 +673,7 @@ async function onCancelSync(): Promise<void> {
  * Refresh the Cardmarket session banner (logged-in / needs_login state).
  */
 async function loadCardmarketSession(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     cmSession.value = null
     return
   }
@@ -686,7 +691,7 @@ async function loadCardmarketSession(): Promise<void> {
  * On mount, reattach to a sync that might already be running on the worker.
  */
 async function reattachActiveSync(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     return
   }
   try {
@@ -722,8 +727,8 @@ onMounted((): void => {
   void reattachActiveSync()
 })
 
-watch(isDesktopApp, (desktop) => {
-  if (desktop) {
+watch(canUseDesktopWorkers, (isAvailable: boolean): void => {
+  if (isAvailable) {
     void loadCardmarketSession()
     void reattachActiveSync()
   } else {

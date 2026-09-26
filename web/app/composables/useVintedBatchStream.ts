@@ -3,6 +3,8 @@
  */
 import type { Ref } from 'vue'
 import type { VintedLogEntry } from '~/composables/useVintedPublishStream'
+import type { WorkerEventStream } from '~/types/DesktopRelay'
+import { useDesktopWorkers, wrapEventSource } from '~/composables/useDesktopWorkers'
 
 export interface VintedBatchProgress {
   current: number
@@ -20,7 +22,7 @@ export function useVintedBatchStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers, openWorkerEventStream } = useDesktopWorkers()
 
   const logEntries: Ref<VintedLogEntry[]> = ref([])
   const logEl: Ref<HTMLElement | null> = ref(null)
@@ -29,7 +31,7 @@ export function useVintedBatchStream() {
   const hasFailedListings: Ref<boolean> = ref(false)
   const lastSummary: Ref<unknown> = ref(null)
 
-  let eventSource: EventSource | null = null
+  let eventSource: WorkerEventStream | null = null
 
   watch(
     logEntries,
@@ -97,14 +99,12 @@ export function useVintedBatchStream() {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(/\/$/, '')
-    const base = isDesktopApp.value ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
-    const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
 
     return new Promise((resolve, reject) => {
       let settled = false
-      eventSource = new EventSource(url)
+      eventSource = canUseDesktopWorkers.value
+        ? openWorkerEventStream('vinted', streamPath)
+        : wrapEventSource(new EventSource(`${remoteBase}${streamPath}?token=${encodeURIComponent(t)}`))
 
       eventSource.onmessage = (e: MessageEvent<string>) => {
         try {

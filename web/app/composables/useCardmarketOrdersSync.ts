@@ -1,7 +1,7 @@
 import type { AxiosInstance } from 'axios'
+import type { WorkerProgressChannel } from '~/types/DesktopRelay'
 import type { OrdersSyncEvent } from '~/types/Orders'
-
-const TOKEN_KEY = 'goupix_token'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 /**
  * Drive the local Cardmarket worker's "sync purchases" job.
@@ -13,80 +13,32 @@ const TOKEN_KEY = 'goupix_token'
  */
 export function useCardmarketOrdersSync() {
   const nuxtApp = useNuxtApp() as { $cardmarketLocal: AxiosInstance }
-  const config = useRuntimeConfig()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers, openWorkerSocketStream } = useDesktopWorkers()
   const local = computed(() => nuxtApp.$cardmarketLocal)
 
   /**
-   * Build the WebSocket URL for `/ws/cardmarket/orders/sync/progress`.
-   *
-   * @returns Full URL with `token` and `remote_api`, or `null` on SSR or missing config.
-   */
-  function buildProgressWebSocketUrl(): string | null {
-    if (!import.meta.client) {
-      return null
-    }
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (!token?.trim()) {
-      return null
-    }
-    const base = String(config.public.cardmarketLocalBase || '').replace(/\/$/, '')
-    const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
-    if (!base || !apiBase) {
-      return null
-    }
-    const wsBase = base.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'))
-    const q = new URLSearchParams({ token: token.trim(), remote_api: apiBase })
-    return `${wsBase}/ws/cardmarket/orders/sync/progress?${q.toString()}`
-  }
-
-  /**
-   * Open the WebSocket and resolve once it is open (or `null` on failure / timeout).
+   * Open the sync progress stream (on the PC, or relayed) and resolve once it is open.
    *
    * @param onPayload - Called for every JSON event received.
    * @param openTimeoutMs - Maximum wait for `open`.
-   * @returns Open socket, or `null` when URL/auth is missing or open times out.
+   * @returns Open channel, or `null` when the worker does not answer.
    */
   async function openProgressSocket(
     onPayload: (ev: OrdersSyncEvent) => void,
     openTimeoutMs: number = 8000,
-  ): Promise<WebSocket | null> {
-    const url = buildProgressWebSocketUrl()
-    if (!url) {
-      return null
-    }
-    const ws = new WebSocket(url)
-
-    ws.onmessage = (ev: MessageEvent): void => {
-      try {
-        const payload = JSON.parse(String(ev.data)) as OrdersSyncEvent
-        onPayload(payload)
-      } catch {
-        /* ignore malformed frames */
-      }
-    }
-
-    const opened = await new Promise<boolean>((resolve) => {
-      const timer = window.setTimeout(() => resolve(false), openTimeoutMs)
-      ws.onopen = (): void => {
-        window.clearTimeout(timer)
-        resolve(true)
-      }
-      ws.onerror = (): void => {
-        window.clearTimeout(timer)
-        resolve(false)
-      }
-    })
-
-    if (!opened) {
-      try {
-        ws.close()
-      } catch {
-        /* ignore */
-      }
-      return null
-    }
-    return ws
+  ): Promise<WorkerProgressChannel | null> {
+    return openWorkerSocketStream(
+      'cardmarket',
+      '/ws/cardmarket/orders/sync/progress',
+      (data: string): void => {
+        try {
+          onPayload(JSON.parse(data) as OrdersSyncEvent)
+        } catch {
+          /* ignore malformed frames */
+        }
+      },
+      { openTimeoutMs },
+    )
   }
 
   /**
@@ -106,8 +58,8 @@ export function useCardmarketOrdersSync() {
    * Throws if not on desktop or if a sync is already running (409).
    */
   async function startSync(): Promise<void> {
-    if (!isDesktopApp.value) {
-      throw new Error('La synchronisation Cardmarket nécessite l’application bureau GoupixDex.')
+    if (!canUseDesktopWorkers.value) {
+      throw new Error('La synchronisation Cardmarket s’exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur.')
     }
     await local.value.post('/cardmarket/orders/sync')
   }
@@ -116,7 +68,7 @@ export function useCardmarketOrdersSync() {
    * POST `/cardmarket/orders/sync/cancel` — cancel the running sync.
    */
   async function cancelSync(): Promise<void> {
-    if (!isDesktopApp.value) {
+    if (!canUseDesktopWorkers.value) {
       return
     }
     try {
@@ -133,30 +85,22 @@ export function useCardmarketOrdersSync() {
    * @returns Cleanup `close()` to drop the WebSocket from the caller side.
    */
   async function runWithProgress(onPayload: (ev: OrdersSyncEvent) => void): Promise<{ close: () => void }> {
-    const ws = await openProgressSocket(onPayload)
+    const progressChannel = await openProgressSocket(onPayload)
     try {
       await startSync()
     } catch (e) {
-      try {
-        ws?.close()
-      } catch {
-        /* ignore */
-      }
+      progressChannel?.close()
       throw e
     }
     return {
       close: (): void => {
-        try {
-          ws?.close()
-        } catch {
-          /* ignore */
-        }
+        progressChannel?.close()
       },
     }
   }
 
   return {
-    isDesktopApp,
+    canUseDesktopWorkers,
     getActiveSync,
     startSync,
     cancelSync,

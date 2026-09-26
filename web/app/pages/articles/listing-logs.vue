@@ -32,8 +32,9 @@
           :title="idleMessage"
         >
           <template #description>
-            <span v-if="!isDesktopApp" class="text-muted text-sm">
-              Pour l'import garde-robe ou certains lots Vinted, installez aussi
+            <span v-if="isDesktopAppUnreachable" class="text-muted text-sm">
+              L'import garde-robe et les lots Vinted s'exécutent sur votre PC : ouvrez GoupixDex sur votre ordinateur,
+              ou installez
               <NuxtLink to="/downloads" class="underline underline-offset-2"> l'application desktop </NuxtLink>
               .
             </span>
@@ -154,6 +155,7 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
 import {
   navigateToRelistEditorFromStorage,
@@ -174,7 +176,7 @@ const { getVintedBatchActive } = useArticles()
 const batchStream = useVintedBatchStream()
 const publishStream = useVintedPublishStream()
 const wardrobeStream = useWardrobeSyncStream()
-const { isDesktopApp } = useDesktopRuntime()
+const { isDesktopAppUnreachable, waitForDesktopWorkersAvailability } = useDesktopWorkers()
 
 const streamMode: Ref<'none' | 'batch' | 'single' | 'wardrobe'> = ref('none')
 
@@ -309,7 +311,7 @@ async function connectSingleArticle(articleId: number): Promise<void> {
   wardrobeStream.closeStream()
   const progressQ = typeof route.query.progress === 'string' ? route.query.progress.trim().toLowerCase() : ''
   const workerQ = typeof route.query.worker === 'string' ? route.query.worker.trim().toLowerCase() : ''
-  const sseBase = progressQ === 'local' && isDesktopApp.value ? 'local' : 'api'
+  const sseBase = progressQ === 'local' && (await waitForDesktopWorkersAvailability()) ? 'local' : 'api'
   const localWorker = workerQ === 'leboncoin' ? 'leboncoin' : 'vinted'
   try {
     await publishStream.followStream(`/articles/${articleId}/listing-progress`, 'logs', {
@@ -349,13 +351,17 @@ async function bootstrap(): Promise<void> {
   const wardrobeJobId = typeof qWardrobe === 'string' ? qWardrobe.trim() : ''
   const articleIdRaw = typeof qArticle === 'string' ? qArticle.trim() : ''
   const articleId = articleIdRaw ? Number.parseInt(articleIdRaw, 10) : NaN
+  // Les lots et flux Vinted passent par le PC : sa présence doit être connue avant de choisir la source.
+  const canUseDesktopWorkers = await waitForDesktopWorkersAvailability()
+  if (seq !== bootstrapSeq) {
+    return
+  }
 
   if (wardrobeJobId) {
-    if (!isDesktopApp.value) {
+    if (!canUseDesktopWorkers) {
       loading.value = false
       streamMode.value = 'none'
-      idleMessage.value =
-        "L'import garde-robe Vinted nécessite l'application desktop (navigateur local sur votre machine)."
+      idleMessage.value = "L'import garde-robe Vinted s'exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur."
       return
     }
     await connectWardrobeJob(wardrobeJobId)

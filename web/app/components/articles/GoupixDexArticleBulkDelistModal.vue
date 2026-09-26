@@ -113,14 +113,14 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 
 type BrandKey = 'vinted' | 'ebay' | 'leboncoin' | 'all'
 
 const props = defineProps<{
   articleCount: number
   vintedChannelEnabled: boolean
-  isDesktopApp: boolean
+  canUseDesktopWorkers: boolean
   anyVintedListed: boolean
   anyEbayListed: boolean
   anyLeboncoinListed: boolean
@@ -171,7 +171,9 @@ function brandCheckboxClass(brand: BrandKey, checked: boolean): string {
   }
 }
 
-const vintedAvailable = computed(() => props.anyVintedListed && props.vintedChannelEnabled && props.isDesktopApp)
+const vintedAvailable: ComputedRef<boolean> = computed(
+  (): boolean => props.anyVintedListed && props.vintedChannelEnabled && props.canUseDesktopWorkers,
+)
 const ebayAvailable = computed(() => props.anyEbayListed)
 const leboncoinAvailable = computed(() => props.anyLeboncoinListed)
 
@@ -184,8 +186,8 @@ const vintedHint = computed(() => {
   if (!props.vintedChannelEnabled) {
     return 'Vinted désactivé dans les paramètres.'
   }
-  if (!props.isDesktopApp) {
-    return 'Application desktop requise.'
+  if (!props.canUseDesktopWorkers) {
+    return 'Ouvrez GoupixDex sur votre PC.'
   }
   return ''
 })

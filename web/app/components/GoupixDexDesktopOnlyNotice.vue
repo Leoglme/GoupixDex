@@ -4,11 +4,11 @@
       <UIcon name="i-lucide-monitor-down" class="h-6 w-6 text-(--app-accent)" />
     </span>
     <div class="space-y-1.5">
-      <h2 class="text-highlighted text-lg font-semibold">{{ props.featureLabel }} — disponible sur l'app desktop</h2>
+      <h2 class="text-highlighted text-lg font-semibold">{{ props.featureLabel }} — s'exécute sur votre PC</h2>
       <p class="text-muted mx-auto max-w-md text-sm leading-relaxed">
         {{
           props.reason ??
-          'Cette fonctionnalité pilote un navigateur local sur votre poste et ne peut pas tourner dans la version web.'
+          'Cette fonctionnalité pilote un navigateur sur votre PC : ouvrez GoupixDex sur votre ordinateur pour la lancer depuis cet appareil.'
         }}
       </p>
     </div>

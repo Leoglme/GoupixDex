@@ -165,7 +165,7 @@
         mode === 'create' &&
         !hideVintedOption &&
         !importIsSold &&
-        isDesktopApp &&
+        canUseDesktopWorkers &&
         svcSettings &&
         !svcSettings.vinted_enabled
       "
@@ -192,22 +192,22 @@
       </p>
     </div>
     <UAlert
-      v-else-if="mode === 'create' && !hideVintedOption && !importIsSold"
+      v-else-if="mode === 'create' && !hideVintedOption && !importIsSold && isDesktopAppUnreachable"
       color="info"
       variant="subtle"
       icon="i-lucide-sparkles"
-      title="Publication Vinted disponible uniquement dans l'app desktop"
+      title="Publication Vinted : ouvrez GoupixDex sur votre PC"
     >
       <template #description>
         <p class="text-sm leading-relaxed">
-          Installez la version Windows ou macOS depuis
+          La case « Publier sur Vinted » apparaît quand GoupixDex est ouvert sur votre PC (si Vinted est activé dans les
+          paramètres). Pas encore installé ?
           <NuxtLink
             to="/downloads"
             class="text-primary decoration-primary/40 hover:decoration-primary font-medium underline underline-offset-2"
           >
             Télécharger l'app
           </NuxtLink>
-          pour activer la case « Publier sur Vinted » (si Vinted est activé dans les paramètres).
         </p>
       </template>
     </UAlert>
@@ -336,6 +336,7 @@ import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 import type { AppSettings } from '~/composables/useSettings'
 import type { WardrobeSlotPrefill } from '~/composables/useWardrobeImportPrefill'
 import type { OrderLinkableLine, OrderMatchResponse } from '~/types/Orders'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { EBAY_GRADE_OPTIONS, EBAY_PROFESSIONAL_GRADER_OPTIONS } from '~/utils/ebayTradingCardGrading'
 import {
   normalizeVintedTitleUppercaseRuns,
@@ -647,10 +648,10 @@ const importSoldAt: Ref<string | null> = ref(null)
 const wardrobeVintedListed: Ref<boolean> = ref(false)
 const wardrobeVintedPublishedAtIso: Ref<string | null> = ref(null)
 const wardrobeImportSoldPrice: Ref<string | null> = ref(null)
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
 const { fetchBlob: fetchVintedListingImageBlob } = useVintedListingImage()
 const canUseVinted = computed(
-  () => isDesktopApp.value && !importIsSold.value && svcSettings.value?.vinted_enabled !== false,
+  () => canUseDesktopWorkers.value && !importIsSold.value && svcSettings.value?.vinted_enabled !== false,
 )
 const showEbayPublish = computed(
   () =>
@@ -733,7 +734,7 @@ async function blobFromVintedPhotoUrl(url: string): Promise<Blob | null> {
   } catch {
     /* CORS or network */
   }
-  if (isDesktopApp.value) {
+  if (canUseDesktopWorkers.value) {
     try {
       return await fetchVintedListingImageBlob(url)
     } catch {

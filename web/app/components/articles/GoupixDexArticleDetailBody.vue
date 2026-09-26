@@ -346,6 +346,7 @@ import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useM
 import type { PricingLookup } from '~/composables/usePricing'
 import type { Marketplace } from '~/types/Marketplace'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
 import { DEFAULT_ARTICLE_MARKET_SEARCH_BASE, marketSearchToRouteQuery } from '~/utils/marketSearchQuery'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
@@ -367,7 +368,7 @@ const emit = defineEmits<{
 
 const config = useRuntimeConfig()
 const { getArticle, removeEbayListing, removeVintedListing } = useArticles()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { lookup } = usePricing()
 const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarketSearch()
 const toast = useToast()
@@ -823,17 +824,18 @@ async function onRemoveVinted(): Promise<void> {
   if (!article.value?.published_on_vinted) {
     return
   }
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     toast.add({
-      title: 'Application desktop requise',
-      description: 'La suppression Vinted s’exécute sur le worker local (app GoupixDex).',
+      title: 'Ouvrez GoupixDex sur votre PC',
+      description:
+        'La suppression Vinted s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, puis réessayez.',
       color: 'warning',
     })
     return
   }
   const okVinted = await confirmAction({
     title: 'Retirer l’annonce Vinted ?',
-    body: 'Chrome va s’ouvrir sur ce poste pour retirer l’annonce. La fiche GoupixDex sera conservée.',
+    body: 'Chrome va s’ouvrir sur votre PC pour retirer l’annonce. La fiche GoupixDex sera conservée.',
     confirmLabel: 'Retirer de Vinted',
     confirmColor: 'error',
   })
@@ -845,7 +847,7 @@ async function onRemoveVinted(): Promise<void> {
     await removeVintedListing(id.value)
     toast.add({
       title: 'Vinted',
-      description: 'Suppression lancée sur ce poste. Actualisation dans quelques secondes…',
+      description: 'Suppression lancée sur votre PC. Actualisation dans quelques secondes…',
       color: 'neutral',
     })
     setTimeout(() => {
@@ -861,8 +863,8 @@ async function onRemoveVinted(): Promise<void> {
     const msg = apiErrorMessage(e)
     if (msg.includes('VINTED_LOCAL_WORKER_REQUIRED')) {
       toast.add({
-        title: 'Application desktop requise',
-        description: 'Ouvrez GoupixDex en version desktop pour retirer l’annonce Vinted.',
+        title: 'Ouvrez GoupixDex sur votre PC',
+        description: 'Le retrait de l’annonce Vinted s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur.',
         color: 'warning',
       })
     } else {
@@ -879,7 +881,7 @@ async function onRemoveVinted(): Promise<void> {
 }
 
 /**
- * Raison qui empêche de publier l’article sur cette marketplace depuis ce poste.
+ * Raison qui empêche de publier l’article sur cette marketplace depuis cet appareil.
  * @param marketplace - Marketplace visée.
  * @returns {string | null} La raison, ou `null` si la publication est possible.
  */
@@ -887,8 +889,8 @@ function publishBlockedReason(marketplace: Marketplace): string | null {
   if (!article.value?.images?.length) {
     return 'Ajoutez au moins une photo à l’article.'
   }
-  if (marketplace !== 'ebay' && !isDesktopApp.value) {
-    return 'Disponible dans l’application desktop.'
+  if (marketplace !== 'ebay' && !canUseDesktopWorkers.value) {
+    return 'Ouvrez GoupixDex sur votre PC pour publier.'
   }
   return null
 }

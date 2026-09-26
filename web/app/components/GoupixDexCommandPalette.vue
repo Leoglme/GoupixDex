@@ -71,9 +71,10 @@ import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { CollectionCard } from '~/composables/useCollection'
 import type { GoupixDexCommandPaletteAction, GoupixDexCommandPaletteGroup } from '~/types/GoupixDexCommandPalette'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 const { isOpen, close } = useCommandPalette()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { me } = useAuth()
 const { listArticles } = useArticles()
 const { listCollection } = useCollection()
@@ -208,7 +209,7 @@ const visibleGroups: ComputedRef<GoupixDexCommandPaletteGroup[]> = computed((): 
   ]
   // Basket optimization left the sidebar; the palette keeps it findable.
   pages.push({ label: 'Paniers Cardmarket', icon: 'i-lucide-shopping-basket', to: '/panier-cardmarket' })
-  if (isDesktopApp.value) {
+  if (canUseDesktopWorkers.value) {
     pages.push({ label: 'Invitations Amazon', icon: 'i-simple-icons-amazon', to: '/amazon-invites' })
   }
   if (me.value?.is_admin) {

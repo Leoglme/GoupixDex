@@ -4,6 +4,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -786,9 +788,84 @@ fn sync_dev_database_from_prod() -> Result<String, String> {
     }
 }
 
+/// Argument de l'entrée de démarrage de Windows : l'app démarre alors cachée dans la zone de notification.
+const LAUNCHED_AT_LOGIN_ARG: &str = "--minimized";
+
+/// Affiche la fenêtre principale, même réduite ou cachée dans la zone de notification.
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Icône de la zone de notification : l'app y reste ouverte pour exécuter les actions lancées depuis un autre appareil.
+fn build_tray_icon(app: &tauri::App) -> tauri::Result<()> {
+    let open_item = MenuItem::with_id(app, "open", "Ouvrir GoupixDex", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quitter GoupixDex", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("GoupixDex")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+/// Active le lancement au démarrage de Windows une seule fois : une désactivation dans le Gestionnaire des tâches reste ensuite respectée.
+#[cfg(not(debug_assertions))]
+fn enable_autostart_on_first_launch(app: &tauri::App) {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let marker = data_dir.join("autostart-enabled-once");
+    if marker.exists() {
+        return;
+    }
+    match app.autolaunch().enable() {
+        Ok(()) => {
+            let _ = std::fs::create_dir_all(&data_dir);
+            let _ = std::fs::write(&marker, b"");
+        }
+        Err(e) => eprintln!("[GoupixDex] Lancement au démarrage de Windows non activé : {e}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Release seulement : le build de dev partage l'identifiant de l'app installée et serait bloqué par elle.
+    #[cfg(not(debug_assertions))]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![LAUNCHED_AT_LOGIN_ARG]),
+        ));
+    builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
@@ -804,7 +881,23 @@ pub fn run() {
             restart_local_workers,
             sync_dev_database_from_prod
         ])
+        .on_window_event(|window, event| {
+            // Fermer la fenêtre garde l'app dans la zone de notification, pour les actions lancées depuis un autre appareil.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
+            build_tray_icon(app)?;
+            #[cfg(not(debug_assertions))]
+            enable_autostart_on_first_launch(app);
+            if !std::env::args().any(|arg| arg == LAUNCHED_AT_LOGIN_ARG) {
+                show_main_window(app.handle());
+            }
+
             let handle = app.handle().clone();
 
             let vinted_port = vinted_local_port();
@@ -890,8 +983,8 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::Exit => {
                 if let Ok(mut guard) = app.state::<DesktopWorkers>().0.lock() {
                     if let Some(child) = guard.vinted.take() {
                         kill_worker_tree(child);
@@ -907,5 +1000,8 @@ pub fn run() {
                     }
                 }
             }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main_window(app),
+            _ => {}
         });
 }

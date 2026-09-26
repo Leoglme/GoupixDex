@@ -26,43 +26,6 @@ function buildQueryParams(p: AmazonInvitesFetchParams): Record<string, string | 
 }
 
 /**
- * WebSocket connection target for `/ws/progress`.
- * The JWT travels as a `goupix-jwt.<token>` subprotocol instead of a query param,
- * so it never lands in worker access logs; `remote_api` stays in the query string.
- */
-export type AmazonProgressWebSocketTarget = {
-  url: string
-  protocols: string[]
-}
-
-/**
- * Build the `/ws/progress` connection target (URL + auth subprotocol).
- *
- * @returns Target object, or `null` when token or bases are missing (client-only).
- */
-export function buildAmazonProgressWebSocketUrl(): AmazonProgressWebSocketTarget | null {
-  if (!import.meta.client) {
-    return null
-  }
-  const token = localStorage.getItem('goupix_token')
-  if (!token?.trim()) {
-    return null
-  }
-  const config = useRuntimeConfig()
-  const base = String(config.public.amazonLocalBase || '').replace(/\/$/, '')
-  const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
-  if (!base || !apiBase) {
-    return null
-  }
-  const wsBase = base.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'))
-  const q = new URLSearchParams({ remote_api: apiBase })
-  return {
-    url: `${wsBase}/ws/progress?${q.toString()}`,
-    protocols: [`goupix-jwt.${token.trim()}`],
-  }
-}
-
-/**
  * HTTP calls to the local Amazon worker (`NUXT_PUBLIC_AMAZON_LOCAL_BASE`, default `127.0.0.1:18768`).
  * Uses the same JWT as the main API via the axios plugin.
  *

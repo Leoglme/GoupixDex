@@ -209,6 +209,7 @@ import type { PropType } from 'vue'
 import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
 import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { formatSignedPercent, parseEuroAmount } from '~/utils/sealedProducts'
 import { hasJapanese, readableSetLabel } from '~/utils/cards/readableSet'
@@ -242,7 +243,7 @@ const {
   attachArticle,
 } = useCollection()
 const { createArticle, publishArticleToVinted } = useArticles()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
 const toast = useToast()
 
@@ -486,7 +487,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
   if (!card.value) {
     return
   }
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     fd.set('publish_to_vinted', 'false')
   }
   // Vente depuis la collection : relier l'article à CETTE carte (le back n'en recrée pas une).
@@ -499,7 +500,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
     } catch {
       /* lien best-effort */
     }
-    if (isDesktopApp.value && vinted.desktop_local && vinted.stream_path) {
+    if (canUseDesktopWorkers.value && vinted.desktop_local && vinted.stream_path) {
       try {
         await publishArticleToVinted(article.id)
       } catch (e) {

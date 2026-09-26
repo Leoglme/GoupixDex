@@ -4,9 +4,7 @@ import type {
   CardmarketSearchListRow,
   CardmarketSearchProgressPayload,
 } from '~/types/CardmarketSearch'
-import { openCardmarketProgressWebSocket } from '~/utils/cardmarketProgressWebSocket'
-
-const TOKEN_KEY = 'goupix_token'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 /**
  * Remote API + local Cardmarket worker helpers.
@@ -18,8 +16,7 @@ export function useCardmarketSearches() {
     $api: AxiosInstance
     $cardmarketLocal: AxiosInstance
   }
-  const config = useRuntimeConfig()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers, openWorkerSocketStream } = useDesktopWorkers()
 
   const api = computed(() => nuxtApp.$api)
   const local = computed(() => nuxtApp.$cardmarketLocal)
@@ -79,35 +76,11 @@ export function useCardmarketSearches() {
   }
 
   /**
-   * Full WebSocket URL for worker progress (JWT + remote API as query params).
-   *
-   * @param searchId Search id to subscribe to.
-   * @returns The full `ws(s)://…` URL, or `null` when the token / config is missing or on SSR.
-   */
-  function buildProgressWebSocketUrl(searchId: number): string | null {
-    if (!import.meta.client) {
-      return null
-    }
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (!token?.trim()) {
-      return null
-    }
-    const base = String(config.public.cardmarketLocalBase || '').replace(/\/$/, '')
-    const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
-    if (!base || !apiBase) {
-      return null
-    }
-    const wsBase = base.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'))
-    const q = new URLSearchParams({ token: token.trim(), remote_api: apiBase })
-    return `${wsBase}/ws/cardmarket-searches/${encodeURIComponent(String(searchId))}/progress?${q.toString()}`
-  }
-
-  /**
    * Start a scrape run on the desktop worker (`POST …/run`).
    */
   async function startLocalRun(searchId: number): Promise<void> {
-    if (!isDesktopApp.value) {
-      throw new Error("L'analyse Cardmarket nécessite l'application bureau GoupixDex.")
+    if (!canUseDesktopWorkers.value) {
+      throw new Error("L'analyse Cardmarket s'exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur.")
     }
     await local.value.post(`/cardmarket-searches/${searchId}/run`)
   }
@@ -116,7 +89,7 @@ export function useCardmarketSearches() {
    * Cancel a running scrape on the desktop worker (`POST …/cancel`).
    */
   async function cancelLocalRun(searchId: number): Promise<void> {
-    if (!isDesktopApp.value) {
+    if (!canUseDesktopWorkers.value) {
       return
     }
     await local.value.post(`/cardmarket-searches/${searchId}/cancel`)
@@ -131,28 +104,26 @@ export function useCardmarketSearches() {
     searchId: number,
     onPayload: (p: CardmarketSearchProgressPayload) => void,
   ): Promise<{ close: () => void }> {
-    const url = buildProgressWebSocketUrl(searchId)
-    let ws: WebSocket | null = null
-    if (url) {
-      ws = await openCardmarketProgressWebSocket(url, onPayload)
-    }
+    const progressChannel = await openWorkerSocketStream(
+      'cardmarket',
+      `/ws/cardmarket-searches/${encodeURIComponent(String(searchId))}/progress`,
+      (data: string): void => {
+        try {
+          onPayload(JSON.parse(data) as CardmarketSearchProgressPayload)
+        } catch {
+          /* ignore malformed frames */
+        }
+      },
+    )
     try {
       await startLocalRun(searchId)
     } catch (e) {
-      try {
-        ws?.close()
-      } catch {
-        /* ignore */
-      }
+      progressChannel?.close()
       throw e
     }
     return {
       close: (): void => {
-        try {
-          ws?.close()
-        } catch {
-          /* ignore */
-        }
+        progressChannel?.close()
       },
     }
   }
@@ -163,10 +134,9 @@ export function useCardmarketSearches() {
     createSearch,
     updateSearch,
     deleteSearch,
-    buildProgressWebSocketUrl,
     startLocalRun,
     cancelLocalRun,
     runWithProgress,
-    isDesktopApp,
+    canUseDesktopWorkers,
   }
 }

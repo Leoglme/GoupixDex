@@ -104,6 +104,9 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import type { ComputedRef, Ref } from 'vue'
 import type { AppSidebarNavGroup } from '~/types/AppNavigation'
+import { useDesktopRelay } from '~/composables/useDesktopRelay'
+import { useDesktopRelayAgent } from '~/composables/useDesktopRelayAgent'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 useDashboard()
 
@@ -111,6 +114,9 @@ const route = useRoute()
 const open: Ref<boolean> = ref(false)
 const { open: openPalette } = useCommandPalette()
 const { isDesktopApp, restartLocalWorkers, syncDevDatabaseFromProd } = useDesktopRuntime()
+const { startDesktopRelayAgent, stopDesktopRelayAgent } = useDesktopRelayAgent()
+const { connectDesktopRelay, disconnectDesktopRelay } = useDesktopRelay()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const toast = useToast()
 const workersRestarting: Ref<boolean> = ref(false)
 const dbSyncLoading: Ref<boolean> = ref(false)
@@ -224,8 +230,8 @@ const navGroups: ComputedRef<AppSidebarNavGroup[]> = computed((): AppSidebarNavG
   const purchasesItems: NavigationMenuItem[] = [
     navLink('Commandes Cardmarket', 'i-lucide-file-text', '/orders', ['/orders']),
   ]
-  if (isDesktopApp.value) {
-    // Relies on the local nodriver worker, which only exists in the Tauri app.
+  if (canUseDesktopWorkers.value) {
+    // Relies on the local nodriver worker: in the desktop app, or on the PC reached through the relay.
     purchasesItems.push(navLink('Invitations Amazon', 'i-simple-icons-amazon', '/amazon-invites', ['/amazon-invites']))
   }
 
@@ -264,5 +270,15 @@ onMounted((): void => {
   setTimeout((): void => {
     void scanEmbed.load()
   }, 1500)
+  if (isDesktopApp.value) {
+    startDesktopRelayAgent()
+  } else {
+    connectDesktopRelay()
+  }
+})
+
+onBeforeUnmount((): void => {
+  stopDesktopRelayAgent()
+  disconnectDesktopRelay()
 })
 </script>

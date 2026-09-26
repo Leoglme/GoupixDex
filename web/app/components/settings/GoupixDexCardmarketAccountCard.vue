@@ -22,8 +22,8 @@
         color="info"
         variant="subtle"
         icon="i-lucide-monitor-smartphone"
-        title="Application bureau"
-        description="L’ouverture du navigateur et la détection de session ont lieu dans l’application GoupixDex desktop (worker local)."
+        title="Connexion depuis l’app du PC"
+        description="L’ouverture de Chrome pour vous connecter se fait dans GoupixDex sur votre PC ; ici, l’état de la session s’affiche quand l’app y est ouverte."
       />
 
       <UAlert
@@ -68,7 +68,7 @@
           {{ session?.state === 'ready' ? 'Ouvrir Chrome (vérifier)' : 'Ouvrir Chrome — connexion Cardmarket' }}
         </UButton>
         <UButton
-          v-if="isDesktopApp"
+          v-if="canUseDesktopWorkers"
           color="neutral"
           variant="ghost"
           icon="i-lucide-refresh-cw"
@@ -95,6 +95,7 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { cardmarketSessionBadge } from '~/utils/cardmarketConnectionUi'
 
 const props = withDefaults(
@@ -115,6 +116,7 @@ const cardUi: ComputedRef<Record<string, string> | undefined> = computed(() =>
 )
 
 const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { fetchSession, openLoginBrowser: postOpenLogin, logout: postLogout } = useCardmarketWorker()
 const toast = useToast()
 
@@ -128,8 +130,8 @@ const workerError: Ref<boolean> = ref(false)
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 const badge = computed(() => {
-  if (!isDesktopApp.value) {
-    return { label: 'Web uniquement', color: 'neutral' as const }
+  if (!canUseDesktopWorkers.value) {
+    return { label: 'PC hors ligne', color: 'neutral' as const }
   }
   if (loading.value) {
     return { label: 'Vérification…', color: 'neutral' as const }
@@ -154,7 +156,7 @@ function formatLastSeen(iso: string): string {
 }
 
 async function loadState(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     loading.value = false
     return
   }
@@ -171,7 +173,7 @@ async function loadState(): Promise<void> {
 }
 
 async function refreshState(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     return
   }
   refreshingState.value = true
@@ -265,8 +267,8 @@ onBeforeUnmount(() => {
   stopPolling()
 })
 
-watch(isDesktopApp, (desktop) => {
-  if (desktop) {
+watch(canUseDesktopWorkers, (isAvailable: boolean): void => {
+  if (isAvailable) {
     void loadState()
   } else {
     stopPolling()

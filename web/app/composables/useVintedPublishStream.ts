@@ -1,9 +1,11 @@
 /**
  * Subscribes to the SSE stream ``GET /articles/:id/listing-progress`` after a listing
- * (Vinted and/or eBay). The event session lives on the remote API; the local worker
- * is only used for desktop Vinted publish (``sseBase: 'local'``).
+ * (Vinted and/or eBay). The event session lives on the remote API; the PC worker
+ * (desktop app, or relayed from another device) is used for Vinted/Leboncoin publish (``sseBase: 'local'``).
  */
 import type { Ref } from 'vue'
+import type { WorkerEventStream } from '~/types/DesktopRelay'
+import { useDesktopWorkers, wrapEventSource } from '~/composables/useDesktopWorkers'
 
 export type ListingStreamContext = 'create' | 'list' | 'logs'
 
@@ -25,12 +27,12 @@ export function useVintedPublishStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
   const toast = useToast()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers, openWorkerEventStream } = useDesktopWorkers()
 
   const logEntries: Ref<VintedLogEntry[]> = ref([])
   const logEl: Ref<HTMLElement | null> = ref(null)
 
-  let eventSource: EventSource | null = null
+  let eventSource: WorkerEventStream | null = null
 
   watch(
     logEntries,
@@ -99,20 +101,13 @@ export function useVintedPublishStream() {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const worker = options?.localWorker ?? 'vinted'
-    const localBaseRaw =
-      worker === 'leboncoin'
-        ? config.public.leboncoinLocalBase || 'http://127.0.0.1:18769'
-        : config.public.vintedLocalBase || 'http://127.0.0.1:18766'
-    const localBase = String(localBaseRaw).replace(/\/$/, '')
-    const useLocal = options?.sseBase === 'local' && isDesktopApp.value
-    const base = useLocal ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value && useLocal ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
-    const url = `${base}${streamPath}?token=${encodeURIComponent(t)}${remoteParam}`
+    const isWorkerStream = options?.sseBase === 'local' && canUseDesktopWorkers.value
 
     return new Promise((resolve, reject) => {
       let settled = false
-      eventSource = new EventSource(url)
+      eventSource = isWorkerStream
+        ? openWorkerEventStream(options?.localWorker ?? 'vinted', streamPath)
+        : wrapEventSource(new EventSource(`${remoteBase}${streamPath}?token=${encodeURIComponent(t)}`))
 
       eventSource.onmessage = (e: MessageEvent<string>) => {
         try {

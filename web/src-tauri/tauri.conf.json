@@ -15,6 +15,7 @@
         "title": "GoupixDex",
         "width": 1440,
         "height": 900,
+        "visible": false,
         "resizable": true,
         "minWidth": 1100,
         "minHeight": 700

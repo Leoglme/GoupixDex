@@ -30,8 +30,8 @@
         color="info"
         variant="subtle"
         icon="i-lucide-monitor-smartphone"
-        title="Application bureau"
-        description="L’ouverture du navigateur et la détection de session ont lieu dans l’application GoupixDex desktop."
+        title="Connexion depuis l’app du PC"
+        description="L’ouverture de Chrome pour vous connecter se fait dans GoupixDex sur votre PC ; ici, l’état de la session s’affiche quand l’app y est ouverte."
       />
 
       <UAlert
@@ -83,7 +83,7 @@
           {{ session?.state === 'ready' ? 'Ouvrir Chrome (vérifier)' : 'Ouvrir Chrome — connexion Leboncoin' }}
         </UButton>
         <UButton
-          v-if="isDesktopApp"
+          v-if="canUseDesktopWorkers"
           color="neutral"
           variant="ghost"
           icon="i-lucide-refresh-cw"
@@ -99,6 +99,7 @@
 
 <script setup lang="ts">
 import type { LeboncoinSessionResponse } from '~/composables/useLeboncoinWorker'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { leboncoinSessionBadge } from '~/utils/leboncoinConnectionUi'
 
 const props = withDefaults(
@@ -124,6 +125,7 @@ const cardUi = computed(() =>
 )
 
 const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 const { fetchSession, openLoginBrowser } = useLeboncoinWorker()
 const toast = useToast()
 
@@ -153,7 +155,7 @@ function isWorkerUnreachableError(e: unknown): boolean {
 }
 
 async function refresh() {
-  if (!import.meta.client || !isDesktopApp.value) {
+  if (!import.meta.client || !canUseDesktopWorkers.value) {
     return
   }
   loading.value = true
@@ -215,6 +217,12 @@ async function onOpenChrome() {
     opening.value = false
   }
 }
+
+watch(canUseDesktopWorkers, (isAvailable: boolean): void => {
+  if (isAvailable && props.enabled) {
+    refresh()
+  }
+})
 
 watch(
   () => props.enabled,

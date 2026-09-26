@@ -3,6 +3,7 @@ import type { RouteLocationRaw } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
 import type { ListingProgressLocalWorker, ListingProgressSseBase } from '~/composables/useVintedPublishStream'
 import type { Marketplace } from '~/types/Marketplace'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
 
 export type ListingPublishStart = {
@@ -20,7 +21,7 @@ export type ListingPublishStart = {
 export function useMarketplacePublishing() {
   const { getSettings } = useSettings()
   const { publishArticleToVinted, publishArticleToEbay, publishArticleToLeboncoin } = useArticles()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers } = useDesktopWorkers()
   const toast = useToast()
 
   const isVintedChannelEnabled: Ref<boolean> = useState('goupix-vinted-channel-enabled', () => false)
@@ -81,13 +82,12 @@ export function useMarketplacePublishing() {
    * @returns {Promise<ListingPublishStart | null>} Flux de progression et journal à suivre, ou `null` si rien n'a démarré.
    */
   async function startArticlePublish(article: Article, marketplace: Marketplace): Promise<ListingPublishStart | null> {
-    if (marketplace !== 'ebay' && !isDesktopApp.value) {
+    if (marketplace !== 'ebay' && !canUseDesktopWorkers.value) {
       toast.add({
-        title: 'Application desktop requise',
-        description: `La mise en ligne ${MARKETPLACE_NAMES[marketplace]} utilise Chrome sur ce poste.`,
+        title: 'Ouvrez GoupixDex sur votre PC',
+        description: `La mise en ligne ${MARKETPLACE_NAMES[marketplace]} s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, puis réessayez.`,
         color: 'warning',
       })
-      await navigateTo('/downloads')
       return null
     }
     if (marketplace === 'leboncoin' && !(await ensureLeboncoinPublishReady())) {

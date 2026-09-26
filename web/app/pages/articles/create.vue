@@ -74,6 +74,7 @@
 <script setup lang="ts">
 import type { Ref } from 'vue'
 import type { ScanCardResponse } from '~/composables/useScanCard'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -86,7 +87,7 @@ const { scan } = useScanCard()
 const { createArticle, publishArticleToVinted } = useArticles()
 const { getSettings } = useSettings()
 const toast = useToast()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 
 const formRef: Ref<{
   applyScanPrefill: (s: ScanCardResponse) => Promise<void>
@@ -182,7 +183,7 @@ async function onOcrHintBlur(): Promise<void> {
 }
 
 async function onSubmitCreate(fd: FormData): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     fd.set('publish_to_vinted', 'false')
   }
   vintedSubmit.value = fd.get('publish_to_vinted') === 'true'
@@ -217,7 +218,7 @@ async function onSubmitCreate(fd: FormData): Promise<void> {
       return false
     }
 
-    if (isDesktopApp.value && vinted.desktop_local && vinted.stream_path) {
+    if (canUseDesktopWorkers.value && vinted.desktop_local && vinted.stream_path) {
       try {
         await publishArticleToVinted(article.id)
       } catch (err) {

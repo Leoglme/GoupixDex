@@ -90,6 +90,7 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { parseRelistQueueParam, relistSuccessorLocation, RELIST_QUEUE_STORAGE_KEY } from '~/utils/articleRelistQueue'
 
 definePageMeta({ middleware: 'auth' })
@@ -97,7 +98,7 @@ definePageMeta({ middleware: 'auth' })
 const route = useRoute()
 const { getArticle, updateArticle, publishArticleToEbay, publishArticleToVinted } = useArticles()
 const toast = useToast()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers } = useDesktopWorkers()
 
 const article: Ref<Article | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
@@ -191,7 +192,7 @@ async function onSubmitEdit(
       relistQuery.queue = queueStr
     }
 
-    if (relist.publishVinted && isDesktopApp.value) {
+    if (relist.publishVinted && canUseDesktopWorkers.value) {
       try {
         await publishArticleToVinted(id.value)
       } catch (err) {
@@ -221,10 +222,10 @@ async function onSubmitEdit(
       }
     }
 
-    if (relist.publishVinted && !isDesktopApp.value) {
+    if (relist.publishVinted && !canUseDesktopWorkers.value) {
       toast.add({
         title: 'Vinted non lancé',
-        description: 'Installez l’application desktop pour publier sur Vinted.',
+        description: 'Ouvrez GoupixDex sur votre PC pour publier sur Vinted.',
         color: 'warning',
       })
     }

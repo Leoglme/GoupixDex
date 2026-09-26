@@ -1,3 +1,5 @@
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+
 export interface ArticleImage {
   id: number
   image_url: string
@@ -150,27 +152,31 @@ export interface ArticleUpdateBody {
 /**
  * Article REST CRUD, marketplace publish endpoints, and Vinted worker routing on desktop.
  *
- * @returns HTTP helpers; `vintedHttp()` picks `$vintedLocal` when running inside Tauri with publish intent.
+ * @returns HTTP helpers; `vintedHttp()` picks `$vintedLocal` when the PC workers are reachable (desktop app or relay).
  */
 export function useArticles() {
   const { $api, $vintedLocal, $leboncoinLocal } = useNuxtApp()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers } = useDesktopWorkers()
 
   /**
-   * Axios instance for Vinted automation — local worker on desktop when available.
+   * Axios instance for Vinted automation — the PC worker (direct or relayed) when available.
    *
    * @returns Axios-like client (`$vintedLocal` or `$api`).
    */
   function vintedHttp() {
-    if (import.meta.client && isDesktopApp.value && $vintedLocal) {
+    if (import.meta.client && canUseDesktopWorkers.value && $vintedLocal) {
       return $vintedLocal
     }
     return $api
   }
 
-  /** Worker local Leboncoin (desktop Tauri). */
+  /**
+   * Worker Leboncoin du PC (direct dans l'app desktop, relayé sinon).
+   *
+   * @returns Axios-like client (`$leboncoinLocal` or `$api`).
+   */
   function leboncoinHttp() {
-    if (import.meta.client && isDesktopApp.value && $leboncoinLocal) {
+    if (import.meta.client && canUseDesktopWorkers.value && $leboncoinLocal) {
       return $leboncoinLocal
     }
     return $api
@@ -205,7 +211,7 @@ export function useArticles() {
    */
   async function createArticle(form: FormData) {
     const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' }
-    if (import.meta.client && isDesktopApp.value && form.get('publish_to_vinted') === 'true') {
+    if (import.meta.client && canUseDesktopWorkers.value && form.get('publish_to_vinted') === 'true') {
       headers['X-Goupix-Vinted-Target'] = 'local'
     }
     const { data } = await $api.post<CreateArticleResponse>('/articles', form, { headers })
@@ -276,7 +282,7 @@ export function useArticles() {
    * @returns {Promise<{ ok: boolean; status?: string }>} Accusé de réception du worker (202).
    */
   async function vintedUnlistAfterEbaySale(id: number) {
-    if (!import.meta.client || !isDesktopApp.value || !$vintedLocal) {
+    if (!import.meta.client || !canUseDesktopWorkers.value || !$vintedLocal) {
       throw new Error('VINTED_LOCAL_WORKER_REQUIRED')
     }
     const { data } = await $vintedLocal.post<{ ok: boolean; status?: string }>(
@@ -291,7 +297,7 @@ export function useArticles() {
    * @returns Worker ack with optional Vinted status.
    */
   async function removeVintedListing(id: number) {
-    if (!import.meta.client || !isDesktopApp.value || !$vintedLocal) {
+    if (!import.meta.client || !canUseDesktopWorkers.value || !$vintedLocal) {
       throw new Error('VINTED_LOCAL_WORKER_REQUIRED')
     }
     const { data } = await $vintedLocal.post<{ ok: boolean; status?: string }>(`/articles/${id}/remove-vinted-listing`)

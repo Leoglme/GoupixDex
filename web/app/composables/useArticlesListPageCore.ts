@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { Marketplace } from '~/types/Marketplace'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { persistRelistQueue, relistEditLocation } from '~/utils/articleRelistQueue'
 import {
   articleEligibleForBulkRelist,
@@ -33,7 +34,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     bulkPrepareForSale,
   } = useArticles()
   const toast = useToast()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers } = useDesktopWorkers()
   const { startJob } = useWardrobeLocalSync()
   const {
     isVintedChannelEnabled: vintedChannelEnabled,
@@ -166,6 +167,19 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   })
 
   /**
+   * Prévient que l'action attend le PC : GoupixDex doit y être ouvert pour l'exécuter.
+   * @param {string} actionLabel - Action concernée (« La mise en ligne groupée Vinted »…).
+   * @returns {void}
+   */
+  function notifyPcUnreachable(actionLabel: string): void {
+    toast.add({
+      title: 'Ouvrez GoupixDex sur votre PC',
+      description: `${actionLabel} s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, puis réessayez.`,
+      color: 'warning',
+    })
+  }
+
+  /**
    * Ouvre la modale « vendu » pour un ou plusieurs articles (lot : parts égales).
    *
    * @param articles - Liste non vide ; les lignes déjà vendues devraient être exclues par l’appelant.
@@ -182,7 +196,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    *
    */
   function triggerDesktopVintedUnlistIfNeeded(article: Article) {
-    if (!import.meta.client || !isDesktopApp.value) {
+    if (!import.meta.client || !canUseDesktopWorkers.value) {
       return
     }
     if (!article.pending_vinted_unlist) {
@@ -192,7 +206,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       .then(() => {
         toast.add({
           title: 'Vinted',
-          description: 'Suppression de l’annonce lancée sur ce poste (quelques secondes).',
+          description: 'Suppression de l’annonce lancée sur votre PC (quelques secondes).',
           color: 'neutral',
         })
         setTimeout(() => void refresh(), 7000)
@@ -231,11 +245,11 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         })
         triggerDesktopVintedUnlistIfNeeded(updated)
         toast.add({ title: 'Article marqué comme vendu', color: 'success' })
-        if (payload.saleSource === 'ebay' && rows[0]?.published_on_vinted && !isDesktopApp.value) {
+        if (payload.saleSource === 'ebay' && rows[0]?.published_on_vinted && !canUseDesktopWorkers.value) {
           toast.add({
             title: 'Vinted',
             description:
-              'Pour retirer l’annonce encore en ligne sur Vinted, ouvrez l’application desktop puis « Réessayer suppression Vinted » dans le menu ⋯.',
+              'Pour retirer l’annonce encore en ligne sur Vinted, ouvrez GoupixDex sur votre PC puis « Réessayer suppression Vinted » dans le menu ⋯.',
             color: 'warning',
           })
         }
@@ -254,11 +268,11 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
               : 'Article marqué comme vendu',
           color: 'success',
         })
-        if (payload.saleSource === 'ebay' && rows.some((r) => r.published_on_vinted) && !isDesktopApp.value) {
+        if (payload.saleSource === 'ebay' && rows.some((r) => r.published_on_vinted) && !canUseDesktopWorkers.value) {
           toast.add({
             title: 'Vinted',
             description:
-              'Pour retirer les annonces Vinted restantes, ouvrez l’application desktop puis « Réessayer suppression Vinted » dans le menu ⋯.',
+              'Pour retirer les annonces Vinted restantes, ouvrez GoupixDex sur votre PC puis « Réessayer suppression Vinted » dans le menu ⋯.',
             color: 'warning',
           })
         }
@@ -291,12 +305,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    *
    */
   async function onRetryCrossVinted(id: number) {
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Application desktop',
-        description: 'La suppression Vinted s’exécute sur le worker local (app GoupixDex).',
-        color: 'warning',
-      })
+    if (!canUseDesktopWorkers.value) {
+      notifyPcUnreachable('La suppression Vinted')
       return
     }
     try {
@@ -486,14 +496,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    *
    */
   async function onWardrobeImportFromVinted() {
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Application desktop requise',
-        description:
-          "La synchronisation Vinted utilise le worker local (Chrome). Installez l'app pour Windows ou macOS.",
-        color: 'warning',
-      })
-      await navigateTo('/downloads')
+    if (!canUseDesktopWorkers.value) {
+      notifyPcUnreachable('La synchronisation Vinted')
       return
     }
     wardrobeSyncing.value = true
@@ -600,7 +604,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
             .filter((row: Article) => row.published_on_vinted)
             .map((row: Article) => row.id)
         : []
-      if (vintedDelistIds.length && isDesktopApp.value) {
+      if (vintedDelistIds.length && canUseDesktopWorkers.value) {
         const { job_id } = await startVintedBatchDelist(vintedDelistIds)
         if (payload.ebay || payload.leboncoin) {
           removeEbayAndLeboncoinListingsInBackground(ids, payload)
@@ -624,13 +628,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         parts.push(`${res.leboncoin_cleared} retrait(s) Leboncoin`)
       }
       if (payload.vinted && res.vinted_article_ids.length) {
-        if (!isDesktopApp.value) {
-          toast.add({
-            title: 'Application desktop requise',
-            description: 'Le retrait Vinted s’exécute sur votre machine.',
-            color: 'warning',
-          })
-          await navigateTo('/downloads')
+        if (!canUseDesktopWorkers.value) {
+          notifyPcUnreachable('Le retrait Vinted')
         } else {
           const { job_id } = await startVintedBatchDelist(res.vinted_article_ids)
           if (job_id) {
@@ -682,13 +681,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
         payload.mode === 'vinted-renew' ? vintedDelistIds.length > 0 : payload.renewVinted && vintedDelistIds.length > 0
 
       if (renewVinted) {
-        if (!isDesktopApp.value) {
-          toast.add({
-            title: 'Application desktop requise',
-            description: 'Le retrait Vinted avant republication s’exécute sur votre machine.',
-            color: 'warning',
-          })
-          await navigateTo('/downloads')
+        if (!canUseDesktopWorkers.value) {
+          notifyPcUnreachable('Le retrait Vinted avant republication')
           return
         }
         const { job_id } = await startVintedBatchDelist(vintedDelistIds)
@@ -720,19 +714,13 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     if (!eligible.length) {
       toast.add({
         title: 'Sélection invalide',
-        description:
-          'Choisissez des articles non vendus avec au moins une photo, et utilisez l’application desktop pour Vinted.',
+        description: 'Choisissez des articles non vendus avec au moins une photo.',
         color: 'warning',
       })
       return
     }
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Application desktop requise',
-        description: 'La mise en ligne groupée Vinted s’exécute sur votre machine.',
-        color: 'warning',
-      })
-      await navigateTo('/downloads')
+    if (!canUseDesktopWorkers.value) {
+      notifyPcUnreachable('La mise en ligne groupée Vinted')
       return
     }
     if (eligible.length < ids.length) {
@@ -825,13 +813,13 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       })
       return
     }
-    if (!isDesktopApp.value) {
+    if (!canUseDesktopWorkers.value) {
       toast.add({
-        title: 'Application desktop requise',
-        description: 'Vinted nécessite l’application desktop ; eBay peut être lancé seul depuis la liste.',
+        title: 'Ouvrez GoupixDex sur votre PC',
+        description:
+          'Vinted s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, ou publiez seulement sur eBay.',
         color: 'warning',
       })
-      await navigateTo('/downloads')
       return
     }
     if (eligible.length < ids.length) {
@@ -913,18 +901,13 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     if (!eligible.length) {
       toast.add({
         title: 'Sélection invalide',
-        description: 'Articles non vendus avec au moins une photo requis (app desktop).',
+        description: 'Articles non vendus avec au moins une photo requis.',
         color: 'warning',
       })
       return
     }
-    if (!isDesktopApp.value) {
-      toast.add({
-        title: 'Application desktop requise',
-        description: 'Leboncoin s’exécute sur votre machine via Chrome.',
-        color: 'warning',
-      })
-      await navigateTo('/downloads')
+    if (!canUseDesktopWorkers.value) {
+      notifyPcUnreachable('La publication Leboncoin')
       return
     }
     bulkPublishBusy.value = true

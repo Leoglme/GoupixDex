@@ -72,11 +72,11 @@
           <div class="border-default/80 bg-elevated/60 space-y-3 rounded-lg border p-4">
             <UCheckbox
               v-model="batchVinted"
-              :disabled="!isDesktopApp || route.query.from === 'wardrobe'"
+              :disabled="!canUseDesktopWorkers || route.query.from === 'wardrobe'"
               label="Lancer la publication Vinted groupée après création (une seule connexion)"
             />
-            <p v-if="!isDesktopApp" class="text-muted text-sm">
-              Disponible uniquement dans l'app desktop.
+            <p v-if="isDesktopAppUnreachable" class="text-muted text-sm">
+              S'exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur.
               <NuxtLink to="/downloads" class="underline underline-offset-2"> Télécharger l'app </NuxtLink>
             </p>
             <UCheckbox
@@ -143,7 +143,7 @@
         <div class="flex flex-wrap items-center gap-3">
           <UButton color="primary" size="lg" icon="i-lucide-upload-cloud" :loading="submitting" @click="submitAll">
             Créer {{ formSlots.length }} article(s)
-            <span v-if="batchVinted && isDesktopApp"> et lancer Vinted</span>
+            <span v-if="batchVinted && canUseDesktopWorkers"> et lancer Vinted</span>
             <span v-if="batchEbay"> et eBay</span>
           </UButton>
           <UButton color="neutral" variant="soft" icon="i-lucide-plus" @click="addForm">
@@ -158,6 +158,7 @@
 <script setup lang="ts">
 import type { Ref } from 'vue'
 import type { ScanCardResponse } from '~/composables/useScanCard'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { syncResultToPrefillSlots, WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
 
 definePageMeta({ middleware: 'auth' })
@@ -177,7 +178,7 @@ type ArticleFormExpose = {
 const { createArticle, startVintedBatch, startEbayBatch } = useArticles()
 const { scan } = useScanCard()
 const toast = useToast()
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
 const route = useRoute()
 
 let nextSlotId: number = 1
@@ -476,7 +477,7 @@ async function submitAll() {
       }
     }
 
-    if (isDesktopApp.value && batchVinted.value && createdIds.length) {
+    if (canUseDesktopWorkers.value && batchVinted.value && createdIds.length) {
       try {
         const { job_id } = await startVintedBatch(createdIds)
         await navigateTo({

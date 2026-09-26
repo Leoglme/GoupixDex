@@ -21,7 +21,7 @@
               color="primary"
               icon="i-lucide-play"
               :loading="running"
-              :disabled="!isDesktopApp || !detail || running"
+              :disabled="!canUseDesktopWorkers || !detail || running"
               @click="onRun"
             >
               Lancer l’analyse
@@ -36,15 +36,19 @@
         <GoupixDexBackLink to="/panier-cardmarket" />
 
         <UAlert
-          v-if="!isDesktopApp"
+          v-if="isDesktopAppUnreachable"
           color="warning"
           variant="subtle"
           icon="i-lucide-monitor-down"
-          title="Application bureau requise"
-          description="Installez ou ouvrez GoupixDex desktop pour exécuter l’analyse Cardmarket (Chrome + nodriver)."
+          title="Ouvrez GoupixDex sur votre PC"
+          description="L’analyse Cardmarket s’exécute sur votre PC (Chrome + nodriver) : lancez GoupixDex sur votre ordinateur pour la démarrer d’ici."
         />
 
-        <GoupixDexCardmarketSessionBanner v-if="isDesktopApp" :session="cmSession" :loading="cmSessionLoading" />
+        <GoupixDexCardmarketSessionBanner
+          v-if="canUseDesktopWorkers"
+          :session="cmSession"
+          :loading="cmSessionLoading"
+        />
 
         <UAlert
           v-if="pageError"
@@ -200,19 +204,21 @@ import type {
   CardmarketSearchProgressPayload,
 } from '~/types/CardmarketSearch'
 import type { CardmarketSessionResponse } from '~/types/CardmarketSession'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
 const toast = useToast()
-const { getSearch, updateSearch, runWithProgress, cancelLocalRun, isDesktopApp } = useCardmarketSearches()
+const { getSearch, updateSearch, runWithProgress, cancelLocalRun, canUseDesktopWorkers } = useCardmarketSearches()
 const { fetchSession: fetchCmSession } = useCardmarketWorker()
+const { isDesktopAppUnreachable } = useDesktopWorkers()
 
 const cmSession: Ref<CardmarketSessionResponse | null> = ref(null)
 const cmSessionLoading: Ref<boolean> = ref(false)
 
 async function loadCardmarketSession(): Promise<void> {
-  if (!isDesktopApp.value) {
+  if (!canUseDesktopWorkers.value) {
     cmSession.value = null
     return
   }
@@ -451,7 +457,7 @@ function handleProgressPayload(p: CardmarketSearchProgressPayload): void {
 }
 
 async function onRun(): Promise<void> {
-  if (!detail.value || !isDesktopApp.value) {
+  if (!detail.value || !canUseDesktopWorkers.value) {
     return
   }
   running.value = true
@@ -491,8 +497,8 @@ onMounted((): void => {
   void loadCardmarketSession()
 })
 
-watch(isDesktopApp, (desktop) => {
-  if (desktop) {
+watch(canUseDesktopWorkers, (isAvailable: boolean): void => {
+  if (isAvailable) {
     void loadCardmarketSession()
   } else {
     cmSession.value = null

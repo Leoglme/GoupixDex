@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 
 type BrandKey = 'vinted' | 'ebay' | 'leboncoin' | 'all'
 
@@ -124,7 +124,7 @@ const props = withDefaults(
     vintedChannelEnabled: boolean
     ebayPublishAvailable: boolean
     leboncoinPublishAvailable: boolean
-    isDesktopApp: boolean
+    canUseDesktopWorkers: boolean
     loading?: boolean
     mode?: 'publish' | 'relist'
     defaultVinted?: boolean
@@ -186,9 +186,13 @@ function brandCheckboxClass(brand: BrandKey, checked: boolean): string {
   }
 }
 
-const vintedAvailable = computed(() => props.vintedChannelEnabled === true && props.isDesktopApp === true)
+const vintedAvailable: ComputedRef<boolean> = computed(
+  (): boolean => props.vintedChannelEnabled === true && props.canUseDesktopWorkers === true,
+)
 const ebayAvailable = computed(() => props.ebayPublishAvailable === true)
-const leboncoinAvailable = computed(() => props.leboncoinPublishAvailable === true && props.isDesktopApp === true)
+const leboncoinAvailable: ComputedRef<boolean> = computed(
+  (): boolean => props.leboncoinPublishAvailable === true && props.canUseDesktopWorkers === true,
+)
 
 const anyChannelAvailable = computed(() => vintedAvailable.value || ebayAvailable.value || leboncoinAvailable.value)
 
@@ -196,8 +200,8 @@ const vintedHint = computed(() => {
   if (!props.vintedChannelEnabled) {
     return 'Activez Vinted dans les paramètres.'
   }
-  if (!props.isDesktopApp) {
-    return 'Application desktop requise.'
+  if (!props.canUseDesktopWorkers) {
+    return 'Ouvrez GoupixDex sur votre PC.'
   }
   return ''
 })
@@ -210,8 +214,8 @@ const leboncoinHint = computed(() => {
   if (!props.leboncoinPublishAvailable) {
     return 'Activez Leboncoin et complétez l’adresse expéditeur (Mon profil).'
   }
-  if (!props.isDesktopApp) {
-    return 'Application desktop requise.'
+  if (!props.canUseDesktopWorkers) {
+    return 'Ouvrez GoupixDex sur votre PC.'
   }
   return ''
 })

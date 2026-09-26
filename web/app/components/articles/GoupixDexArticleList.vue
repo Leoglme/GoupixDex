@@ -1,22 +1,22 @@
 <template>
   <div ref="listRoot" class="space-y-4">
     <UAlert
-      v-if="!isDesktopApp"
+      v-if="isDesktopAppUnreachable"
       color="info"
       variant="subtle"
       icon="i-lucide-sparkles"
-      title="Mise en ligne Vinted disponible uniquement dans l'app desktop"
+      title="Mise en ligne Vinted : ouvrez GoupixDex sur votre PC"
     >
       <template #description>
         <p class="text-sm leading-relaxed">
-          Installez GoupixDex sur Windows ou macOS pour publier depuis votre connexion, comme sur la page
+          Les mises en ligne Vinted s'exécutent sur votre ordinateur : ouvrez GoupixDex sur votre PC pour les lancer
+          depuis cet appareil. Pas encore installé ?
           <NuxtLink
             to="/downloads"
             class="text-primary decoration-primary/40 hover:decoration-primary font-medium underline underline-offset-2"
           >
             Télécharger l'app
           </NuxtLink>
-          (installateurs et conseils pour choisir le bon fichier).
         </p>
       </template>
     </UAlert>
@@ -609,6 +609,7 @@ import { reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { ArticleListSortColumn, ArticleListSortDirection } from '~/composables/useUiPrefsLocalStorage'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
 import { articleTableSecondaryLine } from '~/utils/articleTableSecondaryLine'
 import { articleEligibleForBulkRelist } from '~/utils/articleSaleState'
@@ -670,7 +671,7 @@ const emit = defineEmits<{
   'retry-cross-vinted': [id: number]
 }>()
 
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
 const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
 
 /**
@@ -699,11 +700,11 @@ function buildRowMenu(row: Article) {
       onSelect: () => emit('retry-cross-ebay', row.id),
     })
   }
-  if (row.pending_vinted_unlist && (row.cross_vinted_removal_failed || isDesktopApp.value)) {
+  if (row.pending_vinted_unlist && (row.cross_vinted_removal_failed || canUseDesktopWorkers.value)) {
     cross.push({
       label: 'Réessayer suppression Vinted',
       icon: 'i-lucide-refresh-ccw',
-      disabled: !isDesktopApp.value,
+      disabled: !canUseDesktopWorkers.value,
       onSelect: () => emit('retry-cross-vinted', row.id),
     })
   }
@@ -715,7 +716,7 @@ function buildRowMenu(row: Article) {
       {
         label: 'Mettre en ligne sur Vinted',
         icon: 'i-lucide-store',
-        disabled: !isDesktopApp.value || row.is_sold || !row.images?.length,
+        disabled: !canUseDesktopWorkers.value || row.is_sold || !row.images?.length,
         onSelect: () => emit('publish-vinted', row),
       },
       ...(props.ebayPublishAvailable
@@ -733,7 +734,7 @@ function buildRowMenu(row: Article) {
             {
               label: 'Mettre en ligne sur Leboncoin',
               icon: 'i-lucide-megaphone',
-              disabled: !isDesktopApp.value || row.is_sold || !row.images?.length,
+              disabled: !canUseDesktopWorkers.value || row.is_sold || !row.images?.length,
               onSelect: () => emit('publish-leboncoin', row),
             },
           ]

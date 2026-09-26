@@ -15,6 +15,7 @@ except ImportError:
     pass
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -29,6 +30,7 @@ from routes import cardmarket_searches as cardmarket_searches_routes
 from routes import catalog_route
 from routes import binders_route
 from routes import collection_route
+from routes import desktop_relay_route
 from routes import ebay_market_route
 from routes import ebay_route
 from routes import portfolio_route
@@ -148,7 +150,7 @@ async def validation_exception_handler(
         request,
         JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": exc.errors(), "body": exc.body},
+            content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
         ),
     )
 
@@ -197,6 +199,7 @@ app.include_router(binders_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
 app.include_router(scan_stream_route.router)
+app.include_router(desktop_relay_route.router)
 app.include_router(shipping_route.router)
 app.include_router(amazon_accounts_routes.router)
 app.include_router(resend_webhook_routes.router, prefix="/webhooks", tags=["webhooks"])

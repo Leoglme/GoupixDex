@@ -41,7 +41,7 @@
             <UButton
               icon="i-lucide-cloud-download"
               :loading="wardrobeSyncing"
-              :disabled="!isDesktopApp"
+              :disabled="!canUseDesktopWorkers"
               @click="onWardrobeImportFromVinted"
             >
               Importer depuis Vinted
@@ -50,10 +50,9 @@
               Créer un article manuellement
             </UButton>
           </div>
-          <p v-if="!isDesktopApp" class="text-xs text-[var(--app-ink-soft)]">
-            L'import Vinted n'est disponible que dans
-            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>
-            (worker local sur ce poste).
+          <p v-if="isDesktopAppUnreachable" class="text-xs text-[var(--app-ink-soft)]">
+            L'import Vinted s'exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur, ou installez
+            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>.
           </p>
         </div>
 
@@ -167,7 +166,7 @@
     :vinted-channel-enabled="vintedChannelEnabled"
     :ebay-publish-available="ebayPublishAvailable"
     :leboncoin-publish-available="leboncoinPublishAvailable"
-    :is-desktop-app="isDesktopApp"
+    :can-use-desktop-workers="canUseDesktopWorkers"
     :loading="bulkPublishBusy"
     :default-vinted="bulkPublishChannelDefaults.vinted"
     :default-ebay="bulkPublishChannelDefaults.ebay"
@@ -188,7 +187,7 @@
     v-model:open="bulkDelistOpen"
     :article-count="bulkDelistIds.length"
     :vinted-channel-enabled="vintedChannelEnabled"
-    :is-desktop-app="isDesktopApp"
+    :can-use-desktop-workers="canUseDesktopWorkers"
     :any-vinted-listed="bulkDelistChannelState.anyVinted"
     :any-ebay-listed="bulkDelistChannelState.anyEbay"
     :any-leboncoin-listed="bulkDelistChannelState.anyLeboncoin"
@@ -220,6 +219,8 @@
 </template>
 
 <script setup lang="ts">
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+
 definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
@@ -227,7 +228,7 @@ useGoupixPageSeo(
   'Annonces déjà en ligne sur Vinted ou eBay : suivi, mise à jour et vente dans GoupixDex.',
 )
 
-const { isDesktopApp } = useDesktopRuntime()
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
 
 const {
   displayedArticles,

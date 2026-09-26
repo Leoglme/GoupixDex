@@ -1,7 +1,9 @@
 /**
- * Local SSE stream: ``GET /vinted/wardrobe-sync/jobs/:id/stream`` (desktop worker).
+ * SSE stream ``GET /vinted/wardrobe-sync/jobs/:id/stream`` of the PC worker (desktop app, or relayed).
  */
 import type { Ref } from 'vue'
+import type { WorkerEventStream } from '~/types/DesktopRelay'
+import { useDesktopWorkers, wrapEventSource } from '~/composables/useDesktopWorkers'
 
 export interface WardrobeSyncLogEntry {
   text: string
@@ -15,10 +17,10 @@ export interface WardrobeSyncLogEntry {
 export function useWardrobeSyncStream() {
   const config = useRuntimeConfig()
   const { token } = useAuth()
-  const { isDesktopApp } = useDesktopRuntime()
+  const { canUseDesktopWorkers, openWorkerEventStream } = useDesktopWorkers()
 
   const logEntries: Ref<WardrobeSyncLogEntry[]> = ref([])
-  let eventSource: EventSource | null = null
+  let eventSource: WorkerEventStream | null = null
 
   /**
    * Close any active wardrobe SSE connection.
@@ -44,14 +46,13 @@ export function useWardrobeSyncStream() {
       return Promise.reject(new Error('Non authentifié'))
     }
     const remoteBase = (config.public.apiBase as string).replace(/\/$/, '')
-    const localBase = String(config.public.vintedLocalBase || 'http://127.0.0.1:18766').replace(/\/$/, '')
-    const base = isDesktopApp.value ? localBase : remoteBase
-    const remoteParam = isDesktopApp.value ? `&remote_api=${encodeURIComponent(remoteBase)}` : ''
-    const url = `${base}/vinted/wardrobe-sync/jobs/${encodeURIComponent(jobId)}/stream?token=${encodeURIComponent(t)}${remoteParam}`
+    const streamPath = `/vinted/wardrobe-sync/jobs/${encodeURIComponent(jobId)}/stream`
 
     return new Promise((resolve, reject) => {
       let settled = false
-      eventSource = new EventSource(url)
+      eventSource = canUseDesktopWorkers.value
+        ? openWorkerEventStream('vinted', streamPath)
+        : wrapEventSource(new EventSource(`${remoteBase}${streamPath}?token=${encodeURIComponent(t)}`))
 
       eventSource.onmessage = (e: MessageEvent<string>) => {
         try {
