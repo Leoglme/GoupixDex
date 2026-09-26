@@ -56,6 +56,19 @@ def test_match_by_number_when_numbering_and_names_agree(monkeypatch: pytest.Monk
     assert found["TG2"].low == "https://img.test/TG02/small"
 
 
+def test_match_unown_letters_including_the_encoded_question_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    cards = [_pokemontcg_card("?", "Unown"), _pokemontcg_card("A", "Unown"), _pokemontcg_card("!", "Unown")]
+    monkeypatch.setattr(fallback, "_pokemontcg_cards", lambda _pokemontcg_id: cards)
+    english_names = {"!": "unown", "%3F": "unown", "A": "unown"}
+
+    found = fallback._match_pokemontcg("exu", ["!", "%3F", "A"], english_names)
+
+    assert fallback.pokemontcg_set_id("exu") == "ex10"
+    assert found["!"].low == "https://img.test/!/small"
+    assert found["%3F"].low == "https://img.test/?/small"
+    assert found["A"].low == "https://img.test/A/small"
+
+
 def test_no_match_without_english_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fallback, "_pokemontcg_cards", lambda _pokemontcg_id: [_pokemontcg_card("1", "Pikachu")])
 

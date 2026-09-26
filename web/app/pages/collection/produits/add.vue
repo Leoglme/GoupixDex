@@ -46,7 +46,7 @@
                 :logo="openExpansion.logo ?? undefined"
                 :set-id="openExpansion.tcgdex_id ?? undefined"
                 locale="fr"
-                :fallback-image="expansionPreviewImage(openExpansion)"
+                :fallback-images="expansionPreviewImages(openExpansion)"
                 :name="openExpansion.name"
                 large
               />
@@ -154,7 +154,7 @@
                     :logo="expansion.logo ?? undefined"
                     :set-id="expansion.tcgdex_id ?? undefined"
                     locale="fr"
-                    :fallback-image="expansionPreviewImage(expansion)"
+                    :fallback-images="expansionPreviewImages(expansion)"
                     :name="expansion.name"
                     large
                   />
@@ -194,6 +194,7 @@ const drawerStack = useGoupixDrawerStack()
 const toast = useToast()
 
 const SEARCH_LIMIT: number = 80
+const PREVIEW_IMAGE_COUNT: number = 3
 const PRODUCT_TYPE_ORDER: string[] = Object.keys(SEALED_TYPE_LABELS)
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -337,12 +338,15 @@ function expansionSummary(expansion: SealedCatalogExpansion): string {
 }
 
 /**
- * Image d'un produit de l'extension, montrée à la place du logo quand l'extension n'en a pas.
+ * Images de produits de l'extension, montrées à la place du logo quand l'extension n'en a pas (la suivante si l'une manque).
  * @param expansion - Extension du catalogue.
- * @returns L'URL de la première image produit, ou `undefined` sans produit illustré.
+ * @returns Les URL des trois premières images produit.
  */
-function expansionPreviewImage(expansion: SealedCatalogExpansion): string | undefined {
-  return expansion.products.find((product: SealedCatalogProduct): boolean => Boolean(product.img))?.img ?? undefined
+function expansionPreviewImages(expansion: SealedCatalogExpansion): string[] {
+  return expansion.products
+    .map((product: SealedCatalogProduct): string | null => product.img)
+    .filter((imageUrl: string | null): imageUrl is string => Boolean(imageUrl))
+    .slice(0, PREVIEW_IMAGE_COUNT)
 }
 
 /**

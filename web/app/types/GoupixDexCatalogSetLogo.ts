@@ -4,7 +4,7 @@ export type GoupixDexCatalogSetLogoProps = {
   logo?: string
   symbol?: string
   cover?: string
-  fallbackImage?: string
+  fallbackImages?: string[]
   name: string
   large?: boolean
   setId?: string

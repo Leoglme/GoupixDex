@@ -119,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CatalogSearchCardHit, TcgdexSeriesWithSets } from '~/composables/useCardCatalog'
+import type { CatalogLocale, CatalogSearchCardHit, TcgdexSeriesWithSets } from '~/composables/useCardCatalog'
 import { cardThumbFromImage } from '~/utils/catalogAssets'
 
 definePageMeta({ middleware: 'auth' })
@@ -128,7 +128,7 @@ useGoupixPageSeo('Catalogue Pokémon', 'Navigateur d’extensions TCGdex pour al
 
 const route = useRoute()
 const toast = useToast()
-const { browseCatalog, searchCatalogCards } = useCardCatalog()
+const { browseCatalog, browseCatalogFromApi, searchCatalogCards } = useCardCatalog()
 const { addToCollection, listCollection } = useCollection()
 const { catalogLanguage, catalogLanguageItems } = useCatalogLanguage()
 const drawerStack = useGoupixDrawerStack()
@@ -198,6 +198,28 @@ async function loadBrowse(force = false): Promise<void> {
     seriesTree.value = []
   } finally {
     browseLoading.value = false
+  }
+  refreshBrowseFromApi(locale)
+}
+
+/**
+ * Remplace l'index statique, généré sur GitHub où TCGdex répond parfois en retard, par l'arborescence de l'API dès qu'elle arrive.
+ * @param locale - Langue affichée au moment du chargement.
+ * @returns {Promise<void>}
+ */
+async function refreshBrowseFromApi(locale: CatalogLocale): Promise<void> {
+  try {
+    const res = await browseCatalogFromApi(locale)
+    if (catalogLanguage.value !== locale || !res.series.length) {
+      return
+    }
+    const next: TcgdexSeriesWithSets[] = res.series.map(
+      (serie: TcgdexSeriesWithSets): TcgdexSeriesWithSets => ({ ...serie, sets: [...(serie.sets ?? [])] }),
+    )
+    seriesTree.value = next
+    writeBrowseCache(locale, next)
+  } catch {
+    // L'index statique reste affiché.
   }
 }
 

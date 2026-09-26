@@ -13,13 +13,14 @@
   >
     <div class="relative aspect-square w-full overflow-hidden bg-white">
       <img
-        v-if="props.imageUrl"
+        v-if="props.imageUrl && !hasImageLoadFailed"
         :src="props.imageUrl"
         :alt="props.name"
         class="absolute inset-0 h-full w-full object-contain p-4 transition-transform duration-300 group-hover:scale-[1.03]"
         referrerpolicy="no-referrer"
         loading="lazy"
         decoding="async"
+        @error="hasImageLoadFailed = true"
       />
       <div v-else class="absolute inset-0 flex items-center justify-center">
         <UIcon :name="sealedProductTypeIcon(props.productType)" class="size-8 text-neutral-400" />
@@ -34,7 +35,7 @@
       />
     </div>
     <div class="flex min-w-0 flex-1 flex-col gap-0.5 p-3">
-      <p class="text-highlighted line-clamp-2 text-sm leading-tight font-semibold">{{ props.name }}</p>
+      <p class="text-highlighted line-clamp-2 min-h-[2.5em] text-sm leading-tight font-semibold">{{ props.name }}</p>
       <p class="text-muted truncate text-xs">{{ productTypeAndSetLabel }}</p>
       <div class="mt-auto flex items-baseline justify-between gap-2 pt-2">
         <span class="text-muted truncate text-xs tabular-nums">{{ props.purchaseLabel }}</span>
@@ -51,7 +52,7 @@
 </template>
 
 <script lang="ts" setup>
-import type { ComputedRef, PropType } from 'vue'
+import type { ComputedRef, PropType, Ref } from 'vue'
 import type { GoupixDexSealedProductTileProps } from '~/types/GoupixDexSealedProductTile'
 import { sealedProductTypeIcon, sealedProductTypeLabel } from '~/utils/sealedProducts'
 
@@ -99,7 +100,17 @@ const emit = defineEmits<{
   add: []
 }>()
 
+// Certaines images listées par TCGplayer n'existent pas sur leur CDN : l'icône du type prend alors le relais.
+const hasImageLoadFailed: Ref<boolean> = ref(false)
+
 const productTypeAndSetLabel: ComputedRef<string> = computed((): string =>
   [sealedProductTypeLabel(props.productType), props.setName].filter(Boolean).join(' · '),
+)
+
+watch(
+  (): string | null => props.imageUrl,
+  (): void => {
+    hasImageLoadFailed.value = false
+  },
 )
 </script>

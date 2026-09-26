@@ -145,18 +145,19 @@
               </span>
             </template>
             <template #footer>
-              <p
-                v-if="product.gain_eur != null"
-                class="flex items-baseline justify-between gap-2 text-xs font-semibold tabular-nums"
-                :class="product.gain_eur >= 0 ? 'text-success' : 'text-error'"
-              >
+              <p class="flex items-baseline justify-between gap-2 text-xs font-semibold tabular-nums">
                 <span class="font-normal text-(--app-faint)">plus-value</span>
-                <span class="truncate">
+                <span
+                  v-if="product.gain_eur != null"
+                  class="truncate"
+                  :class="product.gain_eur >= 0 ? 'text-success' : 'text-error'"
+                >
                   {{ formatSignedEur(product.gain_eur) }}
                   <span v-if="product.gain_percent != null" class="text-muted font-normal">
                     {{ formatSignedPercent(product.gain_percent) }}
                   </span>
                 </span>
+                <span v-else class="font-normal text-(--app-faint)">—</span>
               </p>
             </template>
           </GoupixDexSealedProductTile>

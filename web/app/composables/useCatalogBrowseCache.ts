@@ -1,6 +1,6 @@
 import type { CatalogLocale, TcgdexSeriesWithSets } from '~/composables/useCardCatalog'
 
-const STORAGE_PREFIX = 'goupix_catalog_browse_v6'
+const STORAGE_PREFIX = 'goupix_catalog_browse_v7'
 /** Static JSON is immutable until deploy; keep a long client cache. */
 const TTL_MS = 7 * 24 * 60 * 60 * 1000
 

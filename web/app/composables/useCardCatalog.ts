@@ -163,7 +163,7 @@ export function useCardCatalog() {
     return await $fetch<CatalogBrowseResponse>(`/catalog-index/${file}`)
   }
 
-  /** Authenticated API fallback (legacy / debugging). */
+  /** Authenticated API browse tree, fresher than the static index built on GitHub runners. */
   async function browseCatalogFromApi(locale: CatalogLocale) {
     const { data } = await $api.get<CatalogBrowseResponse>('/catalog/browse', {
       params: { locale },

@@ -411,35 +411,55 @@ def load_tcgdex_sets() -> tuple[dict[str, dict], list[dict]]:
     return index, series_meta
 
 
+#: Passes sur les groupes TCGCSV en échec : la CI se fait limiter par rafales et perdait jusqu'à 20 extensions par nuit.
+TCGCSV_GROUP_PASSES = 3
+TCGCSV_RETRY_PAUSE_SEC = 60.0
+
+
+def load_tcgcsv_group(group: dict) -> dict | None:
+    """Produits scellés (nom + image) et prix marché USD d'un groupe TCGplayer, ``None`` s'il n'a aucun scellé."""
+    gid = group["groupId"]
+    products = _fetch_json(f"https://tcgcsv.com/tcgplayer/{POKEMON_CATEGORY}/{gid}/products", cache=True)["results"]
+    prices = _fetch_json(f"https://tcgcsv.com/tcgplayer/{POKEMON_CATEGORY}/{gid}/prices", cache=True)["results"]
+    sealed = [
+        p
+        for p in products
+        if not _is_card(p) and not _is_non_physical(p.get("name", "")) and not _is_wholesale(p.get("name", ""))
+    ]
+    if not sealed:
+        return None
+    return {
+        "name": group["name"],
+        "abbr": group.get("abbreviation") or "",
+        "published_on": group.get("publishedOn") or "",
+        "products": sealed,
+        "price_by_id": {p["productId"]: p.get("marketPrice") for p in prices if p.get("marketPrice")},
+    }
+
+
 def load_tcgcsv_groups() -> list[dict]:
-    """Groupes TCGplayer (extensions) + leurs produits scellés (nom + image) + prix marché USD."""
-    groups = _fetch_json("https://tcgcsv.com/tcgplayer/3/groups", cache=True)["results"]
+    """Groupes TCGplayer (extensions) avec leurs scellés ; les groupes en échec sont repris après une pause."""
+    pending = _fetch_json("https://tcgcsv.com/tcgplayer/3/groups", cache=True)["results"]
     out: list[dict] = []
-    for group in groups:
-        gid = group["groupId"]
-        try:
-            products = _fetch_json(f"https://tcgcsv.com/tcgplayer/{POKEMON_CATEGORY}/{gid}/products", cache=True)["results"]
-            prices = _fetch_json(f"https://tcgcsv.com/tcgplayer/{POKEMON_CATEGORY}/{gid}/prices", cache=True)["results"]
-        except (httpx.HTTPError, SystemExit):
-            continue
-        price_by_id = {p["productId"]: p.get("marketPrice") for p in prices if p.get("marketPrice")}
-        sealed = [
-            p
-            for p in products
-            if not _is_card(p) and not _is_non_physical(p.get("name", "")) and not _is_wholesale(p.get("name", ""))
-        ]
-        if not sealed:
-            continue
-        out.append(
-            {
-                "name": group["name"],
-                "abbr": group.get("abbreviation") or "",
-                "published_on": group.get("publishedOn") or "",
-                "products": sealed,
-                "price_by_id": price_by_id,
-            }
-        )
-        time.sleep(0.25)
+    for attempt in range(TCGCSV_GROUP_PASSES):
+        failed: list[dict] = []
+        for group in pending:
+            try:
+                loaded = load_tcgcsv_group(group)
+            except (httpx.HTTPError, SystemExit):
+                failed.append(group)
+                continue
+            if loaded:
+                out.append(loaded)
+            time.sleep(0.25)
+        pending = failed
+        if not pending:
+            break
+        if attempt < TCGCSV_GROUP_PASSES - 1:
+            print(f"TCGCSV : {len(pending)} groupe(s) en échec, nouvelle passe dans {TCGCSV_RETRY_PAUSE_SEC:.0f} s", flush=True)
+            time.sleep(TCGCSV_RETRY_PAUSE_SEC)
+    if pending:
+        print("TCGCSV : groupes abandonnés : " + ", ".join(group["name"] for group in pending), flush=True)
     return out
 
 

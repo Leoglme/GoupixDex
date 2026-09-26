@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "build_sealed_catalog.py"
 
 
@@ -74,3 +76,26 @@ def test_merge_history_points_keeps_existing_and_adds_missing_dates() -> None:
     incoming = [["2026-09-20", 9.0], ["2026-09-22", 99.0], ["2026-09-21", 9.5]]
     merged = build.merge_history_points(existing, incoming)
     assert merged == [["2026-09-20", 9.0], ["2026-09-21", 9.5], ["2026-09-22", 10.0]]
+
+
+def test_load_tcgcsv_groups_retries_groups_that_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    groups = [{"groupId": 1, "name": "Base Set"}, {"groupId": 2, "name": "Jungle"}]
+    failures_left = {2: 1}
+
+    def fake_fetch_json(url: str, **_kwargs: object) -> dict:
+        if url.endswith("/groups"):
+            return {"results": groups}
+        group_id = int(url.split("/")[-2])
+        if url.endswith("/products") and failures_left.get(group_id):
+            failures_left[group_id] -= 1
+            raise SystemExit("TCGCSV limite les requêtes")
+        if url.endswith("/products"):
+            return {"results": [{"productId": group_id, "name": "Booster Box", "extendedData": []}]}
+        return {"results": []}
+
+    monkeypatch.setattr(build, "_fetch_json", fake_fetch_json)
+    monkeypatch.setattr(build.time, "sleep", lambda _seconds: None)
+
+    loaded = build.load_tcgcsv_groups()
+
+    assert [group["name"] for group in loaded] == ["Base Set", "Jungle"]

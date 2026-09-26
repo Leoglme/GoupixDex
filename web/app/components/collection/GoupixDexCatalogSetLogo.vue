@@ -32,9 +32,9 @@ const props: GoupixDexCatalogSetLogoProps = defineProps({
     type: String,
     default: undefined,
   },
-  fallbackImage: {
-    type: String,
-    default: undefined,
+  fallbackImages: {
+    type: Array as PropType<string[]>,
+    default: (): string[] => [],
   },
   name: {
     type: String,
@@ -60,7 +60,7 @@ const candidates: ComputedRef<string[]> = computed((): string[] => {
   const override: string | null = setLogoOverride(props.setId, props.locale ?? 'fr')
   const base: string[] = catalogLogoCandidates(props.logo, props.symbol, props.cover)
   const logoUrls: string[] = override ? [override, ...base] : base
-  return props.fallbackImage ? [...logoUrls, props.fallbackImage] : logoUrls
+  return [...logoUrls, ...(props.fallbackImages ?? [])]
 })
 
 const currentSrc: ComputedRef<string | undefined> = computed(
@@ -70,7 +70,7 @@ const currentSrc: ComputedRef<string | undefined> = computed(
 const imgClass: ComputedRef<string> = computed((): string => {
   const isCover: boolean =
     (Boolean(props.cover) && currentSrc.value === props.cover) ||
-    (Boolean(props.fallbackImage) && currentSrc.value === props.fallbackImage)
+    (currentSrc.value !== undefined && (props.fallbackImages ?? []).includes(currentSrc.value))
   if (isCover) {
     return 'mx-auto h-14 rounded-md object-contain shadow-sm'
   }
@@ -78,7 +78,14 @@ const imgClass: ComputedRef<string> = computed((): string => {
 })
 
 watch(
-  (): (string | undefined)[] => [props.logo, props.symbol, props.cover, props.fallbackImage, props.setId, props.locale],
+  (): (string | undefined)[] => [
+    props.logo,
+    props.symbol,
+    props.cover,
+    props.fallbackImages?.join(' '),
+    props.setId,
+    props.locale,
+  ],
   (): void => {
     candidateIndex.value = 0
   },

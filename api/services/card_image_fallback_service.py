@@ -15,7 +15,7 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -48,6 +48,7 @@ _POKEMONTCG_SET_IDS: dict[str, str] = {
     "30th-c": "me55c",
     "bog": "bp",
     "cel25cc": "cel25c",
+    "exu": "ex10",
     "hgssp": "hsp",
     "sm3.5": "sm35",
     "sm7.5": "sm75",
@@ -302,8 +303,8 @@ def _pokemontcg_cards(pokemontcg_id: str) -> list[dict[str, Any]]:
 
 
 def _normalize_number(number: object) -> str:
-    """Numéro comparable entre sources : « TG01 » = « TG1 », « 001 » = « 1 »."""
-    raw = str(number or "").strip().upper()
+    """Numéro comparable entre sources : « TG01 » = « TG1 », « 001 » = « 1 », « %3F » = « ? »."""
+    raw = unquote(str(number or "")).strip().upper()
     match = _CARD_NUMBER_RE.match(raw)
     return f"{match.group(1)}{match.group(2)}{match.group(3)}" if match else raw
 
