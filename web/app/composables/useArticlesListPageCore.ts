@@ -581,10 +581,55 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
+   * Retire eBay / Leboncoin sans bloquer l’ouverture du journal Vinted, puis annonce le résultat par un toast.
    *
-   * @param ids
+   * @param ids - Articles sélectionnés.
+   * @param payload - Marketplaces cochées hors Vinted (retiré par le worker desktop).
+   * @returns {Promise<void>} Résolue quand l’API a répondu.
    */
-  async function confirmBulkDelist(payload: { vinted: boolean; ebay: boolean; leboncoin: boolean }) {
+  async function removeEbayAndLeboncoinListingsInBackground(
+    ids: number[],
+    payload: { ebay: boolean; leboncoin: boolean },
+  ): Promise<void> {
+    const expectedEbayRemovalCount: number = payload.ebay
+      ? articlesForIds(ids).filter((row: Article) => row.published_on_ebay).length
+      : 0
+    try {
+      const res = await bulkDelistChannels({
+        article_ids: ids,
+        vinted: false,
+        ebay: payload.ebay,
+        leboncoin: payload.leboncoin,
+      })
+      const parts: string[] = []
+      if (res.ebay_removed) {
+        parts.push(`${res.ebay_removed} retrait(s) eBay`)
+      }
+      if (res.leboncoin_cleared) {
+        parts.push(`${res.leboncoin_cleared} retrait(s) Leboncoin`)
+      }
+      if (parts.length) {
+        toast.add({ title: 'Retrait enregistré', description: parts.join(' · '), color: 'success' })
+      }
+      if (res.ebay_removed < expectedEbayRemovalCount) {
+        toast.add({
+          title: 'Retrait eBay incomplet',
+          description: `${expectedEbayRemovalCount - res.ebay_removed} annonce(s) eBay n’ont pas pu être retirées.`,
+          color: 'warning',
+        })
+      }
+    } catch (e) {
+      toast.add({ title: 'Retrait eBay / Leboncoin impossible', description: apiErrorMessage(e), color: 'error' })
+    }
+  }
+
+  /**
+   * Retire la sélection des marketplaces cochées : sur desktop, le lot Vinted part d’abord et le journal s’ouvre tout de suite.
+   *
+   * @param payload - Marketplaces à retirer.
+   * @returns {Promise<void>} Résolue une fois le retrait lancé (ou terminé hors Vinted).
+   */
+  async function confirmBulkDelist(payload: { vinted: boolean; ebay: boolean; leboncoin: boolean }): Promise<void> {
     const ids = bulkDelistIds.value
     if (!ids.length) {
       return
@@ -592,6 +637,21 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     bulkDelistOpen.value = false
     bulkDelistBusy.value = true
     try {
+      const vintedDelistIds: number[] = payload.vinted
+        ? articlesForIds(ids)
+            .filter((row: Article) => row.published_on_vinted)
+            .map((row: Article) => row.id)
+        : []
+      if (vintedDelistIds.length && isDesktopApp.value) {
+        const { job_id } = await startVintedBatchDelist(vintedDelistIds)
+        if (payload.ebay || payload.leboncoin) {
+          removeEbayAndLeboncoinListingsInBackground(ids, payload)
+        }
+        articleListSelectionReset.value += 1
+        await navigateTo({ path: '/articles/listing-logs', query: { job: job_id } })
+        return
+      }
+
       const res = await bulkDelistChannels({
         article_ids: ids,
         vinted: payload.vinted,

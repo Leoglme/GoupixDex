@@ -211,6 +211,8 @@ async def bulk_delist_channels(
             vinted_ids.append(aid)
         if body.ebay and article.published_on_ebay:
             ok, _err = await delete_ebay_listing_for_article(db, article, user)
+            # Relit l’article : le worker Vinted a pu confirmer son propre retrait pendant l’appel eBay.
+            db.refresh(article)
             if ok:
                 clear_ebay_publication_fields(article)
                 article.cross_ebay_removal_failed = False
