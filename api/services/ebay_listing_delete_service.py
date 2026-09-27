@@ -72,6 +72,58 @@ async def _find_sku_for_listing_id(
     return None
 
 
+async def _end_offer_listing(
+    client: httpx.AsyncClient,
+    root: str,
+    headers: dict[str, str],
+    offer: dict[str, Any],
+) -> bool:
+    """
+    Met fin à l’annonce d’une offre eBay, puis supprime l’offre.
+
+    Returns:
+        Vrai dès que l’annonce n’est plus en ligne, même si la suppression de l’offre a échoué.
+    """
+    offer_id = str(offer.get("offerId") or "").strip()
+    has_listing_ended = str(offer.get("status") or "").upper() != "PUBLISHED"
+    if not has_listing_ended:
+        withdraw_response = await client.post(f"{root}/sell/inventory/v1/offer/{offer_id}/withdraw", headers=headers)
+        has_listing_ended = withdraw_response.status_code in (200, 204)
+        if not has_listing_ended:
+            logger.warning(
+                "eBay withdraw failed offer=%s: %s %s",
+                offer_id,
+                withdraw_response.status_code,
+                withdraw_response.text[:300],
+            )
+    try:
+        # Supprimer une offre encore publiée met aussi fin à son annonce.
+        delete_response = await client.delete(f"{root}/sell/inventory/v1/offer/{offer_id}", headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("eBay deleteOffer unreachable offer=%s: %r", offer_id, exc)
+        return has_listing_ended
+    if delete_response.status_code in (200, 204, 404):
+        return True
+    logger.warning(
+        "eBay deleteOffer failed offer=%s: %s %s",
+        offer_id,
+        delete_response.status_code,
+        delete_response.text[:300],
+    )
+    return has_listing_ended
+
+
+async def _delete_inventory_item(client: httpx.AsyncClient, root: str, headers: dict[str, str], sku: str) -> None:
+    """Supprime l’article d’inventaire eBay d’un SKU dont l’annonce est terminée ; un échec est seulement journalisé."""
+    try:
+        response = await client.delete(f"{root}/sell/inventory/v1/inventory_item/{sku}", headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("eBay deleteInventoryItem unreachable sku=%s: %r", sku, exc)
+        return
+    if response.status_code not in (200, 204, 404):
+        logger.warning("eBay deleteInventoryItem failed sku=%s: %s %s", sku, response.status_code, response.text[:300])
+
+
 async def delete_ebay_listing_for_article(
     db: Session,
     article: Article,
@@ -80,10 +132,10 @@ async def delete_ebay_listing_for_article(
     app: AppSettings | None = None,
 ) -> tuple[bool, str | None]:
     """
-    Retire puis supprime l’offre et l’inventaire eBay pour cet article.
+    Met fin à l’annonce eBay de cet article, puis supprime son offre et son inventaire.
 
     Returns:
-        ``(ok, message_erreur_fr)`` — ``message_erreur_fr`` est ``None`` si succès ou rien à faire.
+        ``(ok, message_erreur_fr)`` : ``ok`` dès que l’annonce n’est plus en ligne sur eBay, même si le ménage de l’offre ou de l’inventaire échoue.
     """
     s = app or get_settings()
     if not s.ebay_client_id or not article.published_on_ebay:
@@ -101,50 +153,34 @@ async def delete_ebay_listing_for_article(
     sku = (article.ebay_inventory_sku or "").strip() or None
     headers = {"Authorization": f"Bearer {token}"}
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        if not sku and article.ebay_listing_id:
-            sku = await _find_sku_for_listing_id(client, root, token, str(article.ebay_listing_id))
-            if sku:
-                article.ebay_inventory_sku = sku[:50]
-                db.add(article)
-                db.commit()
-        if not sku:
-            return False, "SKU eBay introuvable pour cette annonce (réimportez ou supprimez-la sur eBay.fr)."
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            if not sku and article.ebay_listing_id:
+                sku = await _find_sku_for_listing_id(client, root, token, str(article.ebay_listing_id))
+                if sku:
+                    article.ebay_inventory_sku = sku[:50]
+                    db.add(article)
+                    db.commit()
+            if not sku:
+                return False, "SKU eBay introuvable pour cette annonce (réimportez ou supprimez-la sur eBay.fr)."
 
-        off_r = await client.get(f"{root}/sell/inventory/v1/offer", params={"sku": sku}, headers=headers)
-        if off_r.status_code != 200:
-            return False, f"Lecture des offres eBay impossible (HTTP {off_r.status_code})."
-        offers: list[dict[str, Any]] = (off_r.json() or {}).get("offers") or []
-        if not offers:
-            return True, None
-
-        for off in offers:
-            offer_id = (off.get("offerId") or "").strip()
-            if not offer_id:
-                continue
-            status = (off.get("status") or "").upper()
-            if status == "PUBLISHED":
-                w = await client.post(
-                    f"{root}/sell/inventory/v1/offer/{offer_id}/withdraw",
-                    headers=headers,
-                )
-                if w.status_code not in (200, 204):
-                    logger.warning(
-                        "eBay withdraw non bloquant offer=%s: %s %s",
-                        offer_id,
-                        w.status_code,
-                        w.text[:300],
-                    )
-
-            d = await client.delete(f"{root}/sell/inventory/v1/offer/{offer_id}", headers=headers)
-            if d.status_code not in (200, 204):
-                logger.warning("eBay deleteOffer failed offer=%s: %s %s", offer_id, d.status_code, d.text[:500])
-                return False, "Impossible de supprimer l’offre eBay."
-
-        inv_d = await client.delete(f"{root}/sell/inventory/v1/inventory_item/{sku}", headers=headers)
-        if inv_d.status_code not in (200, 204):
-            logger.warning("eBay deleteInventoryItem failed sku=%s: %s %s", sku, inv_d.status_code, inv_d.text[:500])
-            return False, "L’offre est retirée mais la suppression de l’inventaire eBay a échoué."
+            off_r = await client.get(f"{root}/sell/inventory/v1/offer", params={"sku": sku}, headers=headers)
+            # eBay répond 404 quand plus aucune offre n’existe pour ce SKU : l’annonce n’est plus en ligne.
+            if off_r.status_code == 404:
+                await _delete_inventory_item(client, root, headers, sku)
+                return True, None
+            if off_r.status_code != 200:
+                return False, f"Lecture des offres eBay impossible (HTTP {off_r.status_code})."
+            offers: list[dict[str, Any]] = (off_r.json() or {}).get("offers") or []
+            for offer in offers:
+                if not str(offer.get("offerId") or "").strip():
+                    continue
+                if not await _end_offer_listing(client, root, headers, offer):
+                    return False, "eBay n’a pas mis fin à l’annonce : réessayez dans quelques minutes."
+            await _delete_inventory_item(client, root, headers, sku)
+    except httpx.HTTPError as exc:
+        logger.warning("eBay listing removal unreachable article=%s: %r", article.id, exc)
+        return False, "eBay ne répond pas pour le moment : réessayez dans quelques minutes."
 
     return True, None
 

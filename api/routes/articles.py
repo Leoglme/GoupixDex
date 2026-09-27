@@ -196,12 +196,13 @@ async def bulk_delist_channels(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Retire eBay / Leboncoin côté API ; renvoie les ids Vinted à traiter sur le worker desktop."""
+    """Retire eBay / Leboncoin côté API ; renvoie les ids Vinted à traiter sur le worker desktop et la raison de chaque échec eBay."""
     if not body.vinted and not body.ebay and not body.leboncoin:
         raise HTTPException(status_code=400, detail="Sélectionnez au moins une marketplace.")
     unique_ids = list(dict.fromkeys(body.article_ids))
     vinted_ids: list[int] = []
     ebay_removed = 0
+    ebay_failures: list[dict[str, Any]] = []
     leboncoin_cleared = 0
     for aid in unique_ids:
         article = article_service.get_article(db, aid, user.id)
@@ -210,7 +211,7 @@ async def bulk_delist_channels(
         if body.vinted and article.published_on_vinted:
             vinted_ids.append(aid)
         if body.ebay and article.published_on_ebay:
-            ok, _err = await delete_ebay_listing_for_article(db, article, user)
+            ok, err = await delete_ebay_listing_for_article(db, article, user)
             # Relit l’article : le worker Vinted a pu confirmer son propre retrait pendant l’appel eBay.
             db.refresh(article)
             if ok:
@@ -218,15 +219,18 @@ async def bulk_delist_channels(
                 article.cross_ebay_removal_failed = False
                 article.cross_ebay_removal_error = None
                 ebay_removed += 1
+            else:
+                ebay_failures.append({"article_id": aid, "detail": err or "Impossible de retirer l’annonce eBay."})
         if body.leboncoin and article.published_on_leboncoin:
             article_service.clear_leboncoin_publication_fields(article)
             leboncoin_cleared += 1
         article_service.apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
         db.add(article)
-    db.commit()
+        db.commit()
     return {
         "vinted_article_ids": vinted_ids,
         "ebay_removed": ebay_removed,
+        "ebay_failures": ebay_failures,
         "leboncoin_cleared": leboncoin_cleared,
     }
 
