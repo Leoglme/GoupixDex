@@ -62,6 +62,23 @@
           </p>
         </UCard>
 
+        <UCard v-if="leboncoinAlongsideJobId" class="shrink-0" :ui="{ body: 'space-y-2 py-3' }">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-highlighted text-sm font-medium">Publication Leboncoin</span>
+            <span class="text-muted text-sm">{{ leboncoinBatchStatusLabel }}</span>
+            <UIcon v-if="isLeboncoinBatchRunning" name="i-lucide-loader-2" class="text-primary size-4 animate-spin" />
+          </div>
+          <ul v-if="leboncoinBatchLogLines.length" class="max-h-40 space-y-1 overflow-y-auto">
+            <li
+              v-for="(line, index) in leboncoinBatchLogLines"
+              :key="index"
+              class="text-muted font-mono text-xs break-words"
+            >
+              {{ line }}
+            </li>
+          </ul>
+        </UCard>
+
         <div v-if="showMainPanels" class="grid min-h-0 flex-1 [grid-template-rows:minmax(0,auto)_minmax(0,1fr)] gap-4">
           <UCard
             v-if="streamMode === 'batch'"
@@ -174,6 +191,9 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import type { VintedBatchProgress } from '~/composables/useVintedBatchStream'
+import type { VintedLogEntry } from '~/composables/useVintedPublishStream'
+import type { DesktopWorkerName } from '~/types/DesktopRelay'
 import type { EbayLeboncoinDelist } from '~/types/EbayLeboncoinDelist'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
@@ -196,6 +216,7 @@ useGoupixPageSeo(
 const route = useRoute()
 const { getVintedBatchActive } = useArticles()
 const batchStream = useVintedBatchStream()
+const leboncoinBatchStream = useVintedBatchStream()
 const publishStream = useVintedPublishStream()
 const wardrobeStream = useWardrobeSyncStream()
 const { isDesktopAppUnreachable, waitForDesktopWorkersAvailability } = useDesktopWorkers()
@@ -238,6 +259,8 @@ watch(
 const loading: Ref<boolean> = ref(false)
 const idleMessage: Ref<string | null> = ref(null)
 const streamError: Ref<string | null> = ref(null)
+const leboncoinAlongsideJobId: Ref<string | null> = ref(null)
+const leboncoinBatchStreamError: Ref<string | null> = ref(null)
 
 let bootstrapSeq: number = 0
 
@@ -304,6 +327,25 @@ const ebayLeboncoinDelistStatusLabel: ComputedRef<string> = computed((): string 
   return summaryParts.join(' · ') || 'Terminé'
 })
 
+const isLeboncoinBatchRunning: ComputedRef<boolean> = computed(
+  (): boolean => !leboncoinBatchStream.finished.value && !leboncoinBatchStreamError.value,
+)
+
+const leboncoinBatchStatusLabel: ComputedRef<string> = computed((): string => {
+  if (leboncoinBatchStreamError.value) {
+    return leboncoinBatchStreamError.value
+  }
+  if (leboncoinBatchStream.finished.value) {
+    return leboncoinBatchStream.hasFailedListings.value ? 'Terminé avec des échecs' : 'Terminé'
+  }
+  const leboncoinProgress: VintedBatchProgress | null = leboncoinBatchStream.progress.value
+  return leboncoinProgress ? `Annonce ${leboncoinProgress.current} / ${leboncoinProgress.total}` : 'Connexion au flux…'
+})
+
+const leboncoinBatchLogLines: ComputedRef<string[]> = computed((): string[] =>
+  leboncoinBatchStream.logEntries.value.map((entry: VintedLogEntry): string => entry.text),
+)
+
 const delistReturnPath: ComputedRef<string> = computed((): string =>
   internalPathOrFallback(route.query.back, '/articles'),
 )
@@ -317,7 +359,7 @@ const hasDelistSucceeded: ComputedRef<boolean> = computed(
     !followedEbayLeboncoinDelist.value?.failures.length,
 )
 
-async function connectBatchJob(jobId: string): Promise<void> {
+async function connectBatchJob(jobId: string, worker: DesktopWorkerName = 'vinted'): Promise<void> {
   idleMessage.value = null
   streamError.value = null
   singleFinished.value = false
@@ -326,9 +368,12 @@ async function connectBatchJob(jobId: string): Promise<void> {
   batchStream.closeBatchStream()
   publishStream.closeStream()
   wardrobeStream.closeStream()
+  const batchStreamPath: string =
+    worker === 'leboncoin' ? `/articles/leboncoin-batch/${jobId}/stream` : `/articles/vinted-batch/${jobId}/stream`
   try {
-    await batchStream.followBatchStream(`/articles/vinted-batch/${jobId}/stream`, {
+    await batchStream.followBatchStream(batchStreamPath, {
       quiet: true,
+      worker,
     })
     const after = typeof route.query.after === 'string' ? route.query.after.trim().toLowerCase() : ''
     if (after === 'relist' && batchStream.hasFailedListings.value) {
@@ -403,13 +448,34 @@ async function connectSingleArticle(articleId: number): Promise<void> {
   }
 }
 
+/**
+ * Suit dans son propre bloc le lot Leboncoin lancé en même temps que le lot affiché dans le journal.
+ * @param {string} jobId - Lot Leboncoin.
+ * @returns {Promise<void>} Résolue quand le lot est terminé ou que son flux s'interrompt.
+ */
+async function followLeboncoinBatchAlongside(jobId: string): Promise<void> {
+  leboncoinAlongsideJobId.value = jobId
+  leboncoinBatchStreamError.value = null
+  try {
+    await leboncoinBatchStream.followBatchStream(`/articles/leboncoin-batch/${jobId}/stream`, {
+      quiet: true,
+      worker: 'leboncoin',
+    })
+  } catch (e) {
+    leboncoinBatchStreamError.value = e instanceof Error ? e.message : 'Flux interrompu'
+  }
+}
+
 async function bootstrap(): Promise<void> {
   bootstrapSeq++
   const seq = bootstrapSeq
   batchStream.closeBatchStream()
   publishStream.closeStream()
   wardrobeStream.closeStream()
+  leboncoinBatchStream.closeBatchStream()
+  leboncoinAlongsideJobId.value = null
 
+  const leboncoinJobId: string = typeof route.query.leboncoin_job === 'string' ? route.query.leboncoin_job.trim() : ''
   const qJob = route.query.job
   const qArticle = route.query.article
   const qWardrobe = route.query.wardrobe_job
@@ -434,14 +500,24 @@ async function bootstrap(): Promise<void> {
     return
   }
   if (jobId) {
+    if (leboncoinJobId) {
+      followLeboncoinBatchAlongside(leboncoinJobId)
+    }
     await connectBatchJob(jobId)
     return
   }
   if (Number.isFinite(articleId) && articleId > 0) {
+    if (leboncoinJobId) {
+      followLeboncoinBatchAlongside(leboncoinJobId)
+    }
     await connectSingleArticle(articleId)
     if (seq !== bootstrapSeq) {
       return
     }
+    return
+  }
+  if (leboncoinJobId) {
+    await connectBatchJob(leboncoinJobId, 'leboncoin')
     return
   }
 
@@ -474,7 +550,13 @@ onMounted(() => {
 })
 
 watch(
-  () => [route.query.job, route.query.article, route.query.wardrobe_job, route.query.progress],
+  () => [
+    route.query.job,
+    route.query.article,
+    route.query.wardrobe_job,
+    route.query.progress,
+    route.query.leboncoin_job,
+  ],
   () => {
     bootstrap()
   },
@@ -489,6 +571,7 @@ watch(hasDelistSucceeded, async (isDelistSucceeded: boolean): Promise<void> => {
 })
 
 onBeforeUnmount(() => {
+  leboncoinBatchStream.closeBatchStream()
   batchStream.closeBatchStream()
   publishStream.closeStream()
   wardrobeStream.closeStream()

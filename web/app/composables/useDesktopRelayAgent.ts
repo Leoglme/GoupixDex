@@ -28,6 +28,7 @@ const RELAYED_WORKER_ROUTES: Record<DesktopWorkerName, RelayedWorkerRoute[]> = {
   ],
   leboncoin: [
     { method: 'POST', path: /^\/articles\/\d+\/publish-leboncoin$/ },
+    { method: 'POST', path: /^\/articles\/leboncoin-batch$/ },
     { method: 'GET', path: /^\/leboncoin\/(meta|session)$/ },
   ],
   cardmarket: [
@@ -51,7 +52,7 @@ const RELAYED_WORKER_STREAMS: Record<DesktopWorkerName, RegExp[]> = {
     /^\/articles\/vinted-batch\/[\w-]+\/stream$/,
     /^\/vinted\/wardrobe-sync\/jobs\/[\w-]+\/stream$/,
   ],
-  leboncoin: [/^\/articles\/\d+\/listing-progress$/],
+  leboncoin: [/^\/articles\/\d+\/listing-progress$/, /^\/articles\/leboncoin-batch\/[\w-]+\/stream$/],
   cardmarket: [/^\/ws\/cardmarket\/orders\/sync\/progress$/, /^\/ws\/cardmarket-searches\/\d+\/progress$/],
   amazon: [/^\/ws\/progress$/],
 }

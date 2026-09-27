@@ -326,6 +326,18 @@ export function useArticles() {
   }
 
   /**
+   * Lance sur le PC la publication Leboncoin de plusieurs articles, l'un après l'autre.
+   * @param {number[]} articleIds - Articles à publier.
+   * @returns {Promise<VintedBatchStartResponse>} Identifiant du lot et chemin de son journal.
+   */
+  async function startLeboncoinBatch(articleIds: number[]): Promise<VintedBatchStartResponse> {
+    const { data } = await leboncoinHttp().post<VintedBatchStartResponse>('/articles/leboncoin-batch', {
+      article_ids: articleIds,
+    })
+    return data
+  }
+
+  /**
    *
    */
   async function bulkDelistChannels(payload: {
@@ -430,6 +442,7 @@ export function useArticles() {
     startVintedBatch,
     startVintedBatchDelist,
     startVintedBatchRefresh,
+    startLeboncoinBatch,
     startEbayBatch,
     getVintedBatchActive,
     bulkDelistChannels,

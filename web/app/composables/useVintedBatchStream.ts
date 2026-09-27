@@ -3,7 +3,7 @@
  */
 import type { Ref } from 'vue'
 import type { VintedLogEntry } from '~/composables/useVintedPublishStream'
-import type { WorkerEventStream } from '~/types/DesktopRelay'
+import type { DesktopWorkerName, WorkerEventStream } from '~/types/DesktopRelay'
 import { useDesktopWorkers, wrapEventSource } from '~/composables/useDesktopWorkers'
 
 export interface VintedBatchProgress {
@@ -83,10 +83,13 @@ export function useVintedBatchStream() {
    * Subscribe to the batch SSE URL until `done` / `error` / transport failure.
    *
    * @param streamPath - Path suffix including job id (from `startVintedBatch`).
-   * @param opts - Optional `{ quiet?: boolean }` to suppress completion toasts.
+   * @param opts - `quiet` suppresses completion toasts; `worker` is the PC worker running the batch (Vinted by default).
    * @returns {Promise<void>} Resolves when the server closes the stream normally.
    */
-  function followBatchStream(streamPath: string, opts?: { quiet?: boolean }): Promise<void> {
+  function followBatchStream(
+    streamPath: string,
+    opts?: { quiet?: boolean; worker?: DesktopWorkerName },
+  ): Promise<void> {
     close()
     logEntries.value = []
     progress.value = null
@@ -103,7 +106,7 @@ export function useVintedBatchStream() {
     return new Promise((resolve, reject) => {
       let settled = false
       eventSource = canUseDesktopWorkers.value
-        ? openWorkerEventStream('vinted', streamPath)
+        ? openWorkerEventStream(opts?.worker ?? 'vinted', streamPath)
         : wrapEventSource(new EventSource(`${remoteBase}${streamPath}?token=${encodeURIComponent(t)}`))
 
       eventSource.onmessage = (e: MessageEvent<string>) => {
@@ -121,6 +124,7 @@ export function useVintedBatchStream() {
             title?: string
             summary?: unknown
             vinted?: { published?: boolean; delisted?: boolean; detail?: string }
+            leboncoin?: { published?: boolean; detail?: string }
           }
           if (data.type === 'progress') {
             const cur = data.current ?? 0
@@ -142,7 +146,8 @@ export function useVintedBatchStream() {
             finished.value = true
             lastSummary.value = data.summary ?? data
             close()
-            const v = data.vinted
+            const v: { published?: boolean; delisted?: boolean; detail?: string } | undefined =
+              data.vinted ?? data.leboncoin
             hasFailedListings.value = v?.published === false || v?.delisted === false
             if (!opts?.quiet) {
               if (v?.published) {
