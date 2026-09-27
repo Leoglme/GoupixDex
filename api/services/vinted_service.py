@@ -309,8 +309,10 @@ class VintedService:
                 await asyncio.wait_for(cls._tab.get("about:blank"), timeout=3.0)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Vinted tab could not leave the page before closing Chrome: %r", exc)
+        # nodriver 0.48 keeps the browser CDP session in ``connection``; from 0.50 the Browser object is that session.
+        browser_session = browser.connection if browser.connection is not None else browser
         try:
-            await asyncio.wait_for(browser.connection.send(cdp.browser.close()), timeout=3.0)
+            await asyncio.wait_for(browser_session.send(cdp.browser.close()), timeout=3.0)
         except Exception as exc:  # noqa: BLE001
             logger.warning("CDP Browser.close failed: %r", exc)
         if process is not None and not await cls._wait_for_process_exit(process, timeout_sec=3.0):
