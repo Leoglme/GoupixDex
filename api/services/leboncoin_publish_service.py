@@ -18,6 +18,7 @@ from services.vinted_publish_service import _materialize_listing_images
 logger = logging.getLogger(__name__)
 
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
+DepositedFn = Callable[[], Awaitable[None]]
 
 
 def _submit_final_enabled() -> bool:
@@ -34,6 +35,35 @@ async def _emit(progress: ProgressFn | None, step: str, message: str, *, form_st
     await progress(ev)
 
 
+async def _signal_deposit_and_find_listing_id(
+    title: str, progress: ProgressFn | None, on_deposited: DepositedFn | None
+) -> str | None:
+    """
+    Signale le dépôt puis cherche le lien de l'annonce dans « Mes annonces », sans jamais faire échouer la publication.
+
+    Returns:
+        L'identifiant de l'annonce, ou None quand Leboncoin ne l'y affiche pas encore.
+    """
+    listing_id: str | None = None
+    try:
+        if on_deposited is not None:
+            await on_deposited()
+        await _emit(progress, "listing_link", "Annonce déposée — récupération de son lien dans « Mes annonces »…")
+        listing_id = await LeboncoinService.find_listing_id_in_my_ads(title)
+    except Exception:
+        logger.warning("Leboncoin listing lookup failed", exc_info=True)
+    if listing_id:
+        await _emit(progress, "listing_link", "Lien de l’annonce Leboncoin récupéré.")
+    else:
+        await _emit(
+            progress,
+            "listing_link",
+            "Annonce pas encore visible dans « Mes annonces » (validation Leboncoin) : "
+            "« Voir sur Leboncoin » ouvrira vos annonces.",
+        )
+    return listing_id
+
+
 async def publish_article_to_leboncoin(
     article: Article,
     stored_image_sources: list[str],
@@ -43,10 +73,12 @@ async def publish_article_to_leboncoin(
     sender_city: str,
     progress: ProgressFn | None = None,
     submit_final: bool | None = None,
+    on_deposited: DepositedFn | None = None,
 ) -> dict[str, Any]:
     """
     List one article on Leboncoin using a logged-in Chromium profile.
     Does not raise on failure; returns a status dict for SSE ``done``.
+    ``on_deposited`` est appelé dès le dépôt de l'annonce, avant la recherche de son lien dans « Mes annonces ».
     """
     line1 = sender_line1.strip()
     pc = postal_code.strip()
@@ -102,6 +134,8 @@ async def publish_article_to_leboncoin(
                 "url": result.get("url"),
             }
         listing_id = result.get("listing_id")
+        if not listing_id:
+            listing_id = await _signal_deposit_and_find_listing_id(title, progress, on_deposited)
         return {
             "published": True,
             "detail": "published",

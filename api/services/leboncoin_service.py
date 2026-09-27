@@ -32,6 +32,7 @@ FormProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
 BASE_URL = "https://www.leboncoin.fr"
 DEPOSIT_URL = f"{BASE_URL}/deposer-une-annonce"
 ACCOUNT_URL = f"{BASE_URL}/mes-annonces"
+MY_ADS_URL = f"{BASE_URL}/compte/part/mes-annonces"
 LOGIN_URL = f"{BASE_URL}/compte/connexion-securite"
 # Pages accessibles uniquement avec une session membre (Leboncoin redirige souvent vers /favorites).
 _MEMBER_AREA_PATH_RE = re.compile(
@@ -85,6 +86,8 @@ _DESC_SELECTORS = (
     "textarea#body",
 )
 _PRICE_SELECTORS = (
+    'input[name="price_cents"]',
+    "input#price_cents",
     'input[aria-label*="prix" i]',
     'input[placeholder*="prix" i]',
     'input[name="price"]',
@@ -129,6 +132,22 @@ _SESSION_RECONNECT_MSG = (
     "Paramètres → Session Leboncoin → Ouvrir Chrome, connectez-vous, "
     "attendez la fermeture automatique de Chrome, puis relancez la publication."
 )
+# « Mes annonces » est rechargée à cet intervalle le temps que Leboncoin valide l'annonce déposée.
+_MY_ADS_RELOAD_SEC = 8.0
+
+
+def format_leboncoin_price(price_eur: float) -> str:
+    """Prix tel qu'on le tape dans Leboncoin : « 3 » ou « 2,50 »."""
+    return str(int(price_eur)) if price_eur == int(price_eur) else f"{price_eur:.2f}".replace(".", ",")
+
+
+def parse_leboncoin_price(shown_price: str) -> float | None:
+    """Prix affiché par le champ Leboncoin (« 2,50 », « 5 € »), ou None quand il est vide ou illisible."""
+    digits = re.sub(r"[^\d,.]", "", shown_price).replace(",", ".")
+    try:
+        return round(float(digits), 2) if digits else None
+    except ValueError:
+        return None
 
 
 class LeboncoinService:
@@ -299,6 +318,34 @@ class LeboncoinService:
             await cls._pick_suggestion(tab, value)
             await tab.sleep(1.2)
         return True
+
+    @classmethod
+    async def _shown_price(cls, tab: Tab, css_selector: str) -> float | None:
+        """Prix affiché par le champ prix de la page."""
+        shown_price = await tab.evaluate(
+            f"(document.querySelector({json.dumps(css_selector)}) || {{}}).value || ''",
+            return_by_value=True,
+        )
+        return parse_leboncoin_price(str(shown_price or ""))
+
+    @classmethod
+    async def _fill_price(cls, tab: Tab, price_eur: float) -> bool | None:
+        """
+        Saisit le prix de l'article et vérifie que le champ le garde : Leboncoin y préremplit son propre prix suggéré.
+
+        Returns:
+            True quand le champ affiche le prix de l'article, False s'il ne le garde pas, None si la page n'a pas de champ prix.
+        """
+        css_selector = await cls._first_matching_selector(tab, _PRICE_SELECTORS)
+        if css_selector is None:
+            return None
+        expected_price = round(price_eur, 2)
+        for _attempt in range(3):
+            if await cls._shown_price(tab, css_selector) == expected_price:
+                return True
+            await cls._set_input_value(tab, css_selector, format_leboncoin_price(price_eur))
+            await tab.sleep(0.6)
+        return await cls._shown_price(tab, css_selector) == expected_price
 
     @classmethod
     async def _click_continue(cls, tab: Tab) -> bool:
@@ -1011,9 +1058,15 @@ class LeboncoinService:
         address_line1: str,
         city: str,
         progress: FormProgressFn | None,
-    ) -> None:
-        price_str = str(int(price_eur)) if price_eur == int(price_eur) else f"{price_eur:.2f}".replace(".", ",")
+    ) -> bool:
+        """
+        Remplit les étapes description, prix, localisation et livraison jusqu'au bouton de dépôt.
+
+        Returns:
+            Vrai quand le champ prix a gardé le prix de l'article.
+        """
         zip_clean = postal_code.strip()
+        has_confirmed_price = False
         for step in range(12):
             if await cls._page_has_final_submit(tab):
                 break
@@ -1035,16 +1088,18 @@ class LeboncoinService:
                             "form_step": "description",
                         }
                     )
-            if await cls._fill_first(tab, _PRICE_SELECTORS, price_str):
-                if progress:
+            is_article_price_shown = await cls._fill_price(tab, price_eur)
+            if is_article_price_shown is not None:
+                if is_article_price_shown and not has_confirmed_price and progress:
                     await progress(
                         {
                             "type": "log",
                             "step": "form",
-                            "message": f"Prix {price_str} € renseigné.",
+                            "message": f"Prix {format_leboncoin_price(price_eur)} € renseigné.",
                             "form_step": "price",
                         }
                     )
+                has_confirmed_price = is_article_price_shown
             if zip_clean and await cls._fill_first(tab, _ZIP_SELECTORS, zip_clean, pick_suggestion=True):
                 if progress:
                     await progress(
@@ -1074,6 +1129,7 @@ class LeboncoinService:
                 logger.debug("Leboncoin wizard: pas de « Continuer » (étape %s).", step)
                 break
             await tab.sleep(0.75)
+        return has_confirmed_price
 
     @classmethod
     async def _current_url(cls, tab: Tab) -> str:
@@ -1457,7 +1513,7 @@ class LeboncoinService:
                     "form_step": "wizard_late",
                 }
             )
-        await cls._wizard_fill_late_steps(
+        has_confirmed_price = await cls._wizard_fill_late_steps(
             tab,
             description=description,
             price_eur=price_eur,
@@ -1466,6 +1522,9 @@ class LeboncoinService:
             city=city,
             progress=progress,
         )
+        is_article_price_shown_on_final_page = await cls._fill_price(tab, price_eur)
+        if is_article_price_shown_on_final_page is not None:
+            has_confirmed_price = is_article_price_shown_on_final_page
 
         if not submit_final:
             url = await cls._current_url(tab)
@@ -1480,6 +1539,11 @@ class LeboncoinService:
                 )
             return {"published": False, "dry_run": True, "url": url}
 
+        if not has_confirmed_price:
+            raise RuntimeError(
+                f"Le prix {format_leboncoin_price(price_eur)} € n'a pas pu être saisi : annonce non déposée, "
+                "pour ne pas la publier au prix suggéré par Leboncoin."
+            )
         return await cls.submit_and_wait(progress)
 
     @classmethod
@@ -1590,6 +1654,49 @@ class LeboncoinService:
             m = pat.search(url)
             if m:
                 return m.group(1)
+        return None
+
+    @classmethod
+    async def _newest_listing_id_with_title(cls, tab: Tab, title: str) -> str | None:
+        """Identifiant de l'annonce la plus récente de « Mes annonces » dont le lien porte ce titre."""
+        listing_id = await tab.evaluate(
+            f"""
+            (() => {{
+              const normalize = (text) => (text || '')
+                .normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
+                .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+              const wantedTitle = normalize({json.dumps(title)});
+              let newestListingId = null;
+              for (const anchor of document.querySelectorAll('a[href*="/ad/"]')) {{
+                const match = (anchor.getAttribute('href') || '').match(/\\/ad\\/[^/?#]+\\/(\\d{{4,}})/);
+                if (!match || !normalize(anchor.textContent).includes(wantedTitle)) continue;
+                if (newestListingId === null || Number(match[1]) > Number(newestListingId)) newestListingId = match[1];
+              }}
+              return newestListingId;
+            }})()
+            """,
+            return_by_value=True,
+        )
+        return str(listing_id) if isinstance(listing_id, str) and listing_id else None
+
+    @classmethod
+    async def find_listing_id_in_my_ads(cls, title: str, *, timeout_sec: float = 60.0) -> str | None:
+        """
+        Retrouve l'annonce déposée dans « Mes annonces », où Leboncoin l'affiche une fois validée (15 à 25 s après le dépôt).
+
+        Returns:
+            L'identifiant de l'annonce, ou None si elle n'y apparaît pas avant la fin du délai.
+        """
+        tab = cls._require_tab()
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            await tab.get(MY_ADS_URL)
+            reload_at = min(deadline, time.monotonic() + _MY_ADS_RELOAD_SEC)
+            while time.monotonic() < reload_at:
+                await tab.sleep(1.0)
+                listing_id = await cls._newest_listing_id_with_title(tab, title)
+                if listing_id:
+                    return listing_id
         return None
 
     @classmethod

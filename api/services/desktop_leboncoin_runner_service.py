@@ -53,6 +53,20 @@ class DesktopLeboncoinRunnerService:
 
             article = DesktopStubsService.article_from_api_dict(article_d)
             image_urls = [im["image_url"] for im in article_d.get("images") or []]
+            has_recorded_publication = False
+
+            async def record_publication(listing_id: str | None = None) -> None:
+                """Enregistre la publication dans GoupixDex, avec l'identifiant de l'annonce quand il est connu."""
+                nonlocal has_recorded_publication
+                try:
+                    await post_confirmation_to_api(
+                        f"{remote_base}/articles/{article_id}/confirm-leboncoin-publish",
+                        {**hdrs, "Content-Type": "application/json"},
+                        {"listing_id": listing_id} if listing_id else {},
+                    )
+                    has_recorded_publication = True
+                except httpx.HTTPError as exc:
+                    logger.warning("confirm-leboncoin-publish failed article_id=%s: %s", article_id, exc)
 
             result = await publish_article_to_leboncoin(
                 article,
@@ -61,19 +75,10 @@ class DesktopLeboncoinRunnerService:
                 sender_line1=line1,
                 sender_city=city,
                 progress=progress,
+                on_deposited=record_publication,
             )
-            if bool(result.get("published")):
-                payload: dict[str, Any] = {}
-                if result.get("listing_id"):
-                    payload["listing_id"] = result["listing_id"]
-                try:
-                    await post_confirmation_to_api(
-                        f"{remote_base}/articles/{article_id}/confirm-leboncoin-publish",
-                        {**hdrs, "Content-Type": "application/json"},
-                        payload,
-                    )
-                except httpx.HTTPError as exc:
-                    logger.warning("confirm-leboncoin-publish failed article_id=%s: %s", article_id, exc)
+            if bool(result.get("published")) and (result.get("listing_id") or not has_recorded_publication):
+                await record_publication(result.get("listing_id"))
             return result
         except Exception as exc:  # noqa: BLE001
             logger.exception("Desktop Leboncoin publish failed article_id=%s", article_id)
