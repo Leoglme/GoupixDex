@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from typing import Annotated
 
 import httpx
@@ -33,6 +34,7 @@ from fastapi.responses import StreamingResponse
 
 from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
+from schemas.articles import VintedBatchStartBody
 from services.desktop_leboncoin_runner_service import DesktopLeboncoinRunnerService
 from services.leboncoin_profile_session_service import (
     clear_leboncoin_session_info,
@@ -41,6 +43,7 @@ from services.leboncoin_profile_session_service import (
     write_leboncoin_session_info,
 )
 from services.os_service import resolve_leboncoin_nodriver_user_data_dir
+from services.vinted_batch_session_service import VintedBatchSessionService as leboncoin_batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as progress_hub
 
 ensure_proactor_event_loop()
@@ -156,6 +159,52 @@ async def publish_leboncoin_for_article(
             "stream_path": f"/articles/{article_id}/listing-progress",
         },
     }
+
+
+@router.post("/leboncoin-batch", status_code=status.HTTP_202_ACCEPTED)
+async def start_leboncoin_batch(
+    body: VintedBatchStartBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Lance la publication Leboncoin de plusieurs articles, l’un après l’autre, suivie par un journal de lot."""
+    unique_ids = list(dict.fromkeys(body.article_ids))
+    job_id = str(uuid.uuid4())
+    if not leboncoin_batch_hub.try_register_job(job_id, user_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Une publication Leboncoin groupée est déjà en cours sur ce compte.",
+        )
+    asyncio.create_task(
+        DesktopLeboncoinRunnerService.run_desktop_leboncoin_batch_job(job_id, user_id, unique_ids, raw_token, remote)
+    )
+    return {
+        "job_id": job_id,
+        "stream_path": f"/articles/leboncoin-batch/{job_id}/stream",
+    }
+
+
+@router.get("/leboncoin-batch/{job_id}/stream")
+async def leboncoin_batch_stream(
+    job_id: str,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> StreamingResponse:
+    owner = leboncoin_batch_hub.get_job_user_id(job_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Job not found or expired.")
+    if owner != user_id:
+        raise HTTPException(status_code=403, detail="Access denied for this job.")
+
+    async def generate():
+        async for ev in leboncoin_batch_hub.event_stream(job_id):
+            yield f"data: {json.dumps(ev, default=str)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{article_id}/listing-progress")
