@@ -1,6 +1,6 @@
 import type { Marketplace } from '~/types/Marketplace'
 
-export type GoupixDexMarketplaceButtonAction = 'publish' | 'delist'
+export type GoupixDexMarketplaceButtonAction = 'publish' | 'delist' | 'open'
 
 export type GoupixDexMarketplaceButtonProps = {
   marketplace: Marketplace
@@ -8,4 +8,5 @@ export type GoupixDexMarketplaceButtonProps = {
   isLoading: boolean
   isDisabled: boolean
   disabledReason: string | null
+  href: string | null
 }

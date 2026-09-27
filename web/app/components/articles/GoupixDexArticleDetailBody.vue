@@ -331,18 +331,13 @@
       <section v-if="liveListingLinks.length" class="space-y-2">
         <p class="app-label">Annonces en ligne</p>
         <div class="grid grid-cols-2 gap-2">
-          <UButton
+          <GoupixDexMarketplaceButton
             v-for="listing in liveListingLinks"
             :key="listing.marketplace"
-            :to="listing.url"
-            target="_blank"
-            color="neutral"
-            variant="outline"
-            class="justify-center"
-          >
-            <GoupixDexMarketplaceAppIcon :marketplace="listing.marketplace" class="size-5" />
-            Voir sur {{ MARKETPLACE_NAMES[listing.marketplace] }}
-          </UButton>
+            :marketplace="listing.marketplace"
+            action="open"
+            :href="listing.url"
+          />
         </div>
       </section>
 

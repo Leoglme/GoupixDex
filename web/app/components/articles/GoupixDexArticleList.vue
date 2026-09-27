@@ -52,12 +52,13 @@
 
       <template v-else>
         <ul class="divide-y divide-[var(--app-line)] md:hidden">
-          <li v-for="row in paged" :key="`m-${row.id}`" class="flex gap-2 bg-[var(--app-surface)] p-3">
-            <button
-              type="button"
-              class="flex min-w-0 flex-1 gap-3 text-left transition-colors hover:opacity-95 active:opacity-90"
-              @click="onOpenArticleRow(row.id)"
-            >
+          <li
+            v-for="row in paged"
+            :key="`m-${row.id}`"
+            class="flex cursor-pointer gap-2 bg-[var(--app-surface)] p-3"
+            @click="onArticleRowClick(row.id, $event)"
+          >
+            <div class="flex min-w-0 flex-1 gap-3 transition-opacity hover:opacity-95 active:opacity-90">
               <span
                 class="relative block h-[5.25rem] w-[3.75rem] shrink-0 overflow-hidden rounded-lg ring-1 ring-[var(--app-line)]"
               >
@@ -77,9 +78,13 @@
                 </span>
               </span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm font-semibold text-[var(--app-ink)]">
+                <a
+                  :href="articleDetailHref(row.id)"
+                  class="block truncate text-sm font-semibold text-[var(--app-ink)]"
+                  @click="onOpenArticle(row.id, $event)"
+                >
                   {{ row.pokemon_name || row.title || '—' }}
-                </span>
+                </a>
                 <span
                   v-if="articleTableSecondaryLine(row)"
                   class="mt-0.5 block truncate text-xs text-[var(--app-ink-soft)]"
@@ -117,6 +122,7 @@
                     :show-vinted="vintedChannelEnabled"
                     :show-ebay="showEbayColumn"
                     :show-leboncoin="leboncoinPublishAvailable"
+                    has-listing-links
                   />
                   <span
                     v-if="showSaleOutcomeColumns && row.is_sold"
@@ -127,8 +133,8 @@
                 </span>
               </span>
               <UIcon name="i-lucide-chevron-right" class="mt-1 size-4 shrink-0 self-start text-[var(--app-faint)]" />
-            </button>
-            <div class="flex shrink-0 flex-col items-center justify-start gap-2 pt-0.5">
+            </div>
+            <div data-row-controls class="flex shrink-0 flex-col items-center justify-start gap-2 pt-0.5">
               <input
                 type="checkbox"
                 class="h-4 w-4 cursor-pointer accent-(--app-accent)"
@@ -238,7 +244,7 @@
               :class="isSelected(row.id) ? 'bg-[var(--app-accent-soft)] hover:bg-[var(--app-accent-soft)]' : ''"
               @click="onArticleRowClick(row.id, $event)"
             >
-              <GoupixDexBaseTableTd class="goupix-card-table__select w-12 align-middle">
+              <GoupixDexBaseTableTd data-row-controls class="goupix-card-table__select w-12 align-middle">
                 <input
                   type="checkbox"
                   class="h-4 w-4 cursor-pointer accent-(--app-accent)"
@@ -370,7 +376,12 @@
                 <span v-else class="text-[var(--app-faint)]">—</span>
               </GoupixDexBaseTableTd>
 
-              <GoupixDexBaseTableTd class="goupix-card-table__actions align-middle" label="Actions" align="center">
+              <GoupixDexBaseTableTd
+                data-row-controls
+                class="goupix-card-table__actions align-middle"
+                label="Actions"
+                align="center"
+              >
                 <UDropdownMenu :items="buildRowMenu(row)">
                   <UButton color="neutral" variant="ghost" icon="i-lucide-more-horizontal" square />
                 </UDropdownMenu>
@@ -941,10 +952,6 @@ function onOpenArticle(rowId: number, event: MouseEvent): void {
   openArticleFromClick(rowId, event, articleBrowseIds())
 }
 
-function onOpenArticleRow(rowId: number): void {
-  openArticle(rowId, articleBrowseIds())
-}
-
 /**
  * Ouvre la fiche au clic sur la ligne, sauf sur ses contrôles (case à cocher, liens, menu d'actions) ou après une sélection de texte.
  * @param {number} rowId - Article de la ligne.
@@ -953,8 +960,7 @@ function onOpenArticleRow(rowId: number): void {
  */
 function onArticleRowClick(rowId: number, event: MouseEvent): void {
   const isOnRowControl: boolean =
-    event.target instanceof Element &&
-    event.target.closest('a, button, input, label, .goupix-card-table__select, .goupix-card-table__actions') !== null
+    event.target instanceof Element && event.target.closest('a, button, input, label, [data-row-controls]') !== null
   if (isOnRowControl || window.getSelection()?.toString()) {
     return
   }
