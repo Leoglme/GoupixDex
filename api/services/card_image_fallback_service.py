@@ -6,7 +6,8 @@ anglaises TCGdex (listées ou par convention), données publiques pokemontcg.io 
 CDN Limitless pour les promos et énergies récentes, puis scans TCGplayer (via TCGCSV) pour les kits dresseur,
 promos McDonald's et extensions japonaises que personne d'autre n'illustre. Les réimpressions (McDonald's exclusifs
 à la France, kits dresseur) reprennent en dernier recours la carte d'origine de même nom et même illustrateur.
-Les listes TCGplayer servent aussi à remplir les extensions japonaises que TCGdex liste sans cartes.
+Les listes TCGplayer servent aussi à remplir les extensions japonaises que TCGdex liste sans cartes, et leurs prix
+à coter les cartes japonaises que TCGdex ne cote pas sur TCGplayer.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ _TCGPLAYER_ENGLISH_CATEGORY = 3
 _TCGPLAYER_JAPANESE_CATEGORY = 85
 _SPECIES_ENGLISH_NAMES_PATH = Path(__file__).resolve().parent.parent / "data" / "pokemon_species_en.json"
 _CACHE_TTL_SEC = 86400.0
+# Un export TCGCSV qui n'a pas répondu est redemandé après ce délai, pas le lendemain.
+_FAILED_EXPORT_TTL_SEC = 300.0
 _PROBE_WORKERS = 24
 _PROBE_SAMPLE_SIZE = 3
 
@@ -255,10 +258,10 @@ class _TtlCache:
                 return None
             return entry[1]
 
-    def set(self, key: str, value: Any) -> None:
-        """Mémorise une valeur pour la durée du cache."""
+    def set(self, key: str, value: Any, ttl_sec: float = _CACHE_TTL_SEC) -> None:
+        """Mémorise une valeur pour ``ttl_sec`` secondes (la durée du cache par défaut)."""
         with self._lock:
-            self._store[key] = (time.monotonic() + _CACHE_TTL_SEC, value)
+            self._store[key] = (time.monotonic() + ttl_sec, value)
 
 
 _cache = _TtlCache()
@@ -543,16 +546,17 @@ def _tcgplayer_json(path: str) -> list[dict[str, Any]]:
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
-    results: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] | None = None
     try:
         response = _http.get(f"{_TCGCSV_BASE}/{path}", timeout=30.0)
-        payload = response.json() if response.status_code == 200 else {}
-        raw = payload.get("results") if isinstance(payload, dict) else None
-        results = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
+        if response.status_code == 200:
+            payload = response.json()
+            raw = payload.get("results") if isinstance(payload, dict) else None
+            results = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
     except (httpx.HTTPError, ValueError):
-        results = []
-    _cache.set(cache_key, results)
-    return results
+        results = None
+    _cache.set(cache_key, results or [], ttl_sec=_CACHE_TTL_SEC if results is not None else _FAILED_EXPORT_TTL_SEC)
+    return results or []
 
 
 def _tcgplayer_group(locale: str, set_id: str) -> tuple[int, int] | None:
@@ -648,6 +652,32 @@ def tcgplayer_japanese_card_listings(set_id: str) -> list[TcgplayerCardListing]:
     ]
     _cache.set(cache_key, listings)
     return listings
+
+
+def tcgplayer_japanese_card_prices(set_id: str, local_id: str) -> list[dict[str, Any]]:
+    """
+    Prix TCGplayer d'une carte japonaise, une ligne par finition avec ``marketPrice``, ``midPrice`` et ``lowPrice``.
+
+    Args:
+        set_id: Identifiant TCGdex de l'extension (``M2``).
+        local_id: Numéro de la carte dans l'extension (``083``).
+
+    Returns:
+        Les prix en dollars de l'impression normale de ce numéro, vides quand TCGplayer ne liste pas la carte.
+    """
+    group = _tcgplayer_group("ja", set_id)
+    wanted_number = _tcgplayer_number(local_id)
+    product_id = next(
+        (
+            product.get("productId")
+            for number, product in _tcgplayer_numbered_products(set_id)
+            if _tcgplayer_number(number) == wanted_number
+        ),
+        None,
+    )
+    if group is None or product_id is None:
+        return []
+    return [row for row in _tcgplayer_json(f"{group[0]}/{group[1]}/prices") if row.get("productId") == product_id]
 
 
 def tcgplayer_japanese_card_names(set_id: str) -> dict[str, str]:

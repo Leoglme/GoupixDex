@@ -8,6 +8,9 @@ no quota, no PokéWallet call.
 
 Tier 2 (``source="pokewallet"``) is the historical PokéWallet lookup, kept for
 cards TCGdex has not mapped to a Cardmarket product yet.
+
+Les cartes japonaises, que TCGdex ne cote pas sur TCGPlayer, prennent leur cote
+TCGPlayer dans l'export TCGCSV avant le recours à PokéWallet.
 """
 
 from __future__ import annotations
@@ -18,7 +21,12 @@ from typing import Any
 
 from app_types.pokewallet import PokeWalletCard
 from config import get_settings
-from services.cardmarket_local_price_service import fetch_tcgdex_pricing_snapshot, resolve_market_price_eur
+from services.card_image_fallback_service import tcgplayer_japanese_card_prices
+from services.cardmarket_local_price_service import (
+    fetch_tcgdex_pricing_snapshot,
+    reference_usd_from_tcgplayer_block,
+    resolve_market_price_eur,
+)
 from services.poke_wallet_client_service import PokeWalletClientService
 from services.poke_wallet_reference_prices_service import PokeWalletReferencePricesService
 from services.tcgdex_lookup_service import resolve_tcgdex_card_id_from_ocr
@@ -81,6 +89,8 @@ def _fetch_prices_via_cardmarket_local(
             return None
 
     block, tcgplayer_usd = fetch_tcgdex_pricing_snapshot(tcgdex_card_id, language)
+    if tcgplayer_usd is None:
+        tcgplayer_usd = _japanese_tcgplayer_usd(tcgdex_card_id, language)
     id_product = block.get("idProduct") if isinstance(block, dict) else None
     cardmarket_eur = resolve_market_price_eur(
         id_product if isinstance(id_product, int) else None,
@@ -108,6 +118,21 @@ def _fetch_prices_via_cardmarket_local(
     else:
         detail = "Prix Cardmarket indisponible (guide local ou carte non cotée)."
     return _empty_result(detail, source="cardmarket_local")
+
+
+def _japanese_tcgplayer_usd(tcgdex_card_id: str, language: str | None) -> float | None:
+    """Cote TCGPlayer en dollars d'une carte japonaise via TCGCSV : prix marché, sinon moyen, sinon le plus bas."""
+    # Un même identifiant TCGdex peut désigner une carte japonaise et une anglaise (sv10-112) : on exige la langue.
+    if (language or "").strip().lower() != "ja":
+        return None
+    set_id, _separator, local_id = tcgdex_card_id.strip().rpartition("-")
+    if not set_id or not local_id:
+        return None
+    finishes = {
+        str(row.get("subTypeName") or index): row
+        for index, row in enumerate(tcgplayer_japanese_card_prices(set_id, local_id))
+    }
+    return reference_usd_from_tcgplayer_block(finishes)
 
 
 def _pokewallet_tcgplayer_usd_only(

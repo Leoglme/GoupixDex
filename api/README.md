@@ -43,7 +43,7 @@ api/
     scan.py                     # /scan-card (multipart, OCR + pricing preview, no DB)
   services/
     ocr_service.py              # Groq vision wrapper
-    pricing_service.py          # Local Cardmarket tier + PokéWallet fallback, EUR/USD average
+    pricing_service.py          # Local Cardmarket tier + TCGCSV (Japanese TCGPlayer prices) + PokéWallet fallback, EUR/USD average
     cardmarket_local_price_service.py   # Price-guide singleton + TCGdex idProduct harvesting
     market_price_refresh_service.py     # Nightly guide refresh + collection revaluation
     scan_service.py             # Title/description templates

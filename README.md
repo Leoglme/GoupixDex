@@ -179,7 +179,7 @@ flowchart LR
 
 - **Browser automation runs on the user's machine.** Vinted, Leboncoin and Cardmarket block datacenter IPs and headless browsers, so the desktop app ships local Python workers (PyInstaller sidecars started by Tauri) that drive the user's own Chrome — Edge as a fallback — with [nodriver](https://github.com/ultrafunkamsterdam/nodriver). The web app covers everything else.
 - **On-device card recognition.** The scanner detects the card and computes an image embedding in the browser (ONNX Runtime Web, in web workers), then matches it against a prebuilt card index shipped with the app. The server-side OCR (Groq vision) is only a fallback.
-- **Pricing without an API key.** [`cardmarket-api`](cardmarket-api/) downloads Cardmarket's public nightly price guide, indexes it in memory and picks a sales-based reference (trend, then 7- and 30-day averages — never the single cheapest listing). [PokéWallet](https://api.pokewallet.io) is the fallback and brings TCGPlayer prices.
+- **Pricing without an API key.** [`cardmarket-api`](cardmarket-api/) downloads Cardmarket's public nightly price guide, indexes it in memory and picks a sales-based reference (trend, then 7- and 30-day averages — never the single cheapest listing). TCGPlayer prices come from TCGdex, or from the [TCGCSV](https://tcgcsv.com) export of TCGplayer for Japanese cards; [PokéWallet](https://api.pokewallet.io) is the last resort.
 - **Secrets stay encrypted.** Vinted credentials and eBay tokens are encrypted at rest (Fernet); eBay uses per-user OAuth.
 - **CI/CD.** GitHub Actions deploy the web app and the API to a VPS, build the desktop installers as GitHub releases and refresh the static catalog index every day.
 
