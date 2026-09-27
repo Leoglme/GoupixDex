@@ -53,27 +53,42 @@ export default defineAppConfig({
         trigger: 'cursor-pointer',
       },
     },
+    // Menus, listes et infobulles au-dessus des volets maison (z-50) et des modales (z-[101]) qui les ouvrent.
     select: {
       slots: {
         base: 'cursor-pointer',
         item: 'cursor-pointer',
+        content: 'z-[105]',
       },
     },
     selectMenu: {
       slots: {
         base: 'cursor-pointer',
         item: 'cursor-pointer',
+        content: 'z-[105]',
       },
     },
     inputMenu: {
       slots: {
         base: 'cursor-pointer',
         item: 'cursor-pointer',
+        content: 'z-[105]',
       },
     },
     dropdownMenu: {
       slots: {
         item: 'cursor-pointer',
+        content: 'z-[105]',
+      },
+    },
+    popover: {
+      slots: {
+        content: 'z-[105]',
+      },
+    },
+    tooltip: {
+      slots: {
+        content: 'z-[105]',
       },
     },
     dashboardPanel: {
