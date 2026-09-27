@@ -20,24 +20,33 @@
         </div>
       </div>
 
-      <div v-if="showMarketplaceActions" class="flex w-full gap-2">
+      <div v-if="showMarketplaceActions" class="flex flex-wrap gap-2">
         <GoupixDexMarketplaceButton
           v-if="article.published_on_ebay"
-          class="flex-1"
+          class="grow basis-2/5"
           marketplace="ebay"
           action="delist"
           :is-loading="removingEbay"
-          :is-disabled="removingVinted"
+          :is-disabled="removingVinted || removingLeboncoin"
           @click="onRemoveEbay"
         />
         <GoupixDexMarketplaceButton
           v-if="article.published_on_vinted"
-          class="flex-1"
+          class="grow basis-2/5"
           marketplace="vinted"
           action="delist"
           :is-loading="removingVinted"
-          :is-disabled="removingEbay"
+          :is-disabled="removingEbay || removingLeboncoin"
           @click="onRemoveVinted"
+        />
+        <GoupixDexMarketplaceButton
+          v-if="article.published_on_leboncoin"
+          class="grow basis-2/5"
+          marketplace="leboncoin"
+          action="delist"
+          :is-loading="removingLeboncoin"
+          :is-disabled="removingEbay || removingVinted"
+          @click="onRemoveLeboncoin"
         />
       </div>
 
@@ -376,7 +385,7 @@ const emit = defineEmits<{
 
 const config = useRuntimeConfig()
 const route: RouteLocationNormalizedLoaded = useRoute()
-const { getArticle, removeEbayListing, startVintedBatchDelist } = useArticles()
+const { getArticle, removeEbayListing, startVintedBatchDelist, bulkDelistChannels } = useArticles()
 const { closeAll: closeAllDrawers } = useGoupixDrawerStack()
 const { canUseDesktopWorkers } = useDesktopWorkers()
 const { lookup } = usePricing()
@@ -397,12 +406,17 @@ const ebayLoading: Ref<boolean> = ref(false)
 const ebayError: Ref<string | null> = ref(null)
 const removingEbay: Ref<boolean> = ref(false)
 const removingVinted: Ref<boolean> = ref(false)
+const removingLeboncoin: Ref<boolean> = ref(false)
 
 const id: ComputedRef<number> = computed(() => props.articleId)
 
-const showMarketplaceActions: ComputedRef<boolean> = computed(() =>
-  Boolean(article.value?.published_on_ebay || article.value?.published_on_vinted),
-)
+const showMarketplaceActions: ComputedRef<boolean> = computed((): boolean => {
+  const current: Article | null = article.value
+  return (
+    current !== null &&
+    MARKETPLACES.some((marketplace: Marketplace): boolean => isPublishedOnMarketplace(current, marketplace))
+  )
+})
 
 const publishOptions: ComputedRef<MarketplacePublishOption[]> = computed((): MarketplacePublishOption[] => {
   const current: Article | null = article.value
@@ -857,6 +871,35 @@ async function onRemoveVinted(): Promise<void> {
     toast.add({ title: 'Suppression Vinted', description: apiErrorMessage(e), color: 'error' })
   } finally {
     removingVinted.value = false
+  }
+}
+
+/**
+ * Marque l'annonce Leboncoin hors ligne dans GoupixDex, sans la supprimer sur Leboncoin.
+ * @returns {Promise<void>} Résolue une fois la fiche à jour, ou l'échec annoncé.
+ */
+async function onRemoveLeboncoin(): Promise<void> {
+  if (!article.value?.published_on_leboncoin) {
+    return
+  }
+  const shouldMarkOffline: boolean = await confirmAction({
+    title: 'Retirer l’annonce Leboncoin ?',
+    body: 'GoupixDex ne supprime pas l’annonce sur Leboncoin : supprimez-la via « Voir sur Leboncoin », puis confirmez pour la marquer hors ligne ici. La fiche GoupixDex sera conservée.',
+    confirmLabel: 'Marquer hors ligne',
+    confirmColor: 'error',
+  })
+  if (!shouldMarkOffline) {
+    return
+  }
+  removingLeboncoin.value = true
+  try {
+    await bulkDelistChannels({ article_ids: [id.value], vinted: false, ebay: false, leboncoin: true })
+    await reloadArticle()
+    toast.add({ title: 'Annonce Leboncoin marquée hors ligne', color: 'success' })
+  } catch (error: unknown) {
+    toast.add({ title: 'Retrait Leboncoin', description: apiErrorMessage(error), color: 'error' })
+  } finally {
+    removingLeboncoin.value = false
   }
 }
 

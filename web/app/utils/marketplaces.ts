@@ -14,8 +14,10 @@ export const MARKETPLACE_NAMES: Record<Marketplace, string> = {
 
 export const MARKETPLACES: Marketplace[] = ['vinted', 'ebay', 'leboncoin']
 
+export const LEBONCOIN_MY_ADS_URL: string = 'https://www.leboncoin.fr/compte/part/mes-annonces'
+
 /**
- * Adresse publique de l'annonce d'un article sur une marketplace.
+ * Adresse de l'annonce d'un article sur une marketplace ; sur Leboncoin sans identifiant d'annonce, la page « Mes annonces ».
  * @param {ArticleMarketplaceListings} article - Statuts de publication et identifiants d'annonce de l'article.
  * @param {Marketplace} marketplace - Marketplace visée.
  * @returns {string | null} L'URL de l'annonce, ou null si l'article n'y est pas en ligne.
@@ -29,9 +31,12 @@ export function marketplaceListingUrl(article: ArticleMarketplaceListings, marke
       ? `https://www.ebay.fr/itm/${article.ebay_listing_id}`
       : null
   }
-  return article.published_on_leboncoin && article.leboncoin_listing_id
+  if (!article.published_on_leboncoin) {
+    return null
+  }
+  return article.leboncoin_listing_id
     ? `https://www.leboncoin.fr/ad/collection/${article.leboncoin_listing_id}`
-    : null
+    : LEBONCOIN_MY_ADS_URL
 }
 
 /**
