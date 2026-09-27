@@ -110,20 +110,100 @@ def _apply_visible_state(item: Dict, state: Dict) -> Dict:
     return item
 
 
-def _title_matches_user_filter(title: str, user_q: str) -> bool:
-    """Match UI search intent on product titles (e.g. ``30`` → 30e / anniversaire)."""
-    u = _normalize_amazon_search_query(user_q)
-    if not u:
-        return True
-    hay = _normalize_amazon_search_query(title)
-    if u in ("30", "30e", "30eme") or u == "30":
-        return "30" in hay or "anniversaire" in hay
-    if u.isdigit():
-        return u in hay
-    if u in hay:
-        return True
-    parts = [p for p in u.split() if len(p) >= 2]
-    return bool(parts) and all(p in hay for p in parts)
+# Mots qui ne départagent aucun produit : la recherche vise déjà le JCC Pokémon.
+_GENERIC_QUERY_WORDS = frozenset(
+    {
+        "pokemon", "jcc", "tcg", "jeu", "jeux", "carte", "cartes", "collectionner",
+        "de", "du", "des", "la", "le", "les", "et", "en", "au", "aux", "un", "une",
+        "pour", "avec", "sur", "the", "of", "and",
+    }
+)
+# Ordinal collé au nombre : « 30e », « 30eme », « 1er », « 1re », « 30th »…
+_ORDINAL_NUMBER_RE = re.compile(r"^(\d+)(?:e|eme|er|ere|re|th|st|nd|rd)$")
+
+
+def _split_search_words(text: str) -> List[str]:
+    """
+    Découpe un titre ou une requête en mots sans accents ni majuscules, « 30ᵉ » et « 30e » lus « 30 ».
+
+    Args:
+        text: Titre produit ou requête saisie.
+
+    Returns:
+        Les mots, dans l'ordre du texte.
+    """
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+    normalized = normalized.replace("œ", "oe").replace("æ", "ae")
+    words: List[str] = []
+    for word in re.split(r"[^0-9a-z]+", normalized):
+        if word:
+            ordinal = _ORDINAL_NUMBER_RE.match(word)
+            words.append(ordinal.group(1) if ordinal else word)
+    return words
+
+
+def _significant_query_words(query: str) -> List[str]:
+    """
+    Mots de la requête capables de départager des titres (sans doublons ni mots génériques).
+
+    Args:
+        query: Requête envoyée à Amazon.
+
+    Returns:
+        Les mots retenus, dans l'ordre de saisie.
+    """
+    significant_words: List[str] = []
+    for word in _split_search_words(query):
+        if word in _GENERIC_QUERY_WORDS or (len(word) < 2 and not word.isdigit()):
+            continue
+        if word not in significant_words:
+            significant_words.append(word)
+    return significant_words
+
+
+def _title_contains_query_word(title_words: List[str], query_word: str) -> bool:
+    """
+    Un nombre doit figurer tel quel ; un mot peut être le début d'un mot du titre (« pika » trouve « pikachu »).
+
+    Args:
+        title_words: Mots du titre.
+        query_word: Mot de la requête.
+
+    Returns:
+        ``True`` si le titre contient ce mot.
+    """
+    if query_word.isdigit():
+        return query_word in title_words
+    prefixes = {query_word}
+    if len(query_word) > 3 and query_word[-1] in "sx":
+        prefixes.add(query_word[:-1])  # pluriel : « boites » trouve « boite »
+    return any(title_word.startswith(prefix) for title_word in title_words for prefix in prefixes)
+
+
+def _select_best_title_matches(rows: List[Dict], query: str) -> List[Dict]:
+    """
+    Garde, dans l'ordre Amazon, les produits dont le titre reprend le plus de mots de la requête (tous si aucun titre ne correspond).
+
+    Args:
+        rows: Produits sur invitation, dans l'ordre des résultats Amazon.
+        query: Requête envoyée à Amazon.
+
+    Returns:
+        Les produits retenus, ordre Amazon conservé.
+    """
+    query_words = _significant_query_words(query)
+    if not query_words:
+        return list(rows)
+    scored_rows: List[tuple[int, Dict]] = []
+    for row in rows:
+        title_words = _split_search_words(str(row.get("title") or ""))
+        score = sum(1 for word in query_words if _title_contains_query_word(title_words, word))
+        scored_rows.append((score, row))
+    best_score = max((score for score, _ in scored_rows), default=0)
+    if best_score == 0:
+        return list(rows)
+    return [row for score, row in scored_rows if score == best_score]
 
 
 class AmazonScraper:
@@ -301,46 +381,64 @@ class AmazonScraper:
             "removed_json": removed_json,
         }
 
+    def _build_invite_search_url(self, amazon_query: str, page: int) -> str:
+        """
+        URL d'une page de résultats Amazon.fr limitée aux produits vendus par Amazon.
+
+        Args:
+            amazon_query: Requête envoyée à Amazon.
+            page: Numéro de page de résultats (1 = première).
+
+        Returns:
+            L'URL de la page de résultats.
+        """
+        # Tri pertinence comme dans le navigateur : « Nouveautés » (s=date-desc-rank) masque une partie des produits sur invitation.
+        url = (
+            f"{self.base_url}/s?k={quote_plus(amazon_query)}"
+            f"&__mk_fr_FR=%C3%85M%C3%85%C5%BD%C3%95%C3%91"
+            f"&rh={AMAZON_FR_SELLER_RH}"
+        )
+        return url if page == 1 else f"{url}&page={page}"
+
     def _scan_search_pages_for_invites(
         self,
         amazon_query: str,
         max_pages: int,
         item_cap: int | None,
-        title_filter: str,
         progress_callback,
-        into: List[Dict],
-        seen_asins: set[str],
-    ) -> None:
-        for page in range(1, max_pages + 1):
-            if item_cap is not None and len(into) >= item_cap:
-                return
+    ) -> List[Dict]:
+        """
+        Lit les pages de résultats et garde les produits sur invitation qui correspondent le mieux à la requête.
 
+        Args:
+            amazon_query: Requête envoyée à Amazon.
+            max_pages: Nombre maximum de pages de résultats à lire.
+            item_cap: Nombre maximum de produits à renvoyer (``None`` = pas de limite).
+            progress_callback: Rappel de progression du worker (optionnel).
+
+        Returns:
+            Les produits retenus, dans l'ordre Amazon.
+        """
+        invite_rows: List[Dict] = []
+        seen_asins: set[str] = set()
+        streamed_asins: set[str] = set()
+        matching_rows: List[Dict] = []
+        pages_without_new_invites = 0
+
+        for page in range(1, max_pages + 1):
             print(f"[page] {page}/{max_pages}...")
 
             if progress_callback:
                 progress_callback(
                     current_page=page,
                     total_pages=max_pages,
-                    items_found=len(into),
+                    items_found=len(matching_rows),
                     status="searching",
                     message=f"Searching page {page}/{max_pages}...",
                 )
                 time.sleep(0.1)
 
-            k_enc = quote_plus(amazon_query)
-            if page == 1:
-                full_url = (
-                    f"{self.base_url}/s?k={k_enc}"
-                    f"&__mk_fr_FR=%C3%85M%C3%85%C5%BD%C3%95%C3%91"
-                    f"&rh={AMAZON_FR_SELLER_RH}&s=date-desc-rank"
-                )
-            else:
-                full_url = (
-                    f"{self.base_url}/s?k={k_enc}"
-                    f"&__mk_fr_FR=%C3%85M%C3%85%C5%BD%C3%95%C3%91"
-                    f"&rh={AMAZON_FR_SELLER_RH}&s=date-desc-rank&page={page}"
-                )
-
+            full_url = self._build_invite_search_url(amazon_query, page)
             print(f"   URL: {full_url}")
 
             try:
@@ -356,49 +454,54 @@ class AmazonScraper:
                 page_items = parse_search_page(soup, self.base_url)
                 print(f"   {len(page_items)} invite-only items on this page")
 
-                if not page_items and not soup.find_all(
-                    "div", {"data-component-type": "s-search-result"}
-                ):
-                    print(f"   [warn] No result blocks - stopping")
-                    break
-
-                added: List[Dict] = []
+                new_invite_count = 0
                 for row in page_items:
-                    if item_cap is not None and len(into) >= item_cap:
-                        break
-                    title = str(row.get("title") or "")
-                    if title_filter and not _title_matches_user_filter(title, title_filter):
-                        continue
                     asin = str(row.get("asin") or "").strip().upper()
                     if not asin or asin in seen_asins:
                         continue
                     seen_asins.add(asin)
-                    into.append(row)
-                    added.append(row)
+                    invite_rows.append(row)
+                    new_invite_count += 1
+
+                matching_rows = _select_best_title_matches(invite_rows, amazon_query)
+                if item_cap is not None:
+                    matching_rows = matching_rows[:item_cap]
 
                 if progress_callback:
                     progress_callback(
                         current_page=page,
                         total_pages=max_pages,
-                        items_found=len(into),
+                        items_found=len(matching_rows),
                         status="page_done",
                         message=(
-                            f"Page {page}/{max_pages}: +{len(added)} invite-only on this page "
-                            f"(total {len(into)})"
+                            f"Page {page}/{max_pages}: +{new_invite_count} invite-only on this page, "
+                            f"{len(matching_rows)} matching the search"
                         ),
                     )
-                    for row in added:
+                    for row in matching_rows:
+                        asin = str(row.get("asin") or "").strip().upper()
+                        if asin in streamed_asins:
+                            continue
+                        streamed_asins.add(asin)
                         progress_callback(
                             current_page=page,
                             total_pages=max_pages,
-                            items_found=len(into),
+                            items_found=len(matching_rows),
                             status="item_found",
                             message=f"Trouvé : {row.get('title', '')[:120]}",
                             item_data=dict(row),
                         )
 
-                if item_cap is not None and len(into) >= item_cap:
-                    return
+                if item_cap is not None and len(matching_rows) >= item_cap:
+                    break
+                if not soup.find_all("div", {"data-component-type": "s-search-result"}):
+                    print("   [warn] No result blocks - stopping")
+                    break
+                pages_without_new_invites = 0 if new_invite_count else pages_without_new_invites + 1
+                # En tri pertinence, les produits sur invitation arrivent en tête des résultats.
+                if pages_without_new_invites >= (1 if invite_rows else 2):
+                    print("   No new invite-only items - stopping")
+                    break
 
                 if page < max_pages:
                     time.sleep(1)
@@ -410,6 +513,8 @@ class AmazonScraper:
                 traceback.print_exc()
                 break
 
+        return matching_rows
+
     def search_invitation_items(
         self,
         query: str,
@@ -417,10 +522,6 @@ class AmazonScraper:
         progress_callback=None,
         max_items: int | None = None,
     ) -> List[Dict]:
-        all_items: List[Dict] = []
-        seen_asins: set[str] = set()
-
-        user_filter = _normalize_amazon_search_query(query)
         amazon_q = _effective_invite_search_query(query)
         item_cap: int | None = None
         if max_items is not None and int(max_items) > 0:
@@ -429,54 +530,24 @@ class AmazonScraper:
         print(f"\n{'='*60}")
         cap_note = f", max {item_cap} items" if item_cap else ""
         print(
-            f"[search] browse '{DEFAULT_INVITE_SEARCH_QUERY}' - up to {max_pages} pages{cap_note} "
+            f"[search] '{amazon_q}' - up to {max_pages} pages{cap_note} "
             f"(HTTP + nodriver if needed)"
         )
-        if user_filter:
-            print(f"[search] title filter: '{user_filter}' (widen to '{amazon_q}' only if empty)")
         print(f"{'='*60}\n")
 
-        primary_message = (
-            f"Recherche des invitations Pokémon (filtre « {user_filter} »)…"
-            if user_filter
-            else f"Recherche des invitations Pokémon (jusqu’à {max_pages} pages)…"
-        )
         if progress_callback:
             progress_callback(
                 current_page=0,
                 total_pages=max_pages,
                 items_found=0,
                 status="starting",
-                message=primary_message,
+                message=f"Recherche Amazon « {amazon_q} » (jusqu’à {max_pages} pages)…",
             )
 
-        # Passage principal : la browse vendeur Amazon.fr fiable (c'est là que le badge
-        # « Disponible sur invitation » apparaît), avec la requête utilisateur appliquée en
-        # filtre de titre côté client. Une requête étroite comme « 30 » n'est PAS injectée dans
-        # la recherche Amazon : ça renvoie des listings génériques et, surtout, un second scan
-        # par-dessus cramerait la session Amazon et ferait bloquer le passage productif.
-        self._scan_search_pages_for_invites(
-            DEFAULT_INVITE_SEARCH_QUERY, max_pages, item_cap, user_filter,
-            progress_callback, all_items, seen_asins,
+        # La requête part telle quelle sur Amazon : lui seul sait que « 30 ans » désigne les titres « 30ᵉ Anniversaire ».
+        all_items = self._scan_search_pages_for_invites(
+            amazon_q, max_pages, item_cap, progress_callback
         )
-
-        # Fallback : uniquement si la browse fiable n'a rien renvoyé pour une requête précise, on
-        # élargit côté Amazon (« pokemon <requête> »), toujours filtré sur le titre pour garder
-        # l'intention de l'utilisateur.
-        if user_filter and not all_items and amazon_q != DEFAULT_INVITE_SEARCH_QUERY:
-            print(f"[search] Widen '{amazon_q}' + title filter '{user_filter}'")
-            if progress_callback:
-                progress_callback(
-                    current_page=0,
-                    total_pages=max_pages,
-                    items_found=0,
-                    status="starting",
-                    message=f"Recherche élargie « {amazon_q} »…",
-                )
-            self._scan_search_pages_for_invites(
-                amazon_q, max_pages, item_cap, user_filter,
-                progress_callback, all_items, seen_asins,
-            )
 
         print(f"\n{'='*60}")
         print(f"[result] {len(all_items)} invite-only items")
