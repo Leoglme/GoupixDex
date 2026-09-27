@@ -201,7 +201,7 @@ class DesktopVintedRunnerService:
         finally:
             if browser_started:
                 try:
-                    VintedService.close_browser()
+                    await VintedService.shutdown_browser()
                 except Exception:
                     pass
 

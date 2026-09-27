@@ -150,7 +150,7 @@ class VintedBatchOrchestratorService:
             )
         finally:
             if browser_started:
-                VintedService.close_browser()
+                await VintedService.shutdown_browser()
             await batch_hub.finish_job(
                 job_id,
                 {

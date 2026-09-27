@@ -293,6 +293,29 @@ class VintedService:
                 logger.debug("taskkill Chrome post-stop: %s", exc)
 
     @classmethod
+    async def shutdown_browser(cls) -> None:
+        """
+        Close Chrome cleanly so it writes its cookies to the profile, then release it like :meth:`close_browser`.
+
+        Vinted replaces its session tokens when it refreshes them: a Chrome killed right after
+        (``Browser.stop`` only terminates the process) loses them and the next run starts logged out.
+        """
+        browser = cls._browser
+        if browser is None:
+            return
+        try:
+            await asyncio.wait_for(browser.connection.send(cdp.browser.close()), timeout=5.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("CDP Browser.close: %s", exc)
+        process = getattr(browser, "_process", None)
+        if process is not None:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Chrome still running after Browser.close, stopping it: %s", exc)
+        cls.close_browser()
+
+    @classmethod
     async def ensure_browser_session(cls, *, wait_after_page_ms: int = 80) -> bool:
         """
         Ensure Chrome and the main tab exist.
@@ -393,24 +416,6 @@ class VintedService:
             "Vinted user menu not detected after %ss — continuing anyway.",
             timeout,
         )
-
-    @classmethod
-    async def _header_guest_login_button_visible(cls, tab: Tab) -> bool:
-        """True when the main header still shows S'inscrire | Se connecter (guest)."""
-        val = await tab.evaluate(
-            """
-            (() => {
-                const b = document.querySelector('[data-testid="header--login-button"]');
-                if (!b) return false;
-                const cs = window.getComputedStyle(b);
-                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-                const r = b.getBoundingClientRect();
-                return r.width > 2 && r.height > 2;
-            })()
-            """,
-            return_by_value=True,
-        )
-        return val is True
 
     @classmethod
     async def _scroll_page_top(cls, tab: Tab) -> None:
@@ -1016,15 +1021,16 @@ class VintedService:
         await tab
 
     @classmethod
-    async def is_connected(cls) -> bool:
+    async def is_connected(cls, *, timeout_sec: float = 8.0) -> bool:
         """
-        Rough check that the user is **not** on an auth entry URL and the guest header CTA is gone.
+        Check that the Vinted session is really logged in: ``/api/v2/users/current`` answers with a member id.
 
-        This avoids logging "connected" while still on ``select_type`` or when the header still shows
-        "S'inscrire | Se connecter".
+        The guest header button is no proof: right after a load it is not rendered yet, so an expired
+        session would look connected. The check is retried for ``timeout_sec`` because Vinted refreshes an
+        expired access token itself a moment after the page loads.
 
         Returns:
-            True if URL is Vinted FR, not an auth-flow path, and the guest login header button is absent/hidden.
+            True if the tab is on Vinted FR, outside the auth flow, and ``users/current`` returns a member id.
         """
         tab = cls._require_tab()
         await tab
@@ -1033,9 +1039,13 @@ class VintedService:
             return False
         if cls._url_is_auth_flow(current):
             return False
-        if await cls._header_guest_login_button_visible(tab):
-            return False
-        return True
+        deadline = time.monotonic() + timeout_sec
+        while True:
+            if await cls._member_id_from_users_current_fetch(tab) is not None:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.8)
 
     @classmethod
     async def ensure_sign_in(
@@ -1068,6 +1078,7 @@ class VintedService:
                 "Vinted session reused (persistent browser profile) — skipping new login.",
             )
             return
+        logger.info("Vinted session expired in the persistent profile — signing in again.")
 
         max_attempts = 5
         # Already on home: open member URL directly (avoids second home load + ``from_home`` delays).

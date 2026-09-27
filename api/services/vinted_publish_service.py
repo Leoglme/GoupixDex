@@ -278,4 +278,4 @@ async def publish_article_to_vinted(
         return {"published": False, "detail": str(exc)}
     finally:
         if browser_started:
-            VintedService.close_browser()
+            await VintedService.shutdown_browser()

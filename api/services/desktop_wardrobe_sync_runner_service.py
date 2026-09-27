@@ -100,7 +100,7 @@ class DesktopWardrobeSyncRunnerService:
         finally:
             if browser_started:
                 await _job_log(job_id, "Closing Vinted browser…")
-                VintedService.close_browser()
+                await VintedService.shutdown_browser()
 
         if not cookie_header.strip():
             if settings.vinted_browser_ephemeral:
