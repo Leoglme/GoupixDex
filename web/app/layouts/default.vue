@@ -75,6 +75,7 @@
 
     <GoupixDexBrowserMissingModal v-if="isDesktopApp" />
     <GoupixDexConfirmHost />
+    <GoupixDexPublishReviewHost />
     <GoupixDexDrawerStackHost />
 
     <div

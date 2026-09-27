@@ -110,3 +110,27 @@ function findLeboncoinSetupIssue(settings: AppSettings): string | null {
   }
   return null
 }
+
+/**
+ * Noms des marketplaces pour une phrase : « Vinted, eBay et Leboncoin ».
+ * @param {Marketplace[]} marketplaces - Marketplaces à nommer.
+ * @returns {string} Les noms séparés par des virgules, le dernier par « et ».
+ */
+export function marketplaceNamesLabel(marketplaces: Marketplace[]): string {
+  return new Intl.ListFormat('fr', { style: 'long', type: 'conjunction' }).format(
+    marketplaces.map((marketplace: Marketplace): string => MARKETPLACE_NAMES[marketplace]),
+  )
+}
+
+/**
+ * Marketplaces d'un paramètre d'URL « vinted,ebay » ; les valeurs inconnues sont ignorées.
+ * @param {unknown} rawList - Valeur du paramètre.
+ * @returns {Marketplace[]} Les marketplaces reconnues, dans l'ordre Vinted, eBay, Leboncoin.
+ */
+export function parseMarketplaceList(rawList: unknown): Marketplace[] {
+  if (typeof rawList !== 'string') {
+    return []
+  }
+  const requestedMarketplaces: string[] = rawList.split(',').map((value: string): string => value.trim())
+  return MARKETPLACES.filter((marketplace: Marketplace): boolean => requestedMarketplaces.includes(marketplace))
+}

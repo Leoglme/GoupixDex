@@ -3,9 +3,12 @@ import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
 import type { EbayLeboncoinDelist, EbayLeboncoinDelistFailure } from '~/types/EbayLeboncoinDelist'
 import type { Marketplace } from '~/types/Marketplace'
+import type { PublishReviewChoice } from '~/types/PublishReviewPrompt'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
-import { persistRelistQueue, relistEditLocation } from '~/utils/articleRelistQueue'
+import { usePublishReviewPrompt } from '~/composables/usePublishReviewPrompt'
+import { persistRelistQueue, publishReviewLocation, relistEditLocation } from '~/utils/articleRelistQueue'
+import { MARKETPLACES } from '~/utils/marketplaces'
 import {
   articleEligibleForBulkRelist,
   articleEligibleForVintedRelist,
@@ -39,6 +42,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const toast = useToast()
   const { canUseDesktopWorkers } = useDesktopWorkers()
   const { removeEbayLeboncoinListings } = useEbayLeboncoinDelist()
+  const { askWhetherToReviewBeforePublishing } = usePublishReviewPrompt()
   const { startJob } = useWardrobeLocalSync()
   const {
     isVintedChannelEnabled: vintedChannelEnabled,
@@ -435,19 +439,34 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   })
 
   /**
-   * Lance la publication groupée selon les canaux cochés dans la modale.
+   * Demande s’il faut d’abord modifier les fiches, puis lance la publication groupée sur les canaux cochés ou ouvre la première fiche à vérifier.
+   * @param {{ vinted: boolean; ebay: boolean; leboncoin: boolean; refreshVinted?: boolean }} payload - Canaux cochés dans la modale.
+   * @returns {Promise<void>} Résolue une fois la publication lancée, la première fiche ouverte, ou la question fermée.
    */
   async function confirmBulkPublish(payload: {
     vinted: boolean
     ebay: boolean
     leboncoin: boolean
     refreshVinted?: boolean
-  }) {
+  }): Promise<void> {
     const ids = bulkPublishIds.value
-    if (!ids.length) {
+    const [firstId, ...remainingIds]: number[] = ids
+    if (firstId === undefined) {
       return
     }
     bulkPublishOpen.value = false
+    const marketplaces: Marketplace[] = MARKETPLACES.filter((marketplace: Marketplace): boolean => payload[marketplace])
+    const choice: PublishReviewChoice | null = await askWhetherToReviewBeforePublishing({
+      subjectLabel: ids.length > 1 ? `${ids.length} articles` : articleById(firstId)?.title || '1 article',
+      marketplaces,
+    })
+    if (choice === 'review') {
+      await navigateTo(publishReviewLocation(firstId, remainingIds, marketplaces, route.path))
+      return
+    }
+    if (choice !== 'publish') {
+      return
+    }
     if (payload.leboncoin && !payload.vinted && !payload.ebay) {
       await onBulkPublishLeboncoin(ids)
       return

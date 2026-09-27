@@ -177,6 +177,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { EbayLeboncoinDelist } from '~/types/EbayLeboncoinDelist'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
+import { internalPathOrFallback } from '~/utils/internalPath'
 import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
 import {
   navigateToRelistEditorFromStorage,
@@ -303,11 +304,9 @@ const ebayLeboncoinDelistStatusLabel: ComputedRef<string> = computed((): string 
   return summaryParts.join(' · ') || 'Terminé'
 })
 
-const delistReturnPath: ComputedRef<string> = computed((): string => {
-  const requestedPath: string = typeof route.query.back === 'string' ? route.query.back : ''
-  // Seul un chemin interne est suivi, pour ne jamais rediriger hors de GoupixDex.
-  return requestedPath.startsWith('/') && !requestedPath.startsWith('//') ? requestedPath : '/articles'
-})
+const delistReturnPath: ComputedRef<string> = computed((): string =>
+  internalPathOrFallback(route.query.back, '/articles'),
+)
 
 const hasDelistSucceeded: ComputedRef<boolean> = computed(
   (): boolean =>

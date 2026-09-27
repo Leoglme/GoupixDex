@@ -349,14 +349,13 @@ import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useM
 import type { PricingLookup } from '~/composables/usePricing'
 import type { MarketplacePublishOption } from '~/types/GoupixDexPublishEverywhereButton'
 import type { Marketplace, MarketplaceListingLink } from '~/types/Marketplace'
+import type { PublishReviewChoice } from '~/types/PublishReviewPrompt'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
+import { useArticleMarketplacePublication } from '~/composables/useArticleMarketplacePublication'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
-import {
-  isPublishedOnMarketplace,
-  MARKETPLACE_NAMES,
-  MARKETPLACES,
-  marketplaceListingLinks,
-} from '~/utils/marketplaces'
+import { usePublishReviewPrompt } from '~/composables/usePublishReviewPrompt'
+import { publishReviewLocation } from '~/utils/articleRelistQueue'
+import { isPublishedOnMarketplace, MARKETPLACES, marketplaceListingLinks } from '~/utils/marketplaces'
 import { DEFAULT_ARTICLE_MARKET_SEARCH_BASE, marketSearchToRouteQuery } from '~/utils/marketSearchQuery'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
@@ -385,12 +384,9 @@ const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarket
 const toast = useToast()
 const { confirm: confirmAction } = useGoupixConfirm()
 const { openCard } = useOpenCardDrawer()
-const { marketplaceSetupIssues, loadMarketplaceAvailability, startArticlePublish } = useMarketplacePublishing()
-const publishStreamByMarketplace: Record<Marketplace, ReturnType<typeof useVintedPublishStream>> = {
-  vinted: useVintedPublishStream(),
-  ebay: useVintedPublishStream(),
-  leboncoin: useVintedPublishStream(),
-}
+const { marketplaceSetupIssues, loadMarketplaceAvailability } = useMarketplacePublishing()
+const { publishingMarketplaces, publishArticleOnMarketplaces } = useArticleMarketplacePublication()
+const { askWhetherToReviewBeforePublishing } = usePublishReviewPrompt()
 
 const article: Ref<Article | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
@@ -401,7 +397,6 @@ const ebayLoading: Ref<boolean> = ref(false)
 const ebayError: Ref<string | null> = ref(null)
 const removingEbay: Ref<boolean> = ref(false)
 const removingVinted: Ref<boolean> = ref(false)
-const publishingMarketplaces: Ref<Marketplace[]> = ref([])
 
 const id: ComputedRef<number> = computed(() => props.articleId)
 
@@ -885,55 +880,27 @@ function publishBlockedReason(marketplace: Marketplace): string | null {
 }
 
 /**
- * Publie l’article sur chacune des marketplaces demandées en même temps, chacune suivant sa propre progression.
+ * Demande s'il faut d'abord modifier la fiche, puis publie l'article sur les marketplaces demandées ou ouvre sa page de modification.
  * @param {Marketplace[]} marketplaces - Marketplaces visées.
- * @returns {Promise<void>} Résolue quand toutes les publications sont terminées (ou n’ont pas démarré).
+ * @returns {Promise<void>} Résolue quand les publications sont terminées, la page de modification ouverte, ou la question fermée.
  */
 async function onPublishOnMarketplaces(marketplaces: Marketplace[]): Promise<void> {
-  await Promise.all(marketplaces.map((marketplace: Marketplace): Promise<void> => onPublish(marketplace)))
-}
-
-/**
- * Publie l’article sans quitter le drawer : suit la progression en arrière-plan puis recharge la fiche.
- * @param marketplace - Marketplace visée.
- * @returns {Promise<void>} Résolue quand la publication est terminée (ou n’a pas démarré).
- */
-async function onPublish(marketplace: Marketplace): Promise<void> {
-  const current = article.value
-  if (!current || publishingMarketplaces.value.includes(marketplace)) {
+  const current: Article | null = article.value
+  if (!current) {
     return
   }
-  publishingMarketplaces.value = [...publishingMarketplaces.value, marketplace]
-  try {
-    const listingPublish = await startArticlePublish(current, marketplace)
-    if (!listingPublish) {
-      return
-    }
-    toast.add({
-      title: `Publication ${MARKETPLACE_NAMES[marketplace]} lancée`,
-      description: 'Vous pouvez continuer : un message confirmera la mise en ligne.',
-      actions: [
-        {
-          label: 'Voir le journal',
-          onClick: async (): Promise<void> => {
-            await navigateTo(listingPublish.journalLocation)
-          },
-        },
-      ],
-    })
-    await publishStreamByMarketplace[marketplace].followStream(listingPublish.streamPath, 'list', {
-      sseBase: listingPublish.sseBase,
-      localWorker: listingPublish.localWorker,
-    })
+  const choice: PublishReviewChoice | null = await askWhetherToReviewBeforePublishing({
+    subjectLabel: current.pokemon_name || current.title,
+    marketplaces,
+  })
+  if (choice === 'review') {
+    closeAllDrawers()
+    await navigateTo(publishReviewLocation(current.id, [], marketplaces, route.path))
+    return
+  }
+  if (choice === 'publish') {
+    await publishArticleOnMarketplaces(current, marketplaces)
     await reloadArticle()
-  } catch (e) {
-    toast.add({
-      title: `Publication ${MARKETPLACE_NAMES[marketplace]}`,
-      description: apiErrorMessage(e),
-      color: 'warning',
-    })
-  } finally {
-    publishingMarketplaces.value = publishingMarketplaces.value.filter((item: Marketplace) => item !== marketplace)
   }
 }
 

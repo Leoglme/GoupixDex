@@ -321,7 +321,9 @@
     </div>
 
     <UButton v-if="showSubmitButton" color="primary" :loading="loading" @click="submit">
-      {{ mode === 'create' ? "Créer l'article" : relistMode ? 'Enregistrer et continuer' : 'Enregistrer' }}
+      {{
+        submitLabel ?? (mode === 'create' ? "Créer l'article" : relistMode ? 'Enregistrer et continuer' : 'Enregistrer')
+      }}
     </UButton>
     <p v-if="showSubmitButton && loading && loadingHint" class="text-muted flex items-center gap-2 text-sm">
       <UIcon name="i-lucide-loader-2" class="size-4 shrink-0 animate-spin" />
@@ -356,6 +358,7 @@ const props = withDefaults(
     relistMode?: boolean
     /** Show the form submit button (disable if the parent handles submit). */
     showSubmitButton?: boolean
+    submitLabel?: string
   }>(),
   {
     hideVintedOption: false,

@@ -1,5 +1,7 @@
 /** Navigation file d’attente après remise en vente (query `queue=id1,id2`). */
 
+import type { Marketplace } from '~/types/Marketplace'
+
 export function parseRelistQueueParam(raw: unknown): number[] {
   if (typeof raw !== 'string' || !raw.trim()) {
     return []
@@ -71,4 +73,25 @@ export async function navigateToRelistEditorFromStorage(): Promise<void> {
     return
   }
   await navigateTo(relistEditLocation(ids[0]!, ids))
+}
+
+/**
+ * Page de modification d'une fiche à vérifier avant publication, suivie des fiches restantes de la série.
+ * @param {number} articleId - Fiche à vérifier maintenant.
+ * @param {number[]} remainingArticleIds - Fiches à vérifier ensuite, dans l'ordre.
+ * @param {Marketplace[]} marketplaces - Marketplaces où publier chaque fiche une fois enregistrée.
+ * @param {string} returnPath - Page où revenir une fois la série publiée.
+ * @returns {{ path: string; query: Record<string, string> }} La page de modification de la fiche.
+ */
+export function publishReviewLocation(
+  articleId: number,
+  remainingArticleIds: number[],
+  marketplaces: Marketplace[],
+  returnPath: string,
+): { path: string; query: Record<string, string> } {
+  const query: Record<string, string> = { review: '1', publish: marketplaces.join(','), back: returnPath }
+  if (remainingArticleIds.length) {
+    query.queue = remainingArticleIds.join(',')
+  }
+  return { path: `/articles/${articleId}/edit`, query }
 }
