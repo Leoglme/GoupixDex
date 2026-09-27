@@ -1,0 +1,34 @@
+# One-shot manuel : enregistre des annonces Leboncoin déjà en ligne sur leurs articles (prod). À supprimer après usage.
+name: One-shot — leboncoin listings
+on:
+  workflow_dispatch:
+    inputs:
+      listings_b64: { description: 'JSON [{article_id, listing_id, published_at}] encodé en base64', required: true }
+      apply: { description: 'true = écrit ; false = dry-run', required: true, default: 'false' }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run script over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          APPLY: '${{ inputs.apply }}'
+          LISTINGS_B64: '${{ inputs.listings_b64 }}'
+          DEPLOY_API_DIR: '${{ secrets.DEPLOY_API_DIR }}'
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: APPLY,LISTINGS_B64,DEPLOY_API_DIR
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            APP_ROOT="${DEPLOY_API_DIR%/}/api"
+            LISTINGS_FILE="$(mktemp)"
+            echo "$LISTINGS_B64" | base64 -d > "$LISTINGS_FILE"
+            if [ "${APPLY}" = "true" ]; then FLAG=""; else FLAG="--dry-run"; fi
+            cd "$APP_ROOT"
+            "$APP_ROOT/.venv/bin/python" -u "$APP_ROOT/scripts/set_leboncoin_listings.py" --file "$LISTINGS_FILE" $FLAG
+            rm -f "$LISTINGS_FILE"
