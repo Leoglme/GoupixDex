@@ -43,6 +43,25 @@
 
         <UAlert v-if="streamError" color="error" variant="subtle" icon="i-lucide-alert-circle" :title="streamError" />
 
+        <UCard v-if="followedEbayLeboncoinDelist" class="shrink-0" :ui="{ body: 'space-y-2 py-3' }">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-highlighted text-sm font-medium">Retrait eBay / Leboncoin</span>
+            <span class="text-muted text-sm">{{ ebayLeboncoinDelistStatusLabel }}</span>
+            <UIcon
+              v-if="followedEbayLeboncoinDelist.isRunning"
+              name="i-lucide-loader-2"
+              class="text-primary size-4 animate-spin"
+            />
+          </div>
+          <p
+            v-for="failure in followedEbayLeboncoinDelist.failures"
+            :key="failure.articleId"
+            class="text-sm text-(--app-red)"
+          >
+            {{ failure.articleTitle }} : {{ failure.reason }}
+          </p>
+        </UCard>
+
         <div v-if="showMainPanels" class="grid min-h-0 flex-1 [grid-template-rows:minmax(0,auto)_minmax(0,1fr)] gap-4">
           <UCard
             v-if="streamMode === 'batch'"
@@ -155,7 +174,9 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import type { EbayLeboncoinDelist } from '~/types/EbayLeboncoinDelist'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
 import { WARDROBE_IMPORT_STORAGE_KEY } from '~/composables/useWardrobeImportPrefill'
 import {
   navigateToRelistEditorFromStorage,
@@ -177,6 +198,8 @@ const batchStream = useVintedBatchStream()
 const publishStream = useVintedPublishStream()
 const wardrobeStream = useWardrobeSyncStream()
 const { isDesktopAppUnreachable, waitForDesktopWorkersAvailability } = useDesktopWorkers()
+const { ebayLeboncoinDelist } = useEbayLeboncoinDelist()
+const toast = useToast()
 
 const streamMode: Ref<'none' | 'batch' | 'single' | 'wardrobe'> = ref('none')
 
@@ -250,6 +273,44 @@ const progressLabel: ComputedRef<string | null> = computed(() => {
 })
 
 const showMainPanels: ComputedRef<boolean> = computed(() => !(idleMessage.value && !loading.value))
+
+const followedEbayLeboncoinDelist: ComputedRef<EbayLeboncoinDelist | null> = computed(
+  (): EbayLeboncoinDelist | null => {
+    const followedJobId: string = typeof route.query.job === 'string' ? route.query.job.trim() : ''
+    const delist: EbayLeboncoinDelist | null = ebayLeboncoinDelist.value
+    return delist && followedJobId && delist.vintedDelistJobId === followedJobId ? delist : null
+  },
+)
+
+const ebayLeboncoinDelistStatusLabel: ComputedRef<string> = computed((): string => {
+  const delist: EbayLeboncoinDelist | null = followedEbayLeboncoinDelist.value
+  if (!delist) {
+    return ''
+  }
+  if (delist.isRunning) {
+    return `${delist.processedCount}/${delist.totalCount} article(s)…`
+  }
+  const summaryParts: string[] = []
+  if (delist.removedFromEbayCount) {
+    summaryParts.push(`${delist.removedFromEbayCount} retirée(s) d’eBay`)
+  }
+  if (delist.removedFromLeboncoinCount) {
+    summaryParts.push(`${delist.removedFromLeboncoinCount} retirée(s) de Leboncoin`)
+  }
+  if (delist.failures.length) {
+    summaryParts.push(`${delist.failures.length} échec(s)`)
+  }
+  return summaryParts.join(' · ') || 'Terminé'
+})
+
+const hasDelistSucceeded: ComputedRef<boolean> = computed(
+  (): boolean =>
+    route.query.after === 'delist' &&
+    finished.value &&
+    !hasBatchFailedListings.value &&
+    !followedEbayLeboncoinDelist.value?.isRunning &&
+    !followedEbayLeboncoinDelist.value?.failures.length,
+)
 
 async function connectBatchJob(jobId: string): Promise<void> {
   idleMessage.value = null
@@ -413,6 +474,14 @@ watch(
     bootstrap()
   },
 )
+
+watch(hasDelistSucceeded, async (isDelistSucceeded: boolean): Promise<void> => {
+  if (!isDelistSucceeded) {
+    return
+  }
+  toast.add({ title: 'Retrait terminé', color: 'success' })
+  await navigateTo('/articles')
+})
 
 onBeforeUnmount(() => {
   batchStream.closeBatchStream()

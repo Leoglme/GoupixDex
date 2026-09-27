@@ -1,7 +1,9 @@
 import type { Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
+import type { EbayLeboncoinDelist, EbayLeboncoinDelistFailure } from '~/types/EbayLeboncoinDelist'
 import type { Marketplace } from '~/types/Marketplace'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
 import { persistRelistQueue, relistEditLocation } from '~/utils/articleRelistQueue'
 import {
   articleEligibleForBulkRelist,
@@ -30,11 +32,11 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     startVintedBatch,
     startVintedBatchDelist,
     startEbayBatch,
-    bulkDelistChannels,
     bulkPrepareForSale,
   } = useArticles()
   const toast = useToast()
   const { canUseDesktopWorkers } = useDesktopWorkers()
+  const { removeEbayLeboncoinListings } = useEbayLeboncoinDelist()
   const { startJob } = useWardrobeLocalSync()
   const {
     isVintedChannelEnabled: vintedChannelEnabled,
@@ -543,50 +545,33 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
-   * Retire eBay / Leboncoin sans bloquer l’ouverture du journal Vinted, puis annonce le résultat par un toast.
-   *
-   * @param ids - Articles sélectionnés.
-   * @param payload - Marketplaces cochées hors Vinted (retiré par le worker desktop).
-   * @returns {Promise<void>} Résolue quand l’API a répondu.
+   * Annonce par un toast le bilan d’un retrait eBay / Leboncoin terminé hors du journal.
+   * @param {EbayLeboncoinDelist} delist - Bilan du retrait.
+   * @returns {void}
    */
-  async function removeEbayAndLeboncoinListingsInBackground(
-    ids: number[],
-    payload: { ebay: boolean; leboncoin: boolean },
-  ): Promise<void> {
-    const expectedEbayRemovalCount: number = payload.ebay
-      ? articlesForIds(ids).filter((row: Article) => row.published_on_ebay).length
-      : 0
-    try {
-      const res = await bulkDelistChannels({
-        article_ids: ids,
-        vinted: false,
-        ebay: payload.ebay,
-        leboncoin: payload.leboncoin,
+  function announceEbayLeboncoinDelist(delist: EbayLeboncoinDelist): void {
+    const removedParts: string[] = []
+    if (delist.removedFromEbayCount) {
+      removedParts.push(`${delist.removedFromEbayCount} retrait(s) eBay`)
+    }
+    if (delist.removedFromLeboncoinCount) {
+      removedParts.push(`${delist.removedFromLeboncoinCount} retrait(s) Leboncoin`)
+    }
+    if (removedParts.length) {
+      toast.add({ title: 'Retrait enregistré', description: removedParts.join(' · '), color: 'success' })
+    }
+    const firstFailure: EbayLeboncoinDelistFailure | undefined = delist.failures[0]
+    if (firstFailure) {
+      toast.add({
+        title: `${delist.failures.length} retrait(s) impossible(s)`,
+        description: `${firstFailure.articleTitle} : ${firstFailure.reason}`,
+        color: 'error',
       })
-      const parts: string[] = []
-      if (res.ebay_removed) {
-        parts.push(`${res.ebay_removed} retrait(s) eBay`)
-      }
-      if (res.leboncoin_cleared) {
-        parts.push(`${res.leboncoin_cleared} retrait(s) Leboncoin`)
-      }
-      if (parts.length) {
-        toast.add({ title: 'Retrait enregistré', description: parts.join(' · '), color: 'success' })
-      }
-      if (res.ebay_removed < expectedEbayRemovalCount) {
-        toast.add({
-          title: 'Retrait eBay incomplet',
-          description: `${expectedEbayRemovalCount - res.ebay_removed} annonce(s) eBay n’ont pas pu être retirées.`,
-          color: 'warning',
-        })
-      }
-    } catch (e) {
-      toast.add({ title: 'Retrait eBay / Leboncoin impossible', description: apiErrorMessage(e), color: 'error' })
     }
   }
 
   /**
-   * Retire la sélection des marketplaces cochées : sur desktop, le lot Vinted part d’abord et le journal s’ouvre tout de suite.
+   * Retire la sélection des marketplaces cochées : sur desktop, le lot Vinted part d’abord et le journal suit aussi eBay / Leboncoin.
    *
    * @param payload - Marketplaces à retirer.
    * @returns {Promise<void>} Résolue une fois le retrait lancé (ou terminé hors Vinted).
@@ -599,48 +584,30 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     bulkDelistOpen.value = false
     bulkDelistBusy.value = true
     try {
+      const selectedArticles: Article[] = articlesForIds(ids)
       const vintedDelistIds: number[] = payload.vinted
-        ? articlesForIds(ids)
-            .filter((row: Article) => row.published_on_vinted)
-            .map((row: Article) => row.id)
+        ? selectedArticles.filter((row: Article) => row.published_on_vinted).map((row: Article) => row.id)
         : []
+      const ebayLeboncoinArticles: Article[] = selectedArticles.filter(
+        (row: Article) => (payload.ebay && row.published_on_ebay) || (payload.leboncoin && row.published_on_leboncoin),
+      )
       if (vintedDelistIds.length && canUseDesktopWorkers.value) {
         const { job_id } = await startVintedBatchDelist(vintedDelistIds)
-        if (payload.ebay || payload.leboncoin) {
-          removeEbayAndLeboncoinListingsInBackground(ids, payload)
+        if (ebayLeboncoinArticles.length) {
+          // Pas d'attente : le journal suit ce retrait pendant le lot Vinted.
+          removeEbayLeboncoinListings(ebayLeboncoinArticles, payload, job_id)
         }
         articleListSelectionReset.value += 1
-        await navigateTo({ path: '/articles/listing-logs', query: { job: job_id } })
+        await navigateTo({ path: '/articles/listing-logs', query: { job: job_id, after: 'delist' } })
         return
       }
 
-      const res = await bulkDelistChannels({
-        article_ids: ids,
-        vinted: payload.vinted,
-        ebay: payload.ebay,
-        leboncoin: payload.leboncoin,
-      })
-      const parts: string[] = []
-      if (res.ebay_removed) {
-        parts.push(`${res.ebay_removed} retrait(s) eBay`)
+      if (vintedDelistIds.length) {
+        notifyPcUnreachable('Le retrait Vinted')
       }
-      if (res.leboncoin_cleared) {
-        parts.push(`${res.leboncoin_cleared} retrait(s) Leboncoin`)
-      }
-      if (payload.vinted && res.vinted_article_ids.length) {
-        if (!canUseDesktopWorkers.value) {
-          notifyPcUnreachable('Le retrait Vinted')
-        } else {
-          const { job_id } = await startVintedBatchDelist(res.vinted_article_ids)
-          if (job_id) {
-            await navigateTo({ path: '/articles/listing-logs', query: { job: job_id } })
-            return
-          }
-        }
-      }
-      if (parts.length) {
-        toast.add({ title: 'Retrait enregistré', description: parts.join(' · '), color: 'success' })
-      } else if (!payload.vinted || !res.vinted_article_ids.length) {
+      if (ebayLeboncoinArticles.length) {
+        announceEbayLeboncoinDelist(await removeEbayLeboncoinListings(ebayLeboncoinArticles, payload, null))
+      } else if (!vintedDelistIds.length) {
         toast.add({
           title: 'Aucun retrait',
           description: 'Aucune annonce active sur les canaux choisis pour cette sélection.',

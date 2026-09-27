@@ -350,6 +350,7 @@ export function useArticles() {
     const { data } = await $api.post<{
       vinted_article_ids: number[]
       ebay_removed: number
+      ebay_failures: { article_id: number; detail: string }[]
       leboncoin_cleared: number
     }>('/articles/bulk-delist-channels', payload)
     return data
