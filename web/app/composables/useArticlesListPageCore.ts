@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
 import type { EbayLeboncoinDelist, EbayLeboncoinDelistFailure } from '~/types/EbayLeboncoinDelist'
 import type { Marketplace } from '~/types/Marketplace'
@@ -34,6 +35,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     startEbayBatch,
     bulkPrepareForSale,
   } = useArticles()
+  const route: RouteLocationNormalizedLoaded = useRoute()
   const toast = useToast()
   const { canUseDesktopWorkers } = useDesktopWorkers()
   const { removeEbayLeboncoinListings } = useEbayLeboncoinDelist()
@@ -598,7 +600,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
           removeEbayLeboncoinListings(ebayLeboncoinArticles, payload, job_id)
         }
         articleListSelectionReset.value += 1
-        await navigateTo({ path: '/articles/listing-logs', query: { job: job_id, after: 'delist' } })
+        await navigateTo({ path: '/articles/listing-logs', query: { job: job_id, after: 'delist', back: route.path } })
         return
       }
 

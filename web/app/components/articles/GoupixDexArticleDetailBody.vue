@@ -353,6 +353,7 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
 import { apiErrorMessage } from '~/composables/useApiError'
 import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useMarketSearch'
@@ -380,7 +381,9 @@ const emit = defineEmits<{
 }>()
 
 const config = useRuntimeConfig()
-const { getArticle, removeEbayListing, removeVintedListing } = useArticles()
+const route: RouteLocationNormalizedLoaded = useRoute()
+const { getArticle, removeEbayListing, startVintedBatchDelist } = useArticles()
+const { closeAll: closeAllDrawers } = useGoupixDrawerStack()
 const { canUseDesktopWorkers } = useDesktopWorkers()
 const { lookup } = usePricing()
 const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarketSearch()
@@ -837,6 +840,10 @@ async function onRemoveEbay(): Promise<void> {
   }
 }
 
+/**
+ * Lance le retrait Vinted de l'article sur le PC, ferme la fiche et ouvre le journal, qui ramène ici une fois le retrait réussi.
+ * @returns {Promise<void>} Résolue après l'ouverture du journal, ou l'échec annoncé.
+ */
 async function onRemoveVinted(): Promise<void> {
   if (!article.value?.published_on_vinted) {
     return
@@ -861,37 +868,11 @@ async function onRemoveVinted(): Promise<void> {
   }
   removingVinted.value = true
   try {
-    await removeVintedListing(id.value)
-    toast.add({
-      title: 'Vinted',
-      description: 'Suppression lancée sur votre PC. Actualisation dans quelques secondes…',
-      color: 'neutral',
-    })
-    setTimeout(() => {
-      void reloadArticle()
-        .then(() => {
-          if (!article.value?.published_on_vinted) {
-            toast.add({ title: 'Annonce Vinted retirée', color: 'success' })
-          }
-        })
-        .catch(() => {})
-    }, 7000)
+    const { job_id } = await startVintedBatchDelist([id.value])
+    closeAllDrawers()
+    await navigateTo({ path: '/articles/listing-logs', query: { job: job_id, after: 'delist', back: route.path } })
   } catch (e) {
-    const msg = apiErrorMessage(e)
-    if (msg.includes('VINTED_LOCAL_WORKER_REQUIRED')) {
-      toast.add({
-        title: 'Ouvrez GoupixDex sur votre PC',
-        description: 'Le retrait de l’annonce Vinted s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur.',
-        color: 'warning',
-      })
-    } else {
-      toast.add({ title: 'Suppression Vinted', description: msg, color: 'error' })
-    }
-    try {
-      await reloadArticle()
-    } catch {
-      /* ignore */
-    }
+    toast.add({ title: 'Suppression Vinted', description: apiErrorMessage(e), color: 'error' })
   } finally {
     removingVinted.value = false
   }

@@ -292,19 +292,6 @@ export function useArticles() {
   }
 
   /**
-   * POST worker local — retire l’annonce Vinted (fiche article).
-   *
-   * @returns Worker ack with optional Vinted status.
-   */
-  async function removeVintedListing(id: number) {
-    if (!import.meta.client || !canUseDesktopWorkers.value || !$vintedLocal) {
-      throw new Error('VINTED_LOCAL_WORKER_REQUIRED')
-    }
-    const { data } = await $vintedLocal.post<{ ok: boolean; status?: string }>(`/articles/${id}/remove-vinted-listing`)
-    return data
-  }
-
-  /**
    * POST `/articles/:id/remove-ebay-listing` — retire l’annonce eBay (API).
    *
    * @returns Updated article after eBay delist.
@@ -436,7 +423,6 @@ export function useArticles() {
     markSold,
     retryCrossEbayRemoval,
     vintedUnlistAfterEbaySale,
-    removeVintedListing,
     removeEbayListing,
     publishArticleToVinted,
     publishArticleToEbay,

@@ -303,6 +303,12 @@ const ebayLeboncoinDelistStatusLabel: ComputedRef<string> = computed((): string 
   return summaryParts.join(' · ') || 'Terminé'
 })
 
+const delistReturnPath: ComputedRef<string> = computed((): string => {
+  const requestedPath: string = typeof route.query.back === 'string' ? route.query.back : ''
+  // Seul un chemin interne est suivi, pour ne jamais rediriger hors de GoupixDex.
+  return requestedPath.startsWith('/') && !requestedPath.startsWith('//') ? requestedPath : '/articles'
+})
+
 const hasDelistSucceeded: ComputedRef<boolean> = computed(
   (): boolean =>
     route.query.after === 'delist' &&
@@ -480,7 +486,7 @@ watch(hasDelistSucceeded, async (isDelistSucceeded: boolean): Promise<void> => {
     return
   }
   toast.add({ title: 'Retrait terminé', color: 'success' })
-  await navigateTo('/articles')
+  await navigateTo(delistReturnPath.value)
 })
 
 onBeforeUnmount(() => {
