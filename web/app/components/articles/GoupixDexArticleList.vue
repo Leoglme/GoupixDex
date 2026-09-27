@@ -234,7 +234,9 @@
               v-for="row in cachedRows"
               v-show="idToPage.get(row.id) === page"
               :key="row.id"
+              class="cursor-pointer"
               :class="isSelected(row.id) ? 'bg-[var(--app-accent-soft)] hover:bg-[var(--app-accent-soft)]' : ''"
+              @click="onArticleRowClick(row.id, $event)"
             >
               <GoupixDexBaseTableTd class="goupix-card-table__select w-12 align-middle">
                 <input
@@ -348,6 +350,7 @@
                   :show-vinted="vintedChannelEnabled"
                   :show-ebay="showEbayColumn"
                   :show-leboncoin="leboncoinPublishAvailable"
+                  has-listing-links
                 />
               </GoupixDexBaseTableTd>
 
@@ -939,6 +942,22 @@ function onOpenArticle(rowId: number, event: MouseEvent): void {
 }
 
 function onOpenArticleRow(rowId: number): void {
+  openArticle(rowId, articleBrowseIds())
+}
+
+/**
+ * Ouvre la fiche au clic sur la ligne, sauf sur ses contrôles (case à cocher, liens, menu d'actions) ou après une sélection de texte.
+ * @param {number} rowId - Article de la ligne.
+ * @param {MouseEvent} event - Clic reçu par la ligne.
+ * @returns {void}
+ */
+function onArticleRowClick(rowId: number, event: MouseEvent): void {
+  const isOnRowControl: boolean =
+    event.target instanceof Element &&
+    event.target.closest('a, button, input, label, .goupix-card-table__select, .goupix-card-table__actions') !== null
+  if (isOnRowControl || window.getSelection()?.toString()) {
+    return
+  }
   openArticle(rowId, articleBrowseIds())
 }
 

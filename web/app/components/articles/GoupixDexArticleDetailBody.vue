@@ -328,6 +328,24 @@
         </div>
       </div>
 
+      <section v-if="liveListingLinks.length" class="space-y-2">
+        <p class="app-label">Annonces en ligne</p>
+        <div class="grid grid-cols-2 gap-2">
+          <UButton
+            v-for="listing in liveListingLinks"
+            :key="listing.marketplace"
+            :to="listing.url"
+            target="_blank"
+            color="neutral"
+            variant="outline"
+            class="justify-center"
+          >
+            <GoupixDexMarketplaceAppIcon :marketplace="listing.marketplace" class="size-5" />
+            Voir sur {{ MARKETPLACE_NAMES[listing.marketplace] }}
+          </UButton>
+        </div>
+      </section>
+
       <div class="text-muted border-default flex flex-wrap gap-x-6 gap-y-2 border-t pt-4 text-xs">
         <span>Créé le {{ new Date(article.created_at).toLocaleString('fr-FR') }}</span>
         <span v-if="article.sold_at">Vendu le {{ new Date(article.sold_at).toLocaleString('fr-FR') }}</span>
@@ -344,10 +362,10 @@ import type { Article } from '~/composables/useArticles'
 import { apiErrorMessage } from '~/composables/useApiError'
 import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useMarketSearch'
 import type { PricingLookup } from '~/composables/usePricing'
-import type { Marketplace } from '~/types/Marketplace'
+import type { Marketplace, MarketplaceListingLink } from '~/types/Marketplace'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
-import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
+import { MARKETPLACE_NAMES, marketplaceListingLinks } from '~/utils/marketplaces'
 import { DEFAULT_ARTICLE_MARKET_SEARCH_BASE, marketSearchToRouteQuery } from '~/utils/marketSearchQuery'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
@@ -421,6 +439,10 @@ const publishableMarketplaces: ComputedRef<Marketplace[]> = computed(() => {
   }
   return marketplaces
 })
+
+const liveListingLinks: ComputedRef<MarketplaceListingLink[]> = computed((): MarketplaceListingLink[] =>
+  article.value ? marketplaceListingLinks(article.value) : [],
+)
 
 /** Spinner only while eBay loads, or pricing lookup when Cardmarket is not cached on the article. */
 const showMarketReferenceSpinner: ComputedRef<boolean> = computed(() => {
