@@ -1584,7 +1584,7 @@ class LeboncoinService:
                 return True
         return False
 
-    @classmethod
+    @staticmethod
     def _extract_listing_id(url: str) -> str | None:
         for pat in PUBLISHED_URL_PATTERNS:
             m = pat.search(url)
