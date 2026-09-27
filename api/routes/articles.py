@@ -628,9 +628,12 @@ async def remove_ebay_listing(
         )
     ok, err = await delete_ebay_listing_for_article(db, article, user)
     if ok:
+        # Relit l’article : le worker Vinted a pu confirmer son propre retrait pendant l’appel eBay.
+        db.refresh(article)
         clear_ebay_publication_fields(article)
         article.cross_ebay_removal_failed = False
         article.cross_ebay_removal_error = None
+        article_service.apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
     else:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

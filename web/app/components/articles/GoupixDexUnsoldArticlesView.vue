@@ -1,0 +1,259 @@
+<template>
+  <UDashboardPanel :id="props.saleStatus === 'withdrawn' ? 'articles-withdrawn' : 'articles'">
+    <template #header>
+      <UDashboardNavbar>
+        <template #leading>
+          <UDashboardSidebarCollapse />
+        </template>
+        <template #title>
+          <span class="app-label flex items-center gap-1.5 !text-[0.65rem]">
+            <UIcon name="i-lucide-flame" class="h-3 w-3 text-(--app-accent)" />
+            Vente
+          </span>
+        </template>
+      </UDashboardNavbar>
+    </template>
+
+    <template #body>
+      <div class="app-dashboard-page w-full">
+        <GoupixDexPageHeader
+          title="Mes articles"
+          :description="
+            props.saleStatus === 'withdrawn'
+              ? 'Fiches retirées de toutes les marketplaces — utilisez Relister pour les remettre en ligne.'
+              : 'Cartes de votre collection mises en vente — publiées ou en préparation.'
+          "
+        >
+          <template #actions>
+            <UButton to="/articles/create" icon="i-lucide-plus" size="md"> Nouvel article </UButton>
+            <UButton to="/articles/batch-create" color="neutral" variant="outline" icon="i-lucide-layers" size="md">
+              Création groupée
+            </UButton>
+          </template>
+        </GoupixDexPageHeader>
+
+        <GoupixDexPageTabs :items="ARTICLES_PAGE_TABS" />
+        <div
+          v-if="!loading && !hasAnyArticles && props.saleStatus === 'forSale'"
+          class="app-card ring-primary/25 space-y-4 p-5 ring-1 sm:p-6"
+        >
+          <div class="space-y-2">
+            <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article pour l'instant</p>
+            <p class="text-sm leading-relaxed text-[var(--app-ink-soft)]">
+              Si vous vendez déjà sur Vinted, vous pouvez importer vos annonces actives et vendues dans GoupixDex. Une
+              fenêtre Chrome s'ouvre pour vous connecter ; le catalogue est ensuite récupéré automatiquement.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <UButton
+              icon="i-lucide-cloud-download"
+              :loading="wardrobeSyncing"
+              :disabled="!canUseDesktopWorkers"
+              @click="onWardrobeImportFromVinted"
+            >
+              Importer depuis Vinted
+            </UButton>
+            <UButton to="/articles/create" color="neutral" variant="subtle" icon="i-lucide-plus">
+              Créer un article manuellement
+            </UButton>
+          </div>
+          <p v-if="isDesktopAppUnreachable" class="text-xs text-[var(--app-ink-soft)]">
+            L'import Vinted s'exécute sur votre PC : ouvrez GoupixDex sur votre ordinateur, ou installez
+            <NuxtLink to="/downloads" class="underline underline-offset-2">l'application desktop</NuxtLink>.
+          </p>
+        </div>
+
+        <div v-else-if="!loading && !unsoldArticles.length" class="app-card space-y-4 p-5 sm:p-6">
+          <template v-if="props.saleStatus === 'withdrawn'">
+            <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article retiré de la vente</p>
+            <p class="text-sm leading-relaxed text-[var(--app-ink-soft)]">
+              Les fiches retirées de toutes les marketplaces s'affichent ici, prêtes à être remises en vente.
+            </p>
+          </template>
+          <template v-else>
+            <p class="text-sm font-medium text-[var(--app-ink)]">Aucun article en cours de vente</p>
+            <p class="text-sm leading-relaxed text-[var(--app-ink-soft)]">
+              Consultez les onglets
+              <NuxtLink to="/articles/sold" class="text-primary font-medium underline underline-offset-2">
+                Vendus
+              </NuxtLink>
+              et
+              <NuxtLink to="/articles/withdrawn" class="text-primary font-medium underline underline-offset-2">
+                Retirés
+              </NuxtLink>
+              ou créez une fiche depuis
+              <NuxtLink to="/collection" class="text-primary font-medium underline underline-offset-2">
+                Ma collection </NuxtLink
+              >.
+            </p>
+          </template>
+        </div>
+
+        <GoupixDexArticleList
+          v-else-if="!loading"
+          variant="listed"
+          :articles="unsoldArticles"
+          :loading="loading"
+          :selection-reset-key="articleListSelectionReset"
+          :show-ebay-column="ebayPublishAvailable"
+          :ebay-publish-available="ebayPublishAvailable"
+          :vinted-channel-enabled="vintedChannelEnabled"
+          :leboncoin-publish-available="leboncoinPublishAvailable"
+          :bulk-publishing="bulkPublishBusy"
+          :bulk-delisting="bulkDelistBusy"
+          @edit="(id: number) => navigateTo(`/articles/${id}/edit`)"
+          @delete="
+            (id: number) => {
+              deleteId = id
+              deleteOpen = true
+            }
+          "
+          @sold="(article: Article) => openSold([article])"
+          @bulk-sold="openSold"
+          @publish-vinted="onPublishVinted"
+          @publish-ebay="onPublishEbay"
+          @publish-leboncoin="onPublishLeboncoin"
+          @bulk-delete="openBulkDelete"
+          @bulk-publish="openBulkPublish"
+          @bulk-delist="openBulkDelist"
+          @bulk-relist="openBulkRelist"
+          @retry-cross-ebay="onRetryCrossEbay"
+          @retry-cross-vinted="onRetryCrossVinted"
+        />
+      </div>
+    </template>
+  </UDashboardPanel>
+
+  <GoupixDexArticleMarkSoldModal
+    v-model:open="soldOpen"
+    :articles="soldArticles"
+    :ebay-enabled="ebayPublishAvailable"
+    :loading="soldSubmitting"
+    @confirm="confirmSold"
+  />
+
+  <GoupixDexArticleBulkPublishModal
+    v-model:open="bulkPublishOpen"
+    :article-count="bulkPublishIds.length"
+    :vinted-channel-enabled="vintedChannelEnabled"
+    :ebay-publish-available="ebayPublishAvailable"
+    :leboncoin-publish-available="leboncoinPublishAvailable"
+    :can-use-desktop-workers="canUseDesktopWorkers"
+    :loading="bulkPublishBusy"
+    :default-vinted="bulkPublishChannelDefaults.vinted"
+    :default-ebay="bulkPublishChannelDefaults.ebay"
+    :default-leboncoin="bulkPublishChannelDefaults.leboncoin"
+    @confirm="confirmBulkPublish"
+  />
+
+  <GoupixDexArticleBulkRelistModal
+    v-model:open="bulkRelistOpen"
+    :article-count="bulkRelistIds.length"
+    :mode="bulkRelistChannelState.mode"
+    :any-vinted-listed="bulkRelistChannelState.anyVintedListed"
+    :loading="bulkRelistBusy"
+    @confirm="confirmBulkRelist"
+  />
+
+  <GoupixDexArticleBulkDelistModal
+    v-model:open="bulkDelistOpen"
+    :article-count="bulkDelistIds.length"
+    :vinted-channel-enabled="vintedChannelEnabled"
+    :can-use-desktop-workers="canUseDesktopWorkers"
+    :any-vinted-listed="bulkDelistChannelState.anyVinted"
+    :any-ebay-listed="bulkDelistChannelState.anyEbay"
+    :any-leboncoin-listed="bulkDelistChannelState.anyLeboncoin"
+    :loading="bulkDelistBusy"
+    @confirm="confirmBulkDelist"
+  />
+
+  <UModal
+    v-model:open="bulkDeleteOpen"
+    title="Supprimer plusieurs articles ?"
+    :description="`Vous allez supprimer ${bulkDeleteIds.length} article(s). Cette action est irréversible.`"
+  >
+    <template #body>
+      <div class="flex justify-end gap-2">
+        <UButton color="neutral" variant="subtle" @click="bulkDeleteOpen = false"> Annuler </UButton>
+        <UButton color="error" @click="confirmBulkDelete"> Supprimer {{ bulkDeleteIds.length }} article(s) </UButton>
+      </div>
+    </template>
+  </UModal>
+
+  <UModal v-model:open="deleteOpen" title="Supprimer cet article ?" description="Cette action est irréversible.">
+    <template #body>
+      <div class="flex justify-end gap-2">
+        <UButton color="neutral" variant="subtle" @click="deleteOpen = false"> Annuler </UButton>
+        <UButton color="error" @click="confirmDelete"> Supprimer </UButton>
+      </div>
+    </template>
+  </UModal>
+</template>
+
+<script lang="ts" setup>
+import type { ComputedRef, PropType } from 'vue'
+import type { Article } from '~/composables/useArticles'
+import type { GoupixDexUnsoldArticlesViewProps, UnsoldArticleSaleStatus } from '~/types/GoupixDexUnsoldArticlesView'
+import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+
+const props: GoupixDexUnsoldArticlesViewProps = defineProps({
+  saleStatus: {
+    type: String as PropType<UnsoldArticleSaleStatus>,
+    required: true,
+  },
+})
+
+const { canUseDesktopWorkers, isDesktopAppUnreachable } = useDesktopWorkers()
+
+const {
+  displayedArticles,
+  withdrawnFromSaleArticles,
+  hasAnyArticles,
+  loading,
+  wardrobeSyncing,
+  ebayPublishAvailable,
+  vintedChannelEnabled,
+  leboncoinPublishAvailable,
+  soldOpen,
+  soldArticles,
+  soldSubmitting,
+  articleListSelectionReset,
+  deleteOpen,
+  deleteId,
+  bulkDeleteOpen,
+  bulkDeleteIds,
+  bulkPublishOpen,
+  bulkPublishIds,
+  bulkPublishBusy,
+  bulkDelistOpen,
+  bulkDelistIds,
+  bulkDelistBusy,
+  bulkDelistChannelState,
+  bulkRelistOpen,
+  bulkRelistIds,
+  bulkRelistBusy,
+  bulkRelistChannelState,
+  confirmSold,
+  confirmDelete,
+  openBulkDelete,
+  confirmBulkDelete,
+  openBulkPublish,
+  bulkPublishChannelDefaults,
+  openBulkDelist,
+  openBulkRelist,
+  confirmBulkPublish,
+  confirmBulkDelist,
+  confirmBulkRelist,
+  onWardrobeImportFromVinted,
+  onPublishEbay,
+  onPublishVinted,
+  onPublishLeboncoin,
+  onRetryCrossEbay,
+  onRetryCrossVinted,
+  openSold,
+} = useArticlesListPageCore('listed')
+
+const unsoldArticles: ComputedRef<Article[]> = computed((): Article[] =>
+  props.saleStatus === 'withdrawn' ? withdrawnFromSaleArticles.value : displayedArticles.value,
+)
+</script>
