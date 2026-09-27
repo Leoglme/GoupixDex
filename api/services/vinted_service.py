@@ -2638,6 +2638,40 @@ class VintedService:
             return False
 
     @classmethod
+    async def _open_item_delete_confirmation(cls, tab: "Tab", item_id: int) -> str | None:
+        """
+        Ouvre la modale de suppression depuis la fiche de l’annonce déjà affichée dans l’onglet.
+
+        Returns:
+            Le sélecteur du bouton de confirmation, ou ``None`` si la modale ne s’est pas ouverte.
+
+        Raises:
+            RuntimeError: Aucun bouton « Supprimer » sur la fiche (annonce déjà supprimée ou vendue).
+        """
+        delete_button_selector = '[data-testid="item-delete-button"]'
+        if not await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=15.0):
+            if not await cls._mark_button_by_exact_text(tab, ("supprimer",), marker="item-delete"):
+                raise RuntimeError(
+                    f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
+                )
+            delete_button_selector = '[data-goupix-marker="item-delete"]'
+            await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=5.0)
+
+        confirmation_selector = '[data-testid="item-delete-confirmation-button"]'
+        for _ in range(3):
+            await cls._click_in_page(tab, delete_button_selector)
+            if await cls._wait_until_react_handles_clicks(tab, confirmation_selector, timeout_sec=4.0):
+                return confirmation_selector
+        if await cls._mark_button_by_exact_text(
+            tab,
+            ("supprimer", "oui, supprimer", "confirmer"),
+            scope_selector='[role="dialog"]',
+            marker="item-delete-confirm",
+        ):
+            return '[data-goupix-marker="item-delete-confirm"]'
+        return None
+
+    @classmethod
     async def delete_vinted_item_listing(
         cls,
         tab: "Tab",
@@ -2652,32 +2686,15 @@ class VintedService:
             RuntimeError: Bouton ou confirmation introuvable, pas de retour au dressing, ou annonce toujours listée.
         """
         origin = site_origin.rstrip("/")
-        await tab.get(f"{origin}/items/{int(item_id)}")
-        delete_button_selector = '[data-testid="item-delete-button"]'
-        if not await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=15.0):
-            if not await cls._mark_button_by_exact_text(tab, ("supprimer",), marker="item-delete"):
-                raise RuntimeError(
-                    f"Bouton « Supprimer » introuvable sur la fiche Vinted #{item_id} (annonce déjà supprimée ou vendue ?)."
-                )
-            delete_button_selector = '[data-goupix-marker="item-delete"]'
-            await cls._wait_until_react_handles_clicks(tab, delete_button_selector, timeout_sec=5.0)
-
-        confirmation_selector = '[data-testid="item-delete-confirmation-button"]'
-        has_confirmation_opened = False
-        for _ in range(3):
-            await cls._click_in_page(tab, delete_button_selector)
-            if await cls._wait_until_react_handles_clicks(tab, confirmation_selector, timeout_sec=4.0):
-                has_confirmation_opened = True
+        confirmation_selector: str | None = None
+        for is_last_attempt in (False, True):
+            await tab.get(f"{origin}/items/{int(item_id)}")
+            confirmation_selector = await cls._open_item_delete_confirmation(tab, item_id)
+            if confirmation_selector is not None or is_last_attempt:
                 break
-        if not has_confirmation_opened:
-            has_confirmation_opened = await cls._mark_button_by_exact_text(
-                tab,
-                ("supprimer", "oui, supprimer", "confirmer"),
-                scope_selector='[role="dialog"]',
-                marker="item-delete-confirm",
-            )
-            confirmation_selector = '[data-goupix-marker="item-delete-confirm"]'
-        if not has_confirmation_opened or not await cls._click_in_page(tab, confirmation_selector):
+            # Une fiche que React n’a jamais reprise ignore tous les clics : la recharger suffit en général.
+            logger.warning("Vinted delete dialog did not open for item %s — reloading the item page once.", item_id)
+        if confirmation_selector is None or not await cls._click_in_page(tab, confirmation_selector):
             raise RuntimeError(f"Confirmation de suppression introuvable sur la fiche Vinted #{item_id}.")
         member_id: int | None = None
         deadline = time.monotonic() + 35.0
