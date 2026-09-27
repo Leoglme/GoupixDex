@@ -78,17 +78,30 @@
             :description="error"
           />
 
-          <UAlert
-            v-if="unrequestedInviteCount && !refreshing"
+          <div
+            v-if="unrequestedInviteCount && !refreshing && !requestingAllInvites"
+            class="app-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
             role="status"
-            color="primary"
-            variant="subtle"
-            icon="i-lucide-send"
-            orientation="vertical"
-            :title="unrequestedInvitesTitle"
-            description="Chrome s’ouvre sur chaque compte, l’un après l’autre, et demande chaque invitation manquante."
-            :actions="unrequestedInvitesActions"
-          />
+          >
+            <div class="flex min-w-0 items-center gap-3">
+              <span class="app-icon-tile" aria-hidden="true">
+                <UIcon name="i-lucide-send" class="size-5 text-(--app-accent)" />
+              </span>
+              <div class="min-w-0 space-y-0.5">
+                <p class="text-highlighted text-sm font-semibold">{{ unrequestedInvitesTitle }}</p>
+                <p class="text-muted text-xs leading-relaxed">{{ unrequestedInvitesDescription }}</p>
+              </div>
+            </div>
+            <UButton
+              icon="i-lucide-send"
+              size="sm"
+              class="shrink-0 self-start sm:self-auto"
+              :disabled="loading"
+              @click="requestAllUnrequestedInvites"
+            >
+              Tout demander
+            </UButton>
+          </div>
 
           <GoupixDexAmazonWorkerProgress
             v-if="refreshing || requestingAllInvites"
@@ -178,7 +191,6 @@
 </template>
 
 <script setup lang="ts">
-import type { ButtonProps } from '@nuxt/ui'
 import type { ComputedRef } from 'vue'
 import type { AmazonConnectionBadge } from '~/utils/amazonConnectionUi'
 import type { AmazonStatusFilter } from '~/types/amazonInvites'
@@ -244,21 +256,13 @@ const workerProgressTitle: ComputedRef<string> = computed(() =>
 
 const unrequestedInvitesTitle: ComputedRef<string> = computed(() => {
   const inviteCount = unrequestedInviteCount.value
-  const accountCount = unrequestedInvitesByAccount.value.length
-  return `${inviteCount} invitation${inviteCount > 1 ? 's' : ''} à demander sur ${accountCount} compte${accountCount > 1 ? 's' : ''}`
+  return `${inviteCount} invitation${inviteCount > 1 ? 's' : ''} à demander`
 })
 
-const unrequestedInvitesActions: ComputedRef<ButtonProps[]> = computed(() => [
-  {
-    label: requestingAllInvites.value ? 'Demandes en cours…' : 'Tout demander',
-    icon: 'i-lucide-send',
-    color: 'primary',
-    variant: 'solid',
-    loading: requestingAllInvites.value,
-    disabled: requestingAllInvites.value || loading.value,
-    onClick: requestAllUnrequestedInvites,
-  },
-])
+const unrequestedInvitesDescription: ComputedRef<string> = computed(() => {
+  const accountCount = unrequestedInvitesByAccount.value.length
+  return `Sur ${accountCount} compte${accountCount > 1 ? 's' : ''} — Chrome s’ouvre sur chacun, l’un après l’autre.`
+})
 
 async function onAccountChange(id: number | null | undefined): Promise<void> {
   if (id == null) {

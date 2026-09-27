@@ -95,6 +95,9 @@ export function loadAmazonInvitesPrefs(): Partial<AmazonInvitesUiPrefs> | null {
     if (typeof p.cachedRefreshedAt === 'string') {
       out.cachedRefreshedAt = p.cachedRefreshedAt
     }
+    if (p.invitesByAccount && typeof p.invitesByAccount === 'object') {
+      out.invitesByAccount = p.invitesByAccount as Record<string, AmazonInvitesAccountCache>
+    }
     if (p.accountConnectionStates && typeof p.accountConnectionStates === 'object') {
       const states: Record<string, AmazonAccountConnectionState> = {}
       for (const [id, v] of Object.entries(p.accountConnectionStates as Record<string, unknown>)) {
