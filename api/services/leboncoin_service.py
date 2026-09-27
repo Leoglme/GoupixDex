@@ -522,6 +522,34 @@ class LeboncoinService:
         return raw is True
 
     @classmethod
+    async def _wait_for_wizard_step(cls, tab: Tab, *, timeout_sec: float = 45.0) -> bool:
+        """
+        Attend que l'étape courante de l'assistant soit affichée : après les photos, Leboncoin analyse l'article (« On admire votre article »).
+
+        Returns:
+            Vrai quand un champ ou un bouton de l'étape est là, faux si l'analyse dure au-delà du délai.
+        """
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            is_step_shown = await tab.evaluate(
+                """
+                (() => {
+                  if (/On admire votre article|Juste un instant/i.test(document.body.innerText || '')) return false;
+                  if (document.querySelector('textarea[name="body"], input[name="price_cents"]')) return true;
+                  return [...document.querySelectorAll('button')].some((button) => {
+                    const label = (button.textContent || '').trim().toLowerCase();
+                    return label === 'continuer' || label.includes('déposer');
+                  });
+                })()
+                """,
+                return_by_value=True,
+            )
+            if is_step_shown is True:
+                return True
+            await tab.sleep(0.5)
+        return False
+
+    @classmethod
     async def _fill_title_and_trigger_suggestions(cls, tab: Tab, title: str) -> None:
         if not await cls._fill_first(tab, _TITLE_SELECTORS, title[:200]):
             raise RuntimeError("Champ titre introuvable (assistant Leboncoin).")
@@ -1068,6 +1096,7 @@ class LeboncoinService:
         zip_clean = postal_code.strip()
         has_confirmed_price = False
         for step in range(12):
+            await cls._wait_for_wizard_step(tab)
             if await cls._page_has_final_submit(tab):
                 break
             if not await cls._location_keep_leboncoin_prefill(tab, postal_code.strip()):
