@@ -60,7 +60,7 @@
               v-model:max-items="maxItems"
               v-model:search-query="searchQuery"
               v-model:status-filter="statusFilter"
-              :loading="loading"
+              :loading="loading || requestingAllInvites"
               :refreshing="refreshing"
               :result-count="displayItems.length"
               :total-loaded="items.length"
@@ -78,10 +78,24 @@
             :description="error"
           />
 
-          <GoupixDexAmazonRefreshProgress
-            v-if="refreshing"
-            :phase-hint="refreshPhaseHint"
-            :log-lines="refreshLogLines"
+          <UAlert
+            v-if="unrequestedInviteCount && !refreshing"
+            role="status"
+            color="primary"
+            variant="subtle"
+            icon="i-lucide-send"
+            orientation="vertical"
+            :title="unrequestedInvitesTitle"
+            description="Chrome s’ouvre sur chaque compte, l’un après l’autre, et demande chaque invitation manquante."
+            :actions="unrequestedInvitesActions"
+          />
+
+          <GoupixDexAmazonWorkerProgress
+            v-if="refreshing || requestingAllInvites"
+            :title="workerProgressTitle"
+            :phase-hint="progressPhaseHint"
+            :log-lines="progressLogLines"
+            :progress-percent="requestingAllInvites ? inviteRequestProgressPercent : null"
           />
 
           <div v-if="accountSelectItems.length && !refreshing" class="flex flex-wrap items-center gap-2">
@@ -90,7 +104,7 @@
               :items="accountSelectItems"
               value-key="value"
               class="w-full max-w-md min-w-0"
-              :disabled="refreshing || loading"
+              :disabled="refreshing || loading || requestingAllInvites"
               placeholder="Compte Amazon"
               @update:model-value="onAccountChange"
             />
@@ -125,6 +139,7 @@
               :key="inv.id"
               :invite="inv"
               :request-invite-loading="requestInviteLoadingAsin === (inv.asin ?? '').trim().toUpperCase()"
+              :request-invite-disabled="requestingAllInvites"
               @request-invite="requestProductInvite"
             />
           </div>
@@ -163,6 +178,7 @@
 </template>
 
 <script setup lang="ts">
+import type { ButtonProps } from '@nuxt/ui'
 import type { ComputedRef } from 'vue'
 import type { AmazonConnectionBadge } from '~/utils/amazonConnectionUi'
 import type { AmazonStatusFilter } from '~/types/amazonInvites'
@@ -202,9 +218,13 @@ const {
   statusSelectItems,
   displayItems,
   streamingDisplayItems,
-  refreshLogLines,
-  refreshPhaseHint,
+  progressLogLines,
+  progressPhaseHint,
   requestInviteLoadingAsin,
+  requestingAllInvites,
+  inviteRequestProgressPercent,
+  unrequestedInvitesByAccount,
+  unrequestedInviteCount,
   accountSelectItems,
   vaultAccountCount,
   accountConnectionStates,
@@ -212,10 +232,33 @@ const {
   load,
   refresh,
   requestProductInvite,
+  requestAllUnrequestedInvites,
   switchActiveAccount,
 } = useAmazonInvitesPage()
 
 const activeStatusFilterLabel: ComputedRef<string> = computed(() => STATUS_FILTER_LABELS[statusFilter.value])
+
+const workerProgressTitle: ComputedRef<string> = computed(() =>
+  requestingAllInvites.value ? 'Demande des invitations…' : 'Actualisation Amazon…',
+)
+
+const unrequestedInvitesTitle: ComputedRef<string> = computed(() => {
+  const inviteCount = unrequestedInviteCount.value
+  const accountCount = unrequestedInvitesByAccount.value.length
+  return `${inviteCount} invitation${inviteCount > 1 ? 's' : ''} à demander sur ${accountCount} compte${accountCount > 1 ? 's' : ''}`
+})
+
+const unrequestedInvitesActions: ComputedRef<ButtonProps[]> = computed(() => [
+  {
+    label: requestingAllInvites.value ? 'Demandes en cours…' : 'Tout demander',
+    icon: 'i-lucide-send',
+    color: 'primary',
+    variant: 'solid',
+    loading: requestingAllInvites.value,
+    disabled: requestingAllInvites.value || loading.value,
+    onClick: requestAllUnrequestedInvites,
+  },
+])
 
 async function onAccountChange(id: number | null | undefined): Promise<void> {
   if (id == null) {

@@ -758,22 +758,26 @@ class AmazonScraper:
         st_before = _status_from_visible_state(dict(res.get("state_before") or {})) or (
             before.get("invitation_status") if before else None
         )
+        # Sans clic, la fiche lue avant (« item ») donne quand même le statut réel du produit.
         if st_before == "accepted":
             return {
                 "success": False,
                 "message": "This product is already orderable; no invitation to request.",
+                "item": before,
             }
         if st_before == "requested":
-            return {"success": False, "message": "Invitation already recorded or status changed."}
+            return {"success": False, "message": "Invitation already recorded or status changed.", "item": before}
         if st_before == "needs_login":
             return {
                 "success": False,
                 "message": "Ce compte n'est pas connecté à Amazon dans Chrome. Reconnectez-le puis réessayez.",
+                "item": before,
             }
         if not res.get("clicked"):
             return {
                 "success": False,
                 "message": "Invitation button not found (Amazon may have changed the page).",
+                "item": before,
             }
 
         state_after = dict(res.get("state_after") or {})

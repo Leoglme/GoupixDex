@@ -7,6 +7,7 @@ export interface GoupixDexAmazonInviteCardProps {
   invite: AmazonInvite
   /** True while ``POST /amazon/invites/request`` is in flight for this card’s ASIN. */
   requestInviteLoading?: boolean
+  requestInviteDisabled?: boolean
 }
 
 /**

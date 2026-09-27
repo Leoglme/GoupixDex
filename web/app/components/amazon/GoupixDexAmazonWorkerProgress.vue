@@ -4,12 +4,12 @@
       <div class="flex flex-wrap items-center gap-3">
         <UIcon name="i-lucide-loader-circle" class="text-primary size-8 shrink-0 animate-spin" />
         <div class="min-w-0 flex-1 space-y-1">
-          <p class="text-highlighted font-medium">Actualisation Amazon…</p>
+          <p class="text-highlighted font-medium">{{ title }}</p>
           <p v-if="phaseHint" class="text-muted text-xs leading-snug">
             {{ phaseHint }}
           </p>
         </div>
-        <UProgress animation="carousel" class="h-1 w-full max-w-xs shrink-0 sm:w-56" />
+        <UProgress :model-value="progressPercent" animation="carousel" class="h-1 w-full max-w-xs shrink-0 sm:w-56" />
       </div>
       <div
         ref="logScrollEl"
@@ -28,9 +28,13 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch, type PropType } from 'vue'
-import type { GoupixDexAmazonRefreshProgressProps } from '~/types/GoupixDexAmazonRefreshProgress'
+import type { GoupixDexAmazonWorkerProgressProps } from '~/types/GoupixDexAmazonWorkerProgress'
 
-const props: GoupixDexAmazonRefreshProgressProps = defineProps({
+const props: GoupixDexAmazonWorkerProgressProps = defineProps({
+  title: {
+    type: String,
+    required: true,
+  },
   phaseHint: {
     type: String,
     default: '',
@@ -38,6 +42,10 @@ const props: GoupixDexAmazonRefreshProgressProps = defineProps({
   logLines: {
     type: Array as PropType<string[]>,
     required: true,
+  },
+  progressPercent: {
+    type: Number as PropType<number | null>,
+    default: null,
   },
 })
 

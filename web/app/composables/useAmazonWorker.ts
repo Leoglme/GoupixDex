@@ -1,10 +1,12 @@
 import type { AxiosInstance } from 'axios'
 import type {
+  AmazonAccountInviteRequests,
   AmazonInvitesFetchParams,
   AmazonInvitesResponse,
   AmazonInvite,
   AmazonRefreshResponse,
   AmazonReverifyResponse,
+  AmazonRequestAllInvitesResponse,
   AmazonRequestInviteResponse,
   AmazonSessionResponse,
   AmazonVerifyAllAccountsResponse,
@@ -151,6 +153,21 @@ export function useAmazonWorker() {
       asin: asin.trim(),
       account_id: accountId,
     })
+    return data
+  }
+
+  /**
+   * POST `/amazon/invites/request-all` — demande les invitations listées, compte par compte, dans Chrome.
+   *
+   * @param accounts - ASIN à demander pour chaque compte du coffre.
+   * @returns {Promise<AmazonRequestAllInvitesResponse>} Résultat de chaque demande, par compte.
+   */
+  async function requestAllInvites(accounts: AmazonAccountInviteRequests[]): Promise<AmazonRequestAllInvitesResponse> {
+    const { data } = await client.value.post<AmazonRequestAllInvitesResponse>(
+      '/amazon/invites/request-all',
+      { accounts },
+      { timeout: 3_600_000 },
+    )
     return data
   }
 
@@ -321,6 +338,7 @@ export function useAmazonWorker() {
     reverifyInvites,
     verifyAllAccounts,
     requestInvite,
+    requestAllInvites,
     openLoginBrowser,
     closeLoginBrowser,
     activateVaultAccount,

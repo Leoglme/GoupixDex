@@ -111,3 +111,26 @@ export interface AmazonRequestInviteResponse {
   message: string
   invite?: AmazonInvite
 }
+
+export type AmazonAccountInviteRequests = {
+  account_id: number
+  asins: string[]
+}
+
+export type AmazonInviteRequestOutcomeKind = 'requested' | 'already_done' | 'failed'
+
+export type AmazonInviteRequestOutcome = {
+  asin: string
+  outcome: AmazonInviteRequestOutcomeKind
+  message: string
+  invite: AmazonInvite | null
+}
+
+export type AmazonRequestAllInvitesResponse = {
+  outcomes_by_account: Record<string, AmazonInviteRequestOutcome[]>
+  errors: Record<string, string>
+  requested_count: number
+  already_done_count: number
+  failed_count: number
+  message: string
+}

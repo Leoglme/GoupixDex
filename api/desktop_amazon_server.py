@@ -449,6 +449,35 @@ class AmazonRequestInviteBody(BaseModel):
         return t
 
 
+class AmazonAccountInviteRequests(BaseModel):
+    """Produits dont l'invitation est à demander depuis un compte du coffre."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    account_id: int = Field(ge=1)
+    asins: list[str] = Field(min_length=1, max_length=500)
+
+    @field_validator("asins", mode="after")
+    @classmethod
+    def _unique_asins_upper_alnum10(cls, values: list[str]) -> list[str]:
+        asins: list[str] = []
+        for value in values:
+            asin = (value or "").strip().upper()
+            if not re.match(r"^[A-Z0-9]{10}$", asin):
+                raise ValueError("ASIN invalide (10 caractères alphanumériques).")
+            if asin not in asins:
+                asins.append(asin)
+        return asins
+
+
+class AmazonRequestAllInvitesBody(BaseModel):
+    """Body for ``POST /amazon/invites/request-all`` : les invitations à demander, compte par compte."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accounts: list[AmazonAccountInviteRequests] = Field(min_length=1, max_length=50)
+
+
 class AmazonProvisionRegisterBody(BaseModel):
     """Chrome inscription Amazon sans compte coffre (profil staging local)."""
 
@@ -561,7 +590,7 @@ async def _amazon_click_connexion_depuis_accueil(tab: Any, base: str) -> tuple[b
 router = APIRouter(prefix="/amazon", tags=["amazon-local"])
 
 # Bump when new local routes are added (UI can warn if the running sidecar is stale).
-AMAZON_WORKER_BUILD = "2026-03-21-receive-sms-auto-allocate"
+AMAZON_WORKER_BUILD = "2026-09-27-invites-request-all"
 
 
 @router.get("/meta")
@@ -576,6 +605,7 @@ async def amazon_worker_meta() -> dict[str, object]:
             "provision-receive-sms-inbox",
             "provision-receive-sms-allocate",
             "invites-reverify",
+            "invites-request-all",
         ],
     }
 
@@ -1534,6 +1564,50 @@ async def amazon_invites_verify_all(
     }
 
 
+def _replace_cached_invite_row(cache_key: str, invite: dict[str, object]) -> None:
+    """Remplace, dans le cache d'un compte, la ligne qui a le même ASIN que ``invite``."""
+    asin = str(invite.get("asin") or "").strip().upper()
+    rows = _invites_cache.get(cache_key)
+    if not asin or not rows:
+        return
+    _invites_cache[cache_key] = [
+        invite if str(row.get("asin") or "").strip().upper() == asin else dict(row) for row in rows
+    ]
+
+
+_INVITE_OUTCOME_LABELS: dict[str, str] = {
+    "requested": "invitation demandée",
+    "already_done": "déjà demandée ou commandable",
+}
+
+
+def _invite_request_outcome(asin: str, result: dict[str, Any]) -> dict[str, object]:
+    """
+    Résultat d'une demande d'invitation dans la réponse groupée.
+
+    Args:
+        asin: Produit demandé.
+        result: Retour de ``AmazonScraper.request_invitation_via_browser``.
+
+    Returns:
+        ``asin``, ``outcome`` (``requested``, ``already_done`` ou ``failed``), ``message`` et la ligne à jour.
+    """
+    raw_item = result.get("item")
+    invite = _integration_item_to_goupix_invite(raw_item) if isinstance(raw_item, dict) else None
+    if result.get("success"):
+        outcome = "requested"
+    elif invite is not None and invite.get("status") in ("requested", "accepted"):
+        outcome = "already_done"
+    else:
+        outcome = "failed"
+    return {
+        "asin": asin,
+        "outcome": outcome,
+        "message": str(result.get("message") or ""),
+        "invite": invite,
+    }
+
+
 @router.post("/invites/request")
 async def amazon_invites_request(
     _lock: Annotated[None, Depends(hold_invites_lock)],
@@ -1587,24 +1661,131 @@ async def amazon_invites_request(
     goupix: dict[str, object] | None = None
     if isinstance(raw_item, dict):
         goupix = _integration_item_to_goupix_invite(raw_item)
-        rows = list(_invites_cache.get(cache_key, []))
-        new_cache: list[dict[str, object]] = []
-        replaced = False
-        for row in rows:
-            r_asin = str(row.get("asin") or "").strip().upper()
-            if r_asin == asin:
-                new_cache.append(goupix)
-                replaced = True
-            else:
-                new_cache.append(dict(row))
-        if replaced:
-            _invites_cache[cache_key] = new_cache
+        _replace_cached_invite_row(cache_key, goupix)
 
     return {
         "success": True,
         "message": str(result.get("message") or "Invitation demandée."),
         "invite": goupix,
         "account_id": target_account_id,
+    }
+
+
+@router.post("/invites/request-all")
+async def amazon_invites_request_all(
+    _lock: Annotated[None, Depends(hold_invites_lock)],
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    active_account_id: Annotated[int | None, Depends(bind_active_amazon_profile)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+    body: AmazonRequestAllInvitesBody,
+) -> dict[str, object]:
+    """Demande les invitations listées compte par compte : un seul Chrome par compte, un clic par fiche."""
+    invite_total = sum(len(account_requests.asins) for account_requests in body.accounts)
+    processed_count = 0
+    outcomes_by_account: dict[str, list[dict[str, object]]] = {}
+    errors: dict[str, str] = {}
+    account_total = len(body.accounts)
+    for account_index, account_requests in enumerate(body.accounts, start=1):
+        account_id = account_requests.account_id
+        scope: dict[str, Any] = {
+            "account_id": account_id,
+            "account_index": account_index,
+            "account_total": account_total,
+        }
+        await _broadcast_amazon_progress(
+            {
+                "status": "connecting",
+                "message": f"Compte {account_index}/{account_total} — ouverture de Chrome et vérification de la connexion…",
+                "current_page": processed_count,
+                "total_pages": invite_total,
+                **scope,
+            }
+        )
+        await _close_all_amazon_chromium()
+        bind_amazon_profile_for(user_id, account_id)
+        _reset_amazon_scraper()
+        scraper = _browser_scraper()
+        cache_key = _invites_cache_key(user_id, account_id)
+        outcomes: list[dict[str, object]] = []
+        try:
+            await _ensure_account_signed_in(user_id, account_id, raw_token, remote, scraper)
+            for position, asin in enumerate(account_requests.asins, start=1):
+                await _broadcast_amazon_progress(
+                    {
+                        "status": "requesting",
+                        "message": f"Compte {account_index}/{account_total} — invitation {position}/{len(account_requests.asins)}…",
+                        "asin": asin,
+                        "current_page": processed_count,
+                        "total_pages": invite_total,
+                        **scope,
+                    }
+                )
+                result = await asyncio.to_thread(scraper.request_invitation_via_browser, asin)
+                outcome = _invite_request_outcome(asin, result)
+                outcomes.append(outcome)
+                processed_count += 1
+                invite = outcome["invite"]
+                if isinstance(invite, dict):
+                    _replace_cached_invite_row(cache_key, invite)
+                outcome_label = _INVITE_OUTCOME_LABELS.get(str(outcome["outcome"])) or f"échec ({outcome['message']})"
+                await _broadcast_amazon_progress(
+                    {
+                        "status": "invite_requested",
+                        "message": f"Compte {account_index}/{account_total} — {outcome_label}",
+                        "asin": asin,
+                        "item_title": invite.get("title") if isinstance(invite, dict) else None,
+                        "invite_preview": invite,
+                        "current_page": processed_count,
+                        "total_pages": invite_total,
+                        **scope,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Amazon request-all account %s", account_id)
+            errors[str(account_id)] = str(exc)
+            # Les fiches non traitées de ce compte comptent comme passées pour la progression.
+            processed_count += len(account_requests.asins) - len(outcomes)
+            await _broadcast_amazon_progress(
+                {
+                    "status": "error",
+                    "message": f"Compte {account_index}/{account_total} : {exc}",
+                    "current_page": processed_count,
+                    "total_pages": invite_total,
+                    **scope,
+                }
+            )
+        finally:
+            await _close_all_amazon_chromium()
+        outcomes_by_account[str(account_id)] = outcomes
+
+    # Revenir au profil du compte actif pour les requêtes suivantes.
+    bind_amazon_profile_for(user_id, active_account_id)
+    _reset_amazon_scraper()
+
+    all_outcomes = [outcome for outcomes in outcomes_by_account.values() for outcome in outcomes]
+    requested_count = sum(1 for outcome in all_outcomes if outcome["outcome"] == "requested")
+    already_done_count = sum(1 for outcome in all_outcomes if outcome["outcome"] == "already_done")
+    failed_count = sum(1 for outcome in all_outcomes if outcome["outcome"] == "failed")
+    summary_parts = [f"{requested_count} invitation(s) demandée(s)"]
+    if already_done_count:
+        summary_parts.append(f"{already_done_count} déjà faite(s)")
+    if failed_count:
+        summary_parts.append(f"{failed_count} échec(s)")
+    if errors:
+        summary_parts.append(f"{len(errors)} compte(s) non connecté(s)")
+    summary = " · ".join(summary_parts)
+    await _broadcast_amazon_progress(
+        {"status": "completed", "message": summary, "current_page": invite_total, "total_pages": invite_total}
+    )
+
+    return {
+        "outcomes_by_account": outcomes_by_account,
+        "errors": errors,
+        "requested_count": requested_count,
+        "already_done_count": already_done_count,
+        "failed_count": failed_count,
+        "message": summary,
     }
 
 
@@ -1677,7 +1858,7 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "service": "goupixdex-amazon-local",
-        "routes_revision": 9,
+        "routes_revision": 10,
         "has_ws_progress": True,
         "has_post_open_login": True,
     }

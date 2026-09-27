@@ -2,9 +2,11 @@ import type { ComputedRef, Ref } from 'vue'
 import { isAxiosError } from 'axios'
 import type {
   AmazonAccountConnectionState,
+  AmazonAccountInviteRequests,
   AmazonInvite,
   AmazonInviteStatusCounts,
   AmazonInvitesFetchParams,
+  AmazonRequestAllInvitesResponse,
   AmazonSessionResponse,
   AmazonStatusFilter,
   AmazonStatusSelectItem,
@@ -20,6 +22,7 @@ import {
 import { desktopRelayErrorMessage } from '~/composables/useApiError'
 import { useAmazonWorker } from '~/composables/useAmazonWorker'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+import { canRequestInvite } from '~/utils/amazonInviteRequest'
 import { formatAmazonWorkerProgressLine } from '~/utils/amazonWorkerProgressFormat'
 import {
   clampMaxItems,
@@ -70,12 +73,27 @@ function errorMessageFromUnknown(e: unknown, fallback: string): string {
 }
 
 /**
+ * Lit un message JSON du flux `/ws/progress` du worker Amazon.
+ *
+ * @param data - Texte reçu sur le flux.
+ * @returns {AmazonWorkerProgressPayload | null} L’événement de progression, ou `null` s’il n’est pas lisible.
+ */
+function parseWorkerProgressPayload(data: string): AmazonWorkerProgressPayload | null {
+  try {
+    return JSON.parse(data) as AmazonWorkerProgressPayload
+  } catch {
+    return null
+  }
+}
+
+/**
  * Page Invitations Amazon : catalogue partagé, un statut par compte du coffre, demandes depuis le compte affiché.
  *
- * @returns Reactive state, `displayItems`, `load`, `refresh`, `requestProductInvite`, `switchActiveAccount`.
+ * @returns Reactive state, `displayItems`, `load`, `refresh`, `requestProductInvite`, `requestAllUnrequestedInvites`, `switchActiveAccount`.
  */
 export function useAmazonInvitesPage() {
-  const { fetchSession, fetchInvites, refreshInvites, verifyAllAccounts, requestInvite } = useAmazonWorker()
+  const { fetchSession, fetchInvites, refreshInvites, verifyAllAccounts, requestInvite, requestAllInvites } =
+    useAmazonWorker()
   const { fetchOverview, setActiveAccount } = useAmazonAccounts()
   const { openWorkerSocketStream } = useDesktopWorkers()
   const toast = useToast()
@@ -93,10 +111,11 @@ export function useAmazonInvitesPage() {
   const searchQuery: Ref<string> = ref('')
   const maxItems: Ref<number> = ref(DEFAULT_AMAZON_INVITES_MAX_ITEMS)
   const statusFilter: Ref<AmazonStatusFilter> = ref('all')
-  /** Live log lines during `refresh()` (WebSocket `/ws/progress`). */
-  const refreshLogLines: Ref<string[]> = ref([])
+  const progressLogLines: Ref<string[]> = ref([])
   /** Latest worker message for the progress subtitle. */
-  const refreshPhaseHint: Ref<string> = ref('')
+  const progressPhaseHint: Ref<string> = ref('')
+  const requestingAllInvites: Ref<boolean> = ref(false)
+  const inviteRequestProgressPercent: Ref<number | null> = ref(null)
   /** Invites received over WebSocket during ``refresh()`` for the displayed account, shown before the calls complete. */
   const streamingInvites: Ref<AmazonInvite[]> = ref([])
   /** ASIN whose invite request is in flight (worker ``POST /amazon/invites/request``). */
@@ -128,6 +147,22 @@ export function useAmazonInvitesPage() {
     return rowsByAccount.value[String(id)] ?? catalogAsUnverified.value
   })
 
+  const unrequestedInvitesByAccount: ComputedRef<AmazonAccountInviteRequests[]> = computed(() =>
+    vaultAccounts.value
+      .map((account) => ({
+        account_id: account.id,
+        asins: (rowsByAccount.value[String(account.id)] ?? catalogAsUnverified.value)
+          .filter((row) => canRequestInvite(row.status))
+          .map((row) => (row.asin ?? '').trim().toUpperCase())
+          .filter((asin) => /^[A-Z0-9]{10}$/.test(asin)),
+      }))
+      .filter((request) => request.asins.length > 0),
+  )
+
+  const unrequestedInviteCount: ComputedRef<number> = computed(() =>
+    unrequestedInvitesByAccount.value.reduce((total, request) => total + request.asins.length, 0),
+  )
+
   /**
    * Enregistre les lignes vérifiées d’un compte (mémoire + cache local).
    *
@@ -142,6 +177,39 @@ export function useAmazonInvitesPage() {
     if (import.meta.client && trimmed.length) {
       saveInvitesCacheForAccount(accountId, trimmed, at)
     }
+  }
+
+  /**
+   * Remplace, dans les lignes d’un compte, celle du même ASIN par sa version à jour.
+   *
+   * @param accountId - Compte du coffre.
+   * @param invite - Ligne renvoyée par le worker après la demande.
+   * @returns {void} Cette fonction ne retourne rien.
+   */
+  function replaceAccountInviteRow(accountId: number, invite: AmazonInvite): void {
+    const asin = (invite.asin ?? '').trim().toUpperCase()
+    if (!asin) {
+      return
+    }
+    const currentRows = rowsByAccount.value[String(accountId)] ?? catalogAsUnverified.value
+    setAccountRows(
+      accountId,
+      currentRows.map((row) => ((row.asin ?? '').trim().toUpperCase() === asin ? invite : row)),
+      refreshedAt.value,
+    )
+  }
+
+  /**
+   * Ajoute un événement du worker au journal de progression et à la ligne d’état.
+   *
+   * @param payload - Événement reçu sur `/ws/progress`.
+   * @returns {void} Cette fonction ne retourne rien.
+   */
+  function appendProgressLine(payload: AmazonWorkerProgressPayload): void {
+    if (payload.message) {
+      progressPhaseHint.value = payload.message
+    }
+    progressLogLines.value = [...progressLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
   }
 
   /**
@@ -275,7 +343,7 @@ export function useAmazonInvitesPage() {
       selectedAccountId.value = accountId
       return
     }
-    if (refreshing.value) {
+    if (refreshing.value || requestingAllInvites.value) {
       selectedAccountId.value = confirmedActiveAccountId.value
       return
     }
@@ -339,6 +407,17 @@ export function useAmazonInvitesPage() {
   }
 
   /**
+   * Nom d’un compte du coffre tel qu’affiché dans les messages (libellé, sinon e-mail Amazon).
+   *
+   * @param accountId - Identifiant du compte, tel que renvoyé par le worker.
+   * @returns {string} Le nom du compte, ou « compte <id> » s’il n’est plus dans le coffre.
+   */
+  function vaultAccountLabel(accountId: string): string {
+    const account = vaultAccounts.value.find((vaultAccount) => String(vaultAccount.id) === accountId)
+    return account ? (account.label ?? account.amazon_email) : `compte ${accountId}`
+  }
+
+  /**
    * Applique le résultat de la vérification multi-comptes et prévient si un compte n’a pas pu être vérifié.
    *
    * @param res - Réponse de ``POST /amazon/invites/verify-all``.
@@ -360,13 +439,9 @@ export function useAmazonInvitesPage() {
     }
     const failed = Object.keys(res.errors ?? {})
     if (failed.length) {
-      const labels = failed.map((id) => {
-        const acc = vaultAccounts.value.find((a) => String(a.id) === id)
-        return acc ? (acc.label ?? acc.amazon_email) : `compte ${id}`
-      })
       toast.add({
         title: 'Comptes non connectés',
-        description: `Connexion impossible sur : ${labels.join(', ')}. Vérifiez leurs identifiants dans le coffre.`,
+        description: `Connexion impossible sur : ${failed.map(vaultAccountLabel).join(', ')}. Vérifiez leurs identifiants dans le coffre.`,
         color: 'warning',
       })
     }
@@ -381,30 +456,25 @@ export function useAmazonInvitesPage() {
   async function refresh(): Promise<void> {
     refreshing.value = true
     error.value = null
-    refreshLogLines.value = []
-    refreshPhaseHint.value = ''
+    progressLogLines.value = []
+    progressPhaseHint.value = ''
     streamingInvites.value = []
 
     const progressChannel = await openWorkerSocketStream(
       'amazon',
       '/ws/progress',
       (data: string): void => {
-        let payload: AmazonWorkerProgressPayload
-        try {
-          payload = JSON.parse(data) as AmazonWorkerProgressPayload
-        } catch {
+        const payload = parseWorkerProgressPayload(data)
+        if (!payload) {
           return
         }
-        if (payload.message) {
-          refreshPhaseHint.value = payload.message
-        }
         mergeInvitePreviewFromWs(payload)
-        refreshLogLines.value = [...refreshLogLines.value, formatAmazonWorkerProgressLine(payload)].slice(-120)
+        appendProgressLine(payload)
       },
       { authSubprotocol: true, openTimeoutMs: 5000 },
     )
     if (!progressChannel) {
-      refreshLogLines.value = [
+      progressLogLines.value = [
         '[info] Connexion au flux temps réel impossible — la recherche continue (logs détaillés indisponibles).',
       ]
     }
@@ -418,8 +488,8 @@ export function useAmazonInvitesPage() {
         refreshedAt.value = res.refreshed_at
       }
       saveCatalogCache()
-      if (res.message && !refreshPhaseHint.value) {
-        refreshPhaseHint.value = res.message
+      if (res.message && !progressPhaseHint.value) {
+        progressPhaseHint.value = res.message
       }
 
       if (catalog.value.length && hasVaultAccounts) {
@@ -427,7 +497,7 @@ export function useAmazonInvitesPage() {
         const all = await verifyAllAccounts(catalog.value)
         applyVerifyAllResult(all)
         if (all.message) {
-          refreshPhaseHint.value = all.message
+          progressPhaseHint.value = all.message
         }
       }
       streamingInvites.value = []
@@ -521,12 +591,7 @@ export function useAmazonInvitesPage() {
       const updated = res.invite
       if (updated) {
         const key = asin.toUpperCase()
-        const current = rowsByAccount.value[String(accountId)] ?? catalogAsUnverified.value
-        setAccountRows(
-          accountId,
-          current.map((row) => ((row.asin ?? '').trim().toUpperCase() === key ? updated : row)),
-          refreshedAt.value,
-        )
+        replaceAccountInviteRow(accountId, updated)
         streamingInvites.value = streamingInvites.value.map((row) =>
           (row.asin ?? '').trim().toUpperCase() === key ? updated : row,
         )
@@ -547,6 +612,97 @@ export function useAmazonInvitesPage() {
     }
   }
 
+  /**
+   * Met à jour les lignes de chaque compte après la demande groupée, puis affiche le bilan.
+   *
+   * @param res - Réponse de ``POST /amazon/invites/request-all``.
+   * @returns {void} Cette fonction ne retourne rien.
+   */
+  function applyRequestAllInvitesResult(res: AmazonRequestAllInvitesResponse): void {
+    for (const [id, outcomes] of Object.entries(res.outcomes_by_account)) {
+      const accountId = Number(id)
+      if (!Number.isFinite(accountId)) {
+        continue
+      }
+      for (const outcome of outcomes) {
+        if (outcome.invite) {
+          replaceAccountInviteRow(accountId, outcome.invite)
+        }
+      }
+    }
+
+    const notConnectedAccountIds = Object.keys(res.errors)
+    const hasFailures = res.failed_count > 0 || notConnectedAccountIds.length > 0
+    toast.add({
+      title: hasFailures ? 'Demandes terminées avec des erreurs' : 'Invitations demandées',
+      description: notConnectedAccountIds.length
+        ? `${res.message}. Connexion impossible sur : ${notConnectedAccountIds.map(vaultAccountLabel).join(', ')}.`
+        : res.message,
+      color: hasFailures ? 'warning' : 'success',
+    })
+  }
+
+  /**
+   * Demande, sur chaque compte du coffre, toutes les invitations encore à demander, en suivant la progression.
+   *
+   * @returns {Promise<void>} Résolu quand toutes les demandes sont passées ou ont échoué.
+   */
+  async function requestAllUnrequestedInvites(): Promise<void> {
+    const invitesToRequest = unrequestedInvitesByAccount.value
+    if (!invitesToRequest.length || refreshing.value || requestingAllInvites.value) {
+      return
+    }
+    requestingAllInvites.value = true
+    inviteRequestProgressPercent.value = 0
+    progressLogLines.value = []
+    progressPhaseHint.value = ''
+
+    const progressChannel = await openWorkerSocketStream(
+      'amazon',
+      '/ws/progress',
+      (data: string): void => {
+        const payload = parseWorkerProgressPayload(data)
+        if (!payload) {
+          return
+        }
+        appendProgressLine(payload)
+        if (payload.total_pages) {
+          inviteRequestProgressPercent.value = Math.round(((payload.current_page ?? 0) / payload.total_pages) * 100)
+        }
+        if (payload.status === 'requesting' && payload.account_id === selectedAccountId.value) {
+          requestInviteLoadingAsin.value = payload.asin ?? null
+        } else if (payload.status === 'invite_requested') {
+          requestInviteLoadingAsin.value = null
+        }
+        if (payload.invite_preview && payload.account_id != null) {
+          replaceAccountInviteRow(payload.account_id, payload.invite_preview)
+        }
+      },
+      { authSubprotocol: true, openTimeoutMs: 5000 },
+    )
+    if (!progressChannel) {
+      inviteRequestProgressPercent.value = null
+      progressLogLines.value = [
+        '[info] Connexion au flux temps réel impossible — les demandes continuent (suivi détaillé indisponible).',
+      ]
+    }
+
+    try {
+      applyRequestAllInvitesResult(await requestAllInvites(invitesToRequest))
+    } catch (e: unknown) {
+      toast.add({
+        title: 'Demandes interrompues',
+        description: errorMessageFromUnknown(e, 'Le worker n’a pas pu demander les invitations.'),
+        color: 'error',
+      })
+    } finally {
+      progressChannel?.close()
+      requestInviteLoadingAsin.value = null
+      inviteRequestProgressPercent.value = null
+      requestingAllInvites.value = false
+    }
+  }
+
   return {
     loading,
     refreshing,
@@ -561,9 +717,13 @@ export function useAmazonInvitesPage() {
     displayItems,
     streamingInvites,
     streamingDisplayItems,
-    refreshLogLines,
-    refreshPhaseHint,
+    progressLogLines,
+    progressPhaseHint,
     requestInviteLoadingAsin,
+    requestingAllInvites,
+    inviteRequestProgressPercent,
+    unrequestedInvitesByAccount,
+    unrequestedInviteCount,
     accountSelectItems,
     vaultAccountCount,
     accountConnectionStates,
@@ -571,6 +731,7 @@ export function useAmazonInvitesPage() {
     load,
     refresh,
     requestProductInvite,
+    requestAllUnrequestedInvites,
     switchActiveAccount,
   }
 }

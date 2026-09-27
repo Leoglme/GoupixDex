@@ -68,7 +68,7 @@
             icon="i-lucide-send"
             class="w-fit"
             :loading="requestInviteLoading"
-            :disabled="requestInviteLoading"
+            :disabled="requestInviteLoading || requestInviteDisabled"
             @click="emit('request-invite', invite)"
           >
             Demander l’invitation
@@ -111,6 +111,7 @@ import type {
   GoupixDexAmazonInviteStatusBadgeColor,
 } from '~/types/GoupixDexAmazonInviteCard'
 import type { AmazonInvite, AmazonInviteStatus } from '~/types/amazonInvites'
+import { canRequestInvite } from '~/utils/amazonInviteRequest'
 
 const props: GoupixDexAmazonInviteCardProps = defineProps({
   invite: {
@@ -118,6 +119,10 @@ const props: GoupixDexAmazonInviteCardProps = defineProps({
     required: true,
   },
   requestInviteLoading: {
+    type: Boolean,
+    default: false,
+  },
+  requestInviteDisabled: {
     type: Boolean,
     default: false,
   },
@@ -180,8 +185,6 @@ const canShowRequestCta: ComputedRef<boolean> = computed(() => {
   if (!productLink.value) {
     return false
   }
-  // `listing_only` means Amazon shows the product as invite-gated: requesting is exactly
-  // what the user wants to do there, same as a row not requested yet.
-  return props.invite.status === 'not_requested' || props.invite.status === 'listing_only'
+  return canRequestInvite(props.invite.status)
 })
 </script>
