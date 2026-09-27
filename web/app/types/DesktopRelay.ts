@@ -96,6 +96,7 @@ export type DesktopWorkersAccess = {
   canUseDesktopWorkers: ComputedRef<boolean>
   isDesktopAppUnreachable: ComputedRef<boolean>
   waitForDesktopWorkersAvailability: () => Promise<boolean>
+  notifyPcUnreachable: (actionLabel: string) => void
   openWorkerEventStream: (worker: DesktopWorkerName, path: string) => WorkerEventStream
   openWorkerSocketStream: (
     worker: DesktopWorkerName,

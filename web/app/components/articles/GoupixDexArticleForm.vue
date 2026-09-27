@@ -320,7 +320,14 @@
       />
     </div>
 
-    <UButton v-if="showSubmitButton" color="primary" :loading="loading" @click="submit">
+    <UButton
+      v-if="showSubmitButton"
+      color="primary"
+      :icon="submitIcon"
+      :trailing-icon="submitTrailingIcon"
+      :loading="loading"
+      @click="submit"
+    >
       {{
         submitLabel ?? (mode === 'create' ? "Créer l'article" : relistMode ? 'Enregistrer et continuer' : 'Enregistrer')
       }}
@@ -359,6 +366,8 @@ const props = withDefaults(
     /** Show the form submit button (disable if the parent handles submit). */
     showSubmitButton?: boolean
     submitLabel?: string
+    submitIcon?: string
+    submitTrailingIcon?: string
   }>(),
   {
     hideVintedOption: false,

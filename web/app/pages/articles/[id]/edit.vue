@@ -12,7 +12,7 @@
           </span>
         </template>
         <template #right>
-          <UButton :to="`/articles/${id}`" color="neutral" variant="ghost" icon="i-lucide-eye"> Fiche </UButton>
+          <UButton color="neutral" variant="outline" icon="i-lucide-eye" @click="openArticle(id)"> Fiche </UButton>
         </template>
       </UDashboardNavbar>
     </template>
@@ -28,9 +28,7 @@
         <template v-else-if="article">
           <GoupixDexPageHeader :title="pageTitle" :description="pageDescription">
             <template v-if="isReviewBeforePublishing && article.collection_card_id" #actions>
-              <UButton color="neutral" variant="outline" icon="i-lucide-album" @click="openLinkedCollectionCard">
-                Voir dans ma collection
-              </UButton>
+              <UButton icon="i-lucide-album" @click="openLinkedCollectionCard"> Voir dans ma collection </UButton>
             </template>
           </GoupixDexPageHeader>
 
@@ -39,16 +37,8 @@
               <UIcon name="i-lucide-send" class="size-5 text-(--app-accent)" />
             </span>
             <div class="min-w-0 space-y-0.5">
-              <p class="text-highlighted text-sm font-semibold">
-                Publication sur {{ marketplaceNamesLabel(reviewMarketplaces) }} après l’enregistrement
-              </p>
-              <p class="text-muted text-xs leading-relaxed">
-                Rien n’est publié avant l’enregistrement.
-                <span v-if="queuedArticleIds.length">
-                  Encore {{ queuedArticleIds.length }} fiche{{ queuedArticleIds.length > 1 ? 's' : '' }} à vérifier
-                  ensuite.
-                </span>
-              </p>
+              <p class="text-highlighted text-sm font-semibold">{{ reviewStatusTitle }}</p>
+              <p class="text-muted text-xs leading-relaxed">{{ reviewStatusDetail }}</p>
             </div>
           </div>
 
@@ -95,7 +85,11 @@
               :relist-mode="relistMode"
               :loading="submitting"
               :loading-hint="submitLoadingHint"
-              :submit-label="isReviewBeforePublishing ? 'Enregistrer et publier' : undefined"
+              :submit-label="isReviewBeforePublishing ? reviewSubmitLabel : undefined"
+              :submit-icon="isReviewBeforePublishing && !hasNextArticleToReview ? 'i-lucide-send' : undefined"
+              :submit-trailing-icon="
+                isReviewBeforePublishing && hasNextArticleToReview ? 'i-lucide-arrow-right' : undefined
+              "
               @submit-edit="onSubmitEdit"
             />
           </UCard>
@@ -110,6 +104,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { Article, ArticleUpdateBody } from '~/composables/useArticles'
 import type { Marketplace } from '~/types/Marketplace'
 import { useArticleMarketplacePublication } from '~/composables/useArticleMarketplacePublication'
+import { useBulkMarketplacePublication } from '~/composables/useBulkMarketplacePublication'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import {
   parseRelistQueueParam,
@@ -128,9 +123,14 @@ const toast = useToast()
 const { canUseDesktopWorkers } = useDesktopWorkers()
 const { publishArticleOnMarketplaces } = useArticleMarketplacePublication()
 const { openCard } = useOpenCardDrawer()
+const { openArticle } = useOpenArticleDrawer()
+const reviewedArticlesById: Map<number, Article> = new Map()
+const { publishArticlesInBulk } = useBulkMarketplacePublication((articleId: number): Article | undefined =>
+  reviewedArticlesById.get(articleId),
+)
 
 const REVIEW_PAGE_DESCRIPTION: string =
-  'Ajustez le prix avec les repères Cardmarket et complétez la fiche : l’enregistrement lance la mise en ligne.'
+  'Ajustez le prix avec les repères Cardmarket et complétez la fiche avant sa mise en ligne.'
 
 const article: Ref<Article | null> = ref(null)
 const loading: Ref<boolean> = ref(true)
@@ -151,6 +151,40 @@ const reviewMarketplaces: ComputedRef<Marketplace[]> = computed((): Marketplace[
   parseMarketplaceList(route.query.publish),
 )
 
+const reviewedArticleIds: ComputedRef<number[]> = computed((): number[] => parseRelistQueueParam(route.query.reviewed))
+
+const reviewPosition: ComputedRef<number> = computed((): number => reviewedArticleIds.value.length + 1)
+
+const reviewArticleCount: ComputedRef<number> = computed(
+  (): number => reviewPosition.value + queuedArticleIds.value.length,
+)
+
+const isReviewingSeries: ComputedRef<boolean> = computed((): boolean => reviewArticleCount.value > 1)
+
+const hasNextArticleToReview: ComputedRef<boolean> = computed((): boolean => queuedArticleIds.value.length > 0)
+
+const reviewSubmitLabel: ComputedRef<string> = computed((): string => {
+  if (hasNextArticleToReview.value) {
+    return 'Enregistrer et passer à la suivante'
+  }
+  return isReviewingSeries.value
+    ? `Enregistrer et publier les ${reviewArticleCount.value} fiches`
+    : 'Enregistrer et publier'
+})
+
+const reviewStatusTitle: ComputedRef<string> = computed((): string => {
+  const marketplaceNames: string = marketplaceNamesLabel(reviewMarketplaces.value)
+  return isReviewingSeries.value
+    ? `Fiche ${reviewPosition.value} sur ${reviewArticleCount.value} · publication sur ${marketplaceNames} à la fin`
+    : `Publication sur ${marketplaceNames} après l’enregistrement`
+})
+
+const reviewStatusDetail: ComputedRef<string> = computed((): string =>
+  isReviewingSeries.value
+    ? `Rien n’est publié avant la dernière fiche : les ${reviewArticleCount.value} fiches partent ensemble.`
+    : 'Rien n’est publié avant l’enregistrement.',
+)
+
 const pageTitle: ComputedRef<string> = computed((): string => {
   if (isReviewBeforePublishing.value) {
     return 'Vérifier avant publication'
@@ -169,7 +203,10 @@ const pageDescription: ComputedRef<string> = computed((): string => {
 
 const submitLoadingHint: ComputedRef<string | undefined> = computed((): string | undefined => {
   if (isPublishingReviewedArticle.value) {
-    return `Publication sur ${marketplaceNamesLabel(reviewMarketplaces.value)} en cours…`
+    const marketplaceNames: string = marketplaceNamesLabel(reviewMarketplaces.value)
+    return isReviewingSeries.value
+      ? `Lancement de la publication des ${reviewArticleCount.value} fiches sur ${marketplaceNames}…`
+      : `Publication sur ${marketplaceNames} en cours…`
   }
   return submitting.value && vintedSubmit.value ? 'Enregistrement… puis journal Vinted.' : undefined
 })
@@ -244,28 +281,52 @@ async function publishEbayOnly(): Promise<void> {
 }
 
 /**
- * Enregistre la fiche vérifiée, la publie sur les marketplaces choisies et attend la fin, puis ouvre la fiche suivante ou revient à la page de départ.
+ * Publie ensemble toutes les fiches vérifiées de la série, une fois la dernière enregistrée, puis ouvre le journal.
+ * @param {Article} lastReviewedArticle - Dernière fiche de la série, tout juste enregistrée.
+ * @returns {Promise<void>} Résolue une fois le journal ouvert, ou les échecs annoncés.
+ */
+async function publishReviewedSeries(lastReviewedArticle: Article): Promise<void> {
+  const reviewedArticles: Article[] = await Promise.all(
+    reviewedArticleIds.value.map((articleId: number): Promise<Article> => getArticle(articleId)),
+  )
+  for (const reviewedArticle of [...reviewedArticles, lastReviewedArticle]) {
+    reviewedArticlesById.set(reviewedArticle.id, reviewedArticle)
+  }
+  await publishArticlesInBulk([...reviewedArticleIds.value, lastReviewedArticle.id], reviewMarketplaces.value)
+}
+
+/**
+ * Enregistre la fiche vérifiée puis ouvre la suivante de la série ; la dernière lance la publication de toute la série.
  * @param {ArticleUpdateBody} body - Modifications de la fiche.
  * @returns {Promise<void>} Résolue après la navigation, ou l'erreur annoncée.
  */
-async function saveAndPublishReviewedArticle(body: ArticleUpdateBody): Promise<void> {
+async function saveReviewedArticle(body: ArticleUpdateBody): Promise<void> {
   submitting.value = true
   try {
     const updatedArticle: Article = await updateArticle(id.value, body)
     article.value = updatedArticle
+    const [nextArticleId, ...laterArticleIds]: number[] = queuedArticleIds.value
+    const returnPath: string = internalPathOrFallback(route.query.back, '/articles')
+    if (nextArticleId !== undefined) {
+      await navigateTo(
+        publishReviewLocation(nextArticleId, laterArticleIds, reviewMarketplaces.value, returnPath, [
+          ...reviewedArticleIds.value,
+          updatedArticle.id,
+        ]),
+      )
+      return
+    }
     isPublishingReviewedArticle.value = true
+    if (isReviewingSeries.value) {
+      await publishReviewedSeries(updatedArticle)
+      return
+    }
     await publishArticleOnMarketplaces(
       updatedArticle,
       reviewMarketplaces.value.filter(
         (marketplace: Marketplace): boolean => !isPublishedOnMarketplace(updatedArticle, marketplace),
       ),
     )
-    const [nextArticleId, ...laterArticleIds]: number[] = queuedArticleIds.value
-    const returnPath: string = internalPathOrFallback(route.query.back, '/articles')
-    if (nextArticleId !== undefined) {
-      await navigateTo(publishReviewLocation(nextArticleId, laterArticleIds, reviewMarketplaces.value, returnPath))
-      return
-    }
     await navigateTo(returnPath)
   } catch (e) {
     toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
@@ -286,7 +347,7 @@ async function onSubmitEdit(
   relist?: { publishVinted: boolean; publishEbay: boolean },
 ): Promise<void> {
   if (isReviewBeforePublishing.value) {
-    await saveAndPublishReviewedArticle(body)
+    await saveReviewedArticle(body)
     return
   }
   vintedSubmit.value = Boolean(relist?.publishVinted)

@@ -4,6 +4,7 @@ import type { Article } from '~/composables/useArticles'
 import type { EbayLeboncoinDelist, EbayLeboncoinDelistFailure } from '~/types/EbayLeboncoinDelist'
 import type { Marketplace } from '~/types/Marketplace'
 import type { PublishReviewChoice } from '~/types/PublishReviewPrompt'
+import { useBulkMarketplacePublication } from '~/composables/useBulkMarketplacePublication'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
 import { usePublishReviewPrompt } from '~/composables/usePublishReviewPrompt'
@@ -32,15 +33,12 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     markSold,
     retryCrossEbayRemoval,
     vintedUnlistAfterEbaySale,
-    startVintedBatch,
-    startLeboncoinBatch,
     startVintedBatchDelist,
-    startEbayBatch,
     bulkPrepareForSale,
   } = useArticles()
   const route: RouteLocationNormalizedLoaded = useRoute()
   const toast = useToast()
-  const { canUseDesktopWorkers } = useDesktopWorkers()
+  const { canUseDesktopWorkers, notifyPcUnreachable } = useDesktopWorkers()
   const { removeEbayLeboncoinListings } = useEbayLeboncoinDelist()
   const { askWhetherToReviewBeforePublishing } = usePublishReviewPrompt()
   const { startJob } = useWardrobeLocalSync()
@@ -49,7 +47,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     canPublishOnEbay: ebayPublishAvailable,
     canPublishOnLeboncoin: leboncoinPublishAvailable,
     loadMarketplaceAvailability,
-    ensureLeboncoinPublishReady,
     startArticlePublish,
   } = useMarketplacePublishing()
 
@@ -72,7 +69,10 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const bulkDeleteIds: Ref<number[]> = ref([])
   const bulkPublishOpen: Ref<boolean> = ref(false)
   const bulkPublishIds: Ref<number[]> = ref([])
-  const bulkPublishBusy: Ref<boolean> = ref(false)
+  const { isPublishingInBulk: bulkPublishBusy, publishArticlesInBulk } = useBulkMarketplacePublication(
+    articleById,
+    refresh,
+  )
   const bulkDelistOpen: Ref<boolean> = ref(false)
   const bulkDelistIds: Ref<number[]> = ref([])
   const bulkDelistBusy: Ref<boolean> = ref(false)
@@ -94,53 +94,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
    */
   function articleById(id: number): Article | undefined {
     return allArticles.value.find((a) => a.id === id)
-  }
-
-  /**
-   * eBay bulk publish requires at least one HTTPS-hosted photo URL.
-   *
-   * @param a - Article with `images[]`.
-   * @returns {boolean} `true` when any image URL starts with `https://`.
-   */
-  function hasHttpsImage(a: Article) {
-    return a.images?.some((img) => (img.image_url || '').startsWith('https://')) ?? false
-  }
-
-  /**
-   * Filter selection ids to rows that can be published on Vinted (unsold + has photos).
-   *
-   * @param ids - Selected article ids from the table.
-   * @returns {number[]} Eligible subset.
-   */
-  function eligibleIdsForVintedBulk(ids: number[]) {
-    return ids.filter((id) => {
-      const a = articleById(id)
-      return a && !a.is_sold && (a.images?.length ?? 0) > 0
-    })
-  }
-
-  /**
-   * Filter ids for eBay bulk (HTTPS images, not yet on eBay, unsold).
-   *
-   * @param ids - Selected article ids.
-   * @returns {number[]} Eligible subset.
-   */
-  function eligibleIdsForEbayBulk(ids: number[]) {
-    return ids.filter((id) => {
-      const a = articleById(id)
-      return a && !a.is_sold && !(a.published_on_ebay ?? false) && hasHttpsImage(a)
-    })
-  }
-
-  /**
-   * Intersection of Vinted + eBay eligibility for dual-channel bulk.
-   *
-   * @param ids - Selected article ids.
-   * @returns {number[]} Eligible subset for both channels.
-   */
-  function eligibleIdsForDualBulk(ids: number[]) {
-    const v = new Set(eligibleIdsForVintedBulk(ids))
-    return eligibleIdsForEbayBulk(ids).filter((id) => v.has(id))
   }
 
   /**
@@ -173,19 +126,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     const listRefresh = allArticles.value.length === 0 ? refresh() : refresh({ background: true })
     await Promise.all([listRefresh, loadMarketplaceAvailability()])
   })
-
-  /**
-   * Prévient que l'action attend le PC : GoupixDex doit y être ouvert pour l'exécuter.
-   * @param {string} actionLabel - Action concernée (« La mise en ligne groupée Vinted »…).
-   * @returns {void}
-   */
-  function notifyPcUnreachable(actionLabel: string): void {
-    toast.add({
-      title: 'Ouvrez GoupixDex sur votre PC',
-      description: `${actionLabel} s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, puis réessayez.`,
-      color: 'warning',
-    })
-  }
 
   /**
    * Ouvre la modale « vendu » pour un ou plusieurs articles (lot : parts égales).
@@ -467,24 +407,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     if (choice !== 'publish') {
       return
     }
-    const journalQuery: Record<string, string> = {}
-    if (payload.leboncoin) {
-      const leboncoinJobId: string | null = await startBulkLeboncoinPublish(ids)
-      if (leboncoinJobId) {
-        journalQuery.leboncoin_job = leboncoinJobId
-      }
-    }
-    let hasOpenedJournal: boolean = false
-    if (payload.vinted && payload.ebay) {
-      hasOpenedJournal = await onBulkPublishBoth(ids, journalQuery)
-    } else if (payload.vinted) {
-      hasOpenedJournal = await onBulkPublishVinted(ids, journalQuery)
-    } else if (payload.ebay) {
-      hasOpenedJournal = await onBulkPublishEbay(ids, journalQuery)
-    }
-    if (!hasOpenedJournal && journalQuery.leboncoin_job) {
-      await navigateTo({ path: '/articles/listing-logs', query: journalQuery })
-    }
+    await publishArticlesInBulk(ids, marketplaces)
   }
 
   /**
@@ -691,238 +614,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
-   * Lance le lot Vinted des articles éligibles et ouvre son journal.
-   * @param {number[]} ids - Articles sélectionnés.
-   * @param {Record<string, string>} extraJournalQuery - Autres lots à suivre dans le même journal.
-   * @returns {Promise<boolean>} Vrai si le journal a été ouvert.
-   */
-  async function onBulkPublishVinted(ids: number[], extraJournalQuery: Record<string, string>): Promise<boolean> {
-    const eligible = eligibleIdsForVintedBulk(ids)
-    if (!eligible.length) {
-      toast.add({
-        title: 'Sélection invalide',
-        description: 'Choisissez des articles non vendus avec au moins une photo.',
-        color: 'warning',
-      })
-      return false
-    }
-    if (!canUseDesktopWorkers.value) {
-      notifyPcUnreachable('La mise en ligne groupée Vinted')
-      return false
-    }
-    if (eligible.length < ids.length) {
-      toast.add({
-        title: 'Certains articles sont ignorés',
-        description: 'Seuls les articles non vendus avec photos sont inclus dans le lot.',
-        color: 'warning',
-      })
-    }
-    bulkPublishBusy.value = true
-    try {
-      const { job_id, stream_path } = await startVintedBatch(eligible)
-      if (job_id && stream_path) {
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { job: job_id, ...extraJournalQuery },
-        })
-        return true
-      }
-      toast.add({ title: 'Lot Vinted', description: 'Réponse inattendue (pas de job).', color: 'warning' })
-      await refresh()
-    } catch (e) {
-      toast.add({
-        title: 'Impossible de lancer le lot Vinted',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
-    } finally {
-      bulkPublishBusy.value = false
-    }
-    return false
-  }
-
-  /**
-   * Met en file les publications eBay des articles éligibles et ouvre le journal du premier.
-   * @param {number[]} ids - Articles sélectionnés.
-   * @param {Record<string, string>} extraJournalQuery - Autres lots à suivre dans le même journal.
-   * @returns {Promise<boolean>} Vrai si le journal a été ouvert.
-   */
-  async function onBulkPublishEbay(ids: number[], extraJournalQuery: Record<string, string>): Promise<boolean> {
-    const eligible = eligibleIdsForEbayBulk(ids)
-    if (!eligible.length) {
-      toast.add({
-        title: 'Sélection invalide',
-        description: 'Choisissez des articles non vendus, pas déjà sur eBay, avec au moins une image en HTTPS.',
-        color: 'warning',
-      })
-      return false
-    }
-    if (eligible.length < ids.length) {
-      toast.add({
-        title: 'Certains articles sont ignorés',
-        description: 'Seuls les articles éligibles pour eBay (image HTTPS, pas déjà publié) sont inclus.',
-        color: 'warning',
-      })
-    }
-    bulkPublishBusy.value = true
-    try {
-      const { queued } = await startEbayBatch(eligible)
-      toast.add({
-        title: 'Mise en ligne eBay',
-        description: `${queued} publication(s) mise(s) en file d’attente (traitement séquentiel).`,
-        color: 'success',
-      })
-      await navigateTo({
-        path: '/articles/listing-logs',
-        query: { article: String(eligible[0]), ...extraJournalQuery },
-      })
-      await refresh()
-      return true
-    } catch (e) {
-      toast.add({
-        title: 'Impossible de lancer le lot eBay',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
-    } finally {
-      bulkPublishBusy.value = false
-    }
-    return false
-  }
-
-  /**
-   * Lance ensemble le lot Vinted et la file eBay des articles éligibles, puis ouvre le journal.
-   * @param {number[]} ids - Articles sélectionnés.
-   * @param {Record<string, string>} extraJournalQuery - Autres lots à suivre dans le même journal.
-   * @returns {Promise<boolean>} Vrai si le journal a été ouvert.
-   */
-  async function onBulkPublishBoth(ids: number[], extraJournalQuery: Record<string, string>): Promise<boolean> {
-    const eligible = eligibleIdsForDualBulk(ids)
-    if (!eligible.length) {
-      toast.add({
-        title: 'Sélection invalide',
-        description:
-          'Pour les deux canaux : articles non vendus, avec photos (Vinted) et au moins une image HTTPS pour eBay, sans annonce eBay déjà créée.',
-        color: 'warning',
-      })
-      return false
-    }
-    if (!canUseDesktopWorkers.value) {
-      toast.add({
-        title: 'Ouvrez GoupixDex sur votre PC',
-        description:
-          'Vinted s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, ou publiez seulement sur eBay.',
-        color: 'warning',
-      })
-      return false
-    }
-    if (eligible.length < ids.length) {
-      toast.add({
-        title: 'Certains articles sont ignorés',
-        description: 'Seuls les articles éligibles pour eBay et Vinted sont inclus.',
-        color: 'warning',
-      })
-    }
-    bulkPublishBusy.value = true
-    try {
-      const [vintedR, ebayR] = await Promise.allSettled([startVintedBatch(eligible), startEbayBatch(eligible)])
-
-      if (vintedR.status === 'fulfilled' && vintedR.value.job_id) {
-        if (ebayR.status === 'fulfilled') {
-          toast.add({
-            title: 'Lots lancés',
-            description: `Vinted : suivi du lot. eBay : ${ebayR.value.queued} article(s) en file (API).`,
-            color: 'success',
-          })
-        } else {
-          toast.add({
-            title: 'Lot Vinted lancé',
-            description: `eBay : ${apiErrorMessage(ebayR.reason)}`,
-            color: 'warning',
-          })
-        }
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { job: vintedR.value.job_id, ...extraJournalQuery },
-        })
-        await refresh()
-        return true
-      }
-
-      if (ebayR.status === 'fulfilled') {
-        toast.add({
-          title: 'Lot eBay lancé',
-          description:
-            vintedR.status === 'rejected'
-              ? `Vinted : ${apiErrorMessage(vintedR.reason)}`
-              : `${ebayR.value.queued} article(s) en file.`,
-          color: vintedR.status === 'rejected' ? 'warning' : 'success',
-        })
-        await navigateTo({
-          path: '/articles/listing-logs',
-          query: { article: String(eligible[0]), ...extraJournalQuery },
-        })
-        await refresh()
-        return true
-      }
-
-      const parts: string[] = []
-      if (vintedR.status === 'rejected') {
-        parts.push(`Vinted : ${apiErrorMessage(vintedR.reason)}`)
-      }
-      if (ebayR.status === 'rejected') {
-        parts.push(`eBay : ${apiErrorMessage(ebayR.reason)}`)
-      }
-      toast.add({
-        title: 'Impossible de lancer les lots',
-        description: parts.length ? parts.join(' · ') : 'Erreur inconnue',
-        color: 'error',
-      })
-    } finally {
-      bulkPublishBusy.value = false
-    }
-    return false
-  }
-
-  /**
-   * Lance sur le PC le lot Leboncoin des articles éligibles, publiés l’un après l’autre.
-   * @param {number[]} ids - Articles sélectionnés.
-   * @returns {Promise<string | null>} L’identifiant du lot, ou null s’il n’a pas démarré (raison annoncée par un toast).
-   */
-  async function startBulkLeboncoinPublish(ids: number[]): Promise<string | null> {
-    if (!(await ensureLeboncoinPublishReady())) {
-      return null
-    }
-    const eligibleIds: number[] = ids.filter((id: number): boolean => {
-      const row: Article | undefined = articleById(id)
-      return Boolean(row && !row.is_sold && row.images?.length && !row.published_on_leboncoin)
-    })
-    if (!eligibleIds.length) {
-      toast.add({
-        title: 'Sélection invalide',
-        description: 'Leboncoin : articles non vendus, pas déjà en ligne, avec au moins une photo.',
-        color: 'warning',
-      })
-      return null
-    }
-    if (!canUseDesktopWorkers.value) {
-      notifyPcUnreachable('La publication Leboncoin')
-      return null
-    }
-    try {
-      const { job_id } = await startLeboncoinBatch(eligibleIds)
-      return job_id
-    } catch (e) {
-      toast.add({
-        title: 'Publication Leboncoin impossible',
-        description: apiErrorMessage(e),
-        color: 'error',
-      })
-      return null
-    }
-  }
-
-  /**
    * Publie un article sur Leboncoin depuis la liste.
    *
    * @param a - Article à publier.
@@ -987,9 +678,6 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     confirmBulkRelist,
     onWardrobeImportFromVinted,
     onPublishEbay,
-    onBulkPublishVinted,
-    onBulkPublishEbay,
-    onBulkPublishBoth,
     onPublishVinted,
     onPublishLeboncoin,
     onRetryCrossEbay,

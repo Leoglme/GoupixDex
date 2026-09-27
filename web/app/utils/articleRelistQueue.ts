@@ -79,8 +79,9 @@ export async function navigateToRelistEditorFromStorage(): Promise<void> {
  * Page de modification d'une fiche à vérifier avant publication, suivie des fiches restantes de la série.
  * @param {number} articleId - Fiche à vérifier maintenant.
  * @param {number[]} remainingArticleIds - Fiches à vérifier ensuite, dans l'ordre.
- * @param {Marketplace[]} marketplaces - Marketplaces où publier chaque fiche une fois enregistrée.
+ * @param {Marketplace[]} marketplaces - Marketplaces où publier la série une fois la dernière fiche enregistrée.
  * @param {string} returnPath - Page où revenir une fois la série publiée.
+ * @param {number[]} [reviewedArticleIds] - Fiches de la série déjà vérifiées, publiées avec la dernière.
  * @returns {{ path: string; query: Record<string, string> }} La page de modification de la fiche.
  */
 export function publishReviewLocation(
@@ -88,10 +89,14 @@ export function publishReviewLocation(
   remainingArticleIds: number[],
   marketplaces: Marketplace[],
   returnPath: string,
+  reviewedArticleIds: number[] = [],
 ): { path: string; query: Record<string, string> } {
   const query: Record<string, string> = { review: '1', publish: marketplaces.join(','), back: returnPath }
   if (remainingArticleIds.length) {
     query.queue = remainingArticleIds.join(',')
+  }
+  if (reviewedArticleIds.length) {
+    query.reviewed = reviewedArticleIds.join(',')
   }
   return { path: `/articles/${articleId}/edit`, query }
 }

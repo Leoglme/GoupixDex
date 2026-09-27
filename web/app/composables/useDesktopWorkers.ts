@@ -37,6 +37,7 @@ export function wrapEventSource(source: EventSource): WorkerEventStream {
  */
 export function useDesktopWorkers(): DesktopWorkersAccess {
   const config = useRuntimeConfig()
+  const toast = useToast()
   const { isDesktopApp } = useDesktopRuntime()
   const {
     isDesktopRelayOnline,
@@ -234,10 +235,24 @@ export function useDesktopWorkers(): DesktopWorkersAccess {
     }
   }
 
+  /**
+   * Prévient que l'action attend le PC : GoupixDex doit y être ouvert pour l'exécuter.
+   * @param {string} actionLabel - Action concernée (« La mise en ligne groupée Vinted »…).
+   * @returns {void}
+   */
+  function notifyPcUnreachable(actionLabel: string): void {
+    toast.add({
+      title: 'Ouvrez GoupixDex sur votre PC',
+      description: `${actionLabel} s’exécute sur votre PC : lancez GoupixDex sur votre ordinateur, puis réessayez.`,
+      color: 'warning',
+    })
+  }
+
   return {
     canUseDesktopWorkers,
     isDesktopAppUnreachable,
     waitForDesktopWorkersAvailability,
+    notifyPcUnreachable,
     openWorkerEventStream,
     openWorkerSocketStream,
   }
