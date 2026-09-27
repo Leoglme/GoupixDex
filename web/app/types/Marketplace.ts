@@ -16,3 +16,5 @@ export type MarketplaceListingLink = {
   marketplace: Marketplace
   url: string
 }
+
+export type MarketplaceSetupIssues = Record<Marketplace, string | null>

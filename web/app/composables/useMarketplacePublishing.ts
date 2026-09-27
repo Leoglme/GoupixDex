@@ -2,9 +2,9 @@ import type { Ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
 import type { ListingProgressLocalWorker, ListingProgressSseBase } from '~/composables/useVintedPublishStream'
-import type { Marketplace } from '~/types/Marketplace'
+import type { Marketplace, MarketplaceSetupIssues } from '~/types/Marketplace'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
-import { MARKETPLACE_NAMES } from '~/utils/marketplaces'
+import { findMarketplaceSetupIssues, MARKETPLACE_NAMES } from '~/utils/marketplaces'
 
 export type ListingPublishStart = {
   streamPath: string
@@ -13,10 +13,28 @@ export type ListingPublishStart = {
   journalLocation: RouteLocationRaw
 }
 
+const SETTINGS_LOADING_ISSUE: string = 'Chargement des réglages…'
+const SETTINGS_UNREADABLE_ISSUE: string = 'Réglages indisponibles : rechargez la page.'
+
+/**
+ * Réglage qui empêche de publier sur chaque marketplace, partagé entre les écrans.
+ * @returns {Ref<MarketplaceSetupIssues>} Le réglage manquant par marketplace, ou null quand elle est prête.
+ */
+export function useMarketplaceSetupIssues(): Ref<MarketplaceSetupIssues> {
+  return useState(
+    'goupix-marketplace-setup-issues',
+    (): MarketplaceSetupIssues => ({
+      vinted: SETTINGS_LOADING_ISSUE,
+      ebay: SETTINGS_LOADING_ISSUE,
+      leboncoin: SETTINGS_LOADING_ISSUE,
+    }),
+  )
+}
+
 /**
  * Mise en ligne d'un article : canaux disponibles et démarrage de la publication.
  *
- * @returns {object} Disponibilité des canaux (`useState` partagé), `loadMarketplaceAvailability`, `ensureLeboncoinPublishReady` et `startArticlePublish`.
+ * @returns {object} Disponibilité des canaux et réglages manquants (`useState` partagés), `loadMarketplaceAvailability`, `ensureLeboncoinPublishReady` et `startArticlePublish`.
  */
 export function useMarketplacePublishing() {
   const { getSettings } = useSettings()
@@ -27,6 +45,7 @@ export function useMarketplacePublishing() {
   const isVintedChannelEnabled: Ref<boolean> = useState('goupix-vinted-channel-enabled', () => false)
   const canPublishOnEbay: Ref<boolean> = useState('goupix-ebay-publish-available', () => false)
   const canPublishOnLeboncoin: Ref<boolean> = useState('goupix-leboncoin-publish-available', () => false)
+  const marketplaceSetupIssues: Ref<MarketplaceSetupIssues> = useMarketplaceSetupIssues()
 
   /**
    * Lit les paramètres pour savoir sur quelles marketplaces l'utilisateur peut publier.
@@ -35,19 +54,17 @@ export function useMarketplacePublishing() {
    */
   async function loadMarketplaceAvailability(): Promise<void> {
     try {
-      const settings = await getSettings()
-      isVintedChannelEnabled.value = settings.vinted_enabled === true
-      canPublishOnEbay.value =
-        settings.ebay_enabled === true &&
-        settings.ebay_oauth_configured === true &&
-        settings.ebay_connected === true &&
-        settings.ebay_listing_config_complete === true
-      canPublishOnLeboncoin.value = settings.leboncoin_enabled === true && settings.sender_address_complete === true
+      marketplaceSetupIssues.value = findMarketplaceSetupIssues(await getSettings())
     } catch {
-      isVintedChannelEnabled.value = false
-      canPublishOnEbay.value = false
-      canPublishOnLeboncoin.value = false
+      marketplaceSetupIssues.value = {
+        vinted: SETTINGS_UNREADABLE_ISSUE,
+        ebay: SETTINGS_UNREADABLE_ISSUE,
+        leboncoin: SETTINGS_UNREADABLE_ISSUE,
+      }
     }
+    isVintedChannelEnabled.value = marketplaceSetupIssues.value.vinted === null
+    canPublishOnEbay.value = marketplaceSetupIssues.value.ebay === null
+    canPublishOnLeboncoin.value = marketplaceSetupIssues.value.leboncoin === null
   }
 
   /**
@@ -154,6 +171,7 @@ export function useMarketplacePublishing() {
     isVintedChannelEnabled,
     canPublishOnEbay,
     canPublishOnLeboncoin,
+    marketplaceSetupIssues,
     loadMarketplaceAvailability,
     ensureLeboncoinPublishReady,
     startArticlePublish,

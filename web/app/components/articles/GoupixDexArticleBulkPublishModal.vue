@@ -115,6 +115,8 @@
 
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
+import type { MarketplaceSetupIssues } from '~/types/Marketplace'
+import { useMarketplaceSetupIssues } from '~/composables/useMarketplacePublishing'
 
 type BrandKey = 'vinted' | 'ebay' | 'leboncoin' | 'all'
 
@@ -136,6 +138,7 @@ const props = withDefaults(
 
 const open = defineModel<boolean>('open', { default: false })
 const toast = useToast()
+const marketplaceSetupIssues: Ref<MarketplaceSetupIssues> = useMarketplaceSetupIssues()
 
 const emit = defineEmits<{
   confirm: [payload: { vinted: boolean; ebay: boolean; leboncoin: boolean; refreshVinted?: boolean }]
@@ -196,9 +199,9 @@ const leboncoinAvailable: ComputedRef<boolean> = computed(
 
 const anyChannelAvailable = computed(() => vintedAvailable.value || ebayAvailable.value || leboncoinAvailable.value)
 
-const vintedHint = computed(() => {
+const vintedHint: ComputedRef<string> = computed((): string => {
   if (!props.vintedChannelEnabled) {
-    return 'Activez Vinted dans les paramètres.'
+    return marketplaceSetupIssues.value.vinted ?? ''
   }
   if (!props.canUseDesktopWorkers) {
     return 'Ouvrez GoupixDex sur votre PC.'
@@ -206,13 +209,13 @@ const vintedHint = computed(() => {
   return ''
 })
 
-const ebayHint = computed(() =>
-  !props.ebayPublishAvailable ? 'Connexion OAuth et configuration des annonces requises.' : '',
+const ebayHint: ComputedRef<string> = computed((): string =>
+  !props.ebayPublishAvailable ? (marketplaceSetupIssues.value.ebay ?? '') : '',
 )
 
-const leboncoinHint = computed(() => {
+const leboncoinHint: ComputedRef<string> = computed((): string => {
   if (!props.leboncoinPublishAvailable) {
-    return 'Activez Leboncoin et complétez l’adresse expéditeur (Mon profil).'
+    return marketplaceSetupIssues.value.leboncoin ?? ''
   }
   if (!props.canUseDesktopWorkers) {
     return 'Ouvrez GoupixDex sur votre PC.'
