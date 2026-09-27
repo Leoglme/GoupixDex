@@ -2419,6 +2419,46 @@ class VintedService:
         return [row for row in rows if isinstance(row, dict)]
 
     @classmethod
+    async def find_live_member_listing(
+        cls,
+        tab: "Tab",
+        *,
+        vinted_id: int | None,
+        title: str,
+        sell_price: Decimal | float | int | None,
+    ) -> int | None:
+        """
+        Cherche l’annonce en ligne d’un article sur le dressing connecté : par son id s’il est connu, sinon par titre et prix.
+
+        Returns:
+            L’id de l’annonce, ou ``None`` quand le dressing a répondu sans la lister en ligne (supprimée, vendue ou jamais publiée).
+
+        Raises:
+            RuntimeError: Dressing illisible sans autre moyen de trouver l’annonce, ou plusieurs annonces du même titre sans prix pour trancher.
+        """
+        member_id = await cls.fetch_logged_in_vinted_user_numeric_id()
+        wardrobe_rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
+        if wardrobe_rows is None:
+            if vinted_id is not None:
+                return vinted_id
+            item_id = await cls.find_member_listing_item_id_for_match(tab, title=title, sell_price=sell_price)
+            if item_id is None:
+                raise RuntimeError("Dressing Vinted illisible et annonce introuvable : réessayez dans quelques minutes.")
+            return item_id
+
+        live_rows = [row for row in wardrobe_rows if not row.get("is_closed") and not row.get("is_draft")]
+        if vinted_id is not None:
+            return vinted_id if any(cls._wardrobe_row_item_id(row) == vinted_id for row in live_rows) else None
+
+        item_id = cls._pick_wardrobe_item_match(live_rows, title=title, sell_price=sell_price)
+        normalized_title = cls._normalize_match_token(title)
+        if item_id is None and any(
+            cls._normalize_match_token(str(row.get("title") or "")) == normalized_title for row in live_rows
+        ):
+            raise RuntimeError("Plusieurs annonces portent ce titre sur votre dressing Vinted : retirez la bonne depuis Vinted.")
+        return item_id
+
+    @classmethod
     async def find_member_listing_item_id_for_match(
         cls,
         tab: "Tab",

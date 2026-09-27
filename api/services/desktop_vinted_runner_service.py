@@ -134,8 +134,27 @@ class DesktopVintedRunnerService:
                 logger.warning("fail-vinted-cross-removal failed article_id=%s: %s", article_id, exc)
             return {"article_id": article_id, "delisted": False, "vinted_id": vinted_id, "detail": detail}
 
+        async def confirm_removal(vinted_id: int | None, detail: str | None) -> VintedListingRemovalOutcome:
+            """Marque l’article comme retiré de Vinted dans GoupixDex et renvoie le retrait réussi."""
+            try:
+                await post_confirmation_to_api(
+                    f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
+                    hdrs_json,
+                    {"hide_when_off_all_platforms": True},
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("confirm-vinted-unlist failed article_id=%s: %s", article_id, exc)
+                return {
+                    "article_id": article_id,
+                    "delisted": True,
+                    "vinted_id": vinted_id,
+                    "detail": "Retirée de Vinted, mais la fiche GoupixDex n’a pas pu être mise à jour.",
+                }
+            return {"article_id": article_id, "delisted": True, "vinted_id": vinted_id, "detail": detail}
+
         browser_started = False
         item_id: int | None = None
+        is_listing_absent = False
         try:
             async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
                 ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
@@ -179,20 +198,19 @@ class DesktopVintedRunnerService:
             browser_started = await VintedService.ensure_browser_session()
             await VintedService.ensure_sign_in(email, password, form_progress=None)
             tab = VintedService._require_tab()
-            if item_id is None:
-                await log_step(f"Recherche de l’annonce « {article.title} » sur votre dressing…", "search")
-                item_id = await VintedService.find_member_listing_item_id_for_match(
-                    tab,
-                    title=article.title or "",
-                    sell_price=listed_vinted_price(article),
-                )
-            if item_id is None:
-                return await record_failure(
-                    "Annonce introuvable sur votre dressing Vinted (titre ou prix modifié depuis la publication ?).",
-                    None,
-                )
-            await log_step(f"Suppression de l’annonce Vinted #{item_id}…", "delete")
-            await VintedService.delete_vinted_item_listing(tab, item_id)
+            await log_step(f"Recherche de l’annonce « {article.title} » sur votre dressing…", "search")
+            live_listing_id = await VintedService.find_live_member_listing(
+                tab,
+                vinted_id=item_id,
+                title=article.title or "",
+                sell_price=listed_vinted_price(article),
+            )
+            if live_listing_id is None:
+                is_listing_absent = True
+            else:
+                item_id = live_listing_id
+                await log_step(f"Suppression de l’annonce Vinted #{item_id}…", "delete")
+                await VintedService.delete_vinted_item_listing(tab, item_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Vinted listing removal failed article_id=%s", article_id)
             return await record_failure(str(exc) or type(exc).__name__, item_id)
@@ -203,22 +221,11 @@ class DesktopVintedRunnerService:
                 except Exception:
                     pass
 
+        if is_listing_absent:
+            await log_step("Annonce absente de votre dressing Vinted : marquée comme retirée dans GoupixDex.", "delisted")
+            return await confirm_removal(item_id, "Absente du dressing Vinted.")
         await log_step(f"Annonce Vinted #{item_id} supprimée.", "delisted")
-        try:
-            await post_confirmation_to_api(
-                f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
-                hdrs_json,
-                {"hide_when_off_all_platforms": True},
-            )
-        except httpx.HTTPError as exc:
-            logger.warning("confirm-vinted-unlist failed article_id=%s: %s", article_id, exc)
-            return {
-                "article_id": article_id,
-                "delisted": True,
-                "vinted_id": item_id,
-                "detail": "Supprimée sur Vinted, mais la fiche GoupixDex n’a pas pu être mise à jour.",
-            }
-        return {"article_id": article_id, "delisted": True, "vinted_id": item_id, "detail": None}
+        return await confirm_removal(item_id, None)
 
     @staticmethod
     async def run_remove_vinted_listing(article_id: int, user_id: int, token: str, remote_base: str) -> None:
