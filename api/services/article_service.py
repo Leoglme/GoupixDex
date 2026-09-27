@@ -275,6 +275,8 @@ def update_article_from_body(article: Article, body: ArticleUpdate) -> None:
         else:
             c = str(cert).strip()[:30]
             article.graded_cert_number = c or None
+    if data.get("vinted_id") is not None:
+        article.vinted_id = data["vinted_id"]
     if data.get("clear_vinted_publication") is True:
         clear_vinted_publication_fields(article)
         apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
