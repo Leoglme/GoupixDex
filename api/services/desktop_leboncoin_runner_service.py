@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from services.desktop_api_confirmation_service import post_confirmation_to_api
 from services.desktop_stubs_service import DesktopStubsService
 from services.leboncoin_publish_service import publish_article_to_leboncoin
 from services.vinted_progress_session_service import VintedProgressSessionService as progress_hub
@@ -60,16 +61,14 @@ class DesktopLeboncoinRunnerService:
                 payload: dict[str, Any] = {}
                 if result.get("listing_id"):
                     payload["listing_id"] = result["listing_id"]
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    r = await client.post(
+                try:
+                    await post_confirmation_to_api(
                         f"{remote_base}/articles/{article_id}/confirm-leboncoin-publish",
-                        headers={**hdrs, "Content-Type": "application/json"},
-                        json=payload,
+                        {**hdrs, "Content-Type": "application/json"},
+                        payload,
                     )
-                    try:
-                        r.raise_for_status()
-                    except httpx.HTTPError as exc:
-                        logger.warning("confirm-leboncoin-publish failed article_id=%s: %s", article_id, exc)
+                except httpx.HTTPError as exc:
+                    logger.warning("confirm-leboncoin-publish failed article_id=%s: %s", article_id, exc)
             await progress_hub.finish(article_id, {"leboncoin": result})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Desktop Leboncoin publish failed article_id=%s", article_id)

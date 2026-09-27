@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app_types.vinted import VintedListingRemovalOutcome
+from services.desktop_api_confirmation_service import post_confirmation_to_api
 from services.desktop_stubs_service import DesktopStubsService
 from services.vinted_batch_orchestrator_service import VintedBatchOrchestratorService
 from services.vinted_batch_session_service import VintedBatchSessionService as batch_hub
@@ -61,16 +62,14 @@ class DesktopVintedRunnerService:
             if bool(result.get("published")):
                 vinted_id = result.get("vinted_id")
                 payload: dict[str, Any] = {"vinted_id": vinted_id} if isinstance(vinted_id, int) else {}
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    r = await client.post(
+                try:
+                    await post_confirmation_to_api(
                         f"{remote_base}/articles/{article_id}/confirm-vinted-publish",
-                        headers={**hdrs, "Content-Type": "application/json"},
-                        json=payload,
+                        {**hdrs, "Content-Type": "application/json"},
+                        payload,
                     )
-                    try:
-                        r.raise_for_status()
-                    except httpx.HTTPError as exc:
-                        logger.warning("confirm-vinted-publish failed article_id=%s: %s", article_id, exc)
+                except httpx.HTTPError as exc:
+                    logger.warning("confirm-vinted-publish failed article_id=%s: %s", article_id, exc)
             await vp.finish(article_id, {"vinted": result})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Desktop Vinted publish failed article_id=%s", article_id)
@@ -126,12 +125,11 @@ class DesktopVintedRunnerService:
             """Journalise l’échec, l’enregistre sur l’article et le renvoie."""
             await log_step(f"Échec du retrait : {detail}", "failed")
             try:
-                async with httpx.AsyncClient(timeout=25.0) as client:
-                    await client.post(
-                        f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
-                        headers=hdrs_json,
-                        json={"detail": detail[:480]},
-                    )
+                await post_confirmation_to_api(
+                    f"{remote_base}/articles/{article_id}/fail-vinted-cross-removal",
+                    hdrs_json,
+                    {"detail": detail[:480]},
+                )
             except httpx.HTTPError as exc:
                 logger.warning("fail-vinted-cross-removal failed article_id=%s: %s", article_id, exc)
             return {"article_id": article_id, "delisted": False, "vinted_id": vinted_id, "detail": detail}
@@ -207,13 +205,11 @@ class DesktopVintedRunnerService:
 
         await log_step(f"Annonce Vinted #{item_id} supprimée.", "delisted")
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                r = await client.post(
-                    f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
-                    headers=hdrs_json,
-                    json={"hide_when_off_all_platforms": True},
-                )
-                r.raise_for_status()
+            await post_confirmation_to_api(
+                f"{remote_base}/articles/{article_id}/confirm-vinted-unlist",
+                hdrs_json,
+                {"hide_when_off_all_platforms": True},
+            )
         except httpx.HTTPError as exc:
             logger.warning("confirm-vinted-unlist failed article_id=%s: %s", article_id, exc)
             return {

@@ -303,17 +303,33 @@ class VintedService:
         browser = cls._browser
         if browser is None:
             return
-        try:
-            await asyncio.wait_for(browser.connection.send(cdp.browser.close()), timeout=5.0)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("CDP Browser.close: %s", exc)
         process = getattr(browser, "_process", None)
-        if process is not None:
+        if cls._tab is not None:
             try:
-                await asyncio.wait_for(process.wait(), timeout=10.0)
+                await asyncio.wait_for(cls._tab.get("about:blank"), timeout=3.0)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Chrome still running after Browser.close, stopping it: %s", exc)
+                logger.warning("Vinted tab could not leave the page before closing Chrome: %r", exc)
+        try:
+            await asyncio.wait_for(browser.connection.send(cdp.browser.close()), timeout=3.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("CDP Browser.close failed: %r", exc)
+        if process is not None and not await cls._wait_for_process_exit(process, timeout_sec=3.0):
+            logger.warning("Chrome still running 3 s after Browser.close — asking its windows to close.")
+            if sys.platform == "win32":
+                # Without /F, taskkill closes the windows like the user would: Chrome still saves its cookies.
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T"], capture_output=True, timeout=5, check=False)
+            if not await cls._wait_for_process_exit(process, timeout_sec=3.0):
+                logger.warning("Chrome ignored the close request — stopping it.")
         cls.close_browser()
+
+    @staticmethod
+    async def _wait_for_process_exit(process: asyncio.subprocess.Process, *, timeout_sec: float) -> bool:
+        """True once the Chrome process has exited, False if it is still running after ``timeout_sec``."""
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout_sec)
+        except asyncio.TimeoutError:
+            return False
+        return True
 
     @classmethod
     async def ensure_browser_session(cls, *, wait_after_page_ms: int = 80) -> bool:
