@@ -655,6 +655,13 @@ class VintedService:
         Returns:
             None
         """
+        # Consentement déjà enregistré (profil persistant) : OneTrust n'affiche plus le bandeau, inutile de l'attendre.
+        try:
+            has_consented = await tab.evaluate("document.cookie.includes('OptanonAlertBoxClosed')", return_by_value=True)
+        except Exception:  # noqa: BLE001
+            has_consented = False
+        if has_consented is True:
+            return
         deadline = time.monotonic() + total_timeout_sec
         while time.monotonic() < deadline:
             await tab
@@ -1248,11 +1255,16 @@ class VintedService:
         logger.info("Photos added successfully.")
 
         expected = len(photo_paths)
-        for _ in range(120):
-            count = await tab.evaluate(
-                "document.querySelectorAll('.photo-box').length",
-                return_by_value=True,
-            )
+        # Les vignettes n'ont plus toujours la classe `.photo-box` : on compte aussi les aperçus locaux et les envois terminés.
+        uploaded_photo_count_js = """
+        (() => Math.max(
+          document.querySelectorAll('.photo-box').length,
+          document.querySelectorAll('img[src^="blob:"], img[src^="data:image"]').length,
+          performance.getEntriesByType('resource').filter((entry) => /\\/api\\/v2\\/photos(\\?|$)/.test(entry.name)).length,
+        ))()
+        """
+        for _ in range(40):
+            count = await tab.evaluate(uploaded_photo_count_js, return_by_value=True)
             if isinstance(count, int) and count >= expected:
                 return
             await asyncio.sleep(0.25)
