@@ -26,20 +26,13 @@
         </div>
 
         <template v-else-if="article">
-          <GoupixDexPageHeader
-            v-if="isReviewBeforePublishing"
-            title="Vérifier avant publication"
-            :description="REVIEW_PAGE_DESCRIPTION"
-          />
-          <GoupixDexPageHeader
-            v-else
-            :title="relistMode ? 'Ajuster avant republication' : 'Modifier l’article'"
-            :description="
-              relistMode
-                ? 'Vérifiez le prix avec les repères Cardmarket, puis enregistrez et publiez sur les canaux souhaités.'
-                : 'Mettez à jour la fiche, les photos et les prix de votre annonce.'
-            "
-          />
+          <GoupixDexPageHeader :title="pageTitle" :description="pageDescription">
+            <template v-if="isReviewBeforePublishing && article.collection_card_id" #actions>
+              <UButton color="neutral" variant="outline" icon="i-lucide-album" @click="openLinkedCollectionCard">
+                Voir dans ma collection
+              </UButton>
+            </template>
+          </GoupixDexPageHeader>
 
           <div v-if="isReviewBeforePublishing" class="app-card flex items-center gap-3 p-4" role="status">
             <span class="app-icon-tile" aria-hidden="true">
@@ -134,6 +127,7 @@ const { getArticle, updateArticle, publishArticleToEbay, publishArticleToVinted 
 const toast = useToast()
 const { canUseDesktopWorkers } = useDesktopWorkers()
 const { publishArticleOnMarketplaces } = useArticleMarketplacePublication()
+const { openCard } = useOpenCardDrawer()
 
 const REVIEW_PAGE_DESCRIPTION: string =
   'Ajustez le prix avec les repères Cardmarket et complétez la fiche : l’enregistrement lance la mise en ligne.'
@@ -157,6 +151,22 @@ const reviewMarketplaces: ComputedRef<Marketplace[]> = computed((): Marketplace[
   parseMarketplaceList(route.query.publish),
 )
 
+const pageTitle: ComputedRef<string> = computed((): string => {
+  if (isReviewBeforePublishing.value) {
+    return 'Vérifier avant publication'
+  }
+  return relistMode.value ? 'Ajuster avant republication' : 'Modifier l’article'
+})
+
+const pageDescription: ComputedRef<string> = computed((): string => {
+  if (isReviewBeforePublishing.value) {
+    return REVIEW_PAGE_DESCRIPTION
+  }
+  return relistMode.value
+    ? 'Vérifiez le prix avec les repères Cardmarket, puis enregistrez et publiez sur les canaux souhaités.'
+    : 'Mettez à jour la fiche, les photos et les prix de votre annonce.'
+})
+
 const submitLoadingHint: ComputedRef<string | undefined> = computed((): string | undefined => {
   if (isPublishingReviewedArticle.value) {
     return `Publication sur ${marketplaceNamesLabel(reviewMarketplaces.value)} en cours…`
@@ -173,6 +183,17 @@ async function load(): Promise<void> {
     await navigateTo('/articles')
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * Ouvre par-dessus la page la carte de « Ma collection » reliée à l'article : courbe de prix et lien Cardmarket.
+ * @returns {void}
+ */
+function openLinkedCollectionCard(): void {
+  const collectionCardId: number | null | undefined = article.value?.collection_card_id
+  if (collectionCardId != null) {
+    openCard(collectionCardId)
   }
 }
 
