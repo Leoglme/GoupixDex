@@ -1,5 +1,5 @@
 <template>
-  <span class="block min-w-0" :title="isDisabled && disabledReason ? disabledReason : undefined">
+  <span class="block min-w-0">
     <component
       :is="href ? 'a' : 'button'"
       :type="href ? undefined : 'button'"
@@ -13,14 +13,14 @@
     >
       <UIcon v-if="isLoading" name="i-lucide-loader-2" class="size-4 shrink-0 animate-spin" aria-hidden="true" />
       <span
-        v-else-if="action !== 'publish' && marketplace === 'ebay'"
+        v-else-if="marketplace === 'ebay'"
         class="inline-flex h-5 w-12 shrink-0 items-center justify-start overflow-hidden"
         aria-hidden="true"
       >
         <GoupixDexEbayLogoGradient class="h-5 w-12 max-w-none" />
       </span>
       <UIcon
-        v-else-if="action !== 'publish' && marketplace === 'vinted'"
+        v-else-if="marketplace === 'vinted'"
         name="i-simple-icons-vinted"
         class="size-5 shrink-0"
         aria-hidden="true"
@@ -57,10 +57,6 @@ const props: GoupixDexMarketplaceButtonProps = defineProps({
     type: Boolean,
     default: false,
   },
-  disabledReason: {
-    type: String as PropType<string | null>,
-    default: null,
-  },
   href: {
     type: String as PropType<string | null>,
     default: null,
@@ -72,7 +68,6 @@ const emit = defineEmits<{
 }>()
 
 const ACTION_LABEL_PREFIXES: Record<GoupixDexMarketplaceButtonAction, string> = {
-  publish: 'Publier sur',
   delist: 'Retirer de',
   open: 'Voir sur',
 }
@@ -82,9 +77,6 @@ const label: ComputedRef<string> = computed(
 )
 
 const buttonClasses: ComputedRef<string> = computed(() => {
-  if (props.action === 'publish') {
-    return 'border border-dashed border-[var(--app-line)] bg-transparent text-highlighted hover:bg-elevated/60'
-  }
   if (props.marketplace === 'vinted') {
     return 'border border-[#09B1BA]/40 bg-[#09B1BA] text-white hover:bg-[#08a0a8] shadow-sm shadow-[#09B1BA]/20'
   }

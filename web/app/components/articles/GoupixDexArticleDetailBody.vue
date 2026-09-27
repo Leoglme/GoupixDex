@@ -41,20 +41,9 @@
         />
       </div>
 
-      <section v-if="publishableMarketplaces.length" class="space-y-2">
+      <section v-if="publishOptions.length" class="space-y-2">
         <p class="app-label">Mettre en ligne</p>
-        <div class="grid grid-cols-2 gap-2">
-          <GoupixDexMarketplaceButton
-            v-for="marketplace in publishableMarketplaces"
-            :key="marketplace"
-            :marketplace="marketplace"
-            action="publish"
-            :is-loading="publishingMarketplaces.includes(marketplace)"
-            :is-disabled="publishBlockedReason(marketplace) !== null"
-            :disabled-reason="publishBlockedReason(marketplace)"
-            @click="onPublish(marketplace)"
-          />
-        </div>
+        <GoupixDexPublishEverywhereButton :publish-options="publishOptions" @publish="onPublishOnMarketplaces" />
       </section>
 
       <div
@@ -358,10 +347,16 @@ import type { Article } from '~/composables/useArticles'
 import { apiErrorMessage } from '~/composables/useApiError'
 import type { MarketSearchInput, MarketSearchResponse } from '~/composables/useMarketSearch'
 import type { PricingLookup } from '~/composables/usePricing'
+import type { MarketplacePublishOption } from '~/types/GoupixDexPublishEverywhereButton'
 import type { Marketplace, MarketplaceListingLink } from '~/types/Marketplace'
 import { cardmarketSellerProfileUrl } from '~/utils/cardmarket'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
-import { MARKETPLACE_NAMES, marketplaceListingLinks } from '~/utils/marketplaces'
+import {
+  isPublishedOnMarketplace,
+  MARKETPLACE_NAMES,
+  MARKETPLACES,
+  marketplaceListingLinks,
+} from '~/utils/marketplaces'
 import { DEFAULT_ARTICLE_MARKET_SEARCH_BASE, marketSearchToRouteQuery } from '~/utils/marketSearchQuery'
 import { countryFlagImgUrl } from '~/utils/flagEmoji'
 
@@ -390,13 +385,7 @@ const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarket
 const toast = useToast()
 const { confirm: confirmAction } = useGoupixConfirm()
 const { openCard } = useOpenCardDrawer()
-const {
-  isVintedChannelEnabled,
-  canPublishOnEbay,
-  canPublishOnLeboncoin,
-  loadMarketplaceAvailability,
-  startArticlePublish,
-} = useMarketplacePublishing()
+const { marketplaceSetupIssues, loadMarketplaceAvailability, startArticlePublish } = useMarketplacePublishing()
 const publishStreamByMarketplace: Record<Marketplace, ReturnType<typeof useVintedPublishStream>> = {
   vinted: useVintedPublishStream(),
   ebay: useVintedPublishStream(),
@@ -420,22 +409,20 @@ const showMarketplaceActions: ComputedRef<boolean> = computed(() =>
   Boolean(article.value?.published_on_ebay || article.value?.published_on_vinted),
 )
 
-const publishableMarketplaces: ComputedRef<Marketplace[]> = computed(() => {
-  const current = article.value
+const publishOptions: ComputedRef<MarketplacePublishOption[]> = computed((): MarketplacePublishOption[] => {
+  const current: Article | null = article.value
   if (!current || current.is_sold) {
     return []
   }
-  const marketplaces: Marketplace[] = []
-  if (isVintedChannelEnabled.value && !current.published_on_vinted) {
-    marketplaces.push('vinted')
-  }
-  if (canPublishOnEbay.value && !current.published_on_ebay) {
-    marketplaces.push('ebay')
-  }
-  if (canPublishOnLeboncoin.value && !current.published_on_leboncoin) {
-    marketplaces.push('leboncoin')
-  }
-  return marketplaces
+  return MARKETPLACES.filter(
+    (marketplace: Marketplace): boolean => !isPublishedOnMarketplace(current, marketplace),
+  ).map(
+    (marketplace: Marketplace): MarketplacePublishOption => ({
+      marketplace,
+      blockedReason: publishBlockedReason(marketplace),
+      isPublishing: publishingMarketplaces.value.includes(marketplace),
+    }),
+  )
 })
 
 const liveListingLinks: ComputedRef<MarketplaceListingLink[]> = computed((): MarketplaceListingLink[] =>
@@ -887,10 +874,23 @@ function publishBlockedReason(marketplace: Marketplace): string | null {
   if (!article.value?.images?.length) {
     return 'Ajoutez au moins une photo à l’article.'
   }
+  const setupIssue: string | null = marketplaceSetupIssues.value[marketplace]
+  if (setupIssue) {
+    return setupIssue
+  }
   if (marketplace !== 'ebay' && !canUseDesktopWorkers.value) {
     return 'Ouvrez GoupixDex sur votre PC pour publier.'
   }
   return null
+}
+
+/**
+ * Publie l’article sur chacune des marketplaces demandées en même temps, chacune suivant sa propre progression.
+ * @param {Marketplace[]} marketplaces - Marketplaces visées.
+ * @returns {Promise<void>} Résolue quand toutes les publications sont terminées (ou n’ont pas démarré).
+ */
+async function onPublishOnMarketplaces(marketplaces: Marketplace[]): Promise<void> {
+  await Promise.all(marketplaces.map((marketplace: Marketplace): Promise<void> => onPublish(marketplace)))
 }
 
 /**
