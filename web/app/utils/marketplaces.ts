@@ -1,6 +1,7 @@
 import type { AppSettings } from '~/composables/useSettings'
 import type {
   ArticleMarketplaceListings,
+  ArticlePublicationDates,
   Marketplace,
   MarketplaceListingLink,
   MarketplaceSetupIssues,
@@ -49,6 +50,21 @@ export function marketplaceListingLinks(article: ArticleMarketplaceListings): Ma
     const url: string | null = marketplaceListingUrl(article, marketplace)
     return url ? [{ marketplace, url }] : []
   })
+}
+
+/**
+ * Date de la dernière mise en ligne de l'article, toutes marketplaces confondues.
+ * @param {ArticlePublicationDates} article - Dates de publication de l'article sur chaque marketplace.
+ * @returns {string | null} La date ISO la plus récente, ou null si l'article n'est en ligne nulle part.
+ */
+export function latestPublicationDate(article: ArticlePublicationDates): string | null {
+  let latestDate: string | null = null
+  for (const publishedAt of [article.vinted_published_at, article.ebay_published_at, article.leboncoin_published_at]) {
+    if (publishedAt && (latestDate === null || new Date(publishedAt).getTime() > new Date(latestDate).getTime())) {
+      latestDate = publishedAt
+    }
+  }
+  return latestDate
 }
 
 /**

@@ -219,11 +219,11 @@
               />
               <GoupixDexBaseTableTh align="center" title="Vinted, eBay, Leboncoin">En ligne</GoupixDexBaseTableTh>
               <GoupixDexBaseTableSortTh
-                label="Créé"
-                title="Date de création"
-                :active="sortColumn === 'created'"
+                :label="dateColumnLabel"
+                :title="dateColumnTitle"
+                :active="sortColumn === 'date'"
                 :direction="sortDirection"
-                @sort="toggleSort('created')"
+                @sort="toggleSort('date')"
               />
               <GoupixDexBaseTableSortTh
                 v-if="showSaleOutcomeColumns"
@@ -361,10 +361,10 @@
               </GoupixDexBaseTableTd>
 
               <GoupixDexBaseTableTd
-                label="Créé"
+                :label="dateColumnLabel"
                 class="hidden text-xs whitespace-nowrap text-[var(--app-ink-soft)] md:table-cell"
               >
-                {{ new Date(row.created_at).toLocaleDateString('fr-FR') }}
+                {{ new Date(displayedDateOf(row)).toLocaleDateString('fr-FR') }}
               </GoupixDexBaseTableTd>
 
               <GoupixDexBaseTableTd
@@ -622,11 +622,13 @@ import { useMediaQuery } from '@vueuse/core'
 import { reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
+import type { GoupixDexArticleListDisplayedDate } from '~/types/GoupixDexArticleList'
 import type { ArticleListSortColumn, ArticleListSortDirection } from '~/composables/useUiPrefsLocalStorage'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { loadArticleListPrefs, saveArticleListPrefs } from '~/composables/useUiPrefsLocalStorage'
 import { articleTableSecondaryLine } from '~/utils/articleTableSecondaryLine'
 import { articleEligibleForBulkRelist } from '~/utils/articleSaleState'
+import { latestPublicationDate } from '~/utils/marketplaces'
 
 export type GoupixDexArticleListVariant = 'listed' | 'full'
 
@@ -659,13 +661,25 @@ const props = withDefaults(
     /** Disable bulk publish buttons while an API call is in flight. */
     bulkPublishing?: boolean
     bulkDelisting?: boolean
+    displayedDate?: GoupixDexArticleListDisplayedDate
   }>(),
   {
     variant: 'listed',
+    displayedDate: 'createdAt',
   },
 )
 
 const showSaleOutcomeColumns = computed(() => props.variant === 'full')
+
+const dateColumnLabel: ComputedRef<string> = computed((): string =>
+  props.displayedDate === 'listedAt' ? 'Mis en ligne' : 'Créé',
+)
+
+const dateColumnTitle: ComputedRef<string> = computed((): string =>
+  props.displayedDate === 'listedAt'
+    ? 'Date de la dernière mise en ligne (de création si l’article n’est en ligne nulle part)'
+    : 'Date de création',
+)
 
 const tableMinWidth = computed(() => (showSaleOutcomeColumns.value ? '1120px' : '920px'))
 
@@ -833,7 +847,7 @@ function soldStatusBrandStyle(row: Article): { backgroundColor: string; color: s
   return null
 }
 
-const sortColumn: Ref<ArticleListSortColumn> = ref('created')
+const sortColumn: Ref<ArticleListSortColumn> = ref('date')
 const sortDirection: Ref<ArticleListSortDirection> = ref('desc')
 
 const SALE_OUTCOME_SORT_COLUMNS: ArticleListSortColumn[] = ['sold', 'realized', 'sold_at']
@@ -842,7 +856,7 @@ watch(
   showSaleOutcomeColumns,
   (show) => {
     if (!show && SALE_OUTCOME_SORT_COLUMNS.includes(sortColumn.value)) {
-      sortColumn.value = 'created'
+      sortColumn.value = 'date'
       sortDirection.value = 'desc'
     }
   },
@@ -1041,6 +1055,18 @@ function compareOptionalNumber(
   return dir === 'asc' ? diff : -diff
 }
 
+/**
+ * Date affichée et triée dans la colonne de date : la dernière mise en ligne (à défaut la création) ou la création, selon `displayedDate`.
+ * @param {Article} article - Ligne du tableau.
+ * @returns {string} La date ISO à afficher et à trier.
+ */
+function displayedDateOf(article: Article): string {
+  if (props.displayedDate === 'listedAt') {
+    return latestPublicationDate(article) ?? article.created_at
+  }
+  return article.created_at
+}
+
 function compareArticlesForSort(
   a: Article,
   b: Article,
@@ -1077,8 +1103,8 @@ function compareArticlesForSort(
     case 'realized':
       cmp = compareOptionalNumber(realizedSalePrice(a), realizedSalePrice(b), 'asc')
       return dir === 'asc' ? cmp : -cmp
-    case 'created':
-      cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    case 'date':
+      cmp = new Date(displayedDateOf(a)).getTime() - new Date(displayedDateOf(b)).getTime()
       break
     case 'sold_at':
       cmp = compareOptionalDate(a.sold_at, b.sold_at, 'asc')

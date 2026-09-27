@@ -18,7 +18,7 @@ export type ArticleListSortColumn =
   | 'purchase'
   | 'sell'
   | 'realized'
-  | 'created'
+  | 'date'
   | 'sold_at'
 
 export type ArticleListSortDirection = 'asc' | 'desc'
@@ -39,11 +39,13 @@ const SORT_COLUMNS: ArticleListSortColumn[] = [
   'purchase',
   'sell',
   'realized',
-  'created',
+  'date',
   'sold_at',
 ]
 
 const SORT_KEYS: ArticleListSortKey[] = ['created_desc', 'sold_desc', 'purchase_asc', 'purchase_desc']
+
+const LEGACY_DATE_SORT_COLUMN: string = 'created'
 
 /**
  * Map legacy sort dropdown values to column + direction.
@@ -61,7 +63,7 @@ export function articleListSortKeyToColumnDirection(key: ArticleListSortKey): {
       return { column: 'purchase', direction: 'desc' }
     case 'created_desc':
     default:
-      return { column: 'created', direction: 'desc' }
+      return { column: 'date', direction: 'desc' }
   }
 }
 const PAGE_SIZES: number[] = [5, 10, 15, 30, 50, 100]
@@ -82,8 +84,9 @@ export function loadArticleListPrefs(): Partial<ArticleListPrefs> | null {
     }
     const p = JSON.parse(raw) as Record<string, unknown>
     const out: Partial<ArticleListPrefs> = {}
-    if (typeof p.sortColumn === 'string' && SORT_COLUMNS.includes(p.sortColumn as ArticleListSortColumn)) {
-      out.sortColumn = p.sortColumn as ArticleListSortColumn
+    const storedSortColumn: unknown = p.sortColumn === LEGACY_DATE_SORT_COLUMN ? 'date' : p.sortColumn
+    if (typeof storedSortColumn === 'string' && SORT_COLUMNS.includes(storedSortColumn as ArticleListSortColumn)) {
+      out.sortColumn = storedSortColumn as ArticleListSortColumn
     }
     if (p.sortDirection === 'asc' || p.sortDirection === 'desc') {
       out.sortDirection = p.sortDirection

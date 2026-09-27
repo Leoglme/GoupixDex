@@ -12,6 +12,11 @@ export type ArticleMarketplaceListings = Pick<
   | 'leboncoin_listing_id'
 >
 
+export type ArticlePublicationDates = Pick<
+  Article,
+  'vinted_published_at' | 'ebay_published_at' | 'leboncoin_published_at'
+>
+
 export type MarketplaceListingLink = {
   marketplace: Marketplace
   url: string

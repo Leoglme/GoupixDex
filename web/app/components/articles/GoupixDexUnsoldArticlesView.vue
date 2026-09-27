@@ -92,6 +92,7 @@
         <GoupixDexArticleList
           v-else-if="!loading"
           variant="listed"
+          :displayed-date="props.saleStatus === 'withdrawn' ? 'createdAt' : 'listedAt'"
           :articles="unsoldArticles"
           :loading="loading"
           :selection-reset-key="articleListSelectionReset"
