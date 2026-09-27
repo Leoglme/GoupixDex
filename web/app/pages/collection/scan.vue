@@ -229,7 +229,11 @@
           </div>
 
           <Teleport to="body">
-            <div v-if="webcamActive && prefersFullscreenCamera" class="fixed inset-0 z-[300] flex flex-col bg-black">
+            <div
+              v-if="webcamActive && prefersFullscreenCamera"
+              data-no-pull-to-refresh
+              class="fixed inset-0 z-[300] flex flex-col bg-black"
+            >
               <div
                 class="absolute top-0 right-0 left-0 z-10 flex items-center justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
               >

@@ -71,6 +71,7 @@
     <slot />
 
     <GoupixDexMobileTabBar />
+    <GoupixDexPullToRefresh />
 
     <GoupixDexBrowserMissingModal v-if="isDesktopApp" />
     <GoupixDexConfirmHost />
