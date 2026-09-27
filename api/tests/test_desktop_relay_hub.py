@@ -69,8 +69,8 @@ def test_desktop_disconnect_fails_pending_work_and_reports_offline() -> None:
     events = drain(client.queue)
     assert {"type": "response", "id": request_id, "status": 503, "error": "desktop_disconnected"} in events
     assert {"type": "stream-end", "id": stream_id, "error": "desktop_disconnected"} in events
-    assert events[-1] == {"type": "agent-status", "online": False}
-    assert hub.agent_status(USER_ID) == {"online": False}
+    assert events[-1] == {"type": "agent-status", "online": False, "relay_instance": hub.instance_id}
+    assert hub.agent_status(USER_ID) == {"online": False, "relay_instance": hub.instance_id}
 
 
 def test_newer_desktop_connection_replaces_the_previous_one() -> None:
@@ -82,7 +82,11 @@ def test_newer_desktop_connection_replaces_the_previous_one() -> None:
     hub.detach_agent(USER_ID, first)
     assert hub.agent_status(USER_ID)["app_version"] == "0.1.1"
     hub.detach_agent(USER_ID, second)
-    assert hub.agent_status(USER_ID) == {"online": False}
+    assert hub.agent_status(USER_ID) == {"online": False, "relay_instance": hub.instance_id}
+
+
+def test_a_restarted_hub_reports_a_new_instance() -> None:
+    assert DesktopRelayHub().agent_status(USER_ID)["relay_instance"] != DesktopRelayHub().agent_status(USER_ID)["relay_instance"]
 
 
 def test_reconnecting_client_keeps_buffered_events() -> None:

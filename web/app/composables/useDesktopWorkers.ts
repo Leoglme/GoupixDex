@@ -10,6 +10,7 @@ import type {
 
 const TOKEN_KEY: string = 'goupix_token'
 const DEFAULT_SOCKET_OPEN_TIMEOUT_MS: number = 8_000
+const AGENT_RECONNECT_TIMEOUT_MS: number = 60_000
 const LOCAL_WORKER_DEFAULT_BASES: Record<DesktopWorkerName, string> = {
   vinted: 'http://127.0.0.1:18766',
   amazon: 'http://127.0.0.1:18768',
@@ -37,8 +38,13 @@ export function wrapEventSource(source: EventSource): WorkerEventStream {
 export function useDesktopWorkers(): DesktopWorkersAccess {
   const config = useRuntimeConfig()
   const { isDesktopApp } = useDesktopRuntime()
-  const { isDesktopRelayOnline, hasDesktopRelayStatus, waitForDesktopRelayStatus, openDesktopStream } =
-    useDesktopRelay()
+  const {
+    isDesktopRelayOnline,
+    hasDesktopRelayStatus,
+    waitForDesktopRelayStatus,
+    waitForDesktopAgentOnline,
+    openDesktopStream,
+  } = useDesktopRelay()
 
   const canUseDesktopWorkers: ComputedRef<boolean> = computed(
     (): boolean => isDesktopApp.value || isDesktopRelayOnline.value,
@@ -103,32 +109,63 @@ export function useDesktopWorkers(): DesktopWorkersAccess {
     }
 
     const stream: WorkerEventStream = { onmessage: null, onerror: null, close: (): void => {} }
-    let isClosed = false
+    let isClosed: boolean = false
+    let deliveredEventCount: number = 0
     let stopRelayStream: () => void = (): void => {}
     stream.close = (): void => {
       isClosed = true
       stopRelayStream()
     }
-    openDesktopStream(worker, 'sse', path, {
-      onEvents: (events: DesktopRelayStreamEvent[]): void => {
-        for (const event of events) {
+
+    /**
+     * Suit le flux via le relais ; si l'API redémarre, le rouvre en sautant les trames déjà reçues, que le worker rejoue.
+     * @param {number} alreadyDeliveredCount - Trames à ignorer au début du flux rouvert.
+     * @returns {void}
+     */
+    function followRelayedStream(alreadyDeliveredCount: number): void {
+      let replayedEventCount: number = 0
+      openDesktopStream(worker, 'sse', path, {
+        onEvents: (events: DesktopRelayStreamEvent[]): void => {
+          for (const event of events) {
+            if (isClosed) {
+              return
+            }
+            if (replayedEventCount < alreadyDeliveredCount) {
+              replayedEventCount += 1
+              continue
+            }
+            deliveredEventCount += 1
+            stream.onmessage?.(new MessageEvent('message', { data: event.data }))
+          }
+        },
+        onEnd: (error: string | null): void => {
           if (isClosed) {
             return
           }
-          stream.onmessage?.(new MessageEvent('message', { data: event.data }))
+          if (error !== 'relay_restarted') {
+            stream.onerror?.()
+            return
+          }
+          waitForDesktopAgentOnline(AGENT_RECONNECT_TIMEOUT_MS).then((isAgentOnline: boolean): void => {
+            if (isClosed) {
+              return
+            }
+            if (isAgentOnline) {
+              followRelayedStream(deliveredEventCount)
+            } else {
+              stream.onerror?.()
+            }
+          })
+        },
+      }).then((stop: () => void): void => {
+        stopRelayStream = stop
+        if (isClosed) {
+          stop()
         }
-      },
-      onEnd: (): void => {
-        if (!isClosed) {
-          stream.onerror?.()
-        }
-      },
-    }).then((stop: () => void): void => {
-      stopRelayStream = stop
-      if (isClosed) {
-        stop()
-      }
-    })
+      })
+    }
+
+    followRelayedStream(0)
     return stream
   }
 

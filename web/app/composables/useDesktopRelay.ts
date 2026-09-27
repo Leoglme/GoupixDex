@@ -30,6 +30,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS: number = 35 * 60_000
 const CONNECTION_TIMEOUT_MS: number = 6_000
 const STREAM_OPEN_TIMEOUT_MS: number = 10_000
 const RECONNECT_DELAY_MS: number = 15_000
+const AGENT_ONLINE_POLL_MS: number = 500
 const UNCLAIMED_MESSAGE_TTL_MS: number = 60_000
 
 const isDesktopRelayOnline: Ref<boolean> = ref(false)
@@ -37,6 +38,7 @@ const hasDesktopRelayStatus: Ref<boolean> = ref(false)
 
 let relayApiBase: string = ''
 let relayClientId: string | null = null
+let relayInstanceId: string | null = null
 let relayEventSource: EventSource | null = null
 let firstRelayStatus: Promise<void> | null = null
 let resolveFirstRelayStatus: (() => void) | null = null
@@ -117,6 +119,25 @@ function takeUnclaimedMessages(id: string): DesktopRelayClientMessage[] {
 }
 
 /**
+ * Termine les requêtes et les flux qui attendent encore le PC.
+ * @param {string} requestError - Code d'erreur rendu aux requêtes en attente.
+ * @param {string} streamError - Code de fin transmis aux flux ouverts.
+ * @returns {void}
+ */
+function endPendingRelayWork(requestError: string, streamError: string): void {
+  for (const [requestId, pending] of pendingRequests) {
+    clearTimeout(pending.timer)
+    pending.resolve({ status: 503, error: requestError })
+    pendingRequests.delete(requestId)
+  }
+  for (const [streamId, registration] of streamRegistrations) {
+    streamRegistrations.delete(streamId)
+    registration.onOpened()
+    registration.handlers.onEnd(streamError)
+  }
+}
+
+/**
  * Transmet un message du relais à la requête ou au flux qui l'attend.
  * @param {DesktopRelayClientMessage} message - Message reçu sur le flux SSE du client.
  * @returns {void}
@@ -126,6 +147,11 @@ function dispatchRelayMessage(message: DesktopRelayClientMessage): void {
     isDesktopRelayOnline.value = message.online
     hasDesktopRelayStatus.value = true
     resolveFirstRelayStatus?.()
+    // Nouvelle instance du relais : l'API a redémarré et oublié les requêtes et flux en cours.
+    if (message.relay_instance && relayInstanceId && message.relay_instance !== relayInstanceId) {
+      endPendingRelayWork('desktop_disconnected', 'relay_restarted')
+    }
+    relayInstanceId = message.relay_instance ?? relayInstanceId
     return
   }
   if (message.type === 'connection-replaced') {
@@ -214,19 +240,11 @@ function disconnectDesktopRelay(): void {
   }
   relayEventSource?.close()
   relayEventSource = null
+  relayInstanceId = null
   firstRelayStatus = null
   isDesktopRelayOnline.value = false
   hasDesktopRelayStatus.value = false
-  for (const [requestId, pending] of pendingRequests) {
-    clearTimeout(pending.timer)
-    pending.resolve({ status: 503, error: 'desktop_offline' })
-    pendingRequests.delete(requestId)
-  }
-  for (const [streamId, registration] of streamRegistrations) {
-    streamRegistrations.delete(streamId)
-    registration.onOpened()
-    registration.handlers.onEnd('desktop_offline')
-  }
+  endPendingRelayWork('desktop_offline', 'desktop_offline')
 }
 
 /**
@@ -243,6 +261,24 @@ async function ensureDesktopRelayConnected(): Promise<boolean> {
   })
   await Promise.race([firstRelayStatus, timeout])
   return Boolean(relayEventSource)
+}
+
+/**
+ * Attend que l'app du PC soit de nouveau connectée au relais.
+ * @param {number} timeoutMs - Attente maximale.
+ * @returns {Promise<boolean>} True dès que le PC est en ligne, false au bout du délai.
+ */
+async function waitForDesktopAgentOnline(timeoutMs: number): Promise<boolean> {
+  const deadline: number = Date.now() + timeoutMs
+  while (!isDesktopRelayOnline.value) {
+    if (Date.now() >= deadline) {
+      return false
+    }
+    await new Promise<void>((resolve: () => void): void => {
+      setTimeout(resolve, AGENT_ONLINE_POLL_MS)
+    })
+  }
+  return true
 }
 
 /**
@@ -350,6 +386,7 @@ export function useDesktopRelay(): DesktopRelayClient {
     connectDesktopRelay,
     disconnectDesktopRelay,
     waitForDesktopRelayStatus: ensureDesktopRelayConnected,
+    waitForDesktopAgentOnline,
     requestThroughDesktop,
     openDesktopStream,
   }

@@ -34,7 +34,13 @@ export type DesktopRelayStreamHandlers = {
 }
 
 export type DesktopRelayClientMessage =
-  | { type: 'agent-status'; online: boolean; connected_at?: number; app_version?: string | null }
+  | {
+      type: 'agent-status'
+      online: boolean
+      connected_at?: number
+      app_version?: string | null
+      relay_instance?: string
+    }
   | ({ type: 'response'; id: string } & DesktopRelayResponse)
   | { type: 'stream-events'; id: string; events: DesktopRelayStreamEvent[] }
   | { type: 'stream-end'; id: string; error?: string | null }
@@ -65,6 +71,7 @@ export type DesktopRelayClient = {
   connectDesktopRelay: () => void
   disconnectDesktopRelay: () => void
   waitForDesktopRelayStatus: () => Promise<boolean>
+  waitForDesktopAgentOnline: (timeoutMs: number) => Promise<boolean>
   requestThroughDesktop: DesktopRelayRequest
   openDesktopStream: DesktopRelayStreamOpener
 }

@@ -76,6 +76,7 @@ class DesktopRelayHub:
     """Routes commands from a user's web clients to their desktop app, and results back."""
 
     def __init__(self) -> None:
+        self.instance_id: str = uuid.uuid4().hex
         self._agents: dict[int, DesktopAgentConnection] = {}
         self._clients: dict[str, RelayClientConnection] = {}
         self._requests: dict[str, _PendingRelayEntry] = {}
@@ -112,11 +113,16 @@ class DesktopRelayHub:
         self._notify_agent_status(user_id)
 
     def agent_status(self, user_id: int) -> dict[str, Any]:
-        """Presence of the desktop app, as sent to web clients."""
+        """Presence of the desktop app, with the hub instance id: a new id tells clients the API restarted and lost their work."""
         agent = self._agents.get(user_id)
         if agent is None:
-            return {"online": False}
-        return {"online": True, "connected_at": agent.connected_at, "app_version": agent.app_version}
+            return {"online": False, "relay_instance": self.instance_id}
+        return {
+            "online": True,
+            "connected_at": agent.connected_at,
+            "app_version": agent.app_version,
+            "relay_instance": self.instance_id,
+        }
 
     def attach_client(self, user_id: int, client_id: str) -> RelayClientConnection:
         """Register a web client SSE connection; reconnecting with the same id keeps its buffered events."""
