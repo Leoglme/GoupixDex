@@ -433,7 +433,7 @@ def list_linkable_order_lines(
     )
     out: list[dict[str, Any]] = []
     for ln, order in rows:
-        remaining = remaining_units(db, ln.id)
+        remaining = remaining_units(db, ln)
         if remaining <= 0:
             continue
         if tokens:
