@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { AxiosInstance } from 'axios'
 import type { CollectionCard } from '~/composables/useCollection'
+import type { ScannedCardPreview } from '~/types/ScannedCardSheet'
 
 /**
  * Phase of a scan event in the real-time pipeline.
@@ -481,6 +482,21 @@ export function useScanStream() {
   }
 
   /**
+   * GET `/scan-stream/card-preview` — fiche d'une carte reconnue sur l'appareil, avant de l'ajouter.
+   *
+   * @param {string} tcgdexCardId - Identifiant TCGdex de la carte (ex. `me02-107`).
+   * @param {string} language - Langue physique retenue (`fr` | `en` | `ja`).
+   * @returns {Promise<ScannedCardPreview>} Identité, cote Cardmarket et exemplaires déjà possédés du même print.
+   */
+  async function fetchScannedCardPreview(tcgdexCardId: string, language: string): Promise<ScannedCardPreview> {
+    const { data } = await $api.get<ScannedCardPreview>('/scan-stream/card-preview', {
+      params: { tcgdex_card_id: tcgdexCardId, language },
+      timeout: 15_000,
+    })
+    return data
+  }
+
+  /**
    * Commit a card identified on-device by the visual match index — no photo,
    * no OCR: the server adds/removes it right away and emits the usual
    * `queued` → `added` / `removed` events over the WebSocket.
@@ -488,16 +504,18 @@ export function useScanStream() {
    * @param tcgdexCardId - Canonical TCGdex card id (e.g. `sv2a-173`).
    * @param language - Physical language stored in the collection (`fr` | `en` | `ja`).
    * @param direction - `in` (add, default) or `out` (checkout / decrement).
+   * @param eventId - Identifiant des événements, choisi par l'appelant pour suivre l'issue (sinon généré par le serveur).
    * @returns {Promise<UploadResponse>} `{ event_id, status: 'queued' }`.
    */
   async function commitMatchedScan(
     tcgdexCardId: string,
     language: string,
     direction: ScanDirection = 'in',
+    eventId?: string,
   ): Promise<UploadResponse> {
     const { data } = await $api.post<UploadResponse>(
       '/scan-stream/match',
-      { tcgdex_card_id: tcgdexCardId, language, direction },
+      { tcgdex_card_id: tcgdexCardId, language, direction, event_id: eventId },
       { timeout: 15_000 },
     )
     if (pollingActive || connectionMode.value !== 'websocket') {
@@ -544,6 +562,7 @@ export function useScanStream() {
     disconnect,
     refreshRecent,
     uploadPhoto,
+    fetchScannedCardPreview,
     commitMatchedScan,
     dismissEvent,
     clearProblemEvents,

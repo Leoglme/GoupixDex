@@ -24,8 +24,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import threading
 import time
 from typing import Any, Literal
+
+from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
 from models.collection_card import CollectionCard
@@ -65,6 +68,12 @@ _user_consumers: dict[int, asyncio.Task[None]] = {}
 #: Keep strong references to background tasks: ``asyncio.create_task`` results
 #: may otherwise be garbage-collected mid-flight (scans silently vanishing).
 _background_tasks: set[asyncio.Task[None]] = set()
+
+#: Fiche TCGdex d'une carte reconnue, gardée le temps de décider de l'ajouter : l'ajout ne relit pas TCGdex.
+_CARD_META_TTL_SEC = 600.0
+_CARD_META_CACHE_MAX = 256
+_card_meta_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_card_meta_lock = threading.Lock()
 
 
 def _now_iso() -> float:
@@ -139,6 +148,55 @@ def _short_error(exc: Exception, prefix: str) -> str:
     return f"{prefix} : {text}" if text else prefix
 
 
+def same_print_languages(physical_language: str) -> tuple[str, ...]:
+    """Langues d'un même print : EN et FR partagent l'id TCGdex, qui peut désigner une autre carte en japonais."""
+    return ("ja",) if physical_language == "ja" else ("en", "fr")
+
+
+def scanned_card_meta(tcgdex_card_id: str, physical_language: str) -> dict[str, Any]:
+    """Colonnes ``collection_cards`` d'une carte reconnue sur le téléphone, relues sur TCGdex au plus toutes les 10 min."""
+    cache_key = (tcgdex_card_id.lower(), physical_language)
+    now = time.time()
+    with _card_meta_lock:
+        cached = _card_meta_cache.get(cache_key)
+    if cached is not None and now - cached[0] < _CARD_META_TTL_SEC:
+        return dict(cached[1])
+    meta = fetch_card_for_collection(tcgdex_card_id=tcgdex_card_id, physical_language=physical_language)
+    with _card_meta_lock:
+        if len(_card_meta_cache) >= _CARD_META_CACHE_MAX:
+            oldest_key = min(_card_meta_cache, key=lambda key: _card_meta_cache[key][0])
+            del _card_meta_cache[oldest_key]
+        _card_meta_cache[cache_key] = (now, meta)
+    return dict(meta)
+
+
+def build_scanned_card_preview(
+    db: Session,
+    user_id: int,
+    tcgdex_card_id: str,
+    physical_language: str,
+) -> dict[str, Any]:
+    """Fiche d'une carte reconnue avant son ajout : identité, cote et exemplaires déjà possédés du même print."""
+    meta = scanned_card_meta(tcgdex_card_id, physical_language)
+    owned_by_language = collection_card_service.owned_quantities_by_language(db, user_id, meta["tcgdex_card_id"])
+    print_languages = same_print_languages(meta["language"])
+    return {
+        "tcgdex_card_id": meta["tcgdex_card_id"],
+        "tcgdex_set_id": meta["tcgdex_set_id"],
+        "language": meta["language"],
+        "display_name": meta["display_name"],
+        "set_name": meta["set_name"],
+        "set_code": meta["set_code"],
+        "card_number": meta["card_number"],
+        "printed_set_total": meta.get("printed_set_total"),
+        "image_url": meta["image_url"],
+        "market_price_eur": meta["market_price_eur"],
+        "owned_quantity": sum(
+            quantity for language, quantity in owned_by_language.items() if language in print_languages
+        ),
+    }
+
+
 def _add_or_increment(
     user_id: int,
     meta: dict[str, Any],
@@ -159,7 +217,10 @@ def _add_or_increment(
             language=meta["language"],
         )
         if existing is not None:
-            existing.quantity = int(existing.quantity) + 1
+            fills_binder_placeholder = bool(existing.is_placeholder)
+            # Un emplacement vide de classeur (quantité 0) devient la carte scannée, au lieu de rester invisible.
+            existing.is_placeholder = False
+            existing.quantity = 1 if fills_binder_placeholder else int(existing.quantity) + 1
             if notes:
                 existing.notes = notes.strip() or existing.notes
             collection_card_service.apply_market_price(
@@ -169,7 +230,7 @@ def _add_or_increment(
             )
             db.commit()
             db.refresh(existing)
-            return collection_card_service.collection_card_to_dict(existing), False
+            return collection_card_service.collection_card_to_dict(existing), fills_binder_placeholder
 
         row = CollectionCard(
             user_id=user_id,
@@ -210,8 +271,9 @@ def _decrement_or_delete(
     Checkout counterpart of :func:`_add_or_increment`.
 
     Finds the user's row for ``tcgdex_card_id`` — exact language first, then
-    any language when exactly one row matches — and decrements its quantity,
-    deleting the row when it reaches zero.
+    any language of the same print when exactly one row matches — and
+    decrements its quantity, deleting the row when it reaches zero. Empty
+    binder placeholders are never touched.
 
     Returns ``(card_dict, deleted, remaining_quantity)``;
     ``card_dict`` is ``None`` when the card is not in the collection.
@@ -224,12 +286,16 @@ def _decrement_or_delete(
             tcgdex_card_id=tcgdex_card_id,
             language=language,
         )
+        if row is not None and row.is_placeholder:
+            row = None
         if row is None:
             candidates = (
                 db.query(CollectionCard)
                 .filter(
                     CollectionCard.user_id == user_id,
                     CollectionCard.tcgdex_card_id == tcgdex_card_id,
+                    CollectionCard.language.in_(same_print_languages(language)),
+                    CollectionCard.is_placeholder.is_(False),
                 )
                 .all()
             )
@@ -700,12 +766,6 @@ async def _admit_scan(
     _ensure_consumer(user_id)
 
 
-#: Debounce for on-device match commits — the phone re-arm gate already spaces
-#: real cards out; this only guards against a double POST for the same card.
-_MATCH_DEBOUNCE_SEC = 1.2
-_last_match_accept: dict[tuple[int, str, str], float] = {}
-
-
 async def _process_matched_scan(
     *,
     event_id: str,
@@ -715,31 +775,14 @@ async def _process_matched_scan(
     direction: ScanDirection,
 ) -> None:
     """
-    Commit a card identified **on the phone** by the visual match index: no
-    photo, no OCR, no TCGdex resolution — straight to the collection, with the
-    same ``queued`` → ``added`` / ``removed`` events the OCR pipeline emits so
-    every listening client renders it identically (just seconds earlier).
+    Commit a card identified **on the phone** by the visual match index, once
+    the user tapped « Ajouter » / « Retirer » on its sheet: no photo, no OCR,
+    no TCGdex resolution — straight to the collection, with the same
+    ``queued`` then ``added`` / ``removed`` events the OCR pipeline emits so
+    every listening client renders it identically. Each tap is one copy.
     """
     hub = get_scan_stream_hub()
     loop = asyncio.get_running_loop()
-
-    now = time.time()
-    key = (user_id, tcgdex_card_id.lower(), direction)
-    if now - _last_match_accept.get(key, 0.0) < _MATCH_DEBOUNCE_SEC:
-        await _publish_dropped(
-            event_id=event_id,
-            user_id=user_id,
-            physical_language=physical_language,
-            direction=direction,
-            reason="debounce",
-            message="Scan identique trop rapproché — ignoré.",
-        )
-        return
-    _last_match_accept[key] = now
-    if len(_last_match_accept) > 512:
-        cutoff = now - 60.0
-        for stale_key in [k for k, ts in _last_match_accept.items() if ts < cutoff]:
-            _last_match_accept.pop(stale_key, None)
 
     await hub.publish(
         user_id,
@@ -807,11 +850,7 @@ async def _process_matched_scan(
     try:
         meta = await loop.run_in_executor(
             None,
-            lambda: fetch_card_for_collection(
-                tcgdex_card_id=tcgdex_card_id,
-                physical_language=physical_language,
-                fallback_name_en=None,
-            ),
+            lambda: scanned_card_meta(tcgdex_card_id, physical_language),
         )
         card_dict, created = await loop.run_in_executor(
             None,
@@ -854,12 +893,14 @@ def submit_matched_scan(
     tcgdex_card_id: str,
     physical_language: str,
     direction: ScanDirection = "in",
+    client_event_id: str | None = None,
 ) -> str:
     """
     Enqueue the commit of a card identified on-device (visual match). Returns
-    the ``event_id`` the WebSocket events will carry.
+    the ``event_id`` the WebSocket events will carry — the phone's own id when
+    it sends one, so its sheet follows the outcome without a race.
     """
-    event_id = secrets.token_urlsafe(10)
+    event_id = client_event_id or secrets.token_urlsafe(10)
     task = asyncio.create_task(
         _process_matched_scan(
             event_id=event_id,

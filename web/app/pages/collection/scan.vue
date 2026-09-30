@@ -20,7 +20,7 @@
 
         <GoupixDexPageHeader
           title="Scanner mes cartes"
-          description="Photographiez vos cartes à la chaîne : langue reconnue automatiquement, capture en mode caisse (HTTPS) et arrivée en temps réel dans la collection."
+          description="Visez vos cartes à la chaîne : chacune est reconnue avec sa cote, et vous l'ajoutez à la collection d'un tap."
         />
 
         <!-- Desktop (Tauri) : pas de caméra pertinente — QR code vers le téléphone,
@@ -147,8 +147,8 @@
             <p class="text-muted text-xs">
               {{
                 scanDirection === 'in'
-                  ? 'Chaque carte scannée est ajoutée à la collection.'
-                  : 'Chaque carte scannée est retirée de la collection (vendue / échangée).'
+                  ? 'Chaque carte reconnue affiche sa fiche : un tap sur « Ajouter » la met dans la collection.'
+                  : 'Chaque carte reconnue affiche sa fiche : un tap sur « Retirer » la sort de la collection (vendue / échangée).'
               }}
             </p>
           </div>
@@ -222,9 +222,16 @@
                 />
               </button>
             </div>
+            <GoupixDexScannedCardSheet
+              v-if="scannedCard"
+              is-embedded
+              :scanned-card="scannedCard"
+              @confirm="confirmScannedCardAction"
+              @close="dismissScannedCard"
+            />
             <p class="text-muted text-[11px]">
-              Centrez chaque carte dans le cadre&nbsp;: identification instantanée si connue, sinon OCR automatique.
-              Retirez-la pour enchaîner.
+              Centrez chaque carte dans le cadre&nbsp;: sa fiche s'affiche dès qu'elle est reconnue. Retirez-la pour
+              enchaîner.
             </p>
           </div>
 
@@ -325,7 +332,7 @@
                 </div>
 
                 <div
-                  v-if="webcamReady && autoScan"
+                  v-if="webcamReady && autoScan && !scannedCard"
                   class="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex w-[min(94vw,24rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-white/20 bg-black/55 px-5 py-2.5 text-center text-sm leading-snug font-medium text-white shadow-lg backdrop-blur-md"
                 >
                   <span
@@ -339,71 +346,19 @@
                   {{ displayScanStatus.label }}
                 </div>
 
-                <Transition name="fade">
-                  <div
-                    v-if="scanFiche"
-                    class="absolute right-3 bottom-[max(4.75rem,env(safe-area-inset-bottom))] left-3 z-20 flex items-center gap-3 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-md"
-                  >
-                    <div class="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-white/10">
-                      <img
-                        v-if="scanFiche.image"
-                        :src="scanFiche.image"
-                        :alt="scanFiche.title"
-                        class="h-full w-full object-cover"
-                        referrerpolicy="no-referrer"
-                        decoding="async"
-                      />
-                      <div v-else class="flex h-full items-center justify-center">
-                        <UIcon name="i-lucide-image" class="size-5 text-white/40" />
-                      </div>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <p class="truncate text-sm font-semibold">
-                        {{ scanFiche.title }}
-                        <span v-if="scanFiche.price" class="ml-1 text-emerald-300 tabular-nums">
-                          {{ scanFiche.price }}
-                        </span>
-                      </p>
-                      <p class="truncate text-xs text-white/70">
-                        {{ scanFiche.subtitle }}
-                      </p>
-                      <p class="mt-0.5 text-xs" :class="scanFiche.lineClass">
-                        {{ scanFiche.line }}
-                      </p>
-                    </div>
-                    <div class="flex shrink-0 flex-col gap-1">
-                      <UButton
-                        v-if="scanFiche.collectionId"
-                        size="xs"
-                        color="neutral"
-                        variant="solid"
-                        icon="i-lucide-external-link"
-                        class="bg-white/15"
-                        :to="`/collection/${scanFiche.collectionId}`"
-                      >
-                        Ouvrir
-                      </UButton>
-                      <UButton
-                        v-else-if="scanFiche.needsReview"
-                        size="xs"
-                        color="primary"
-                        variant="solid"
-                        icon="i-lucide-plus"
-                        to="/collection/add"
-                      >
-                        Ajouter
-                      </UButton>
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-x"
-                        class="text-white"
-                        aria-label="Masquer"
-                        @click.prevent="dismissFiche"
-                      />
-                    </div>
-                  </div>
+                <Transition
+                  enter-active-class="transition duration-200 ease-out"
+                  enter-from-class="translate-y-full opacity-0"
+                  leave-active-class="transition duration-150 ease-in"
+                  leave-to-class="translate-y-full opacity-0"
+                >
+                  <GoupixDexScannedCardSheet
+                    v-if="scannedCard"
+                    class="absolute right-0 bottom-0 left-0 z-20"
+                    :scanned-card="scannedCard"
+                    @confirm="confirmScannedCardAction"
+                    @close="dismissScannedCard"
+                  />
                 </Transition>
               </div>
             </div>
@@ -585,7 +540,9 @@ import { renderSVG } from 'uqr'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
 import type { CardScannerShortcut } from '~/types/CardScannerShortcut'
 import type { ScanCardLanguage, ScanMatchDecision } from '~/types/ScanMatch'
+import type { ScannedCardSheet } from '~/types/ScannedCardSheet'
 import { useOpenCardScanner } from '~/composables/useOpenCardScanner'
+import { useScannedCardSheet } from '~/composables/useScannedCardSheet'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -633,10 +590,14 @@ const {
   disconnect,
   refreshRecent,
   uploadPhoto,
+  fetchScannedCardPreview,
   commitMatchedScan,
   dismissEvent,
   clearProblemEvents,
 } = useScanStream()
+
+const { scannedCard, showScannedCard, confirmScannedCardAction, dismissScannedCard }: ScannedCardSheet =
+  useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan })
 
 const clearingProblems = ref(false)
 const dismissingId = ref<string | null>(null)
@@ -1507,10 +1468,18 @@ function playChimeNote(freq: number, delaySec: number, volume: number): void {
   }
 }
 
-/** Carillon deux notes montantes (do–sol) — carte identifiée / ajoutée. */
+/** Carillon deux notes montantes (do–sol) — carte reconnue. */
 function playBeep(): void {
   playChimeNote(1046.5, 0, 0.22)
   playChimeNote(1568, 0.09, 0.26)
+}
+
+/**
+ * Glissé montant, pendant du « dong » de retrait : carte ajoutée à la collection.
+ * @returns {void}
+ */
+function playAddBeep(): void {
+  playTone(660, 990, 0.25)
 }
 
 /** Falling "dong" — card removed (checkout). */
@@ -1622,9 +1591,9 @@ function flashInstantMatch(name: string): void {
   }, 2500)
 }
 
-/** Dernier commit instantané — anti-doublon tant que la même carte reste devant la caméra. */
-let lastInstantCommit: { cardId: string; direction: ScanDirection; at: number } | null = null
-const INSTANT_COMMIT_DEBOUNCE_MS = 3000
+/** Dernière carte reconnue — anti-doublon tant que la même carte reste devant la caméra. */
+let lastRecognizedCard: { cardId: string; direction: ScanDirection; at: number } | null = null
+const SAME_CARD_RECOGNITION_DEBOUNCE_MS: number = 3000
 
 /** Une inférence à la fois — un crop arrivé pendant l'inférence est ignoré. */
 let identifyInFlight = false
@@ -1698,11 +1667,11 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
   if (autoScanPhase.value === 'cooldown') {
     const committedCardSeen =
       result.topCardId !== null &&
-      lastInstantCommit !== null &&
-      result.topCardId === lastInstantCommit.cardId &&
+      lastRecognizedCard !== null &&
+      result.topCardId === lastRecognizedCard.cardId &&
       result.topSim >= STILL_SAME_CARD_MIN_SIM
-    if (committedCardSeen && lastInstantCommit) {
-      lastInstantCommit.at = Date.now()
+    if (committedCardSeen && lastRecognizedCard) {
+      lastRecognizedCard.at = Date.now()
     }
     return
   }
@@ -1743,68 +1712,33 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     reportIdentifyOutcome(false)
     return
   }
-  commitScanDecision(decision)
+  showRecognizedCard(decision)
 }
 
 /**
- * Committe une carte identifiée (pHash OU embedding) : bip + flash + vibration,
- * POST en arrière-plan, et anti-doublon glissant (revoir la carte repousse la
- * fenêtre de re-commit au lieu d'ajouter deux fois).
- * @param decision - Carte reconnue prête à ajouter.
+ * Affiche la fiche d'une carte reconnue (pHash OU embedding), sauf si c'est la même carte revue juste après.
+ * @param {ScanMatchDecision} decision - Carte reconnue.
+ * @returns {void}
  */
-function commitScanDecision(decision: ScanMatchDecision): void {
+function showRecognizedCard(decision: ScanMatchDecision): void {
   candidateScores.clear()
-  const now = Date.now()
-  if (
-    lastInstantCommit &&
-    lastInstantCommit.cardId === decision.tcgdexCardId &&
-    lastInstantCommit.direction === scanDirection.value &&
-    now - lastInstantCommit.at < INSTANT_COMMIT_DEBOUNCE_MS
-  ) {
-    lastInstantCommit.at = now
-    cooldownIdentifyMisses = 0
-    reportIdentifyOutcome(true)
+  const now: number = Date.now()
+  const isSameCardStillInView: boolean =
+    lastRecognizedCard !== null &&
+    lastRecognizedCard.cardId === decision.tcgdexCardId &&
+    lastRecognizedCard.direction === scanDirection.value &&
+    now - lastRecognizedCard.at < SAME_CARD_RECOGNITION_DEBOUNCE_MS
+  reportIdentifyOutcome(true)
+  if (isSameCardStillInView && lastRecognizedCard) {
+    lastRecognizedCard.at = now
     return
   }
-  lastInstantCommit = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
-  reportIdentifyOutcome(true)
+
+  lastRecognizedCard = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
   flashInstantMatch(decision.name)
-  // Vignette + nom AFFICHÉS TOUT DE SUITE (URL locale) — le prix et le lien
-  // collection se rempliront au retour de l'API, sans bloquer l'image.
-  pendingCard.value = {
-    image: scanCardImage.cardImageUrl(decision),
-    name: decision.name,
-    setId: decision.setId,
-    localId: decision.localId,
-  }
-  if (pendingCardTimer !== null) {
-    clearTimeout(pendingCardTimer)
-  }
-  pendingCardTimer = setTimeout((): void => {
-    pendingCard.value = null
-  }, 8000)
-  if (scanDirection.value === 'out') {
-    playRemoveBeep()
-    vibrate([40, 60, 40])
-    triggerFlash('removed')
-  } else {
-    playBeep()
-    vibrate(60)
-    triggerFlash('success')
-  }
-  if (latestOutcome.value) {
-    dismissedOutcomeId.value = latestOutcome.value.event_id
-  }
-  void commitMatchedScan(decision.tcgdexCardId, decision.language, scanDirection.value)
-    .then((r): void => {
-      // Le bip a déjà retenti à l'identification — l'événement WS ne rejoue rien.
-      notifiedOutcomeIds.add(r.event_id)
-    })
-    .catch((err: unknown): void => {
-      playErrorBeep()
-      triggerFlash('error')
-      toast.add({ title: 'Ajout impossible', description: apiErrorMessage(err), color: 'error' })
-    })
+  playBeep()
+  vibrate(60)
+  showScannedCard(decision, scanCardImage.cardImageUrl(decision), scanDirection.value)
 }
 
 /**
@@ -1831,7 +1765,7 @@ async function onPhashCrop(buf: ArrayBuffer, w: number, h: number): Promise<void
   if (autoScanPhase.value === 'cooldown' || result.status !== 'match' || !result.decision) {
     return
   }
-  commitScanDecision(result.decision)
+  showRecognizedCard(result.decision)
 }
 
 // Scan sans contact : le worker vision suit la carte, DEUX matchers l'identifient
@@ -1882,124 +1816,6 @@ const cameraGuideRect = computed<{ x: number; y: number; w: number; h: number } 
   return { x: (w - gw) / 2, y: (h - gh) / 2, w: gw, h: gh }
 })
 
-/**
- * Most recent settled scan (success OR failure), for the bottom info overlay.
- * Failures are included on purpose: on the fullscreen camera the feed is
- * hidden, so without this the user scans into a black hole and only discovers
- * the « À vérifier » pile after closing the camera. Failures auto-hide after
- * a few seconds so a stale error never squats the camera view.
- */
-const dismissedOutcomeId = ref<string | null>(null)
-let outcomeAutoHideTimer: ReturnType<typeof setTimeout> | null = null
-const latestOutcome = computed(() => {
-  const ev = displayedEvents.value.find(
-    (e) =>
-      ((e.status === 'added' || e.status === 'removed') && e.collection_card) ||
-      e.status === 'needs_review' ||
-      e.status === 'not_in_collection' ||
-      e.status === 'failed',
-  )
-  if (!ev || ev.event_id === dismissedOutcomeId.value) {
-    return null
-  }
-  return ev
-})
-
-/** Carte reconnue affichée AVANT le retour de l'API (vignette + nom instantanés). */
-const pendingCard: Ref<{ image: string; name: string; setId: string; localId: string } | null> = ref(null)
-let pendingCardTimer: ReturnType<typeof setTimeout> | null = null
-
-/**
- * Données de la fiche : le retour API (prix, lien collection) dès qu'il arrive,
- * sinon la carte reconnue en attente. La vignette vient toujours de `pendingCard`
- * quand elle existe (URL locale fiable, y compris pour les JA récentes que l'API
- * n'illustre pas) — plus de délai entre « reconnue » et l'image affichée.
- */
-const scanFiche = computed(() => {
-  const ev = latestOutcome.value
-  const p = pendingCard.value
-  if (ev) {
-    return {
-      image: p?.image ?? thumbUrl(ev),
-      title: cardTitle(ev),
-      price: marketPriceLabel(ev),
-      subtitle: subtitle(ev),
-      line: outcomeLine(ev),
-      lineClass: outcomeLineClass(ev),
-      collectionId: ev.collection_card?.id ?? null,
-      needsReview: ev.status === 'needs_review',
-      eventId: ev.event_id,
-    }
-  }
-  if (p) {
-    return {
-      image: p.image,
-      title: p.name,
-      price: null as string | null,
-      subtitle: `${p.setId} · ${p.localId}`,
-      line: 'Ajout en cours…',
-      lineClass: 'text-white/60',
-      collectionId: null as string | null,
-      needsReview: false,
-      eventId: null as string | null,
-    }
-  }
-  return null
-})
-
-/** Masque la fiche : ignore l'événement API et efface la carte en attente. */
-function dismissFiche(): void {
-  dismissedOutcomeId.value = scanFiche.value?.eventId ?? null
-  pendingCard.value = null
-}
-
-watch(latestOutcome, (ev): void => {
-  if (outcomeAutoHideTimer !== null) {
-    clearTimeout(outcomeAutoHideTimer)
-    outcomeAutoHideTimer = null
-  }
-  if (!ev || ev.status === 'added' || ev.status === 'removed') {
-    return
-  }
-  const eventId = ev.event_id
-  outcomeAutoHideTimer = setTimeout((): void => {
-    if (latestOutcome.value?.event_id === eventId) {
-      dismissedOutcomeId.value = eventId
-    }
-  }, 6000)
-})
-
-/** One-line outcome text under the overlay card name. */
-function outcomeLine(ev: ScanEvent): string {
-  if (ev.status === 'removed') {
-    if (ev.deleted) {
-      return 'Retirée de ma collection (dernier exemplaire)'
-    }
-    return `Retirée de ma collection (reste ×${ev.remaining_quantity ?? '?'})`
-  }
-  if (ev.status === 'needs_review') {
-    return 'Non identifiée — repassez la carte bien à plat, ou finissez-la depuis le catalogue'
-  }
-  if (ev.status === 'not_in_collection') {
-    return 'Absente de la collection — rien à retirer'
-  }
-  if (ev.status === 'failed') {
-    return ev.error ?? 'Échec du scan — repassez la carte'
-  }
-  return `Ajoutée à ma collection${ev.created === false && ev.collection_card ? ` (×${ev.collection_card.quantity})` : ''}`
-}
-
-/** Text color of {@link outcomeLine} on the fullscreen overlay (white card on black). */
-function outcomeLineClass(ev: ScanEvent): string {
-  if (ev.status === 'removed') {
-    return 'text-orange-300'
-  }
-  if (ev.status === 'added') {
-    return 'text-emerald-400'
-  }
-  return 'text-amber-300'
-}
-
 // Sound + vibration + flash the moment each scan settles — the whole point of
 // a cash register is to confirm without looking at the screen.
 const notifiedOutcomeIds = new Set<string>()
@@ -2012,7 +1828,7 @@ watch(
       }
       if (ev.status === 'added') {
         notifiedOutcomeIds.add(ev.event_id)
-        playBeep()
+        playAddBeep()
         vibrate(60)
         triggerFlash('success')
       } else if (ev.status === 'removed') {
@@ -2157,14 +1973,6 @@ onBeforeUnmount(() => {
   if (instantMatchLabelTimer !== null) {
     clearTimeout(instantMatchLabelTimer)
     instantMatchLabelTimer = null
-  }
-  if (outcomeAutoHideTimer !== null) {
-    clearTimeout(outcomeAutoHideTimer)
-    outcomeAutoHideTimer = null
-  }
-  if (pendingCardTimer !== null) {
-    clearTimeout(pendingCardTimer)
-    pendingCardTimer = null
   }
   stopWebcam()
   disconnect()

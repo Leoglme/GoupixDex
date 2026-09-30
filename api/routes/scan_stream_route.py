@@ -30,13 +30,14 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
-from core.database import SessionLocal
+from core.database import SessionLocal, get_db
 from core.deps import get_current_user, get_current_user_from_token_str
 from models.user import User
 from services.scan_stream_hub import get_scan_stream_hub
-from services.scan_stream_service import submit_matched_scan, submit_scan
+from services.scan_stream_service import build_scanned_card_preview, submit_matched_scan, submit_scan
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ async def upload_scan_photo(
 
 
 _TCGDEX_CARD_ID_RE = re.compile(r"^[A-Za-z0-9.]+-[A-Za-z0-9.]+$")
+_CLIENT_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
 class MatchedScanPayload(BaseModel):
@@ -148,6 +150,38 @@ class MatchedScanPayload(BaseModel):
     tcgdex_card_id: str
     language: str = "en"
     direction: str = "in"
+    event_id: str | None = None
+
+
+def _validated_card_id(raw: str) -> str:
+    """Identifiant TCGdex envoyé par le téléphone, ou HTTP 400 s'il est mal formé."""
+    card_id = raw.strip()
+    if not card_id or len(card_id) > 64 or not _TCGDEX_CARD_ID_RE.fullmatch(card_id):
+        raise HTTPException(status_code=400, detail="Identifiant de carte invalide.")
+    return card_id
+
+
+def _matched_card_language(value: str | None) -> str:
+    """Langue physique d'une carte reconnue sur le téléphone : sans OCR, ``auto`` devient l'anglais."""
+    physical_language = _clean_language(value)
+    return "en" if physical_language == "auto" else physical_language
+
+
+@router.get("/scan-stream/card-preview")
+def preview_scanned_card(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    tcgdex_card_id: str = Query(..., min_length=3, max_length=64),
+    language: str = Query("en", max_length=8),
+) -> dict[str, Any]:
+    """Fiche d'une carte reconnue sur le téléphone, avant son ajout : cote Cardmarket et exemplaires déjà possédés."""
+    card_id = _validated_card_id(tcgdex_card_id)
+    try:
+        return build_scanned_card_preview(db, user.id, card_id, _matched_card_language(language))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/scan-stream/match", status_code=status.HTTP_202_ACCEPTED)
@@ -157,16 +191,16 @@ async def commit_matched_scan(
 ) -> dict[str, Any]:
     """
     Commit a card the phone identified **on-device** (perceptual-hash match
-    against the TCGdex index). Skips OCR entirely: the card is added to
-    (``in``) or removed from (``out``) the collection right away, and the same
-    WebSocket events as the photo pipeline are emitted.
+    against the TCGdex index), after the user confirmed it on its sheet. Skips
+    OCR entirely: the card is added to (``in``) or removed from (``out``) the
+    collection right away, and the same WebSocket events as the photo pipeline
+    are emitted.
     """
-    card_id = payload.tcgdex_card_id.strip()
-    if not card_id or len(card_id) > 64 or not _TCGDEX_CARD_ID_RE.fullmatch(card_id):
-        raise HTTPException(status_code=400, detail="Identifiant de carte invalide.")
-    physical_language = _clean_language(payload.language)
-    if physical_language == "auto":
-        physical_language = "en"
+    card_id = _validated_card_id(payload.tcgdex_card_id)
+    client_event_id = (payload.event_id or "").strip() or None
+    if client_event_id is not None and not _CLIENT_EVENT_ID_RE.fullmatch(client_event_id):
+        raise HTTPException(status_code=400, detail="Identifiant d'événement invalide.")
+    physical_language = _matched_card_language(payload.language)
     scan_direction = _clean_direction(payload.direction)
 
     event_id = submit_matched_scan(
@@ -174,6 +208,7 @@ async def commit_matched_scan(
         tcgdex_card_id=card_id,
         physical_language=physical_language,
         direction=scan_direction,  # type: ignore[arg-type]
+        client_event_id=client_event_id,
     )
     return {
         "event_id": event_id,

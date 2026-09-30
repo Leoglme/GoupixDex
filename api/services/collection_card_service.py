@@ -165,6 +165,23 @@ def owned_quantity(db: Session, user_id: int, tcgdex_card_id: str, language: str
     return sum(int(quantity) for (quantity,) in q.all())
 
 
+def owned_quantities_by_language(db: Session, user_id: int, tcgdex_card_id: str) -> dict[str, int]:
+    """Exemplaires possédés d'une carte TCGdex par langue (cartes en vente comprises, emplacements vides exclus)."""
+    rows = (
+        db.query(CollectionCard.language, CollectionCard.quantity)
+        .filter(
+            CollectionCard.user_id == user_id,
+            CollectionCard.tcgdex_card_id == tcgdex_card_id,
+            CollectionCard.is_placeholder.is_(False),
+        )
+        .all()
+    )
+    quantities: dict[str, int] = {}
+    for language, quantity in rows:
+        quantities[language] = quantities.get(language, 0) + int(quantity)
+    return quantities
+
+
 def delete_collection_card(db: Session, user_id: int, card_id: int) -> bool:
     row = db.query(CollectionCard).filter(
         CollectionCard.id == card_id, CollectionCard.user_id == user_id

@@ -108,6 +108,16 @@ def _set_logo_url(set_payload: dict[str, Any]) -> str | None:
     return None
 
 
+def _printed_set_total(set_payload: dict[str, Any]) -> int | None:
+    """Dénominateur imprimé (« 107/094 ») d'un set international ; ``None`` en japonais (total TCGdex parfois faux)."""
+    set_id = _strip(set_payload.get("id"))
+    card_count = set_payload.get("cardCount")
+    if not set_id[:1].islower() or not isinstance(card_count, dict):
+        return None
+    official = card_count.get("official")
+    return official if isinstance(official, int) and official > 0 else None
+
+
 def _locale_priority(physical_language: str) -> list[str]:
     """
     Locale order tried when resolving a card/set, best signal first.
@@ -272,6 +282,7 @@ def fetch_card_for_collection(
         "set_code": set_code,
         "set_name": set_name or None,
         "card_number": normalize_card_number_for_pokewallet(local_raw),
+        "printed_set_total": _printed_set_total(dict(set_detail)),
         "card_name_en": name_en or None,
         "card_name_fr": name_fr or None,
         "card_name_ja": name_ja or None,
@@ -318,6 +329,7 @@ def _external_card_row(
         "set_code": set_code or set_id.upper(),
         "set_name": readable_set_name(_strip(set_detail.get("name"))) or None,
         "card_number": normalize_card_number_for_pokewallet(local_id),
+        "printed_set_total": None,
         "card_name_en": name_en or None,
         "card_name_fr": name_fr or None,
         "card_name_ja": name_ja or None,
