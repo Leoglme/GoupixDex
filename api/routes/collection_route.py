@@ -396,6 +396,8 @@ def prepare_article_prefill(
         }
         if isinstance(avg, (int, float)):
             suggested = round(float(avg) * (1.0 + margin / 100.0), 2)
+    if suggested is None and row.market_price_eur is not None:
+        suggested =round(float(row.market_price_eur) * (1.0 + margin / 100.0), 2)
 
     ocr_like = {
         "set_code": row.set_code or "",
@@ -445,6 +447,7 @@ def prepare_article_prefill(
         "margin_percent_used": margin,
         "collection_card_id": row.id,
         "physical_language": row.language,
+        "purchase_price_eur": float(row.purchase_price_eur) if row.purchase_price_eur is not None else None,
         "error": None,
     }
 

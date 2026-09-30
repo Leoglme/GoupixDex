@@ -387,6 +387,8 @@ const emit = defineEmits<{
 }>()
 
 const VINTED_TITLE_MAX_CHARS: number = 100
+// Reka UI refuse une option à valeur vide (erreur au montage du formulaire) : « aucune liaison » a sa propre valeur.
+const NO_ORDER_LINE_VALUE: string = 'none'
 
 const title: Ref<string> = ref('')
 const description: Ref<string> = ref('')
@@ -440,17 +442,17 @@ let orderMatchDebounce: ReturnType<typeof setTimeout> | null = null
 
 const selectedOrderLineIdStr: ComputedRef<string> = computed({
   get(): string {
-    return selectedOrderLineId.value != null ? String(selectedOrderLineId.value) : ''
+    return selectedOrderLineId.value != null ? String(selectedOrderLineId.value) : NO_ORDER_LINE_VALUE
   },
   set(v: string): void {
     orderLineTouchedByUser.value = true
-    selectedOrderLineId.value = v ? Number(v) : null
+    selectedOrderLineId.value = v && v !== NO_ORDER_LINE_VALUE ? Number(v) : null
     void applyPricesFromSelectedLine()
   },
 })
 
 const orderLineSelectItems: ComputedRef<{ label: string; value: string }[]> = computed(() => {
-  const items: { label: string; value: string }[] = [{ value: '', label: '— Aucune liaison —' }]
+  const items: { label: string; value: string }[] = [{ value: NO_ORDER_LINE_VALUE, label: '— Aucune liaison —' }]
   for (const ln of linkableLines.value) {
     items.push({
       value: String(ln.order_line_id),
@@ -1007,6 +1009,7 @@ async function applyCatalogPrefill(p: {
   display_pokemon_name?: string
   tcgdex?: { names?: { en?: string | null; fr?: string | null; ja?: string | null } }
   image_url_high?: string | null
+  purchase_price_eur?: number | null
   pricing?: {
     cardmarket_eur: number | null
     tcgplayer_usd: number | null
@@ -1026,6 +1029,9 @@ async function applyCatalogPrefill(p: {
   cardNumber.value = p.pokewallet.card_number
   if (p.listing_preview.suggested_price != null) {
     sellPrice.value = String(p.listing_preview.suggested_price)
+  }
+  if (p.purchase_price_eur != null) {
+    purchasePrice.value = formatMoneyInput(p.purchase_price_eur)
   }
   isGraded.value = false
   gradedGraderValueId.value = ''
@@ -1058,6 +1064,7 @@ defineExpose({
   buildCreateFormData,
   applyWardrobeSlot,
   applyEbayPrefill,
+  submit,
 })
 
 /**

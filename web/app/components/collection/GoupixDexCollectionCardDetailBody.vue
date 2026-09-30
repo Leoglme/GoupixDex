@@ -35,6 +35,21 @@
         </div>
       </div>
 
+      <UButton
+        v-if="card.article_id"
+        color="neutral"
+        variant="soft"
+        size="lg"
+        block
+        icon="i-lucide-tag"
+        @click="openLinkedArticle"
+      >
+        Voir l'article #{{ card.article_id }}
+      </UButton>
+      <UButton v-else color="primary" size="lg" block icon="i-lucide-camera" @click="isListingWizardOpen = true">
+        Mettre en ligne
+      </UButton>
+
       <!-- Changer la carte (uniquement quand ouverte depuis une pochette de classeur) -->
       <UButton v-if="pocket" color="primary" variant="soft" icon="i-lucide-replace" block @click="emit('change-card')">
         Changer la carte de cette pochette
@@ -152,64 +167,24 @@
           </UButton>
         </div>
       </section>
-
-      <!-- Mise en vente -->
-      <section class="border-default space-y-3 border-t pt-4">
-        <div class="flex items-center justify-between gap-2">
-          <p class="app-label">Mettre en vente</p>
-          <UButton
-            v-if="!prefill"
-            size="xs"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-sparkles"
-            :loading="loadingPrefill"
-            @click="onPreparePrefill"
-          >
-            Préremplir
-          </UButton>
-          <UButton
-            v-else
-            size="xs"
-            color="neutral"
-            variant="soft"
-            icon="i-lucide-refresh-cw"
-            :loading="loadingPrefill"
-            @click="onPreparePrefill(true)"
-          >
-            Rafraîchir
-          </UButton>
-        </div>
-
-        <UAlert v-if="card.article_id" color="success" variant="subtle" icon="i-lucide-tag" title="Article créé">
-          <template #description>
-            <NuxtLink
-              :to="`/articles/${card.article_id}`"
-              class="text-primary text-sm underline underline-offset-2"
-              @click="openLinkedArticle"
-            >
-              Voir l'article #{{ card.article_id }}
-            </NuxtLink>
-          </template>
-        </UAlert>
-
-        <div v-if="prefill">
-          <GoupixDexArticleForm ref="formRef" mode="create" :loading="submitting" @submit-create="onSubmitCreate" />
-        </div>
-        <p v-else-if="!card.article_id" class="text-muted text-sm">
-          Génère un article prérempli (titre, prix suggéré) à publier sur tes marketplaces.
-        </p>
-      </section>
     </div>
+
+    <GoupixDexCollectionCardListingWizard
+      v-if="card"
+      :open="isListingWizardOpen"
+      :card="card"
+      @close="isListingWizardOpen = false"
+      @created="onListingArticleCreated"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { PropType } from 'vue'
-import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
+import type { PropType, Ref } from 'vue'
+import type { Article } from '~/composables/useArticles'
+import type { CollectionCard } from '~/composables/useCollection'
 import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
-import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { formatSignedPercent, parseEuroAmount } from '~/utils/sealedProducts'
 import { hasJapanese, readableSetLabel } from '~/utils/cards/readableSet'
@@ -234,17 +209,8 @@ const emit = defineEmits<{
   'change-card': []
 }>()
 
-const {
-  getCollectionCard,
-  getCardPriceHistory,
-  patchCollectionCard,
-  deleteCollectionCard,
-  prepareArticlePrefill,
-  attachArticle,
-} = useCollection()
-const { createArticle, publishArticleToVinted } = useArticles()
-const { canUseDesktopWorkers } = useDesktopWorkers()
-const { openArticle, openArticleFromClick } = useOpenArticleDrawer()
+const { getCollectionCard, getCardPriceHistory, patchCollectionCard, deleteCollectionCard } = useCollection()
+const { openArticle } = useOpenArticleDrawer()
 const toast = useToast()
 
 const card = ref<CollectionCard | null>(null)
@@ -253,13 +219,7 @@ const loading = ref(true)
 const savingDraft = ref(false)
 const deleting = ref(false)
 const resettingPrice = ref(false)
-const prefill = ref<CollectionArticlePrefillResponse | null>(null)
-const loadingPrefill = ref(false)
-const submitting = ref(false)
-const formRef = ref<{
-  applyCatalogPrefill: (p: CollectionArticlePrefillResponse) => Promise<void>
-  buildCreateFormData: () => FormData
-} | null>(null)
+const isListingWizardOpen: Ref<boolean> = ref(false)
 
 const languageItems = [
   { label: 'Français', value: 'fr' },
@@ -346,7 +306,6 @@ function syncDrafts(c: CollectionCard): void {
  */
 async function load(): Promise<void> {
   loading.value = true
-  prefill.value = null
   try {
     const data = await getCollectionCard(props.cardId)
     card.value = data
@@ -444,79 +403,33 @@ async function onDelete(): Promise<void> {
 }
 
 /**
- * Ouvre l'article lié dans le drawer, par-dessus la collection (un clic modifié garde la navigation classique).
- * @param event - Clic sur « Voir l'article ».
+ * Ouvre l'article lié dans le drawer, par-dessus la collection.
  * @returns {void}
  */
-function openLinkedArticle(event: MouseEvent): void {
-  const articleId = card.value?.article_id
+function openLinkedArticle(): void {
+  const articleId: number | null | undefined = card.value?.article_id
   if (articleId) {
-    openArticleFromClick(articleId, event)
+    openArticle(articleId)
   }
 }
 
 /**
- * Génère le préremplissage article (titre, prix suggéré) et l'applique au formulaire.
- * @param refreshPricing - Rafraîchit le prix depuis le guide (true par défaut).
- * @returns Résolue après application.
+ * Ferme la mise en ligne et relit la carte, désormais reliée à son article.
+ * @param {Article} article - Article créé depuis la carte.
+ * @returns {Promise<void>} Résolue quand la carte est relue.
  */
-async function onPreparePrefill(refreshPricing: boolean | Event = true): Promise<void> {
-  const refresh = typeof refreshPricing === 'boolean' ? refreshPricing : true
-  if (!card.value) {
-    return
+async function onListingArticleCreated(article: Article): Promise<void> {
+  isListingWizardOpen.value = false
+  if (card.value) {
+    card.value = { ...card.value, article_id: article.id }
   }
-  loadingPrefill.value = true
   try {
-    const data = await prepareArticlePrefill(card.value.id, refresh)
-    prefill.value = data
-    await nextTick()
-    await formRef.value?.applyCatalogPrefill(data)
-  } catch (e) {
-    toast.add({ title: 'Préremplissage impossible', description: apiErrorMessage(e), color: 'error' })
-  } finally {
-    loadingPrefill.value = false
-  }
-}
-
-/**
- * Crée l'article depuis le formulaire, le relie à la carte et publie si desktop.
- * @param fd - Corps multipart de l'article.
- * @returns Résolue après création.
- */
-async function onSubmitCreate(fd: FormData): Promise<void> {
-  if (!card.value) {
-    return
-  }
-  if (!canUseDesktopWorkers.value) {
-    fd.set('publish_to_vinted', 'false')
-  }
-  // Vente depuis la collection : relier l'article à CETTE carte (le back n'en recrée pas une).
-  fd.set('collection_card_id', String(card.value.id))
-  submitting.value = true
-  try {
-    const { article, vinted } = await createArticle(fd)
-    try {
-      await attachArticle(card.value.id, article.id)
-    } catch {
-      /* lien best-effort */
-    }
-    if (canUseDesktopWorkers.value && vinted.desktop_local && vinted.stream_path) {
-      try {
-        await publishArticleToVinted(article.id)
-      } catch (e) {
-        toast.add({ title: 'Worker Vinted', description: apiErrorMessage(e), color: 'error' })
-        await navigateTo('/articles')
-        return
-      }
-      await navigateTo({ path: '/articles/listing-logs', query: { article: String(article.id), progress: 'local' } })
-      return
-    }
-    toast.add({ title: 'Article créé depuis la carte', color: 'success' })
-    openArticle(article.id)
-  } catch (e) {
-    toast.add({ title: 'Création impossible', description: apiErrorMessage(e), color: 'error' })
-  } finally {
-    submitting.value = false
+    const refreshedCard: CollectionCard = await getCollectionCard(props.cardId)
+    card.value = refreshedCard
+    syncDrafts(refreshedCard)
+    emit('updated', refreshedCard)
+  } catch {
+    // La fiche affiche déjà le lien vers l'article : la relecture n'est qu'un rafraîchissement.
   }
 }
 

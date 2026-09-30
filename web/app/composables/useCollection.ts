@@ -80,6 +80,7 @@ export interface CollectionPatchBody {
 export interface CollectionArticlePrefillResponse extends CatalogCardPreviewResponse {
   collection_card_id: number
   physical_language: CollectionLanguage | string
+  purchase_price_eur: number | null
 }
 
 /**
