@@ -122,6 +122,18 @@
               >
                 Continuer
               </UButton>
+              <UButton
+                v-else
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                block
+                icon="i-lucide-images"
+                :disabled="isProcessingPhoto"
+                @click="openGallery(currentCardSide)"
+              >
+                Choisir dans la galerie
+              </UButton>
             </div>
           </div>
 
@@ -240,6 +252,7 @@
             class="hidden"
             @change="onCardSidePhotoPicked"
           />
+          <input ref="galleryInputRef" type="file" accept="image/*" class="hidden" @change="onCardSidePhotoPicked" />
           <input
             ref="extraPhotosInputRef"
             type="file"
@@ -313,6 +326,7 @@ const articlePrefillError: Ref<string | null> = ref(null)
 const isCreatingArticle: Ref<boolean> = ref(false)
 const articleFormRef: Ref<ArticleCreateFormHandle | null> = ref(null)
 const cameraInputRef: Ref<HTMLInputElement | null> = ref(null)
+const galleryInputRef: Ref<HTMLInputElement | null> = ref(null)
 const extraPhotosInputRef: Ref<HTMLInputElement | null> = ref(null)
 
 const currentStepIndex: ComputedRef<number> = computed((): number =>
@@ -370,6 +384,16 @@ function openCamera(side: ListingPhotoSide): void {
   }
   pickedCardSide = side
   cameraInputRef.value?.click()
+}
+
+/**
+ * Ouvre la galerie pour choisir la photo d'une face de la carte.
+ * @param {'front' | 'back'} side - Face à illustrer.
+ * @returns {void}
+ */
+function openGallery(side: 'front' | 'back'): void {
+  pickedCardSide = side
+  galleryInputRef.value?.click()
 }
 
 /**
