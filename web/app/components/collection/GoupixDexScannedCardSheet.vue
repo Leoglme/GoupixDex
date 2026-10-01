@@ -22,11 +22,16 @@
           <p class="min-w-0 flex-1 truncate pt-0.5 text-xl leading-tight font-bold">{{ cardName }}</p>
           <button
             type="button"
-            class="-mt-1 -mr-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-            aria-label="Fermer la fiche"
+            class="-mt-1 -mr-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed"
+            :aria-label="props.scannedCard.addedEventIds.length ? 'Annuler l’ajout' : 'Fermer la fiche'"
+            :disabled="props.scannedCard.action === 'pending' || props.scannedCard.isCancellingAdds"
             @click="emit('close')"
           >
-            <UIcon name="i-lucide-x" class="size-5" />
+            <UIcon
+              :name="props.scannedCard.isCancellingAdds ? 'i-lucide-loader-circle' : 'i-lucide-x'"
+              class="size-5"
+              :class="{ 'animate-spin': props.scannedCard.isCancellingAdds }"
+            />
           </button>
         </div>
         <p class="text-sm text-white/60 tabular-nums">{{ printedNumberLabel }}</p>
@@ -63,7 +68,7 @@
           ? 'border-emerald-400/30 bg-emerald-500/15'
           : 'border-white/10 bg-white/10 active:bg-white/15'
       "
-      :disabled="props.scannedCard.action === 'pending' || isAbsentFromCollection"
+      :disabled="props.scannedCard.action === 'pending' || props.scannedCard.isCancellingAdds || isAbsentFromCollection"
       @click="emit('confirm')"
     >
       <span

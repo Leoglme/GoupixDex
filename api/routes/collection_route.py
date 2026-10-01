@@ -8,6 +8,7 @@ Lean storage: card identity + language + quantity. Pricing / condition stay on
 
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -104,6 +105,7 @@ def add_to_collection(
             existing.quantity = int(body.quantity)
         else:
             existing.quantity = int(existing.quantity) + int(body.quantity)
+        existing.last_added_at = dt.datetime.now(dt.UTC)
         if body.notes:
             existing.notes = body.notes.strip() or existing.notes
         if body.purchase_price_eur is not None:

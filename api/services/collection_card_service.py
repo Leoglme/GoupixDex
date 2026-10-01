@@ -30,7 +30,7 @@ def list_collection_for_user(
     listed_state: str | None = None,
 ) -> list[CollectionCard]:
     """
-    List the user's collection, newest first.
+    List the user's collection, most recently added copy first.
 
     ``listed_state`` filter values: ``"any"`` (default), ``"with_article"``, ``"without_article"``.
     """
@@ -62,7 +62,7 @@ def list_collection_for_user(
         q = q.filter(CollectionCard.article_id.is_not(None))
     elif listed_state == "without_article":
         q = q.filter(CollectionCard.article_id.is_(None))
-    return q.order_by(CollectionCard.created_at.desc()).all()
+    return q.order_by(CollectionCard.last_added_at.desc(), CollectionCard.id.desc()).all()
 
 
 def get_collection_card(

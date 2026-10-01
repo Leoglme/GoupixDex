@@ -227,7 +227,7 @@
               is-embedded
               :scanned-card="scannedCard"
               @confirm="confirmScannedCardAction"
-              @close="dismissScannedCard"
+              @close="onScannedCardClosed"
             />
             <p class="text-muted text-[11px]">
               Centrez chaque carte dans le cadre&nbsp;: sa fiche s'affiche dès qu'elle est reconnue. Retirez-la pour
@@ -357,7 +357,7 @@
                     class="absolute right-0 bottom-0 left-0 z-20"
                     :scanned-card="scannedCard"
                     @confirm="confirmScannedCardAction"
-                    @close="dismissScannedCard"
+                    @close="onScannedCardClosed"
                   />
                 </Transition>
               </div>
@@ -523,8 +523,8 @@
                 variant="ghost"
                 icon="i-lucide-trash-2"
                 :loading="dismissingId === ev.event_id"
-                aria-label="Retirer de la liste"
-                @click="onDismissScan(ev.event_id)"
+                :aria-label="ev.status === 'added' ? 'Annuler l’ajout' : 'Retirer de la liste'"
+                @click="onDismissScan(ev)"
               />
             </div>
           </li>
@@ -593,11 +593,12 @@ const {
   fetchScannedCardPreview,
   commitMatchedScan,
   dismissEvent,
+  undoScanEvent,
   clearProblemEvents,
 } = useScanStream()
 
 const { scannedCard, showScannedCard, confirmScannedCardAction, dismissScannedCard }: ScannedCardSheet =
-  useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan })
+  useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan, undoScanEvent })
 
 const clearingProblems = ref(false)
 const dismissingId = ref<string | null>(null)
@@ -1264,6 +1265,8 @@ function statusLabel(s: ScanEventStatus): string {
       return 'Ignorée'
     case 'failed':
       return 'Échec'
+    case 'cancelled':
+      return 'Annulée'
   }
 }
 
@@ -1314,13 +1317,23 @@ function canDismissScan(_s: ScanEventStatus): boolean {
   return true
 }
 
-async function onDismissScan(eventId: string): Promise<void> {
-  dismissingId.value = eventId
+/**
+ * Retire un scan de la liste ; un ajout est annulé, l'exemplaire quitte alors la collection.
+ * @param {ScanEvent} ev - Scan de la liste.
+ * @returns {Promise<void>} Résolue quand le scan a quitté la liste (ou que l'échec est affiché).
+ */
+async function onDismissScan(ev: ScanEvent): Promise<void> {
+  dismissingId.value = ev.event_id
   try {
-    await dismissEvent(eventId)
+    if (ev.status === 'added') {
+      await undoScanEvent(ev.event_id)
+      toast.add({ title: 'Ajout annulé', description: `${cardTitle(ev)} : un exemplaire retiré de la collection.` })
+    } else {
+      await dismissEvent(ev.event_id)
+    }
   } catch (err) {
     toast.add({
-      title: 'Suppression impossible',
+      title: ev.status === 'added' ? 'Annulation impossible' : 'Suppression impossible',
       description: apiErrorMessage(err),
       color: 'error',
     })
@@ -1739,6 +1752,19 @@ function showRecognizedCard(decision: ScanMatchDecision): void {
   playBeep()
   vibrate(60)
   showScannedCard(decision, scanCardImage.cardImageUrl(decision), scanDirection.value)
+}
+
+/**
+ * Ferme la fiche de la carte reconnue ; des exemplaires ajoutés depuis elle sont retirés, avec le son de retrait.
+ * @returns {Promise<void>} Résolue quand la fiche est fermée (ou l'échec affiché dessus).
+ */
+async function onScannedCardClosed(): Promise<void> {
+  const cancelledAddCount: number = await dismissScannedCard()
+  if (cancelledAddCount > 0) {
+    playRemoveBeep()
+    vibrate([40, 60, 40])
+    triggerFlash('removed')
+  }
 }
 
 /**

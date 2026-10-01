@@ -81,6 +81,11 @@ class CollectionCard(Base):
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),
     )
+    #: Dernier exemplaire ajouté (scan, catalogue, emplacement de classeur rempli) : ordre de « Ma collection ».
+    last_added_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.UTC),
+    )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),

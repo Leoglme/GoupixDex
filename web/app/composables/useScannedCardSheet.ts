@@ -87,6 +87,8 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
       action: 'idle',
       actionEventId: null,
       actionError: null,
+      addedEventIds: [],
+      isCancellingAdds: false,
     }
     loadScannedCardPreview(scannedCard.value)
   }
@@ -153,12 +155,36 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
   }
 
   /**
-   * Ferme la fiche ; le scanner continue et la rouvrira à la prochaine carte reconnue.
-   * @returns {void}
+   * Ferme la fiche en annulant d'abord les exemplaires ajoutés depuis elle ; reste ouverte si une annulation échoue.
+   * @returns {Promise<number>} Nombre d'ajouts annulés.
    */
-  function dismissScannedCard(): void {
+  async function dismissScannedCard(): Promise<number> {
+    const card: ScannedCard | null = scannedCard.value
+    if (!card || card.action === 'pending' || card.isCancellingAdds) {
+      return 0
+    }
+
+    let cancelledAddCount: number = 0
+    card.isCancellingAdds = true
+    card.actionError = null
+    try {
+      for (const addedEventId of [...card.addedEventIds]) {
+        await dependencies.undoScanEvent(addedEventId)
+        card.addedEventIds = card.addedEventIds.filter((eventId: string): boolean => eventId !== addedEventId)
+        card.ownedQuantity = Math.max(0, (card.ownedQuantity ?? 0) - 1)
+        cancelledAddCount += 1
+      }
+    } catch (error: unknown) {
+      card.isCancellingAdds = false
+      card.actionError = `Annulation impossible : ${apiErrorMessage(error)}`
+      return cancelledAddCount
+    }
+
     clearActionTimers()
-    scannedCard.value = null
+    if (scannedCard.value === card) {
+      scannedCard.value = null
+    }
+    return cancelledAddCount
   }
 
   watch(dependencies.events, (events: ScanEvent[]): void => {
@@ -170,6 +196,7 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
       (event: ScanEvent): boolean => event.event_id === card.actionEventId,
     )
     if (outcome?.status === 'added') {
+      card.addedEventIds = [...card.addedEventIds, card.actionEventId]
       completeScannedCardAction(card, 1)
     } else if (outcome?.status === 'removed') {
       completeScannedCardAction(card, -1)

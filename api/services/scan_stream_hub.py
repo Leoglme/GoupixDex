@@ -128,6 +128,13 @@ class ScanStreamHub:
             items = items[-limit:]
         return items
 
+    def find_event(self, user_id: int, event_id: str) -> dict[str, Any] | None:
+        """Dernier état connu d'un événement de scan de l'utilisateur, ou ``None`` s'il n'est plus dans l'historique."""
+        for item in self._history.get(user_id, deque()):
+            if str(item.get("event_id")) == event_id:
+                return item
+        return None
+
     def dismiss_event(self, user_id: int, event_id: str) -> bool:
         """Remove one event from the in-memory backlog (UI dismiss)."""
         buf = self._history.get(user_id)

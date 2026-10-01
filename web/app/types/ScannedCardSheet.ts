@@ -28,6 +28,8 @@ export type ScannedCard = {
   action: ScannedCardAction
   actionEventId: string | null
   actionError: string | null
+  addedEventIds: string[]
+  isCancellingAdds: boolean
 }
 
 export type ScannedCardSheetDependencies = {
@@ -39,11 +41,12 @@ export type ScannedCardSheetDependencies = {
     direction: ScanDirection,
     eventId: string,
   ) => Promise<unknown>
+  undoScanEvent: (eventId: string) => Promise<unknown>
 }
 
 export type ScannedCardSheet = {
   scannedCard: Ref<ScannedCard | null>
   showScannedCard: (decision: ScanMatchDecision, imageUrl: string, direction: ScanDirection) => void
   confirmScannedCardAction: () => Promise<void>
-  dismissScannedCard: () => void
+  dismissScannedCard: () => Promise<number>
 }

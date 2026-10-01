@@ -22,6 +22,7 @@ Design goals (in priority order):
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import secrets
 import threading
@@ -31,6 +32,7 @@ from typing import Any, Literal
 from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
+from models.binder import BinderItem
 from models.collection_card import CollectionCard
 from services import collection_card_service
 from services.card_image_enhance import enhance_for_ocr
@@ -221,6 +223,7 @@ def _add_or_increment(
             # Un emplacement vide de classeur (quantité 0) devient la carte scannée, au lieu de rester invisible.
             existing.is_placeholder = False
             existing.quantity = 1 if fills_binder_placeholder else int(existing.quantity) + 1
+            existing.last_added_at = dt.datetime.now(dt.UTC)
             if notes:
                 existing.notes = notes.strip() or existing.notes
             collection_card_service.apply_market_price(
@@ -316,6 +319,40 @@ def _decrement_or_delete(
         db.commit()
         db.refresh(row)
         return collection_card_service.collection_card_to_dict(row), False, remaining
+    finally:
+        db.close()
+
+
+def _remove_added_copy(user_id: int, collection_card_id: int) -> tuple[dict[str, Any] | None, bool, int]:
+    """
+    Retire l'exemplaire qu'un scan vient d'ajouter : la carte placée dans un classeur redevient un emplacement vide.
+
+    Renvoie ``(card_dict, left_collection, remaining_quantity)`` ; ``card_dict`` vaut ``None`` si la carte n'y est plus.
+    """
+    db = SessionLocal()
+    try:
+        row = collection_card_service.get_collection_card(db, collection_card_id, user_id)
+        if row is None or row.is_placeholder:
+            return None, True, 0
+
+        if int(row.quantity) > 1:
+            row.quantity = int(row.quantity) - 1
+            db.commit()
+            db.refresh(row)
+            return collection_card_service.collection_card_to_dict(row), False, int(row.quantity)
+
+        snapshot = collection_card_service.collection_card_to_dict(row)
+        snapshot["quantity"] = 0
+        is_placed_in_binder = (
+            db.query(BinderItem.binder_id).filter(BinderItem.collection_card_id == row.id).first() is not None
+        )
+        if is_placed_in_binder:
+            row.is_placeholder = True
+            row.quantity = 0
+        else:
+            db.delete(row)
+        db.commit()
+        return snapshot, True, 0
     finally:
         db.close()
 
@@ -913,6 +950,48 @@ def submit_matched_scan(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return event_id
+
+
+async def undo_added_scan(*, user_id: int, event_id: str) -> dict[str, Any]:
+    """
+    Annule l'ajout fait par un scan : l'exemplaire quitte la collection et le scan disparaît du flux de chaque écran.
+
+    Raises:
+        LookupError: le scan n'est plus dans l'historique du flux.
+        ValueError: le scan n'a rien ajouté à la collection.
+    """
+    hub = get_scan_stream_hub()
+    event = hub.find_event(user_id, event_id)
+    if event is None:
+        msg = "Ce scan n'est plus dans l'historique."
+        raise LookupError(msg)
+    added_card = event.get("collection_card")
+    if event.get("status") != "added" or not isinstance(added_card, dict):
+        msg = "Seul un ajout à la collection peut être annulé."
+        raise ValueError(msg)
+
+    # Retiré du flux avant la base : un double appui ne peut pas retirer deux exemplaires.
+    hub.dismiss_event(user_id, event_id)
+    loop = asyncio.get_running_loop()
+    try:
+        card_dict, left_collection, remaining = await loop.run_in_executor(
+            None,
+            lambda: _remove_added_copy(user_id, int(added_card["id"])),
+        )
+    except Exception:
+        await hub.publish(user_id, event)
+        raise
+
+    cancelled_event = {
+        **event,
+        "status": "cancelled",
+        "collection_card": card_dict or {**added_card, "quantity": 0},
+        "deleted": left_collection,
+        "remaining_quantity": remaining,
+        "ts": _now_iso(),
+    }
+    await hub.publish(user_id, cancelled_event, transient=True)
+    return cancelled_event
 
 
 def submit_scan(

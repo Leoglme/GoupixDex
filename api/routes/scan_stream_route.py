@@ -37,7 +37,12 @@ from core.database import SessionLocal, get_db
 from core.deps import get_current_user, get_current_user_from_token_str
 from models.user import User
 from services.scan_stream_hub import get_scan_stream_hub
-from services.scan_stream_service import build_scanned_card_preview, submit_matched_scan, submit_scan
+from services.scan_stream_service import (
+    build_scanned_card_preview,
+    submit_matched_scan,
+    submit_scan,
+    undo_added_scan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +232,20 @@ def list_recent_scans(
     hub = get_scan_stream_hub()
     events = hub.history_snapshot(user.id, limit=max(1, min(int(limit), 100)))
     return {"items": events}
+
+
+@router.post("/scan-stream/events/{event_id}/undo")
+async def undo_scan_event(
+    event_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Annule l'ajout fait par un scan : l'exemplaire quitte la collection et le scan disparaît du flux."""
+    try:
+        return await undo_added_scan(user_id=user.id, event_id=event_id.strip())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/scan-stream/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)

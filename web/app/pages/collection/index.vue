@@ -279,6 +279,10 @@ const viewItems = [
   { label: 'Liste', value: 'list', icon: 'i-lucide-list' },
 ]
 
+const LIVE_SCAN_CLOCK_TOLERANCE_SEC: number = 30
+const collectionOpenedAtEpochSec: number = Date.now() / 1000
+const appliedScanEventIds: Set<string> = new Set()
+
 const stats = computed<CollectionStats>(() => {
   return (
     payload.value?.stats ?? {
@@ -368,7 +372,7 @@ async function load(): Promise<void> {
 /**
  * Insert (or refresh) a card freshly added via scan-stream into the local list
  * without re-hitting `/collection`. We dedupe on `id` so multiple events for
- * the same card (e.g. quantity bumps) just patch the existing row in place.
+ * the same card (e.g. quantity bumps) patch a single row, moved to the top like the API order.
  */
 function applyLiveScanCard(card: CollectionCard): void {
   const current = payload.value
@@ -376,29 +380,56 @@ function applyLiveScanCard(card: CollectionCard): void {
     void load()
     return
   }
-  const ix = current.items.findIndex((row) => row.id === card.id)
-  const nextItems = current.items.slice()
-  if (ix === -1) {
-    nextItems.unshift(card)
-  } else {
-    nextItems[ix] = card
-  }
+  const nextItems: CollectionCard[] = current.items.filter((row: CollectionCard): boolean => row.id !== card.id)
+  nextItems.unshift(card)
   payload.value = { ...current, items: nextItems }
 }
 
-const { events: scanEvents, connect: connectScanStream, disconnect: disconnectScanStream } = useScanStream()
+/**
+ * Reporte un ajout annulé depuis le scan : la carte perd un exemplaire, ou quitte la liste.
+ * @param {ScanEvent} cancelledScan - Scan annulé, avec la carte après retrait.
+ * @returns {void}
+ */
+function applyCancelledScanCard(cancelledScan: ScanEvent): void {
+  const current: CollectionListResponse | null = payload.value
+  const card: CollectionCard | null = cancelledScan.collection_card
+  if (!current || !card) {
+    return
+  }
+  const nextItems: CollectionCard[] = cancelledScan.deleted
+    ? current.items.filter((row: CollectionCard): boolean => row.id !== card.id)
+    : current.items.map((row: CollectionCard): CollectionCard => (row.id === card.id ? card : row))
+  payload.value = { ...current, items: nextItems }
+}
+
+const {
+  events: scanEvents,
+  lastCancelledEvent: lastCancelledScanEvent,
+  connect: connectScanStream,
+  disconnect: disconnectScanStream,
+} = useScanStream()
 
 watch(
   scanEvents,
-  (list: ScanEvent[]) => {
-    for (const ev of list) {
-      if (ev.status === 'added' && ev.collection_card) {
+  (list: ScanEvent[]): void => {
+    // Du plus ancien au plus récent : la dernière carte scannée finit en tête, comme dans l'ordre de l'API.
+    for (const ev of [...list].reverse()) {
+      const isScanAddedSincePageOpened: boolean =
+        ev.status === 'added' && ev.ts >= collectionOpenedAtEpochSec - LIVE_SCAN_CLOCK_TOLERANCE_SEC
+      if (isScanAddedSincePageOpened && ev.collection_card && !appliedScanEventIds.has(ev.event_id)) {
+        appliedScanEventIds.add(ev.event_id)
         applyLiveScanCard(ev.collection_card)
       }
     }
   },
   { deep: true },
 )
+
+watch(lastCancelledScanEvent, (cancelledScan: ScanEvent | null): void => {
+  if (cancelledScan) {
+    applyCancelledScanCard(cancelledScan)
+  }
+})
 
 watch(
   () => drawerStack.cardMutationCounter.value,

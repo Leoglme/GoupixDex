@@ -1,24 +1,29 @@
-"""Fiche d'une carte scannée : exemplaires déjà possédés, ajout ou retrait confirmé, fiche TCGdex gardée en cache."""
+"""Fiche d'une carte scannée : exemplaires possédés, ajout confirmé puis annulable, ordre de la collection."""
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 import models  # noqa: F401 — enregistre tous les mappers (relations croisées entre modèles)
 from models.base import Base
+from models.binder import Binder, BinderItem
 from models.collection_card import CollectionCard
-from services import scan_stream_service
+from services import collection_card_service, scan_stream_service
+from services.scan_stream_hub import get_scan_stream_hub
 
 
 @pytest.fixture
 def db(monkeypatch: pytest.MonkeyPatch) -> Iterator[Session]:
-    """Base SQLite en mémoire, partagée avec les sessions que le service de scan ouvre lui-même."""
-    engine = create_engine("sqlite://")
+    """Base SQLite en mémoire, partagée avec les sessions que le service de scan ouvre lui-même (y compris hors thread)."""
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     monkeypatch.setattr(scan_stream_service, "SessionLocal", sessionmaker(bind=engine))
     with Session(engine) as session:
@@ -186,3 +191,95 @@ def test_removing_a_card_scanned_in_french_takes_the_english_copy(db: Session) -
     assert card_json["id"] == english_card.id
     assert deleted is False
     assert remaining == 1
+
+
+def _added_scan_event(event_id: str, card: CollectionCard) -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "user_id": 1,
+        "status": "added",
+        "physical_language": card.language,
+        "direction": "in",
+        "tcgdex_card_id": card.tcgdex_card_id,
+        "collection_card": {"id": card.id, "quantity": card.quantity},
+    }
+
+
+def test_adding_an_owned_card_moves_it_to_the_top_of_the_collection(db: Session) -> None:
+    owned_card = _collection_card(db, language="fr", quantity=1)
+    owned_card.last_added_at = dt.datetime(2026, 9, 1, tzinfo=dt.UTC)
+    _collection_card(db, language="fr", quantity=1, tcgdex_card_id="sv10-112")
+    db.commit()
+    db.close()
+
+    scan_stream_service._add_or_increment(1, _card_meta(), notes=None)
+
+    rows = collection_card_service.list_collection_for_user(db, 1)
+    assert rows[0].tcgdex_card_id == "me02-107"
+    assert rows[0].quantity == 2
+
+
+def test_undoing_a_new_card_removes_it_from_the_collection(db: Session) -> None:
+    card_id = _collection_card(db, language="fr", quantity=1).id
+
+    card_json, left_collection, remaining = scan_stream_service._remove_added_copy(1, card_id)
+
+    assert card_json is not None
+    assert left_collection is True
+    assert remaining == 0
+    db.expire_all()
+    assert db.get(CollectionCard, card_id) is None
+
+
+def test_undoing_one_of_several_copies_keeps_the_others(db: Session) -> None:
+    card = _collection_card(db, language="fr", quantity=3)
+
+    card_json, left_collection, remaining = scan_stream_service._remove_added_copy(1, card.id)
+
+    assert card_json is not None
+    assert card_json["quantity"] == 2
+    assert left_collection is False
+    assert remaining == 2
+
+
+def test_undoing_a_card_placed_in_a_binder_restores_its_empty_slot(db: Session) -> None:
+    card = _collection_card(db, language="ja", quantity=1)
+    binder = Binder(id=1, user_id=1, name="151 AR")
+    db.add(binder)
+    db.flush()
+    db.add(BinderItem(binder_id=binder.id, collection_card_id=card.id, position=3))
+    db.commit()
+
+    scan_stream_service._remove_added_copy(1, card.id)
+
+    db.expire_all()
+    slot_card = db.get(CollectionCard, card.id)
+    assert slot_card is not None
+    assert slot_card.is_placeholder is True
+    assert slot_card.quantity == 0
+
+
+def test_undoing_a_scan_removes_it_from_the_feed_once(db: Session) -> None:
+    card = _collection_card(db, language="fr", quantity=2)
+    hub = get_scan_stream_hub()
+    hub.clear_events(1)
+    asyncio.run(hub.publish(1, _added_scan_event("sheet-undo-test-01", card)))
+
+    cancelled_event = asyncio.run(scan_stream_service.undo_added_scan(user_id=1, event_id="sheet-undo-test-01"))
+
+    assert cancelled_event["status"] == "cancelled"
+    assert cancelled_event["remaining_quantity"] == 1
+    assert hub.find_event(1, "sheet-undo-test-01") is None
+    with pytest.raises(LookupError):
+        asyncio.run(scan_stream_service.undo_added_scan(user_id=1, event_id="sheet-undo-test-01"))
+
+
+def test_only_an_added_scan_can_be_undone(db: Session) -> None:
+    card = _collection_card(db, language="fr", quantity=1)
+    hub = get_scan_stream_hub()
+    hub.clear_events(1)
+    asyncio.run(hub.publish(1, {**_added_scan_event("sheet-undo-test-02", card), "status": "removed"}))
+
+    with pytest.raises(ValueError):
+        asyncio.run(scan_stream_service.undo_added_scan(user_id=1, event_id="sheet-undo-test-02"))
+    hub.clear_events(1)

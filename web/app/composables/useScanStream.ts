@@ -14,6 +14,7 @@ import type { ScannedCardPreview } from '~/types/ScannedCardSheet'
  * - `not_in_collection` : checkout scan of a card the collection does not hold
  * - `dropped`           : the server rejected the frame (transient, never stored)
  * - `failed`            : unrecoverable error (OCR crash, DB error, ...)
+ * - `cancelled`         : ajout annulé, l'exemplaire a quitté la collection (le scan quitte le flux)
  */
 export type ScanEventStatus =
   | 'queued'
@@ -25,6 +26,7 @@ export type ScanEventStatus =
   | 'not_in_collection'
   | 'dropped'
   | 'failed'
+  | 'cancelled'
 
 /** Scan flow: `in` adds the card to the collection, `out` removes it ("cash register"). */
 export type ScanDirection = 'in' | 'out'
@@ -195,6 +197,7 @@ export function useScanStream() {
    * the page watches it to flash / vibrate an immediate "nothing happened" cue.
    */
   const lastDroppedEvent: Ref<ScanEvent | null> = ref(null)
+  const lastCancelledEvent: Ref<ScanEvent | null> = ref(null)
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -212,6 +215,11 @@ export function useScanStream() {
   function pushEvent(ev: ScanEvent): void {
     if (ev.status === 'dropped') {
       lastDroppedEvent.value = ev
+      return
+    }
+    if (ev.status === 'cancelled') {
+      lastCancelledEvent.value = ev
+      events.value = events.value.filter((event: ScanEvent): boolean => event.event_id !== ev.event_id)
       return
     }
     events.value = upsertEvent(events.value, ev)
@@ -537,6 +545,20 @@ export function useScanStream() {
   }
 
   /**
+   * POST `/scan-stream/events/:id/undo` — annule l'ajout d'un scan : l'exemplaire quitte la collection.
+   *
+   * @param {string} eventId - Scan qui a ajouté la carte.
+   * @returns {Promise<ScanEvent>} Le scan annulé, avec la carte après retrait (`deleted` quand elle a quitté la collection).
+   */
+  async function undoScanEvent(eventId: string): Promise<ScanEvent> {
+    const { data } = await $api.post<ScanEvent>(`/scan-stream/events/${encodeURIComponent(eventId)}/undo`, undefined, {
+      timeout: 15_000,
+    })
+    events.value = events.value.filter((event: ScanEvent): boolean => event.event_id !== eventId)
+    return data
+  }
+
+  /**
    * Bulk-remove failed and needs-review events from the feed.
    *
    * @returns Number of events removed on the server.
@@ -558,6 +580,7 @@ export function useScanStream() {
     connectionMode,
     lastError,
     lastDroppedEvent,
+    lastCancelledEvent,
     connect,
     disconnect,
     refreshRecent,
@@ -565,6 +588,7 @@ export function useScanStream() {
     fetchScannedCardPreview,
     commitMatchedScan,
     dismissEvent,
+    undoScanEvent,
     clearProblemEvents,
   }
 }
