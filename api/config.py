@@ -91,6 +91,10 @@ class AppSettings(BaseSettings):
     ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
     resend_api_key: str | None = None
     resend_webhook_secret: str | None = None
+    #: Inbox that receives the messages of the contact page (``POST /contact``).
+    contact_form_to: str = "contact@dibodev.fr"
+    #: Sender of those messages: its domain must be verified for sending in Resend.
+    contact_form_from: str = "GoupixDex <contact@mail.goupixdex.dibodev.fr>"
 
 
 @lru_cache

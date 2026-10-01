@@ -30,6 +30,7 @@ from routes import cardmarket_searches as cardmarket_searches_routes
 from routes import catalog_route
 from routes import binders_route
 from routes import collection_route
+from routes import contact_route
 from routes import desktop_relay_route
 from routes import ebay_market_route
 from routes import ebay_route
@@ -184,6 +185,7 @@ def health() -> dict[str, str]:
 app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(users_routes.router)
 app.include_router(access_requests_routes.router)
+app.include_router(contact_route.router)
 app.include_router(articles_routes.router)
 app.include_router(orders_routes.router)
 app.include_router(settings_route.router)

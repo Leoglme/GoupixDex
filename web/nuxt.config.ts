@@ -175,6 +175,6 @@ export default defineNuxtConfig({
   sitemap: {
     sitemaps: false,
     includeAppSources: false,
-    urls: ['/', '/request'],
+    urls: ['/', '/request', '/contact', '/legal', '/privacy', '/terms'],
   },
 })

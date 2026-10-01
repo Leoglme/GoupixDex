@@ -1,100 +1,134 @@
 <template>
-  <div class="bg-default text-default min-h-dvh">
-    <section
-      class="border-default/40 relative overflow-hidden border-b px-5 pt-32 pb-20 sm:px-8 sm:pt-40 sm:pb-24 lg:pt-48 lg:pb-28"
-    >
-      <div
-        class="bg-primary/[0.10] pointer-events-none absolute -top-24 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full blur-3xl"
-      />
-      <div class="bg-primary/[0.06] pointer-events-none absolute right-0 -bottom-16 h-72 w-72 rounded-full blur-3xl" />
+  <GoupixDexLegalDocument
+    document-id="privacy"
+    title="Politique de confidentialité"
+    intro="Ce que GoupixDex collecte, pourquoi, combien de temps, et comment exercer vos droits."
+  >
+    <GoupixDexLegalSection title="Responsable du traitement">
+      <p>
+        {{ PUBLISHER.fullName }}, entrepreneur individuel (Dibodev), {{ PUBLISHER.address }}. Pour toute question sur
+        vos données : <a :href="PUBLISHER.emailHref" class="landing-link">{{ PUBLISHER.email }}</a
+        >.
+      </p>
+    </GoupixDexLegalSection>
 
-      <div class="relative mx-auto w-full max-w-4xl space-y-4 text-left">
-        <span
-          class="bg-primary/10 text-primary ring-primary/20 inline-flex items-center rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide ring-1"
-        >
-          Confidentialité
-        </span>
-        <h1 class="text-highlighted text-3xl font-bold tracking-tight sm:text-4xl">
-          Politique de confidentialité — GoupixDex
-        </h1>
-        <p class="text-muted max-w-3xl text-sm leading-relaxed sm:text-base">
-          Cette politique décrit comment les données sont traitées sur GoupixDex. Le service est développé par
-          <strong class="text-highlighted">Dibodev</strong>.
-        </p>
-        <p class="text-muted text-sm">Dernière mise à jour : 17 avril 2026</p>
-      </div>
-    </section>
+    <GoupixDexLegalSection title="Données collectées">
+      <ul class="grid gap-2">
+        <GoupixDexLegalListItem term="Compte :">
+          adresse e-mail, mot de passe (stocké haché), nom et téléphone si vous les renseignez, message de votre demande
+          d'accès.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Stock et ventes :">
+          cartes, articles, photos, prix d'achat et de vente, commandes Cardmarket importées, produits scellés et
+          classeurs que vous créez.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Expédition :">
+          votre adresse d'expéditeur. L'adresse d'un acheteur eBay est lue chez eBay au moment d'imprimer son étiquette,
+          sans être conservée.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Plateformes connectées :">
+          vos identifiants Vinted et Amazon et votre autorisation eBay, chiffrés sur le serveur. Ils servent uniquement
+          aux actions que vous lancez.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Formulaire de contact :">
+          nom, e-mail, téléphone si vous le donnez, et votre message.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Données techniques :">
+          adresse IP et journaux du serveur, pour la sécurité du service.
+        </GoupixDexLegalListItem>
+      </ul>
+    </GoupixDexLegalSection>
 
-    <main class="mx-auto flex w-full max-w-5xl justify-center px-5 py-14 sm:px-8 sm:py-20">
-      <UCard class="ring-default w-full max-w-4xl ring-1">
-        <div class="text-toned space-y-8 text-sm leading-7 sm:text-base">
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">1. Responsable du traitement</h2>
-            <p>
-              GoupixDex est développé par Dibodev. Pour toute question liée à la confidentialité et aux données
-              personnelles, vous pouvez écrire à
-              <a href="mailto:contact@dibodev.fr" class="text-primary underline underline-offset-2">
-                contact@dibodev.fr </a
-              >.
-            </p>
-          </section>
+    <GoupixDexLegalSection title="Application desktop">
+      <p>
+        L'application pour Windows et macOS pilote votre propre navigateur (Chrome ou Edge), sur votre ordinateur, pour
+        Vinted, Leboncoin, Cardmarket et Amazon. Vos sessions de connexion à ces sites restent dans ce navigateur.
+      </p>
+    </GoupixDexLegalSection>
 
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">2. Données traitées</h2>
-            <p>
-              Nous pouvons traiter des données de compte (email, mot de passe chiffré), des données d'inventaire
-              (articles, photos, prix), des paramètres de publication (Vinted / eBay) et des jetons OAuth nécessaires à
-              la connexion aux services tiers.
-            </p>
-          </section>
+    <GoupixDexLegalSection title="Mesure d'audience">
+      <p>
+        GoupixDex mesure son audience avec Umami, sans cookie : aucune donnée n'identifie un visiteur ni ne le suit d'un
+        site à l'autre, et les statistiques restent internes.
+      </p>
+    </GoupixDexLegalSection>
 
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">3. Finalités</h2>
-            <p>
-              Ces données sont utilisées pour authentifier les utilisateurs, gérer l'inventaire, proposer des
-              suggestions de prix, publier des annonces sur les marketplaces activées et assurer le support technique.
-            </p>
-          </section>
+    <GoupixDexLegalSection title="Finalités et bases légales">
+      <ul class="grid gap-2">
+        <GoupixDexLegalListItem term="Exécution du contrat :">
+          gérer votre compte, votre stock, vos annonces, vos ventes et votre collection.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Intérêt légitime :">
+          répondre à vos messages, sécuriser le service et mesurer son audience sans cookie.
+        </GoupixDexLegalListItem>
+      </ul>
+      <p>Vos données ne sont ni vendues, ni louées, ni utilisées à des fins publicitaires.</p>
+    </GoupixDexLegalSection>
 
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">4. Conservation et sécurité</h2>
-            <p>
-              Les données sont conservées pendant l'utilisation du compte, puis supprimées dans un délai raisonnable
-              après demande, sauf obligation légale contraire. Des mesures techniques de sécurité sont appliquées
-              (contrôles d'accès, chiffrement des secrets sensibles, supervision).
-            </p>
-          </section>
+    <GoupixDexLegalSection title="Destinataires">
+      <p>
+        Seul l'éditeur accède à vos données. Des prestataires techniques les traitent pour son compte, chacun pour sa
+        tâche :
+      </p>
+      <ul class="grid gap-2">
+        <GoupixDexLegalListItem term="Hébergement :">OVH, en France.</GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Stockage des photos :">Supabase.</GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Publication sur eBay :">
+          eBay reçoit les annonces que vous y publiez, avec l'autorisation que vous lui avez donnée.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Reconnaissance des cartes :">
+          Groq reçoit la photo d'une carte quand la reconnaissance faite sur votre appareil ne suffit pas.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Envoi des e-mails :">Resend.</GoupixDexLegalListItem>
+      </ul>
+      <p>
+        Quand un prestataire est établi hors de l'Union européenne, le transfert est encadré par les clauses
+        contractuelles types de la Commission européenne.
+      </p>
+    </GoupixDexLegalSection>
 
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">5. Vos droits</h2>
-            <p>
-              Vous pouvez demander l'accès, la rectification ou la suppression de vos données, ainsi que la limitation
-              de certains traitements, selon la réglementation applicable.
-            </p>
-          </section>
+    <GoupixDexLegalSection title="Durée de conservation">
+      <ul class="grid gap-2">
+        <GoupixDexLegalListItem term="Compte, stock et ventes :">
+          tant que le compte est actif, puis suppression à sa fermeture ou sur simple demande.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Identifiants des plateformes :">
+          supprimés dès que vous retirez la plateforme de vos réglages, ou avec votre compte.
+        </GoupixDexLegalListItem>
+        <GoupixDexLegalListItem term="Messages du formulaire :">3 ans après le dernier échange.</GoupixDexLegalListItem>
+      </ul>
+    </GoupixDexLegalSection>
 
-          <section class="space-y-2">
-            <h2 class="text-highlighted text-xl font-semibold">6. Contact</h2>
-            <p>
-              Pour toute question :
-              <a href="mailto:contact@dibodev.fr" class="text-primary underline underline-offset-2">
-                contact@dibodev.fr
-              </a>
-            </p>
-          </section>
-        </div>
-      </UCard>
-    </main>
-  </div>
+    <GoupixDexLegalSection title="Vos droits">
+      <p>
+        Vous pouvez accéder à vos données, les corriger, les supprimer, les récupérer dans un format lisible, vous
+        opposer à leur traitement ou en limiter l'usage. Écrivez à
+        <a :href="PUBLISHER.emailHref" class="landing-link">{{ PUBLISHER.email }}</a> ou passez par la
+        <NuxtLink to="/contact" class="landing-link">page contact</NuxtLink>&nbsp;: vous recevez une réponse sous un
+        mois.
+      </p>
+      <p>Si vous estimez que vos droits ne sont pas respectés, vous pouvez saisir la CNIL sur cnil.fr.</p>
+    </GoupixDexLegalSection>
+
+    <GoupixDexLegalSection title="Cookies">
+      <p>
+        GoupixDex ne dépose aucun cookie de mesure d'audience ni de publicité. Votre session de connexion et vos
+        préférences d'affichage restent dans le stockage local de votre navigateur, sans être transmises à un tiers. La
+        déconnexion efface la session.
+      </p>
+    </GoupixDexLegalSection>
+  </GoupixDexLegalDocument>
 </template>
 
-<script setup lang="ts">
+<script lang="ts" setup>
+import { PUBLISHER } from '~/utils/publisher'
+
 definePageMeta({
-  layout: 'auth',
+  layout: 'landing',
 })
 
 useGoupixPageSeo(
   'Politique de confidentialité',
-  'Politique de confidentialité de GoupixDex : données collectées, usage, conservation et contact Dibodev.',
+  'Données collectées par GoupixDex, usage, durée de conservation, prestataires et exercice de vos droits.',
 )
 </script>

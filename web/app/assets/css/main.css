@@ -502,6 +502,17 @@ html.dark {
     background-color: var(--app-accent);
   }
 
+  .landing-link {
+    @apply font-semibold underline underline-offset-2 transition-colors;
+    color: var(--app-accent-ink);
+    text-decoration-color: color-mix(in srgb, var(--app-accent) 40%, transparent);
+  }
+
+  .landing-link:hover {
+    color: var(--app-accent);
+    text-decoration-color: currentColor;
+  }
+
   /* Staggered editorial entrance on landing load */
   .landing-rise {
     opacity: 0;
