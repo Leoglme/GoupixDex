@@ -81,6 +81,13 @@ export default defineNuxtConfig({
     '/amazon-invites': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/setup-password/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
     '/login': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/classeurs/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/collection/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/market': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/orders/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/panier-cardmarket/**': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/shipping-labels': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
+    '/top-ventes-ebay': { headers: { 'X-Robots-Tag': 'noindex, nofollow' } },
   },
 
   compatibilityDate: '2024-07-11',
@@ -161,6 +168,17 @@ export default defineNuxtConfig({
           '/amazon-invites',
           '/setup-password/**',
           '/login',
+          '/classeurs',
+          '/classeurs/**',
+          '/collection',
+          '/collection/**',
+          '/market',
+          '/orders',
+          '/orders/**',
+          '/panier-cardmarket',
+          '/panier-cardmarket/**',
+          '/shipping-labels',
+          '/top-ventes-ebay',
         ],
       },
     ],
@@ -168,13 +186,13 @@ export default defineNuxtConfig({
   },
 
   /**
-   * Manual sitemap: do not use includeAppSources (all `pages/` routes),
+   * Manual sitemap: `excludeAppSources` drops the routes found in `pages/`,
    * or internal or demo routes get indexed.
    * Add only marketing / public URLs you want crawled.
    */
   sitemap: {
     sitemaps: false,
-    includeAppSources: false,
+    excludeAppSources: true,
     urls: ['/', '/request', '/contact', '/legal', '/privacy', '/terms'],
   },
 })
