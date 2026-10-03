@@ -38,7 +38,7 @@ def empty_card_meta_cache() -> Iterator[None]:
     scan_stream_service._card_meta_cache.clear()
 
 
-def _card_meta(tcgdex_card_id: str = "me02-107", language: str = "fr") -> dict[str, Any]:
+def _card_meta(tcgdex_card_id: str = "me02-107", language: str = "fr", **overrides: Any) -> dict[str, Any]:
     return {
         "tcgdex_card_id": tcgdex_card_id,
         "tcgdex_set_id": "me02",
@@ -51,10 +51,12 @@ def _card_meta(tcgdex_card_id: str = "me02-107", language: str = "fr") -> dict[s
         "card_name_ja": "エテボース",
         "display_name": "Capidextre",
         "rarity": "Illustration Rare",
+        "dex_id": 424,
         "language": language,
         "image_url": "https://assets.tcgdex.net/fr/me/me02/107/low.webp",
         "cardmarket_id_product": 123,
         "market_price_eur": 2.11,
+        **overrides,
     }
 
 
@@ -65,6 +67,7 @@ def _collection_card(
     quantity: int,
     is_placeholder: bool = False,
     tcgdex_card_id: str = "me02-107",
+    rarity: str | None = None,
 ) -> CollectionCard:
     card = CollectionCard(
         user_id=1,
@@ -75,6 +78,7 @@ def _collection_card(
         language=language,
         quantity=quantity,
         is_placeholder=is_placeholder,
+        rarity=rarity,
     )
     db.add(card)
     db.commit()
@@ -283,3 +287,163 @@ def test_only_an_added_scan_can_be_undone(db: Session) -> None:
     with pytest.raises(ValueError):
         asyncio.run(scan_stream_service.undo_added_scan(user_id=1, event_id="sheet-undo-test-02"))
     hub.clear_events(1)
+
+
+def _pikachu_art_rare_meta(*, language: str = "ja", rarity: str = "Illustration rare") -> dict[str, Any]:
+    """Fiche TCGdex de la Pikachu AR japonaise de « Pokémon Card 151 » (SV2a-173, Pokédex n° 25)."""
+    return _card_meta("SV2a-173", language, display_name="Pikachu", rarity=rarity, dex_id=25, tcgdex_set_id="SV2a")
+
+
+def _kanto_binder_with_bulbasaur(db: Session) -> Binder:
+    """Classeur Pokédex de Kanto : Bulbizarre AR japonaise en pochette 0, pochette 4 réservée à Pikachu (n° 25)."""
+    binder = Binder(id=1, user_id=1, name="151-AR", pokedex_region="kanto", pokedex_slots={"0": 1, "4": 25})
+    db.add(binder)
+    db.flush()
+    bulbasaur = _collection_card(
+        db, language="ja", quantity=1, tcgdex_card_id="SV2a-166", rarity="Illustration rare"
+    )
+    _put_in_binder(db, bulbasaur, 0)
+    return binder
+
+
+def _put_in_binder(db: Session, card: CollectionCard, position: int) -> None:
+    db.add(BinderItem(binder_id=1, collection_card_id=card.id, position=position))
+    db.commit()
+
+
+def test_preview_offers_the_binder_pocket_where_the_card_is_wanted(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _pikachu_art_rare_meta())
+    _kanto_binder_with_bulbasaur(db)
+    wanted_card = _collection_card(db, language="ja", quantity=0, is_placeholder=True, tcgdex_card_id="SV2a-173")
+    _put_in_binder(db, wanted_card, 4)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV2a-173", "ja")
+
+    assert preview["fillable_binder_slots"] == [
+        {"binder_id": 1, "binder_name": "151-AR", "kind": "wanted_card", "position": 4}
+    ]
+
+
+def test_preview_offers_the_empty_pocket_of_its_pokemon_to_a_card_like_the_binder_cards(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _pikachu_art_rare_meta())
+    _kanto_binder_with_bulbasaur(db)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV2a-173", "ja")
+
+    assert preview["fillable_binder_slots"] == [
+        {"binder_id": 1, "binder_name": "151-AR", "kind": "pokedex_slot", "position": 4}
+    ]
+
+
+@pytest.mark.parametrize(("language", "rarity"), [("fr", "Illustration rare"), ("ja", "Common")])
+def test_preview_keeps_the_pocket_of_its_pokemon_from_a_card_unlike_the_binder_cards(
+    db: Session, monkeypatch: pytest.MonkeyPatch, language: str, rarity: str
+) -> None:
+    meta = _pikachu_art_rare_meta(language=language, rarity=rarity)
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: meta)
+    _kanto_binder_with_bulbasaur(db)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV2a-173", language)
+
+    assert preview["fillable_binder_slots"] == []
+
+
+def test_preview_offers_no_pocket_to_a_card_already_in_the_binder(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _pikachu_art_rare_meta())
+    _kanto_binder_with_bulbasaur(db)
+    owned_card = _collection_card(
+        db, language="ja", quantity=1, tcgdex_card_id="SV2a-173", rarity="Illustration rare"
+    )
+    _put_in_binder(db, owned_card, 4)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV2a-173", "ja")
+
+    assert preview["fillable_binder_slots"] == []
+
+
+def test_adding_a_card_to_a_binder_puts_it_in_the_empty_pocket_of_its_pokemon(db: Session) -> None:
+    _kanto_binder_with_bulbasaur(db)
+    db.close()
+
+    card_json, created, binder_placement = scan_stream_service._add_to_binder_slot(1, _pikachu_art_rare_meta(), 1)
+
+    assert created is True
+    assert card_json["quantity"] == 1
+    assert binder_placement == {"binder_id": 1, "binder_name": "151-AR", "kind": "pokedex_slot", "position": 4}
+    pocket_item = db.query(BinderItem).filter(BinderItem.collection_card_id == card_json["id"]).one()
+    assert pocket_item.position == 4
+
+
+def test_adding_a_wanted_card_to_its_binder_fills_its_pocket(db: Session) -> None:
+    _kanto_binder_with_bulbasaur(db)
+    wanted_card = _collection_card(db, language="ja", quantity=0, is_placeholder=True, tcgdex_card_id="SV2a-173")
+    wanted_card_id = wanted_card.id
+    _put_in_binder(db, wanted_card, 4)
+    db.close()
+
+    card_json, _, binder_placement = scan_stream_service._add_to_binder_slot(1, _pikachu_art_rare_meta(), 1)
+
+    assert card_json["id"] == wanted_card_id
+    assert card_json["quantity"] == 1
+    assert card_json["is_placeholder"] is False
+    assert binder_placement["kind"] == "wanted_card"
+    assert db.query(BinderItem).filter(BinderItem.collection_card_id == wanted_card_id).count() == 1
+
+
+def test_adding_a_card_to_a_binder_without_room_for_it_adds_nothing(db: Session) -> None:
+    _kanto_binder_with_bulbasaur(db)
+    other_pikachu = _collection_card(
+        db, language="ja", quantity=1, tcgdex_card_id="SV4a-205", rarity="Illustration rare"
+    )
+    _put_in_binder(db, other_pikachu, 4)
+    db.close()
+
+    with pytest.raises(ValueError, match="plus de place"):
+        scan_stream_service._add_to_binder_slot(1, _pikachu_art_rare_meta(), 1)
+
+    assert db.query(CollectionCard).filter(CollectionCard.tcgdex_card_id == "SV2a-173").count() == 0
+
+
+def test_undoing_an_add_to_the_pocket_of_its_pokemon_empties_the_pocket(db: Session) -> None:
+    _kanto_binder_with_bulbasaur(db)
+    db.close()
+    card_json, _, binder_placement = scan_stream_service._add_to_binder_slot(1, _pikachu_art_rare_meta(), 1)
+    hub = get_scan_stream_hub()
+    hub.clear_events(1)
+    added_event = {
+        "event_id": "sheet-binder-undo-01",
+        "user_id": 1,
+        "status": "added",
+        "collection_card": card_json,
+        "binder_placement": binder_placement,
+    }
+    asyncio.run(hub.publish(1, added_event))
+
+    asyncio.run(scan_stream_service.undo_added_scan(user_id=1, event_id="sheet-binder-undo-01"))
+
+    db.expire_all()
+    assert db.get(CollectionCard, card_json["id"]) is None
+    assert db.query(BinderItem).filter(BinderItem.position == 4).count() == 0
+    hub.clear_events(1)
+
+
+def test_undoing_an_add_to_the_pocket_of_its_pokemon_keeps_the_copy_owned_before(db: Session) -> None:
+    _collection_card(db, language="ja", quantity=1, tcgdex_card_id="SV2a-173", rarity="Illustration rare")
+    _kanto_binder_with_bulbasaur(db)
+    db.close()
+    card_json, created, binder_placement = scan_stream_service._add_to_binder_slot(1, _pikachu_art_rare_meta(), 1)
+
+    scan_stream_service._remove_added_copy(1, card_json["id"], binder_placement)
+
+    assert created is False
+    db.expire_all()
+    card = db.get(CollectionCard, card_json["id"])
+    assert card is not None
+    assert card.quantity == 1
+    assert db.query(BinderItem).filter(BinderItem.collection_card_id == card.id).count() == 0

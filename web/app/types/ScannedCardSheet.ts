@@ -2,6 +2,13 @@ import type { Ref } from 'vue'
 import type { ScanDirection, ScanEvent } from '~/composables/useScanStream'
 import type { ScanMatchDecision } from '~/types/ScanMatch'
 
+export type FillableBinderSlot = {
+  binder_id: number
+  binder_name: string
+  kind: 'wanted_card' | 'pokedex_slot'
+  position: number
+}
+
 export type ScannedCardPreview = {
   tcgdex_card_id: string
   tcgdex_set_id: string
@@ -14,6 +21,7 @@ export type ScannedCardPreview = {
   image_url: string | null
   market_price_eur: number | null
   owned_quantity: number
+  fillable_binder_slots: FillableBinderSlot[]
 }
 
 export type ScannedCardAction = 'idle' | 'pending' | 'done' | 'failed'
@@ -26,6 +34,7 @@ export type ScannedCard = {
   isPreviewLoading: boolean
   ownedQuantity: number | null
   action: ScannedCardAction
+  actionBinderId: number | null
   actionEventId: string | null
   actionError: string | null
   addedEventIds: string[]
@@ -40,6 +49,7 @@ export type ScannedCardSheetDependencies = {
     language: string,
     direction: ScanDirection,
     eventId: string,
+    binderId: number | null,
   ) => Promise<unknown>
   undoScanEvent: (eventId: string) => Promise<unknown>
 }
@@ -47,6 +57,6 @@ export type ScannedCardSheetDependencies = {
 export type ScannedCardSheet = {
   scannedCard: Ref<ScannedCard | null>
   showScannedCard: (decision: ScanMatchDecision, imageUrl: string, direction: ScanDirection) => void
-  confirmScannedCardAction: () => Promise<void>
+  confirmScannedCardAction: (binderId: number | null) => Promise<void>
   dismissScannedCard: () => Promise<number>
 }

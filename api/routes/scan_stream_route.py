@@ -29,7 +29,7 @@ from fastapi import (
     WebSocket,
     status,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
@@ -156,6 +156,7 @@ class MatchedScanPayload(BaseModel):
     language: str = "en"
     direction: str = "in"
     event_id: str | None = None
+    binder_id: int | None = Field(None, gt=0)
 
 
 def _validated_card_id(raw: str) -> str:
@@ -214,6 +215,7 @@ async def commit_matched_scan(
         physical_language=physical_language,
         direction=scan_direction,  # type: ignore[arg-type]
         client_event_id=client_event_id,
+        binder_id=payload.binder_id,
     )
     return {
         "event_id": event_id,

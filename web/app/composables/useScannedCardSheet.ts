@@ -85,6 +85,7 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
       isPreviewLoading: true,
       ownedQuantity: null,
       action: 'idle',
+      actionBinderId: null,
       actionEventId: null,
       actionError: null,
       addedEventIds: [],
@@ -107,6 +108,9 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     clearActionTimers()
     card.action = 'failed'
     card.actionError = message
+    if (card.actionBinderId !== null) {
+      loadScannedCardPreview(card)
+    }
   }
 
   /**
@@ -120,18 +124,29 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     card.action = 'done'
     card.ownedQuantity = Math.max(0, (card.ownedQuantity ?? 0) + ownedQuantityChange)
     doneStateTimer = setTimeout((): void => {
-      if (scannedCard.value === card && card.action === 'done') {
-        card.action = 'idle'
-      }
+      reloadPreviewThenResetAction(card)
     }, DONE_STATE_DURATION_MS)
-    loadScannedCardPreview(card)
+  }
+
+  /**
+   * Relit la fiche de la carte, puis remet ses boutons au repos si aucune autre action n'a été lancée entre-temps.
+   * @param {ScannedCard} card - Carte affichée dont l'action a abouti.
+   * @returns {Promise<void>} Résolue une fois la fiche relue.
+   */
+  async function reloadPreviewThenResetAction(card: ScannedCard): Promise<void> {
+    await loadScannedCardPreview(card)
+    if (scannedCard.value === card && card.action === 'done') {
+      card.action = 'idle'
+      card.actionBinderId = null
+    }
   }
 
   /**
    * Ajoute (ou retire) un exemplaire de la carte affichée ; l'issue arrive par le flux d'événements de scan.
+   * @param {number | null} binderId - Classeur où ranger l'exemplaire ajouté, `null` pour la collection seule.
    * @returns {Promise<void>} Résolue quand la demande est partie (ou a échoué).
    */
-  async function confirmScannedCardAction(): Promise<void> {
+  async function confirmScannedCardAction(binderId: number | null = null): Promise<void> {
     const card: ScannedCard | null = scannedCard.value
     const isTapTooSoonAfterCardSwitch: boolean = Date.now() - shownAt < CARD_SWITCH_TAP_GUARD_MS
     if (!card || card.action === 'pending' || isTapTooSoonAfterCardSwitch) {
@@ -141,6 +156,7 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     clearActionTimers()
     const eventId: string = `sheet-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
     card.action = 'pending'
+    card.actionBinderId = binderId
     card.actionEventId = eventId
     card.actionError = null
     actionTimeoutTimer = setTimeout((): void => {
@@ -148,7 +164,13 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     }, ACTION_TIMEOUT_MS)
 
     try {
-      await dependencies.commitMatchedScan(card.decision.tcgdexCardId, card.decision.language, card.direction, eventId)
+      await dependencies.commitMatchedScan(
+        card.decision.tcgdexCardId,
+        card.decision.language,
+        card.direction,
+        eventId,
+        binderId,
+      )
     } catch (error: unknown) {
       failScannedCardAction(eventId, apiErrorMessage(error))
     }

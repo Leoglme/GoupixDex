@@ -45,10 +45,15 @@ def _card_cover_dict(card: CollectionCard) -> dict[str, str]:
     return {"image_url": card.image_url or ""}
 
 
+def _is_owned_card(card: CollectionCard) -> bool:
+    """Carte réellement possédée, par opposition à un emplacement « manquante » de classeur."""
+    return not card.is_placeholder and int(card.quantity) > 0
+
+
 def _pocket_item_dict(item: BinderItem) -> dict[str, Any]:
     card = item.collection_card
     kind = "wanted"
-    if card and not card.is_placeholder and int(card.quantity) > 0:
+    if card and _is_owned_card(card):
         kind = "owned"
     return {
         "id": pocket_key(item.collection_card_id),
@@ -79,7 +84,7 @@ def _binder_completion_stats(binder: Binder, items: list[BinderItem]) -> dict[st
         card = bi.collection_card
         if card is None:
             continue
-        is_owned = (not card.is_placeholder) and int(card.quantity) > 0
+        is_owned = _is_owned_card(card)
         if is_owned:
             owned += 1
             if card.purchase_price_eur is not None:
@@ -142,14 +147,29 @@ def _resolve_covers(binder: Binder, items: list[BinderItem]) -> list[dict[str, s
     return covers
 
 
-def list_binders_for_user(db: Session, user_id: int) -> list[dict[str, Any]]:
-    rows = (
+def _user_binders_with_cards(db: Session, user_id: int) -> list[Binder]:
+    """Classeurs de l'utilisateur dans l'ordre de sa liste, pochettes et cartes chargées d'avance."""
+    return (
         db.query(Binder)
         .options(joinedload(Binder.items).joinedload(BinderItem.collection_card))
         .filter(Binder.user_id == user_id)
         .order_by(Binder.position.asc(), Binder.created_at.asc())
         .all()
     )
+
+
+def get_binder_with_cards(db: Session, binder_id: int, user_id: int) -> Binder | None:
+    """Classeur de l'utilisateur avec ses pochettes et leurs cartes chargées d'avance, ``None`` s'il n'existe pas."""
+    return (
+        db.query(Binder)
+        .options(joinedload(Binder.items).joinedload(BinderItem.collection_card))
+        .filter(Binder.id == binder_id, Binder.user_id == user_id)
+        .first()
+    )
+
+
+def list_binders_for_user(db: Session, user_id: int) -> list[dict[str, Any]]:
+    rows = _user_binders_with_cards(db, user_id)
     out: list[dict[str, Any]] = []
     for b in rows:
         count = 0
@@ -173,12 +193,7 @@ def list_binders_for_user(db: Session, user_id: int) -> list[dict[str, Any]]:
 
 
 def get_binder_detail(db: Session, binder_id: int, user_id: int) -> dict[str, Any] | None:
-    binder = (
-        db.query(Binder)
-        .options(joinedload(Binder.items).joinedload(BinderItem.collection_card))
-        .filter(Binder.id == binder_id, Binder.user_id == user_id)
-        .first()
-    )
+    binder = get_binder_with_cards(db, binder_id, user_id)
     if binder is None:
         return None
 
@@ -599,3 +614,93 @@ def add_items_to_binder(db: Session, binder: Binder, user_id: int, collection_ca
         present.add(cid)
         pocket += 1
     db.commit()
+
+
+def _is_same_card(card: CollectionCard, tcgdex_card_id: str, language: str) -> bool:
+    """Même carte physique : même id TCGdex, casse ignorée comme en base, et même langue."""
+    return card.tcgdex_card_id.lower() == tcgdex_card_id.lower() and card.language == language
+
+
+def _binder_item_holding_card(binder: Binder, tcgdex_card_id: str, language: str) -> BinderItem | None:
+    """Pochette du classeur qui contient la carte, possédée ou prévue, ``None`` si elle n'y est pas."""
+    return next(
+        (
+            item
+            for item in binder.items
+            if item.collection_card is not None and _is_same_card(item.collection_card, tcgdex_card_id, language)
+        ),
+        None,
+    )
+
+
+def _free_pokedex_pocket(binder: Binder, pokedex_number: int) -> int | None:
+    """Première pochette réservée à ce Pokémon (``pokedex_slots``) où aucune carte n'est encore rangée."""
+    occupied_pockets = {item.position for item in binder.items}
+    reserved_pockets = sorted(
+        int(pocket)
+        for pocket, slot_pokedex_number in (binder.pokedex_slots or {}).items()
+        if slot_pokedex_number == pokedex_number and str(pocket).isdigit()
+    )
+    return next((pocket for pocket in reserved_pockets if pocket not in occupied_pockets), None)
+
+
+def _rarity_key(rarity: str | None) -> str:
+    """Rareté comparable d'une fiche à l'autre, vide quand TCGdex écrit « None » faute de rareté."""
+    key = (rarity or "").strip().lower()
+    return "" if key == "none" else key
+
+
+def _resembles_binder_cards(binder: Binder, *, language: str, rarity: str | None) -> bool:
+    """Vrai si la langue et la rareté de la carte figurent parmi celles du classeur ; un classeur vide accepte tout."""
+    binder_cards = [item.collection_card for item in binder.items if item.collection_card is not None]
+    binder_languages = {card.language for card in binder_cards}
+    binder_rarities = {_rarity_key(card.rarity) for card in binder_cards} - {""}
+    if binder_languages and language not in binder_languages:
+        return False
+    return not binder_rarities or _rarity_key(rarity) in binder_rarities
+
+
+def binder_slot_for_card(
+    binder: Binder,
+    *,
+    tcgdex_card_id: str,
+    language: str,
+    pokedex_number: int | None,
+    rarity: str | None,
+) -> dict[str, Any] | None:
+    """Pochette que la carte peut remplir : celle où le classeur la prévoit, sinon la pochette vide de son Pokémon."""
+    holding_item = _binder_item_holding_card(binder, tcgdex_card_id, language)
+    if holding_item is not None:
+        if _is_owned_card(holding_item.collection_card):
+            return None
+        return {"kind": "wanted_card", "position": holding_item.position}
+    if not binder.pokedex_region or pokedex_number is None:
+        return None
+    pocket = _free_pokedex_pocket(binder, pokedex_number)
+    if pocket is None or not _resembles_binder_cards(binder, language=language, rarity=rarity):
+        return None
+    return {"kind": "pokedex_slot", "position": pocket}
+
+
+def fillable_binder_slots_for_card(
+    db: Session,
+    user_id: int,
+    *,
+    tcgdex_card_id: str,
+    language: str,
+    pokedex_number: int | None,
+    rarity: str | None,
+) -> list[dict[str, Any]]:
+    """Pochettes que la carte peut remplir dans les classeurs de l'utilisateur, une par classeur au plus."""
+    fillable_binder_slots: list[dict[str, Any]] = []
+    for binder in _user_binders_with_cards(db, user_id):
+        slot = binder_slot_for_card(
+            binder,
+            tcgdex_card_id=tcgdex_card_id,
+            language=language,
+            pokedex_number=pokedex_number,
+            rarity=rarity,
+        )
+        if slot is not None:
+            fillable_binder_slots.append({"binder_id": binder.id, "binder_name": binder.name, **slot})
+    return fillable_binder_slots

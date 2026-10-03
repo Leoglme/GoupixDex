@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from core.database import SessionLocal
 from models.binder import BinderItem
 from models.collection_card import CollectionCard
-from services import collection_card_service
+from services import binder_service, collection_card_service
 from services.card_image_enhance import enhance_for_ocr
 from services.card_image_gate import assess_card_image
 from services.collection_card_lookup_service import fetch_card_for_collection
@@ -107,6 +107,7 @@ def _public_event(
     deleted: bool | None = None,
     remaining_quantity: int | None = None,
     drop_reason: str | None = None,
+    binder_placement: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Shape published to the WebSocket (snake_case, JSON-serialisable)."""
     return {
@@ -123,6 +124,7 @@ def _public_event(
         "deleted": deleted,
         "remaining_quantity": remaining_quantity,
         "drop_reason": drop_reason,
+        "binder_placement": binder_placement,
         "error": error,
         "ts": _now_iso(),
     }
@@ -196,7 +198,71 @@ def build_scanned_card_preview(
         "owned_quantity": sum(
             quantity for language, quantity in owned_by_language.items() if language in print_languages
         ),
+        "fillable_binder_slots": binder_service.fillable_binder_slots_for_card(
+            db,
+            user_id,
+            tcgdex_card_id=meta["tcgdex_card_id"],
+            language=meta["language"],
+            pokedex_number=meta.get("dex_id"),
+            rarity=meta.get("rarity"),
+        ),
     }
+
+
+def _add_one_copy(
+    db: Session,
+    user_id: int,
+    meta: dict[str, Any],
+    *,
+    notes: str | None,
+) -> tuple[CollectionCard, bool]:
+    """Ajoute un exemplaire de la carte, sans commit, et renvoie ``(carte, created)``."""
+    existing = collection_card_service.find_existing_for_user(
+        db,
+        user_id,
+        tcgdex_card_id=meta["tcgdex_card_id"],
+        language=meta["language"],
+    )
+    if existing is not None:
+        fills_binder_placeholder = bool(existing.is_placeholder)
+        # Un emplacement vide de classeur (quantité 0) devient la carte scannée, au lieu de rester invisible.
+        existing.is_placeholder = False
+        existing.quantity = 1 if fills_binder_placeholder else int(existing.quantity) + 1
+        existing.last_added_at = dt.datetime.now(dt.UTC)
+        if notes:
+            existing.notes = notes.strip() or existing.notes
+        collection_card_service.apply_market_price(
+            existing,
+            cardmarket_id_product=meta.get("cardmarket_id_product"),
+            market_price_eur=meta.get("market_price_eur"),
+        )
+        return existing, fills_binder_placeholder
+
+    row = CollectionCard(
+        user_id=user_id,
+        tcgdex_card_id=meta["tcgdex_card_id"],
+        tcgdex_set_id=meta["tcgdex_set_id"],
+        set_code=meta["set_code"],
+        set_name=meta["set_name"],
+        card_number=meta["card_number"],
+        card_name_en=meta["card_name_en"],
+        card_name_fr=meta["card_name_fr"],
+        card_name_ja=meta["card_name_ja"],
+        display_name=meta["display_name"],
+        rarity=meta["rarity"],
+        language=meta["language"],
+        image_url=meta["image_url"],
+        quantity=1,
+        notes=(notes.strip() if notes else None),
+    )
+    collection_card_service.apply_market_price(
+        row,
+        cardmarket_id_product=meta.get("cardmarket_id_product"),
+        market_price_eur=meta.get("market_price_eur"),
+    )
+    db.add(row)
+    db.flush()
+    return row, True
 
 
 def _add_or_increment(
@@ -212,55 +278,51 @@ def _add_or_increment(
     """
     db = SessionLocal()
     try:
-        existing = collection_card_service.find_existing_for_user(
-            db,
-            user_id,
-            tcgdex_card_id=meta["tcgdex_card_id"],
-            language=meta["language"],
-        )
-        if existing is not None:
-            fills_binder_placeholder = bool(existing.is_placeholder)
-            # Un emplacement vide de classeur (quantité 0) devient la carte scannée, au lieu de rester invisible.
-            existing.is_placeholder = False
-            existing.quantity = 1 if fills_binder_placeholder else int(existing.quantity) + 1
-            existing.last_added_at = dt.datetime.now(dt.UTC)
-            if notes:
-                existing.notes = notes.strip() or existing.notes
-            collection_card_service.apply_market_price(
-                existing,
-                cardmarket_id_product=meta.get("cardmarket_id_product"),
-                market_price_eur=meta.get("market_price_eur"),
-            )
-            db.commit()
-            db.refresh(existing)
-            return collection_card_service.collection_card_to_dict(existing), fills_binder_placeholder
-
-        row = CollectionCard(
-            user_id=user_id,
-            tcgdex_card_id=meta["tcgdex_card_id"],
-            tcgdex_set_id=meta["tcgdex_set_id"],
-            set_code=meta["set_code"],
-            set_name=meta["set_name"],
-            card_number=meta["card_number"],
-            card_name_en=meta["card_name_en"],
-            card_name_fr=meta["card_name_fr"],
-            card_name_ja=meta["card_name_ja"],
-            display_name=meta["display_name"],
-            rarity=meta["rarity"],
-            language=meta["language"],
-            image_url=meta["image_url"],
-            quantity=1,
-            notes=(notes.strip() if notes else None),
-        )
-        collection_card_service.apply_market_price(
-            row,
-            cardmarket_id_product=meta.get("cardmarket_id_product"),
-            market_price_eur=meta.get("market_price_eur"),
-        )
-        db.add(row)
+        card, created = _add_one_copy(db, user_id, meta, notes=notes)
         db.commit()
-        db.refresh(row)
-        return collection_card_service.collection_card_to_dict(row), True
+        db.refresh(card)
+        return collection_card_service.collection_card_to_dict(card), created
+    finally:
+        db.close()
+
+
+def _add_to_binder_slot(
+    user_id: int,
+    meta: dict[str, Any],
+    binder_id: int,
+) -> tuple[dict[str, Any], bool, dict[str, Any]]:
+    """
+    Ajoute un exemplaire et le range dans le classeur : sa pochette prévue ou la pochette vide de son Pokémon.
+
+    Renvoie ``(card_dict, created, binder_placement)``.
+
+    Raises:
+        ValueError: le classeur est introuvable, ou n'a plus de place pour cette carte.
+    """
+    db = SessionLocal()
+    try:
+        binder = binder_service.get_binder_with_cards(db, binder_id, user_id)
+        if binder is None:
+            msg = "Classeur introuvable."
+            raise ValueError(msg)
+        slot = binder_service.binder_slot_for_card(
+            binder,
+            tcgdex_card_id=meta["tcgdex_card_id"],
+            language=meta["language"],
+            pokedex_number=meta.get("dex_id"),
+            rarity=meta.get("rarity"),
+        )
+        if slot is None:
+            msg = f"Cette carte n'a plus de place libre dans « {binder.name} »."
+            raise ValueError(msg)
+
+        card, created = _add_one_copy(db, user_id, meta, notes=None)
+        if slot["kind"] == "pokedex_slot":
+            db.add(BinderItem(binder_id=binder.id, collection_card_id=card.id, position=slot["position"]))
+        binder_placement = {"binder_id": binder.id, "binder_name": binder.name, **slot}
+        db.commit()
+        db.refresh(card)
+        return collection_card_service.collection_card_to_dict(card), created, binder_placement
     finally:
         db.close()
 
@@ -323,7 +385,11 @@ def _decrement_or_delete(
         db.close()
 
 
-def _remove_added_copy(user_id: int, collection_card_id: int) -> tuple[dict[str, Any] | None, bool, int]:
+def _remove_added_copy(
+    user_id: int,
+    collection_card_id: int,
+    binder_placement: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, bool, int]:
     """
     Retire l'exemplaire qu'un scan vient d'ajouter : la carte placée dans un classeur redevient un emplacement vide.
 
@@ -334,6 +400,12 @@ def _remove_added_copy(user_id: int, collection_card_id: int) -> tuple[dict[str,
         row = collection_card_service.get_collection_card(db, collection_card_id, user_id)
         if row is None or row.is_placeholder:
             return None, True, 0
+
+        if binder_placement is not None and binder_placement.get("kind") == "pokedex_slot":
+            db.query(BinderItem).filter(
+                BinderItem.binder_id == int(binder_placement["binder_id"]),
+                BinderItem.collection_card_id == row.id,
+            ).delete()
 
         if int(row.quantity) > 1:
             row.quantity = int(row.quantity) - 1
@@ -810,6 +882,7 @@ async def _process_matched_scan(
     tcgdex_card_id: str,
     physical_language: str,
     direction: ScanDirection,
+    binder_id: int | None,
 ) -> None:
     """
     Commit a card identified **on the phone** by the visual match index, once
@@ -884,15 +957,22 @@ async def _process_matched_scan(
         )
         return
 
+    binder_placement: dict[str, Any] | None = None
     try:
         meta = await loop.run_in_executor(
             None,
             lambda: scanned_card_meta(tcgdex_card_id, physical_language),
         )
-        card_dict, created = await loop.run_in_executor(
-            None,
-            lambda: _add_or_increment(user_id, meta, notes=None),
-        )
+        if binder_id is None:
+            card_dict, created = await loop.run_in_executor(
+                None,
+                lambda: _add_or_increment(user_id, meta, notes=None),
+            )
+        else:
+            card_dict, created, binder_placement = await loop.run_in_executor(
+                None,
+                lambda: _add_to_binder_slot(user_id, meta, binder_id),
+            )
     except Exception as exc:
         logger.warning("scan-match commit failed event=%s card=%s: %s", event_id, tcgdex_card_id, exc)
         await hub.publish(
@@ -920,6 +1000,7 @@ async def _process_matched_scan(
             tcgdex_card_id=tcgdex_card_id,
             collection_card=card_dict,
             created=created,
+            binder_placement=binder_placement,
         ),
     )
 
@@ -931,6 +1012,7 @@ def submit_matched_scan(
     physical_language: str,
     direction: ScanDirection = "in",
     client_event_id: str | None = None,
+    binder_id: int | None = None,
 ) -> str:
     """
     Enqueue the commit of a card identified on-device (visual match). Returns
@@ -945,6 +1027,7 @@ def submit_matched_scan(
             tcgdex_card_id=tcgdex_card_id,
             physical_language=physical_language,
             direction=direction,
+            binder_id=binder_id if direction == "in" else None,
         )
     )
     _background_tasks.add(task)
@@ -972,11 +1055,16 @@ async def undo_added_scan(*, user_id: int, event_id: str) -> dict[str, Any]:
 
     # Retiré du flux avant la base : un double appui ne peut pas retirer deux exemplaires.
     hub.dismiss_event(user_id, event_id)
+    binder_placement = event.get("binder_placement")
     loop = asyncio.get_running_loop()
     try:
         card_dict, left_collection, remaining = await loop.run_in_executor(
             None,
-            lambda: _remove_added_copy(user_id, int(added_card["id"])),
+            lambda: _remove_added_copy(
+                user_id,
+                int(added_card["id"]),
+                binder_placement if isinstance(binder_placement, dict) else None,
+            ),
         )
     except Exception:
         await hub.publish(user_id, event)
