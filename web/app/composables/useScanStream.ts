@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { AxiosInstance } from 'axios'
 import type { CollectionCard } from '~/composables/useCollection'
+import type { FillableBinderSlot } from '~/types/binders'
 import type { ScannedCardPreview } from '~/types/ScannedCardSheet'
 
 /**
@@ -45,6 +46,7 @@ export interface ScanEvent {
   deleted?: boolean | null
   remaining_quantity?: number | null
   drop_reason?: string | null
+  binder_placement?: FillableBinderSlot | null
   error: string | null
   ts: number
 }

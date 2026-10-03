@@ -3,6 +3,7 @@ import type { ScanDirection, ScanEvent } from '~/composables/useScanStream'
 import type { ScanMatchDecision } from '~/types/ScanMatch'
 import type {
   ScannedCard,
+  ScannedCardAdd,
   ScannedCardPreview,
   ScannedCardSheet,
   ScannedCardSheetDependencies,
@@ -15,7 +16,7 @@ const CARD_SWITCH_TAP_GUARD_MS: number = 400
 /**
  * Fiche de la carte reconnue par le scanner : aperçu (cote, exemplaires possédés) et ajout ou retrait confirmé au tap.
  * @param {ScannedCardSheetDependencies} dependencies - Flux d'événements de scan et appels API de la page scan.
- * @returns {ScannedCardSheet} Carte affichée, ouverture, confirmation et fermeture de la fiche.
+ * @returns {ScannedCardSheet} Carte affichée, ouverture, confirmation, annulation du dernier ajout et fermeture de la fiche.
  */
 export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies): ScannedCardSheet {
   const scannedCard: Ref<ScannedCard | null> = ref(null)
@@ -88,8 +89,8 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
       actionBinderId: null,
       actionEventId: null,
       actionError: null,
-      addedEventIds: [],
-      isCancellingAdds: false,
+      addsFromSheet: [],
+      isUndoingLastAdd: false,
     }
     loadScannedCardPreview(scannedCard.value)
   }
@@ -177,48 +178,85 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
   }
 
   /**
-   * Ferme la fiche en annulant d'abord les exemplaires ajoutés depuis elle ; reste ouverte si une annulation échoue.
-   * @returns {Promise<number>} Nombre d'ajouts annulés.
+   * Annule le dernier exemplaire ajouté depuis la fiche : il quitte la collection et le classeur où il avait été rangé.
+   * @returns {Promise<boolean>} `true` quand l'ajout est annulé, `false` s'il n'y avait rien à annuler ou si l'annulation a échoué.
    */
-  async function dismissScannedCard(): Promise<number> {
+  async function undoLastScannedCardAdd(): Promise<boolean> {
     const card: ScannedCard | null = scannedCard.value
-    if (!card || card.action === 'pending' || card.isCancellingAdds) {
-      return 0
+    const lastAdd: ScannedCardAdd | undefined = card?.addsFromSheet.at(-1)
+    if (!card || !lastAdd || card.action === 'pending' || card.isUndoingLastAdd) {
+      return false
     }
 
-    let cancelledAddCount: number = 0
-    card.isCancellingAdds = true
+    card.isUndoingLastAdd = true
     card.actionError = null
     try {
-      for (const addedEventId of [...card.addedEventIds]) {
-        await dependencies.undoScanEvent(addedEventId)
-        card.addedEventIds = card.addedEventIds.filter((eventId: string): boolean => eventId !== addedEventId)
-        card.ownedQuantity = Math.max(0, (card.ownedQuantity ?? 0) - 1)
-        cancelledAddCount += 1
-      }
+      await dependencies.undoScanEvent(lastAdd.eventId)
     } catch (error: unknown) {
-      card.isCancellingAdds = false
       card.actionError = `Annulation impossible : ${apiErrorMessage(error)}`
-      return cancelledAddCount
+      return false
+    } finally {
+      card.isUndoingLastAdd = false
     }
 
-    clearActionTimers()
-    if (scannedCard.value === card) {
-      scannedCard.value = null
+    card.addsFromSheet = card.addsFromSheet.filter((add: ScannedCardAdd): boolean => add !== lastAdd)
+    card.ownedQuantity = Math.max(0, (card.ownedQuantity ?? 0) - 1)
+    if (scannedCard.value === card && card.action === 'done') {
+      clearActionTimers()
+      card.action = 'idle'
+      card.actionBinderId = null
     }
-    return cancelledAddCount
+    loadScannedCardPreview(card)
+    return true
+  }
+
+  /**
+   * Ferme la fiche sans annuler les exemplaires ajoutés depuis elle.
+   * @returns {void}
+   */
+  function dismissScannedCard(): void {
+    clearActionTimers()
+    scannedCard.value = null
+  }
+
+  /**
+   * Oublie les ajouts annulés depuis la liste des scans, puis relit la fiche.
+   * @param {ScannedCard} card - Carte affichée.
+   * @param {ScanEvent[]} events - Scans de la liste.
+   * @returns {void}
+   */
+  function forgetAddsUndoneFromScanList(card: ScannedCard, events: ScanEvent[]): void {
+    if (card.isUndoingLastAdd) {
+      return
+    }
+    const listedEventIds: Set<string> = new Set(events.map((event: ScanEvent): string => event.event_id))
+    const addsStillListed: ScannedCardAdd[] = card.addsFromSheet.filter((add: ScannedCardAdd): boolean =>
+      listedEventIds.has(add.eventId),
+    )
+    if (addsStillListed.length === card.addsFromSheet.length) {
+      return
+    }
+    card.addsFromSheet = addsStillListed
+    loadScannedCardPreview(card)
   }
 
   watch(dependencies.events, (events: ScanEvent[]): void => {
     const card: ScannedCard | null = scannedCard.value
-    if (!card || card.action !== 'pending' || !card.actionEventId) {
+    if (!card) {
+      return
+    }
+    forgetAddsUndoneFromScanList(card, events)
+    if (card.action !== 'pending' || !card.actionEventId) {
       return
     }
     const outcome: ScanEvent | undefined = events.find(
       (event: ScanEvent): boolean => event.event_id === card.actionEventId,
     )
     if (outcome?.status === 'added') {
-      card.addedEventIds = [...card.addedEventIds, card.actionEventId]
+      card.addsFromSheet = [
+        ...card.addsFromSheet,
+        { eventId: card.actionEventId, binderName: outcome.binder_placement?.binder_name ?? null },
+      ]
       completeScannedCardAction(card, 1)
     } else if (outcome?.status === 'removed') {
       completeScannedCardAction(card, -1)
@@ -231,5 +269,5 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     clearActionTimers()
   })
 
-  return { scannedCard, showScannedCard, confirmScannedCardAction, dismissScannedCard }
+  return { scannedCard, showScannedCard, confirmScannedCardAction, undoLastScannedCardAdd, dismissScannedCard }
 }

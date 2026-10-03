@@ -23,15 +23,11 @@
           <button
             type="button"
             class="-mt-1 -mr-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed"
-            :aria-label="props.scannedCard.addedEventIds.length ? 'Annuler l’ajout' : 'Fermer la fiche'"
-            :disabled="props.scannedCard.action === 'pending' || props.scannedCard.isCancellingAdds"
+            aria-label="Fermer la fiche"
+            :disabled="isWaitingForServer"
             @click="emit('close')"
           >
-            <UIcon
-              :name="props.scannedCard.isCancellingAdds ? 'i-lucide-loader-circle' : 'i-lucide-x'"
-              class="size-5"
-              :class="{ 'animate-spin': props.scannedCard.isCancellingAdds }"
-            />
+            <UIcon name="i-lucide-x" class="size-5" />
           </button>
         </div>
         <p class="text-sm text-white/60 tabular-nums">{{ printedNumberLabel }}</p>
@@ -91,6 +87,25 @@
         <span class="min-w-0 truncate">{{ actionButtonLabel(actionButton) }}</span>
       </button>
     </div>
+    <div v-if="lastAddFromSheet" class="mt-2 flex items-center gap-3 pl-3 text-sm">
+      <span class="flex size-9 shrink-0 items-center justify-center">
+        <UIcon name="i-lucide-circle-check" class="size-4 text-emerald-300" />
+      </span>
+      <span class="min-w-0 flex-1 truncate text-white/80">{{ lastAddFromSheetLabel }}</span>
+      <button
+        type="button"
+        class="flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="isWaitingForServer"
+        @click="emit('undo')"
+      >
+        <UIcon
+          :name="props.scannedCard.isUndoingLastAdd ? 'i-lucide-loader-circle' : 'i-lucide-undo-2'"
+          class="size-4"
+          :class="{ 'animate-spin': props.scannedCard.isUndoingLastAdd }"
+        />
+        Annuler
+      </button>
+    </div>
     <p v-if="props.scannedCard.actionError" class="mt-2 text-xs text-red-300">
       {{ props.scannedCard.actionError }}
     </p>
@@ -101,7 +116,7 @@
 import type { ComputedRef, PropType } from 'vue'
 import type { FillableBinderSlot } from '~/types/binders'
 import type { GoupixDexScannedCardSheetProps, ScannedCardActionButton } from '~/types/GoupixDexScannedCardSheet'
-import type { ScannedCard, ScannedCardAction, ScannedCardPreview } from '~/types/ScannedCardSheet'
+import type { ScannedCard, ScannedCardAction, ScannedCardAdd, ScannedCardPreview } from '~/types/ScannedCardSheet'
 import { readableSetLabel } from '~/utils/cards/readableSet'
 
 const props: GoupixDexScannedCardSheetProps = defineProps({
@@ -117,6 +132,7 @@ const props: GoupixDexScannedCardSheetProps = defineProps({
 
 const emit = defineEmits<{
   confirm: [binderId: number | null]
+  undo: []
   close: []
 }>()
 
@@ -160,6 +176,19 @@ const isCheckout: ComputedRef<boolean> = computed((): boolean => props.scannedCa
 const isAbsentFromCollection: ComputedRef<boolean> = computed(
   (): boolean => isCheckout.value && props.scannedCard.ownedQuantity === 0,
 )
+
+const isWaitingForServer: ComputedRef<boolean> = computed(
+  (): boolean => props.scannedCard.action === 'pending' || props.scannedCard.isUndoingLastAdd,
+)
+
+const lastAddFromSheet: ComputedRef<ScannedCardAdd | null> = computed(
+  (): ScannedCardAdd | null => props.scannedCard.addsFromSheet.at(-1) ?? null,
+)
+
+const lastAddFromSheetLabel: ComputedRef<string> = computed((): string => {
+  const binderName: string | null = lastAddFromSheet.value?.binderName ?? null
+  return binderName ? `Rangée dans ${binderName}` : 'Ajoutée à ma collection'
+})
 
 const fillableBinderSlots: ComputedRef<FillableBinderSlot[]> = computed((): FillableBinderSlot[] =>
   isCheckout.value ? [] : (props.scannedCard.preview?.fillable_binder_slots ?? []),
@@ -222,7 +251,7 @@ function actionButtonState(actionButton: ScannedCardActionButton): ScannedCardAc
  * @returns {boolean} `true` quand le bouton doit être désactivé.
  */
 function isActionButtonDisabled(actionButton: ScannedCardActionButton): boolean {
-  if (props.scannedCard.action === 'pending' || props.scannedCard.isCancellingAdds) {
+  if (isWaitingForServer.value) {
     return true
   }
   if (actionButton.binderId === null) {

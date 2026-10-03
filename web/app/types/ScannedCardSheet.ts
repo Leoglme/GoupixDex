@@ -20,6 +20,11 @@ export type ScannedCardPreview = {
 
 export type ScannedCardAction = 'idle' | 'pending' | 'done' | 'failed'
 
+export type ScannedCardAdd = {
+  eventId: string
+  binderName: string | null
+}
+
 export type ScannedCard = {
   decision: ScanMatchDecision
   imageUrl: string
@@ -31,8 +36,8 @@ export type ScannedCard = {
   actionBinderId: number | null
   actionEventId: string | null
   actionError: string | null
-  addedEventIds: string[]
-  isCancellingAdds: boolean
+  addsFromSheet: ScannedCardAdd[]
+  isUndoingLastAdd: boolean
 }
 
 export type ScannedCardSheetDependencies = {
@@ -52,5 +57,6 @@ export type ScannedCardSheet = {
   scannedCard: Ref<ScannedCard | null>
   showScannedCard: (decision: ScanMatchDecision, imageUrl: string, direction: ScanDirection) => void
   confirmScannedCardAction: (binderId: number | null) => Promise<void>
-  dismissScannedCard: () => Promise<number>
+  undoLastScannedCardAdd: () => Promise<boolean>
+  dismissScannedCard: () => void
 }

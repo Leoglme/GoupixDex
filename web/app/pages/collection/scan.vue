@@ -227,7 +227,8 @@
               is-embedded
               :scanned-card="scannedCard"
               @confirm="confirmScannedCardAction"
-              @close="onScannedCardClosed"
+              @undo="onUndoLastScannedCardAdd"
+              @close="dismissScannedCard"
             />
             <p class="text-muted text-[11px]">
               Centrez chaque carte dans le cadre&nbsp;: sa fiche s'affiche dès qu'elle est reconnue. Retirez-la pour
@@ -357,7 +358,8 @@
                     class="absolute right-0 bottom-0 left-0 z-20"
                     :scanned-card="scannedCard"
                     @confirm="confirmScannedCardAction"
-                    @close="onScannedCardClosed"
+                    @undo="onUndoLastScannedCardAdd"
+                    @close="dismissScannedCard"
                   />
                 </Transition>
               </div>
@@ -597,8 +599,13 @@ const {
   clearProblemEvents,
 } = useScanStream()
 
-const { scannedCard, showScannedCard, confirmScannedCardAction, dismissScannedCard }: ScannedCardSheet =
-  useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan, undoScanEvent })
+const {
+  scannedCard,
+  showScannedCard,
+  confirmScannedCardAction,
+  undoLastScannedCardAdd,
+  dismissScannedCard,
+}: ScannedCardSheet = useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan, undoScanEvent })
 
 const clearingProblems = ref(false)
 const dismissingId = ref<string | null>(null)
@@ -1755,12 +1762,12 @@ function showRecognizedCard(decision: ScanMatchDecision): void {
 }
 
 /**
- * Ferme la fiche de la carte reconnue ; des exemplaires ajoutés depuis elle sont retirés, avec le son de retrait.
- * @returns {Promise<void>} Résolue quand la fiche est fermée (ou l'échec affiché dessus).
+ * Annule le dernier exemplaire ajouté depuis la fiche de la carte reconnue, avec le son de retrait.
+ * @returns {Promise<void>} Résolue quand l'ajout est annulé (ou l'échec affiché sur la fiche).
  */
-async function onScannedCardClosed(): Promise<void> {
-  const cancelledAddCount: number = await dismissScannedCard()
-  if (cancelledAddCount > 0) {
+async function onUndoLastScannedCardAdd(): Promise<void> {
+  const isAddUndone: boolean = await undoLastScannedCardAdd()
+  if (isAddUndone) {
     playRemoveBeep()
     vibrate([40, 60, 40])
     triggerFlash('removed')
