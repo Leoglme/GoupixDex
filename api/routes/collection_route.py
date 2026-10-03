@@ -26,6 +26,7 @@ from schemas.collection import (
     CollectionCardUpdateBody,
 )
 from services import (
+    binder_service,
     collection_article_sync_service,
     collection_card_price_history_service,
     collection_card_service,
@@ -179,6 +180,39 @@ def get_price_history(
     if row is None:
         raise HTTPException(status_code=404, detail="Carte de collection introuvable.")
     return collection_card_price_history_service.price_history(db, row)
+
+
+@router.get("/{card_id}/binder-slots")
+def list_card_binder_slots(
+    card_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Classeurs Pokédex où cette carte peut prendre la pochette encore vide de son Pokémon."""
+    row = collection_card_service.get_collection_card(db, card_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Carte de collection introuvable.")
+    return {"fillable_binder_slots": binder_service.fillable_binder_slots_for_collection_card(db, user.id, row)}
+
+
+@router.post("/{card_id}/binder-slots/{binder_id}")
+def place_card_in_binder(
+    card_id: int,
+    binder_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Range la carte dans la pochette vide de son Pokémon, dans ce classeur."""
+    row = collection_card_service.get_collection_card(db, card_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Carte de collection introuvable.")
+    binder = binder_service.get_binder_with_cards(db, binder_id, user.id)
+    if binder is None:
+        raise HTTPException(status_code=404, detail="Classeur introuvable.")
+    try:
+        return binder_service.place_collection_card_in_free_slot(db, binder, row)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.patch("/{card_id}")

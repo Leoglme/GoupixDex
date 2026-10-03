@@ -50,6 +50,20 @@
         Mettre en ligne
       </UButton>
 
+      <UButton
+        v-for="binderSlot in fillableBinderSlots"
+        :key="binderSlot.binder_id"
+        color="primary"
+        variant="soft"
+        icon="i-lucide-book-open"
+        block
+        :loading="placingBinderId === binderSlot.binder_id"
+        :disabled="placingBinderId !== null"
+        @click="onPlaceInBinder(binderSlot)"
+      >
+        Ajouter au classeur {{ binderSlot.binder_name }}
+      </UButton>
+
       <!-- Changer la carte (uniquement quand ouverte depuis une pochette de classeur) -->
       <UButton v-if="pocket" color="primary" variant="soft" icon="i-lucide-replace" block @click="emit('change-card')">
         Changer la carte de cette pochette
@@ -183,6 +197,7 @@
 import type { PropType, Ref } from 'vue'
 import type { Article } from '~/composables/useArticles'
 import type { CollectionCard } from '~/composables/useCollection'
+import type { FillableBinderSlot } from '~/types/binders'
 import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
@@ -209,7 +224,14 @@ const emit = defineEmits<{
   'change-card': []
 }>()
 
-const { getCollectionCard, getCardPriceHistory, patchCollectionCard, deleteCollectionCard } = useCollection()
+const {
+  getCollectionCard,
+  getCardPriceHistory,
+  getCardBinderSlots,
+  placeCardInBinder,
+  patchCollectionCard,
+  deleteCollectionCard,
+} = useCollection()
 const { openArticle } = useOpenArticleDrawer()
 const toast = useToast()
 
@@ -220,6 +242,8 @@ const savingDraft = ref(false)
 const deleting = ref(false)
 const resettingPrice = ref(false)
 const isListingWizardOpen: Ref<boolean> = ref(false)
+const fillableBinderSlots: Ref<FillableBinderSlot[]> = ref([])
+const placingBinderId: Ref<number | null> = ref(null)
 
 const languageItems = [
   { label: 'Français', value: 'fr' },
@@ -311,6 +335,7 @@ async function load(): Promise<void> {
     card.value = data
     syncDrafts(data)
     void loadPriceHistory()
+    loadFillableBinderSlots()
   } catch (e) {
     toast.add({ title: 'Carte de collection', description: apiErrorMessage(e), color: 'error' })
     card.value = null
@@ -328,6 +353,43 @@ async function loadPriceHistory(): Promise<void> {
     priceHistory.value = await getCardPriceHistory(props.cardId)
   } catch {
     priceHistory.value = null
+  }
+}
+
+/**
+ * Charge, sans bloquer la fiche, les classeurs Pokédex qui gardent une pochette vide pour cette carte.
+ * @returns {Promise<void>} Résolue quand les pochettes sont chargées ou l'échec acté.
+ */
+async function loadFillableBinderSlots(): Promise<void> {
+  try {
+    fillableBinderSlots.value = await getCardBinderSlots(props.cardId)
+  } catch {
+    fillableBinderSlots.value = []
+  }
+}
+
+/**
+ * Range la carte dans la pochette vide de son Pokémon, dans le classeur choisi.
+ * @param {FillableBinderSlot} binderSlot - Pochette proposée par le classeur.
+ * @returns {Promise<void>} Résolue après le rangement, ou l'échec affiché.
+ */
+async function onPlaceInBinder(binderSlot: FillableBinderSlot): Promise<void> {
+  if (!card.value) {
+    return
+  }
+  placingBinderId.value = binderSlot.binder_id
+  try {
+    await placeCardInBinder(card.value.id, binderSlot.binder_id)
+    fillableBinderSlots.value = fillableBinderSlots.value.filter(
+      (slot: FillableBinderSlot): boolean => slot.binder_id !== binderSlot.binder_id,
+    )
+    emit('updated', card.value)
+    toast.add({ title: `Rangée dans ${binderSlot.binder_name}`, color: 'success' })
+  } catch (e) {
+    toast.add({ title: 'Rangement impossible', description: apiErrorMessage(e), color: 'error' })
+    loadFillableBinderSlots()
+  } finally {
+    placingBinderId.value = null
   }
 }
 
@@ -352,6 +414,7 @@ async function onSaveDraft(): Promise<void> {
     syncDrafts(updated)
     emit('updated', updated)
     toast.add({ title: 'Carte mise à jour', color: 'success' })
+    loadFillableBinderSlots()
   } catch (e) {
     toast.add({ title: 'Mise à jour impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {

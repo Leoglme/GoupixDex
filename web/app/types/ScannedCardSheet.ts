@@ -1,13 +1,7 @@
 import type { Ref } from 'vue'
 import type { ScanDirection, ScanEvent } from '~/composables/useScanStream'
+import type { FillableBinderSlot } from '~/types/binders'
 import type { ScanMatchDecision } from '~/types/ScanMatch'
-
-export type FillableBinderSlot = {
-  binder_id: number
-  binder_name: string
-  kind: 'wanted_card' | 'pokedex_slot'
-  position: number
-}
 
 export type ScannedCardPreview = {
   tcgdex_card_id: string

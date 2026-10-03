@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 
 from models.binder import Binder, BinderItem
 from models.collection_card import CollectionCard
-from services.collection_card_lookup_service import fetch_card_for_collection
+from services.collection_card_lookup_service import fetch_card_for_collection, fetch_card_pokedex_number
 from services import collection_card_service
 from services.binder_cover_service import (
     collect_paths_from_cover,
@@ -682,18 +682,17 @@ def binder_slot_for_card(
     return {"kind": "pokedex_slot", "position": pocket}
 
 
-def fillable_binder_slots_for_card(
-    db: Session,
-    user_id: int,
+def _fillable_binder_slots(
+    binders: list[Binder],
     *,
     tcgdex_card_id: str,
     language: str,
     pokedex_number: int | None,
     rarity: str | None,
 ) -> list[dict[str, Any]]:
-    """Pochettes que la carte peut remplir dans les classeurs de l'utilisateur, une par classeur au plus."""
+    """Pochettes que la carte peut remplir dans ces classeurs, une par classeur au plus."""
     fillable_binder_slots: list[dict[str, Any]] = []
-    for binder in _user_binders_with_cards(db, user_id):
+    for binder in binders:
         slot = binder_slot_for_card(
             binder,
             tcgdex_card_id=tcgdex_card_id,
@@ -704,3 +703,64 @@ def fillable_binder_slots_for_card(
         if slot is not None:
             fillable_binder_slots.append({"binder_id": binder.id, "binder_name": binder.name, **slot})
     return fillable_binder_slots
+
+
+def fillable_binder_slots_for_card(
+    db: Session,
+    user_id: int,
+    *,
+    tcgdex_card_id: str,
+    language: str,
+    pokedex_number: int | None,
+    rarity: str | None,
+) -> list[dict[str, Any]]:
+    """Pochettes que la carte peut remplir dans les classeurs de l'utilisateur, une par classeur au plus."""
+    return _fillable_binder_slots(
+        _user_binders_with_cards(db, user_id),
+        tcgdex_card_id=tcgdex_card_id,
+        language=language,
+        pokedex_number=pokedex_number,
+        rarity=rarity,
+    )
+
+
+def fillable_binder_slots_for_collection_card(db: Session, user_id: int, card: CollectionCard) -> list[dict[str, Any]]:
+    """Pochettes Pokédex encore vides où ranger une carte possédée de la collection."""
+    if not _is_owned_card(card):
+        return []
+    pokedex_binders = [binder for binder in _user_binders_with_cards(db, user_id) if binder.pokedex_region]
+    if not pokedex_binders:
+        return []
+    return _fillable_binder_slots(
+        pokedex_binders,
+        tcgdex_card_id=card.tcgdex_card_id,
+        language=card.language,
+        pokedex_number=fetch_card_pokedex_number(tcgdex_card_id=card.tcgdex_card_id, physical_language=card.language),
+        rarity=card.rarity,
+    )
+
+
+def place_collection_card_in_free_slot(db: Session, binder: Binder, card: CollectionCard) -> dict[str, Any]:
+    """
+    Range une carte possédée dans la pochette vide de son Pokémon et renvoie cette pochette.
+
+    Raises:
+        ValueError: la carte n'est pas possédée, ou le classeur n'a pas de place pour elle.
+    """
+    if not _is_owned_card(card):
+        msg = "Carte absente de la collection."
+        raise ValueError(msg)
+    slot = binder_slot_for_card(
+        binder,
+        tcgdex_card_id=card.tcgdex_card_id,
+        language=card.language,
+        pokedex_number=fetch_card_pokedex_number(tcgdex_card_id=card.tcgdex_card_id, physical_language=card.language),
+        rarity=card.rarity,
+    )
+    if slot is None:
+        msg = f"Cette carte n'a pas de place libre dans « {binder.name} »."
+        raise ValueError(msg)
+    binder_placement = {"binder_id": binder.id, "binder_name": binder.name, **slot}
+    db.add(BinderItem(binder_id=binder.id, collection_card_id=card.id, position=slot["position"]))
+    db.commit()
+    return binder_placement

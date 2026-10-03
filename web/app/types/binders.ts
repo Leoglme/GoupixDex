@@ -60,6 +60,13 @@ export interface BinderDetail extends BinderSummary {
   candidates: BinderCandidateItem[]
 }
 
+export type FillableBinderSlot = {
+  binder_id: number
+  binder_name: string
+  kind: 'wanted_card' | 'pokedex_slot'
+  position: number
+}
+
 export type BinderValuePeriod = '1j' | '7j' | '1m' | '3m' | '6m' | 'tout'
 
 export interface BinderValueTimelinePoint {

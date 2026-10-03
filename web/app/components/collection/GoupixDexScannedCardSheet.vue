@@ -99,8 +99,9 @@
 
 <script lang="ts" setup>
 import type { ComputedRef, PropType } from 'vue'
+import type { FillableBinderSlot } from '~/types/binders'
 import type { GoupixDexScannedCardSheetProps, ScannedCardActionButton } from '~/types/GoupixDexScannedCardSheet'
-import type { FillableBinderSlot, ScannedCard, ScannedCardAction, ScannedCardPreview } from '~/types/ScannedCardSheet'
+import type { ScannedCard, ScannedCardAction, ScannedCardPreview } from '~/types/ScannedCardSheet'
 import { readableSetLabel } from '~/utils/cards/readableSet'
 
 const props: GoupixDexScannedCardSheetProps = defineProps({
@@ -164,14 +165,6 @@ const fillableBinderSlots: ComputedRef<FillableBinderSlot[]> = computed((): Fill
   isCheckout.value ? [] : (props.scannedCard.preview?.fillable_binder_slots ?? []),
 )
 
-const wantedCardBinderSlots: ComputedRef<FillableBinderSlot[]> = computed((): FillableBinderSlot[] =>
-  fillableBinderSlots.value.filter((slot: FillableBinderSlot): boolean => slot.kind === 'wanted_card'),
-)
-
-const pokedexBinderSlots: ComputedRef<FillableBinderSlot[]> = computed((): FillableBinderSlot[] =>
-  fillableBinderSlots.value.filter((slot: FillableBinderSlot): boolean => slot.kind === 'pokedex_slot'),
-)
-
 const collectionActionButton: ComputedRef<ScannedCardActionButton> = computed((): ScannedCardActionButton => {
   if (isCheckout.value) {
     return {
@@ -193,13 +186,10 @@ const collectionActionButton: ComputedRef<ScannedCardActionButton> = computed(()
   }
 })
 
-const actionButtons: ComputedRef<ScannedCardActionButton[]> = computed((): ScannedCardActionButton[] => {
-  const firstWantedCardSlot: FillableBinderSlot | undefined = wantedCardBinderSlots.value[0]
-  const mainActionButton: ScannedCardActionButton = firstWantedCardSlot
-    ? binderActionButton(firstWantedCardSlot)
-    : collectionActionButton.value
-  return [mainActionButton, ...pokedexBinderSlots.value.map(binderActionButton)]
-})
+const actionButtons: ComputedRef<ScannedCardActionButton[]> = computed((): ScannedCardActionButton[] => [
+  collectionActionButton.value,
+  ...fillableBinderSlots.value.map(binderActionButton),
+])
 
 /**
  * Bouton qui ajoute un exemplaire et le range dans la pochette que lui garde un classeur.

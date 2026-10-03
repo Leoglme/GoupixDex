@@ -29,6 +29,10 @@ from services.tcgdex_client_service import (
 )
 
 
+_POKEDEX_NUMBER_CACHE_MAX = 5000
+_pokedex_number_cache: dict[tuple[str, str], int | None] = {}
+
+
 def _strip(value: Any) -> str:
     return str(value).strip() if isinstance(value, str) else ""
 
@@ -137,6 +141,40 @@ def _locale_priority(physical_language: str) -> list[str]:
         if loc not in order:
             order.append(loc)
     return order
+
+
+def _same_print_locales(physical_language: str) -> list[str]:
+    """Locales TCGdex qui décrivent la carte imprimée : FR et EN partagent l'id, une carte japonaise n'a que le sien."""
+    if physical_language == "ja":
+        return ["ja"]
+    return ["fr", "en"] if physical_language == "fr" else ["en", "fr"]
+
+
+def fetch_card_pokedex_number(
+    *,
+    tcgdex_card_id: str,
+    physical_language: str,
+    tcgdex: TcgdexClientService | None = None,
+) -> int | None:
+    """Numéro de Pokédex national d'une carte, lu sur TCGdex une seule fois par carte et par langue."""
+    card_id = tcgdex_card_id.strip()
+    language = physical_language.strip().lower()
+    cache_key = (card_id.lower(), language)
+    if cache_key in _pokedex_number_cache:
+        return _pokedex_number_cache[cache_key]
+
+    client = tcgdex or TcgdexClientService()
+    for locale in _same_print_locales(language):
+        try:
+            card_payload = dict(client.get_card(locale, card_id))
+        except (RuntimeError, ValueError):
+            continue
+        pokedex_number = _dex_id_from_card(card_payload)
+        if len(_pokedex_number_cache) >= _POKEDEX_NUMBER_CACHE_MAX:
+            _pokedex_number_cache.clear()
+        _pokedex_number_cache[cache_key] = pokedex_number
+        return pokedex_number
+    return None
 
 
 def _first_resolvable_set(

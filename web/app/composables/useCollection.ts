@@ -1,6 +1,7 @@
 /** Personal Pokémon card collection (decoupled from sale articles). */
 
 import type { CatalogCardPreviewResponse } from '~/composables/useCardCatalog'
+import type { FillableBinderSlot } from '~/types/binders'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 
 export type CollectionLanguage = 'fr' | 'en' | 'ja'
@@ -158,6 +159,29 @@ export function useCollection() {
   }
 
   /**
+   * GET `/collection/:id/binder-slots` — classeurs Pokédex où la carte peut prendre la pochette vide de son Pokémon.
+   *
+   * @param {number} id - Carte de la collection.
+   * @returns {Promise<FillableBinderSlot[]>} Une pochette par classeur au plus.
+   */
+  async function getCardBinderSlots(id: number): Promise<FillableBinderSlot[]> {
+    const { data } = await $api.get<{ fillable_binder_slots: FillableBinderSlot[] }>(`/collection/${id}/binder-slots`)
+    return data.fillable_binder_slots
+  }
+
+  /**
+   * POST `/collection/:id/binder-slots/:binderId` — range la carte dans la pochette vide de son Pokémon.
+   *
+   * @param {number} id - Carte de la collection.
+   * @param {number} binderId - Classeur où la ranger.
+   * @returns {Promise<FillableBinderSlot>} Pochette remplie.
+   */
+  async function placeCardInBinder(id: number, binderId: number): Promise<FillableBinderSlot> {
+    const { data } = await $api.post<FillableBinderSlot>(`/collection/${id}/binder-slots/${binderId}`)
+    return data
+  }
+
+  /**
    * PATCH `/collection/:id` — partial update (quantity, language, notes).
    *
    * @param id - Collection card id.
@@ -213,6 +237,8 @@ export function useCollection() {
     refreshCollectionNames,
     getCollectionCard,
     getCardPriceHistory,
+    getCardBinderSlots,
+    placeCardInBinder,
     patchCollectionCard,
     deleteCollectionCard,
     prepareArticlePrefill,
