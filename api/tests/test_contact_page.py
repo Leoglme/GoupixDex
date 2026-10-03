@@ -44,6 +44,16 @@ def forget_recent_messages() -> Iterator[None]:
     contact_message_service._recent_messages.clear()
 
 
+@pytest.fixture(autouse=True)
+def block_real_emails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aucun test n'envoie de vrai e-mail : un envoi que le test n'a pas simulé le fait échouer."""
+
+    def fail_on_real_send(api_key: str, params: dict[str, Any]) -> None:
+        pytest.fail("Ce test a tenté d'envoyer un vrai e-mail par Resend.")
+
+    monkeypatch.setattr(contact_message_service, "_send_with_resend", fail_on_real_send)
+
+
 @pytest.fixture
 def sent_emails(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Les e-mails confiés à Resend, avec une clé d'API configurée."""
@@ -121,7 +131,9 @@ def test_a_message_that_resend_refuses_fails(db: Session, monkeypatch: pytest.Mo
 def test_a_server_without_resend_key_does_not_pretend_the_message_left(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(contact_message_service, "get_settings", lambda: AppSettings(_env_file=None))
+    monkeypatch.setattr(
+        contact_message_service, "get_settings", lambda: AppSettings(_env_file=None, resend_api_key=None)
+    )
 
     with pytest.raises(contact_message_service.ContactDeliveryError):
         asyncio.run(contact_message_service.send_contact_message(db, _message()))
