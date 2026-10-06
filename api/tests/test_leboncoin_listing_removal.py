@@ -249,3 +249,78 @@ def test_deletion_error_shown_by_leboncoin_is_raised() -> None:
 
     with pytest.raises(RuntimeError, match="Leboncoin a refusé la suppression : Une erreur technique"):
         asyncio.run(LeboncoinService._wait_for_delete_outcome(tab))  # type: ignore[arg-type]
+
+
+class FakeClockTab:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def fake_loading_my_ads(monkeypatch: pytest.MonkeyPatch, tab: FakeClockTab, loaded_after_sec: float) -> None:
+    async def no_login_gate(_tab: object) -> bool:
+        return False
+
+    async def read_list_state(_tab: object) -> dict[str, int]:
+        if tab.now < loaded_after_sec:
+            return {"shown": 0, "online": 0}
+        return {"shown": 12, "online": 12}
+
+    monkeypatch.setattr(LeboncoinService, "_page_shows_login_gate", no_login_gate)
+    monkeypatch.setattr(LeboncoinService, "_read_my_ads_list_state", read_list_state)
+    monkeypatch.setattr("services.leboncoin_service.time.monotonic", lambda: tab.now)
+
+
+def test_empty_list_shown_while_my_ads_loads_is_not_taken_as_final(monkeypatch: pytest.MonkeyPatch) -> None:
+    tab = FakeClockTab()
+    fake_loading_my_ads(monkeypatch, tab, loaded_after_sec=2.0)
+
+    state = asyncio.run(LeboncoinService._wait_for_my_ads_list(tab))  # type: ignore[arg-type]
+
+    assert state == {"shown": 12, "online": 12}
+
+
+def test_truly_empty_my_ads_is_accepted_once_it_stays_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    tab = FakeClockTab()
+    fake_loading_my_ads(monkeypatch, tab, loaded_after_sec=999.0)
+
+    state = asyncio.run(LeboncoinService._wait_for_my_ads_list(tab))  # type: ignore[arg-type]
+
+    assert state == {"shown": 0, "online": 0}
+    assert tab.now >= 6.0
+
+
+class FakeNavigationTab:
+    async def get(self, _url: str) -> None:
+        return None
+
+
+def fake_listing_missing_from_my_ads(monkeypatch: pytest.MonkeyPatch, *, is_still_public: bool) -> None:
+    async def no_cookie_banner(_tab: object, timeout_sec: float = 0.0) -> None:
+        return None
+
+    async def not_in_my_ads(_tab: object, _listing_id: str | None, _title: str) -> bool:
+        return False
+
+    async def public_page(_tab: object, _listing_id: str) -> bool:
+        return is_still_public
+
+    monkeypatch.setattr(LeboncoinService, "_tab", FakeNavigationTab())
+    monkeypatch.setattr(LeboncoinService, "_accept_didomi_cookies", no_cookie_banner)
+    monkeypatch.setattr(LeboncoinService, "_find_listing_delete_trigger", not_in_my_ads)
+    monkeypatch.setattr(LeboncoinService, "_is_listing_still_public", public_page)
+
+
+def test_listing_still_public_is_never_reported_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_listing_missing_from_my_ads(monkeypatch, is_still_public=True)
+
+    with pytest.raises(RuntimeError, match="encore en ligne sur Leboncoin"):
+        asyncio.run(LeboncoinService.delete_listing("3278016312", "Titre"))
+
+
+def test_listing_gone_from_my_ads_and_from_leboncoin_is_reported_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_listing_missing_from_my_ads(monkeypatch, is_still_public=False)
+
+    assert asyncio.run(LeboncoinService.delete_listing("3278016312", "Titre")) is False

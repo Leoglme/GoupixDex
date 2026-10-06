@@ -139,6 +139,8 @@ _DELETE_SESSION_RECONNECT_MSG = (
     "attendez la fermeture automatique de Chrome, puis relancez le retrait."
 )
 _MY_ADS_LIST_TIMEOUT_SEC = 25.0
+_MY_ADS_LIST_SETTLE_SEC = 1.5
+_MY_ADS_EMPTY_LIST_SETTLE_SEC = 6.0
 _MY_ADS_MAX_SCROLL_LOADS = 12
 _DELETE_DIALOG_TIMEOUT_SEC = 10.0
 _DELETE_OUTCOME_TIMEOUT_SEC = 30.0
@@ -1747,13 +1749,13 @@ class LeboncoinService:
         Compte les annonces affichées dans « Mes annonces » et le total en ligne annoncé par l'onglet.
 
         Returns:
-            ``{"shown": n, "online": total}``, ou None tant que l'onglet « En ligne » n'est pas affiché.
+            ``{"shown": n, "online": total}``, ou None tant que la page n'a pas fini de charger.
         """
         raw = await tab.evaluate(
             """
             (() => {
               const onlineTab = document.querySelector('[data-qa-id="online_ads_tab"]');
-              if (!onlineTab) return null;
+              if (document.readyState !== 'complete' || !onlineTab) return null;
               const total = ((onlineTab.textContent || '').match(/\\((\\d+)\\)/) || [])[1];
               return JSON.stringify({
                 shown: document.querySelectorAll('li[data-qa-id="ad_item_container"]').length,
@@ -1771,21 +1773,58 @@ class LeboncoinService:
     @classmethod
     async def _wait_for_my_ads_list(cls, tab: Tab) -> dict[str, int]:
         """
-        Attend que « Mes annonces » affiche ses annonces (ou un compte vide).
+        Attend que « Mes annonces » soit chargée et que son compte d'annonces ne bouge plus.
 
         Raises:
-            RuntimeError: session expirée, ou liste jamais affichée.
+            RuntimeError: session expirée, ou liste jamais stabilisée.
         """
         deadline = time.monotonic() + _MY_ADS_LIST_TIMEOUT_SEC
+        last_state: dict[str, int] | None = None
+        last_state_since = time.monotonic()
         while time.monotonic() < deadline:
             if await cls._page_shows_login_gate(tab):
                 await cls._clear_stale_session_marker()
                 raise RuntimeError(_DELETE_SESSION_RECONNECT_MSG)
             state = await cls._read_my_ads_list_state(tab)
-            if state is not None and (state["shown"] > 0 or state["online"] == 0):
-                return state
-            await tab.sleep(0.8)
-        raise RuntimeError("« Mes annonces » ne s’est pas affiché sur Leboncoin.")
+            if state != last_state:
+                last_state, last_state_since = state, time.monotonic()
+            elif state is not None:
+                settle_sec = _MY_ADS_EMPTY_LIST_SETTLE_SEC if state["shown"] == 0 else _MY_ADS_LIST_SETTLE_SEC
+                if time.monotonic() - last_state_since >= settle_sec:
+                    return state
+            await tab.sleep(0.5)
+        raise RuntimeError("« Mes annonces » ne s’est pas chargé sur Leboncoin.")
+
+    @classmethod
+    async def _is_listing_still_public(cls, tab: Tab, listing_id: str) -> bool:
+        """
+        Lit la page publique de l'annonce, dernier contrôle avant de la déclarer retirée.
+
+        Returns:
+            True si Leboncoin la montre encore comme active.
+
+        Raises:
+            RuntimeError: la page de l'annonce ne s'est pas chargée.
+        """
+        await tab.get(f"{BASE_URL}/vi/{listing_id}.htm")
+        deadline = time.monotonic() + _MY_ADS_LIST_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            raw = await tab.evaluate(
+                """
+                (() => {
+                  const nextData = document.getElementById('__NEXT_DATA__');
+                  if (document.readyState !== 'complete' || !nextData) return null;
+                  const ad = JSON.parse(nextData.textContent).props.pageProps.ad;
+                  return JSON.stringify({ listId: ad ? String(ad.list_id) : null, status: ad ? ad.status : null });
+                })()
+                """,
+                return_by_value=True,
+            )
+            if isinstance(raw, str):
+                public_ad = json.loads(raw)
+                return public_ad["listId"] == listing_id and public_ad["status"] == "active"
+            await tab.sleep(0.5)
+        raise RuntimeError("Page de l’annonce Leboncoin non chargée : impossible de vérifier qu’elle est retirée.")
 
     @classmethod
     async def _mark_delete_trigger_of_listing(cls, tab: Tab, listing_id: str | None, title: str) -> int:
@@ -1944,6 +1983,10 @@ class LeboncoinService:
         await cls._accept_didomi_cookies(tab, timeout_sec=4.0)
         numeric_listing_id = re.sub(r"\D", "", listing_id or "") or None
         if not await cls._find_listing_delete_trigger(tab, numeric_listing_id, title):
+            if numeric_listing_id and await cls._is_listing_still_public(tab, numeric_listing_id):
+                raise RuntimeError(
+                    "L’annonce est encore en ligne sur Leboncoin mais n’apparaît pas dans « Mes annonces » : réessayez."
+                )
             return False
         trigger_css = f"[{_DELETE_TRIGGER_MARKER}]"
         if not await cls._click_in_page(tab, trigger_css, timeout_sec=_DELETE_DIALOG_TIMEOUT_SEC):
