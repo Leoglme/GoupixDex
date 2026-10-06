@@ -98,8 +98,15 @@ class Article(Base):
         server_default="0",
         nullable=False,
     )
+    cross_leboncoin_removal_failed: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
     cross_ebay_removal_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
     cross_vinted_removal_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    cross_leboncoin_removal_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
     order_line_id: Mapped[int | None] = mapped_column(
         ForeignKey("cardmarket_order_lines.id", ondelete="SET NULL"),
         nullable=True,

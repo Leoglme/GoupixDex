@@ -107,52 +107,53 @@ async def publish_article_to_leboncoin(
 
     price = float(article.sell_price if article.sell_price is not None else article.purchase_price)
 
-    browser_started = False
-    try:
-        await _emit(progress, "browser", "Ouverture de Chrome (profil Leboncoin)…", form_step="browser_start")
-        await LeboncoinService.init_browser()
-        browser_started = True
-        await LeboncoinService.init_page()
-        await TimerService.wait(100)
+    async with LeboncoinService.browser_job_lock:
+        browser_started = False
+        try:
+            await _emit(progress, "browser", "Ouverture de Chrome (profil Leboncoin)…", form_step="browser_start")
+            await LeboncoinService.init_browser()
+            browser_started = True
+            await LeboncoinService.init_page()
+            await TimerService.wait(100)
 
-        result = await LeboncoinService.publish_pokemon_listing(
-            title=title,
-            description=description,
-            price_eur=price,
-            postal_code=pc,
-            address_line1=line1,
-            city=town,
-            photo_basenames=basenames,
-            listing_fields=listing_fields,
-            progress=progress,
-            submit_final=submit_final,
-        )
-        if result.get("dry_run"):
+            result = await LeboncoinService.publish_pokemon_listing(
+                title=title,
+                description=description,
+                price_eur=price,
+                postal_code=pc,
+                address_line1=line1,
+                city=town,
+                photo_basenames=basenames,
+                listing_fields=listing_fields,
+                progress=progress,
+                submit_final=submit_final,
+            )
+            if result.get("dry_run"):
+                return {
+                    "published": False,
+                    "detail": "dry_run_ready",
+                    "url": result.get("url"),
+                }
+            listing_id = result.get("listing_id")
+            if not listing_id:
+                listing_id = await _signal_deposit_and_find_listing_id(title, progress, on_deposited)
             return {
-                "published": False,
-                "detail": "dry_run_ready",
+                "published": True,
+                "detail": "published",
+                "listing_id": str(listing_id) if listing_id else None,
                 "url": result.get("url"),
             }
-        listing_id = result.get("listing_id")
-        if not listing_id:
-            listing_id = await _signal_deposit_and_find_listing_id(title, progress, on_deposited)
-        return {
-            "published": True,
-            "detail": "published",
-            "listing_id": str(listing_id) if listing_id else None,
-            "url": result.get("url"),
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Leboncoin publish failed article_id=%s", article.id)
-        await _emit(progress, "error", f"Erreur : {exc}", form_step="failed")
-        return {"published": False, "detail": str(exc)}
-    finally:
-        if browser_started:
-            LeboncoinService.close_browser()
-        for name in basenames:
-            try:
-                p = images_dir / name
-                if p.is_file() and name.startswith(f"listing_{article.id}_"):
-                    p.unlink(missing_ok=True)
-            except OSError:
-                pass
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Leboncoin publish failed article_id=%s", article.id)
+            await _emit(progress, "error", f"Erreur : {exc}", form_step="failed")
+            return {"published": False, "detail": str(exc)}
+        finally:
+            if browser_started:
+                LeboncoinService.close_browser()
+            for name in basenames:
+                try:
+                    p = images_dir / name
+                    if p.is_file() and name.startswith(f"listing_{article.id}_"):
+                        p.unlink(missing_ok=True)
+                except OSError:
+                    pass

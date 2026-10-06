@@ -27,6 +27,7 @@ from schemas.articles import (
     ConfirmLeboncoinPublishBody,
     ConfirmVintedDelistBody,
     ConfirmVintedPublishBody,
+    LeboncoinRemovalFailBody,
     SoldPatch,
     VintedBatchStartBody,
     VintedCrossRemovalFailBody,
@@ -615,6 +616,41 @@ def fail_vinted_cross_removal(
     return {"ok": True}
 
 
+@router.post("/{article_id}/confirm-leboncoin-unlist", status_code=status.HTTP_200_OK)
+def confirm_leboncoin_unlist(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """Après suppression de l’annonce sur Leboncoin (worker local) : aligne l’état GoupixDex."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    article_service.clear_leboncoin_publication_fields(article)
+    article_service.apply_offers_for_sale_after_delist(article, hide_when_off_all=True)
+    db.add(article)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{article_id}/fail-leboncoin-cross-removal", status_code=status.HTTP_200_OK)
+def fail_leboncoin_cross_removal(
+    article_id: int,
+    body: LeboncoinRemovalFailBody,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """Enregistre l’échec de la suppression Leboncoin, affiché sur la fiche jusqu’au prochain essai réussi."""
+    article = article_service.get_article(db, article_id, user.id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    article.cross_leboncoin_removal_failed = True
+    article.cross_leboncoin_removal_error = (body.detail or "Erreur inconnue")[:500]
+    db.add(article)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{article_id}/remove-ebay-listing")
 async def remove_ebay_listing(
     article_id: int,
@@ -995,6 +1031,8 @@ def mark_sold(
     article.cross_ebay_removal_error = None
     article.cross_vinted_removal_failed = False
     article.cross_vinted_removal_error = None
+    article.cross_leboncoin_removal_failed = False
+    article.cross_leboncoin_removal_error = None
 
     need_ebay_bg = (
         body.sale_source == "vinted"

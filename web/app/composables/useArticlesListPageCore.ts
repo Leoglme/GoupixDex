@@ -1,13 +1,18 @@
 import type { Ref } from 'vue'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { Article } from '~/composables/useArticles'
-import type { EbayLeboncoinDelist, EbayLeboncoinDelistFailure } from '~/types/EbayLeboncoinDelist'
+import type {
+  EbayLeboncoinChannels,
+  EbayLeboncoinDelist,
+  EbayLeboncoinDelistFailure,
+} from '~/types/EbayLeboncoinDelist'
 import type { Marketplace } from '~/types/Marketplace'
 import type { PublishReviewChoice } from '~/types/PublishReviewPrompt'
 import { useBulkMarketplacePublication } from '~/composables/useBulkMarketplacePublication'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useEbayLeboncoinDelist } from '~/composables/useEbayLeboncoinDelist'
 import { usePublishReviewPrompt } from '~/composables/usePublishReviewPrompt'
+import { useSoldArticleListingsRemoval } from '~/composables/useSoldArticleListingsRemoval'
 import { persistRelistQueue, publishReviewLocation, relistEditLocation } from '~/utils/articleRelistQueue'
 import { MARKETPLACES } from '~/utils/marketplaces'
 import {
@@ -40,6 +45,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   const toast = useToast()
   const { canUseDesktopWorkers, notifyPcUnreachable } = useDesktopWorkers()
   const { removeEbayLeboncoinListings } = useEbayLeboncoinDelist()
+  const { removeListingsLeftOnline } = useSoldArticleListingsRemoval()
   const { askWhetherToReviewBeforePublishing } = usePublishReviewPrompt()
   const { startJob } = useWardrobeLocalSync()
   const {
@@ -141,30 +147,7 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
   }
 
   /**
-   *
-   */
-  function triggerDesktopVintedUnlistIfNeeded(article: Article) {
-    if (!import.meta.client || !canUseDesktopWorkers.value) {
-      return
-    }
-    if (!article.pending_vinted_unlist) {
-      return
-    }
-    void vintedUnlistAfterEbaySale(article.id)
-      .then(() => {
-        toast.add({
-          title: 'Vinted',
-          description: 'Suppression de l’annonce lancée sur votre PC (quelques secondes).',
-          color: 'neutral',
-        })
-        setTimeout(() => void refresh(), 7000)
-      })
-      .catch((e) => {
-        toast.add({ title: 'Suppression Vinted', description: apiErrorMessage(e), color: 'error' })
-      })
-  }
-
-  /**
+   * Enregistre la vente puis fait retirer par le PC les annonces restées en ligne ailleurs (Vinted, Leboncoin).
    * @param payload - Vente unitaire ou lot avec répartition calculée côté modale.
    */
   async function confirmSold(
@@ -182,32 +165,27 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
     }
     soldSubmitting.value = true
     try {
+      const soldArticlesAfterSale: Article[] = []
       if (payload.mode === 'single') {
         const id = rows[0]?.id
         if (id == null) {
           return
         }
-        const updated = await markSold(id, {
-          sold_price: payload.soldPrice,
-          sale_source: payload.saleSource,
-        })
-        triggerDesktopVintedUnlistIfNeeded(updated)
+        soldArticlesAfterSale.push(
+          await markSold(id, {
+            sold_price: payload.soldPrice,
+            sale_source: payload.saleSource,
+          }),
+        )
         toast.add({ title: 'Article marqué comme vendu', color: 'success' })
-        if (payload.saleSource === 'ebay' && rows[0]?.published_on_vinted && !canUseDesktopWorkers.value) {
-          toast.add({
-            title: 'Vinted',
-            description:
-              'Pour retirer l’annonce encore en ligne sur Vinted, ouvrez GoupixDex sur votre PC puis « Réessayer suppression Vinted » dans le menu ⋯.',
-            color: 'warning',
-          })
-        }
       } else {
         for (const a of payload.allocations) {
-          const updated = await markSold(a.id, {
-            sold_price: a.soldPrice,
-            sale_source: payload.saleSource,
-          })
-          triggerDesktopVintedUnlistIfNeeded(updated)
+          soldArticlesAfterSale.push(
+            await markSold(a.id, {
+              sold_price: a.soldPrice,
+              sale_source: payload.saleSource,
+            }),
+          )
         }
         toast.add({
           title:
@@ -216,15 +194,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
               : 'Article marqué comme vendu',
           color: 'success',
         })
-        if (payload.saleSource === 'ebay' && rows.some((r) => r.published_on_vinted) && !canUseDesktopWorkers.value) {
-          toast.add({
-            title: 'Vinted',
-            description:
-              'Pour retirer les annonces Vinted restantes, ouvrez GoupixDex sur votre PC puis « Réessayer suppression Vinted » dans le menu ⋯.',
-            color: 'warning',
-          })
-        }
       }
+      removeListingsLeftOnline(soldArticlesAfterSale)
       soldOpen.value = false
       soldArticles.value = null
       articleListSelectionReset.value += 1
@@ -528,26 +499,40 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       const vintedDelistIds: number[] = payload.vinted
         ? selectedArticles.filter((row: Article) => row.published_on_vinted).map((row: Article) => row.id)
         : []
+      const hasLeboncoinListingToRemove: boolean =
+        payload.leboncoin && selectedArticles.some((row: Article): boolean => Boolean(row.published_on_leboncoin))
+      const ebayLeboncoinChannels: EbayLeboncoinChannels = {
+        ebay: payload.ebay,
+        leboncoin: payload.leboncoin && canUseDesktopWorkers.value,
+      }
       const ebayLeboncoinArticles: Article[] = selectedArticles.filter(
-        (row: Article) => (payload.ebay && row.published_on_ebay) || (payload.leboncoin && row.published_on_leboncoin),
+        (row: Article) =>
+          (ebayLeboncoinChannels.ebay && row.published_on_ebay) ||
+          (ebayLeboncoinChannels.leboncoin && row.published_on_leboncoin),
       )
       if (vintedDelistIds.length && canUseDesktopWorkers.value) {
         const { job_id } = await startVintedBatchDelist(vintedDelistIds)
         if (ebayLeboncoinArticles.length) {
           // Pas d'attente : le journal suit ce retrait pendant le lot Vinted.
-          removeEbayLeboncoinListings(ebayLeboncoinArticles, payload, job_id)
+          removeEbayLeboncoinListings(ebayLeboncoinArticles, ebayLeboncoinChannels, job_id)
         }
         articleListSelectionReset.value += 1
         await navigateTo({ path: '/articles/listing-logs', query: { job: job_id, after: 'delist', back: route.path } })
         return
       }
 
-      if (vintedDelistIds.length) {
-        notifyPcUnreachable('Le retrait Vinted')
+      const unreachableMarketplaceLabels: string[] = [
+        ...(vintedDelistIds.length ? ['Vinted'] : []),
+        ...(hasLeboncoinListingToRemove && !canUseDesktopWorkers.value ? ['Leboncoin'] : []),
+      ]
+      if (unreachableMarketplaceLabels.length) {
+        notifyPcUnreachable(`Le retrait ${unreachableMarketplaceLabels.join(' et ')}`)
       }
       if (ebayLeboncoinArticles.length) {
-        announceEbayLeboncoinDelist(await removeEbayLeboncoinListings(ebayLeboncoinArticles, payload, null))
-      } else if (!vintedDelistIds.length) {
+        announceEbayLeboncoinDelist(
+          await removeEbayLeboncoinListings(ebayLeboncoinArticles, ebayLeboncoinChannels, null),
+        )
+      } else if (!unreachableMarketplaceLabels.length) {
         toast.add({
           title: 'Aucun retrait',
           description: 'Aucune annonce active sur les canaux choisis pour cette sélection.',

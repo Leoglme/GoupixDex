@@ -312,7 +312,7 @@ const ebayLeboncoinDelistStatusLabel: ComputedRef<string> = computed((): string 
     return ''
   }
   if (delist.isRunning) {
-    return `${delist.processedCount}/${delist.totalCount} article(s)…`
+    return `${delist.processedCount}/${delist.totalCount} annonce(s)…`
   }
   const summaryParts: string[] = []
   if (delist.removedFromEbayCount) {

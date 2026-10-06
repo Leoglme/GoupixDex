@@ -29,6 +29,8 @@ const RELAYED_WORKER_ROUTES: Record<DesktopWorkerName, RelayedWorkerRoute[]> = {
   leboncoin: [
     { method: 'POST', path: /^\/articles\/\d+\/publish-leboncoin$/ },
     { method: 'POST', path: /^\/articles\/leboncoin-batch$/ },
+    { method: 'POST', path: /^\/articles\/leboncoin-delist$/ },
+    { method: 'GET', path: /^\/articles\/leboncoin-delist\/[\w-]+$/ },
     { method: 'GET', path: /^\/leboncoin\/(meta|session)$/ },
   ],
   cardmarket: [

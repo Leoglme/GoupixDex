@@ -67,6 +67,10 @@ class VintedCrossRemovalFailBody(BaseModel):
     detail: str = Field(default="Erreur inconnue", max_length=500)
 
 
+class LeboncoinRemovalFailBody(BaseModel):
+    detail: str = Field(default="Erreur inconnue", max_length=500)
+
+
 class ConfirmVintedDelistBody(BaseModel):
     """Après suppression Vinted (worker) : aligner GoupixDex et éventuellement masquer la fiche."""
 

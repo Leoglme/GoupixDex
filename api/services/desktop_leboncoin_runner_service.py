@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 
+from app_types.leboncoin import LeboncoinListingRemovalOutcome
 from services.desktop_api_confirmation_service import post_confirmation_to_api
 from services.desktop_stubs_service import DesktopStubsService
+from services.leboncoin_listing_copy import build_leboncoin_listing_copy
 from services.leboncoin_publish_service import ProgressFn, publish_article_to_leboncoin
+from services.leboncoin_service import LeboncoinService
 from services.vinted_batch_session_service import VintedBatchSessionService as batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as progress_hub
 
@@ -83,6 +87,101 @@ class DesktopLeboncoinRunnerService:
         except Exception as exc:  # noqa: BLE001
             logger.exception("Desktop Leboncoin publish failed article_id=%s", article_id)
             return {"published": False, "detail": str(exc)}
+
+    @staticmethod
+    async def _remove_article_listing(
+        article_id: int,
+        user_id: int,
+        token: str,
+        remote_base: str,
+        *,
+        open_browser: Callable[[], Awaitable[None]],
+    ) -> LeboncoinListingRemovalOutcome:
+        """
+        Supprime l’annonce Leboncoin d’un article puis enregistre le résultat (ou l’erreur) sur sa fiche GoupixDex.
+
+        Returns:
+            Le résultat réel : ``delisted`` n’est vrai que si l’annonce n’est plus en vente sur Leboncoin.
+        """
+        hdrs = _headers(token)
+        hdrs_json = {**hdrs, "Content-Type": "application/json"}
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
+                ar.raise_for_status()
+                article_d = ar.json()
+            if article_d.get("user_id") != user_id:
+                return {"article_id": article_id, "delisted": False, "detail": "Article introuvable sur ce compte."}
+            if not article_d.get("published_on_leboncoin"):
+                return {"article_id": article_id, "delisted": True, "detail": "Déjà retirée de Leboncoin."}
+            await open_browser()
+            listing_title, _ = build_leboncoin_listing_copy(DesktopStubsService.article_from_api_dict(article_d))
+            was_online = await LeboncoinService.delete_listing(article_d.get("leboncoin_listing_id"), listing_title)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Leboncoin listing removal failed article_id=%s", article_id)
+            detail = (str(exc) or type(exc).__name__)[:480]
+            try:
+                await post_confirmation_to_api(
+                    f"{remote_base}/articles/{article_id}/fail-leboncoin-cross-removal",
+                    hdrs_json,
+                    {"detail": detail},
+                )
+            except httpx.HTTPError as report_exc:
+                logger.warning("fail-leboncoin-cross-removal failed article_id=%s: %s", article_id, report_exc)
+            return {"article_id": article_id, "delisted": False, "detail": detail}
+        try:
+            await post_confirmation_to_api(
+                f"{remote_base}/articles/{article_id}/confirm-leboncoin-unlist",
+                hdrs_json,
+                {},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("confirm-leboncoin-unlist failed article_id=%s: %s", article_id, exc)
+            return {
+                "article_id": article_id,
+                "delisted": True,
+                "detail": "Retirée de Leboncoin, mais la fiche GoupixDex n’a pas pu être mise à jour.",
+            }
+        return {
+            "article_id": article_id,
+            "delisted": True,
+            "detail": None if was_online else "Annonce déjà absente de « Mes annonces » sur Leboncoin.",
+        }
+
+    @staticmethod
+    async def run_leboncoin_listings_removal(
+        article_ids: list[int],
+        user_id: int,
+        token: str,
+        remote_base: str,
+    ) -> list[LeboncoinListingRemovalOutcome]:
+        """
+        Supprime sur Leboncoin les annonces de ces articles, l’une après l’autre dans un même Chrome.
+
+        Returns:
+            Le résultat de chaque article, dans l’ordre demandé.
+        """
+        async with LeboncoinService.browser_job_lock:
+            is_browser_open = False
+
+            async def open_browser() -> None:
+                """Ouvre Chrome au premier article qui a une annonce à supprimer."""
+                nonlocal is_browser_open
+                if not is_browser_open:
+                    await LeboncoinService.init_browser()
+                    is_browser_open = True
+                    await LeboncoinService.init_page("about:blank")
+
+            try:
+                return [
+                    await DesktopLeboncoinRunnerService._remove_article_listing(
+                        article_id, user_id, token, remote_base, open_browser=open_browser
+                    )
+                    for article_id in article_ids
+                ]
+            finally:
+                if is_browser_open:
+                    LeboncoinService.close_browser()
 
     @staticmethod
     async def run_desktop_leboncoin_publish_job(

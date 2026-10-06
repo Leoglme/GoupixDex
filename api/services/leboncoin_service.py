@@ -134,6 +134,18 @@ _SESSION_RECONNECT_MSG = (
 )
 # « Mes annonces » est rechargée à cet intervalle le temps que Leboncoin valide l'annonce déposée.
 _MY_ADS_RELOAD_SEC = 8.0
+_DELETE_SESSION_RECONNECT_MSG = (
+    "Session Leboncoin expirée : Paramètres → Session Leboncoin → Ouvrir Chrome, connectez-vous, "
+    "attendez la fermeture automatique de Chrome, puis relancez le retrait."
+)
+_MY_ADS_LIST_TIMEOUT_SEC = 25.0
+_MY_ADS_MAX_SCROLL_LOADS = 12
+_DELETE_DIALOG_TIMEOUT_SEC = 10.0
+_DELETE_OUTCOME_TIMEOUT_SEC = 30.0
+_DELETE_TRIGGER_MARKER = "data-goupix-delete-trigger"
+_DELETE_CONFIRM_CSS = '[data-qa-id="delete-ad-modal-confirm"]'
+_DELETE_ACCEPTED_CSS = '[data-qa-id="delete-ad-modal-reason-submit"]'
+_ALREADY_BEING_DELETED_ERROR = re.compile(r"d[ée]j[àa] en cours de suppression", re.I)
 
 
 def format_leboncoin_price(price_eur: float) -> str:
@@ -155,6 +167,7 @@ class LeboncoinService:
 
     _browser: Optional[Browser] = None
     _tab: Optional[Tab] = None
+    browser_job_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     def _require_tab(cls) -> Tab:
@@ -183,8 +196,8 @@ class LeboncoinService:
             raise RuntimeError("nodriver.start() returned no browser instance")
 
     @classmethod
-    async def init_page(cls) -> None:
-        cls._tab = await cls._browser.get(DEPOSIT_URL)  # type: ignore[union-attr]
+    async def init_page(cls, url: str = DEPOSIT_URL) -> None:
+        cls._tab = await cls._browser.get(url)  # type: ignore[union-attr]
         await cls._require_tab().sleep(0.6)
 
     @classmethod
@@ -1727,6 +1740,218 @@ class LeboncoinService:
                 if listing_id:
                     return listing_id
         return None
+
+    @classmethod
+    async def _read_my_ads_list_state(cls, tab: Tab) -> dict[str, int] | None:
+        """
+        Compte les annonces affichées dans « Mes annonces » et le total en ligne annoncé par l'onglet.
+
+        Returns:
+            ``{"shown": n, "online": total}``, ou None tant que l'onglet « En ligne » n'est pas affiché.
+        """
+        raw = await tab.evaluate(
+            """
+            (() => {
+              const onlineTab = document.querySelector('[data-qa-id="online_ads_tab"]');
+              if (!onlineTab) return null;
+              const total = ((onlineTab.textContent || '').match(/\\((\\d+)\\)/) || [])[1];
+              return JSON.stringify({
+                shown: document.querySelectorAll('li[data-qa-id="ad_item_container"]').length,
+                online: total === undefined ? -1 : Number(total),
+              });
+            })()
+            """,
+            return_by_value=True,
+        )
+        if not isinstance(raw, str):
+            return None
+        state = json.loads(raw)
+        return {"shown": int(state["shown"]), "online": int(state["online"])}
+
+    @classmethod
+    async def _wait_for_my_ads_list(cls, tab: Tab) -> dict[str, int]:
+        """
+        Attend que « Mes annonces » affiche ses annonces (ou un compte vide).
+
+        Raises:
+            RuntimeError: session expirée, ou liste jamais affichée.
+        """
+        deadline = time.monotonic() + _MY_ADS_LIST_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            if await cls._page_shows_login_gate(tab):
+                await cls._clear_stale_session_marker()
+                raise RuntimeError(_DELETE_SESSION_RECONNECT_MSG)
+            state = await cls._read_my_ads_list_state(tab)
+            if state is not None and (state["shown"] > 0 or state["online"] == 0):
+                return state
+            await tab.sleep(0.8)
+        raise RuntimeError("« Mes annonces » ne s’est pas affiché sur Leboncoin.")
+
+    @classmethod
+    async def _mark_delete_trigger_of_listing(cls, tab: Tab, listing_id: str | None, title: str) -> int:
+        """
+        Pose le marqueur sur la corbeille de l'annonce visée : par son identifiant, sinon par son titre exact.
+
+        Returns:
+            Le nombre d'annonces affichées qui correspondent (0 : absente, plus de 1 : ambiguë, rien n'est marqué).
+        """
+        raw = await tab.evaluate(
+            f"""
+            (() => {{
+              const listingId = {json.dumps(listing_id or "")};
+              const normalize = (text) => (text || '')
+                .normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
+                .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+              const wantedTitle = normalize({json.dumps(title)});
+              const marker = {json.dumps(_DELETE_TRIGGER_MARKER)};
+              document.querySelectorAll('[' + marker + ']').forEach((el) => el.removeAttribute(marker));
+              const listingHref = new RegExp('/(?:ad/[^/]+|annonce)/' + listingId + '(?:[/?#]|$)');
+              const matches = [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].filter((card) => {{
+                if (listingId) {{
+                  return [...card.querySelectorAll('a[href]')].some((a) => listingHref.test(a.getAttribute('href') || ''));
+                }}
+                const shownTitle = card.querySelector('a[href*="/ad/"] p[title]');
+                return !!shownTitle && normalize(shownTitle.getAttribute('title')) === wantedTitle;
+              }});
+              if (matches.length !== 1) return JSON.stringify({{ matchCount: matches.length, isMarked: false }});
+              const trigger = [...matches[0].querySelectorAll('button[aria-haspopup="dialog"][title="Supprimer"]')]
+                .find((button) => button.getClientRects().length > 0);
+              if (trigger) trigger.setAttribute(marker, '1');
+              return JSON.stringify({{ matchCount: 1, isMarked: !!trigger }});
+            }})()
+            """,
+            return_by_value=True,
+        )
+        # nodriver renvoie l'erreur JS au lieu de la lever : sans réponse lisible, ne jamais conclure à une absence.
+        if not isinstance(raw, str):
+            raise RuntimeError("Lecture de « Mes annonces » impossible sur Leboncoin.")
+        search = json.loads(raw)
+        if search["matchCount"] == 1 and not search["isMarked"]:
+            raise RuntimeError("Bouton « Supprimer » introuvable sur l’annonce dans « Mes annonces ».")
+        return int(search["matchCount"])
+
+    @classmethod
+    async def _find_listing_delete_trigger(cls, tab: Tab, listing_id: str | None, title: str) -> bool:
+        """
+        Cherche l'annonce dans « Mes annonces », en faisant défiler la liste tant que Leboncoin en charge d'autres.
+
+        Returns:
+            True quand la corbeille de l'annonce est marquée, False quand toute la liste est chargée sans elle.
+
+        Raises:
+            RuntimeError: plusieurs annonces portent ce titre, ou la liste n'a pas pu être chargée en entier
+                (l'annonce n'est alors jamais déclarée absente à tort).
+        """
+        state = await cls._wait_for_my_ads_list(tab)
+        for _ in range(_MY_ADS_MAX_SCROLL_LOADS):
+            match_count = await cls._mark_delete_trigger_of_listing(tab, listing_id, title)
+            if match_count == 1:
+                return True
+            if match_count > 1:
+                raise RuntimeError(
+                    f"{match_count} annonces Leboncoin portent ce titre : supprimez la bonne depuis « Mes annonces »."
+                )
+            if 0 <= state["online"] <= state["shown"]:
+                return False
+            shown_before = state["shown"]
+            await tab.evaluate("(() => { window.scrollTo(0, document.body.scrollHeight); return true; })()")
+            await tab.sleep(2.5)
+            state = await cls._wait_for_my_ads_list(tab)
+            if state["shown"] <= shown_before:
+                break
+        raise RuntimeError("« Mes annonces » n’a pas chargé toutes vos annonces : l’annonce n’a pas été trouvée.")
+
+    @classmethod
+    async def _click_in_page(cls, tab: Tab, css_selector: str, *, timeout_sec: float) -> bool:
+        """
+        Clique un élément dès que React y a branché ses gestionnaires (un clic plus tôt serait perdu).
+
+        Returns:
+            True si l'élément a été cliqué avant la fin du délai.
+        """
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            clicked = await tab.evaluate(
+                f"""
+                (() => {{
+                  const el = document.querySelector({json.dumps(css_selector)});
+                  if (!el || el.disabled || !Object.keys(el).some((key) => key.startsWith('__reactProps'))) return false;
+                  el.scrollIntoView({{ block: 'center' }});
+                  el.click();
+                  return true;
+                }})()
+                """,
+                return_by_value=True,
+            )
+            if clicked is True:
+                return True
+            await tab.sleep(0.4)
+        return False
+
+    @classmethod
+    async def _wait_for_delete_outcome(cls, tab: Tab) -> None:
+        """
+        Attend la réponse de Leboncoin après « Valider » : le questionnaire de suppression s'affiche quand elle est acceptée.
+
+        Raises:
+            RuntimeError: Leboncoin affiche une erreur, ou ne répond pas dans le délai.
+        """
+        deadline = time.monotonic() + _DELETE_OUTCOME_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            raw = await tab.evaluate(
+                f"""
+                (() => {{
+                  if (document.querySelector({json.dumps(_DELETE_ACCEPTED_CSS)})) return JSON.stringify({{ accepted: true }});
+                  const confirm = document.querySelector({json.dumps(_DELETE_CONFIRM_CSS)});
+                  const dialog = confirm && confirm.closest('[role="dialog"]');
+                  const error = dialog && dialog.querySelector('.text-error');
+                  return JSON.stringify({{
+                    accepted: false,
+                    error: error ? (error.textContent || '').trim() : '',
+                  }});
+                }})()
+                """,
+                return_by_value=True,
+            )
+            outcome = json.loads(raw) if isinstance(raw, str) else {}
+            if outcome.get("accepted"):
+                return
+            error = str(outcome.get("error") or "")
+            if _ALREADY_BEING_DELETED_ERROR.search(error):
+                return
+            if error:
+                raise RuntimeError(f"Leboncoin a refusé la suppression : {error}")
+            await tab.sleep(0.5)
+        raise RuntimeError("Leboncoin n’a pas confirmé la suppression de l’annonce.")
+
+    @classmethod
+    async def delete_listing(cls, listing_id: str | None, title: str) -> bool:
+        """
+        Supprime une annonce comme à la main : « Mes annonces », corbeille, puis « Valider » (retrait du site sous 45 min).
+
+        Args:
+            listing_id: Identifiant Leboncoin de l'annonce, quand GoupixDex l'a relevé au dépôt.
+            title: Titre exact de l'annonce, utilisé seulement sans identifiant.
+
+        Returns:
+            True si Leboncoin a accepté la suppression, False si l'annonce n'est déjà plus en ligne.
+
+        Raises:
+            RuntimeError: session expirée, annonce ambiguë, ou suppression refusée par Leboncoin.
+        """
+        tab = cls._require_tab()
+        await tab.get(MY_ADS_URL)
+        await cls._accept_didomi_cookies(tab, timeout_sec=4.0)
+        numeric_listing_id = re.sub(r"\D", "", listing_id or "") or None
+        if not await cls._find_listing_delete_trigger(tab, numeric_listing_id, title):
+            return False
+        trigger_css = f"[{_DELETE_TRIGGER_MARKER}]"
+        if not await cls._click_in_page(tab, trigger_css, timeout_sec=_DELETE_DIALOG_TIMEOUT_SEC):
+            raise RuntimeError("Impossible d’ouvrir la fenêtre « Supprimer l’annonce » de Leboncoin.")
+        if not await cls._click_in_page(tab, _DELETE_CONFIRM_CSS, timeout_sec=_DELETE_DIALOG_TIMEOUT_SEC):
+            raise RuntimeError("Bouton « Valider » introuvable dans la fenêtre de suppression Leboncoin.")
+        await cls._wait_for_delete_outcome(tab)
+        return True
 
     @classmethod
     async def submit_and_wait(

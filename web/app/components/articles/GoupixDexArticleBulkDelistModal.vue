@@ -78,7 +78,9 @@
         </span>
         <span class="channel-row-body">
           <GoupixDexLeboncoinLogo class="channel-mark-lbc shrink-0" aria-hidden="true" />
-          <span class="channel-row-text text-xs leading-snug text-[#FF6E14]/90">{{ leboncoinHint }}</span>
+          <span v-if="leboncoinHint" class="channel-row-text text-xs leading-snug text-[#FF6E14]/90">{{
+            leboncoinHint
+          }}</span>
         </span>
       </button>
 
@@ -175,7 +177,9 @@ const vintedAvailable: ComputedRef<boolean> = computed(
   (): boolean => props.anyVintedListed && props.vintedChannelEnabled && props.canUseDesktopWorkers,
 )
 const ebayAvailable = computed(() => props.anyEbayListed)
-const leboncoinAvailable = computed(() => props.anyLeboncoinListed)
+const leboncoinAvailable: ComputedRef<boolean> = computed(
+  (): boolean => props.anyLeboncoinListed && props.canUseDesktopWorkers,
+)
 
 const anyChannelAvailable = computed(() => vintedAvailable.value || ebayAvailable.value || leboncoinAvailable.value)
 
@@ -194,9 +198,15 @@ const vintedHint = computed(() => {
 
 const ebayHint = computed(() => (!props.anyEbayListed ? 'Aucun article sélectionné n’est en ligne sur eBay.' : ''))
 
-const leboncoinHint = computed(() =>
-  !props.anyLeboncoinListed ? 'Aucun article sélectionné n’est sur Leboncoin.' : 'Retrait local GoupixDex.',
-)
+const leboncoinHint: ComputedRef<string> = computed((): string => {
+  if (!props.anyLeboncoinListed) {
+    return 'Aucun article sélectionné n’est sur Leboncoin.'
+  }
+  if (!props.canUseDesktopWorkers) {
+    return 'Ouvrez GoupixDex sur votre PC.'
+  }
+  return ''
+})
 
 const selectionLine = computed(() => {
   const n = props.articleCount

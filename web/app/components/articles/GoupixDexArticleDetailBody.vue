@@ -58,7 +58,8 @@
       <div
         v-if="
           (article.cross_ebay_removal_failed && article.published_on_ebay) ||
-          (article.cross_vinted_removal_failed && article.published_on_vinted)
+          (article.cross_vinted_removal_failed && article.published_on_vinted) ||
+          (article.cross_leboncoin_removal_failed && article.published_on_leboncoin)
         "
         class="space-y-2"
       >
@@ -77,6 +78,14 @@
           icon="i-lucide-alert-triangle"
           title="Dernière suppression Vinted échouée"
           :description="article.cross_vinted_removal_error || 'Réessayez avec le bouton ci-dessus.'"
+        />
+        <UAlert
+          v-if="article.cross_leboncoin_removal_failed && article.published_on_leboncoin"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-alert-triangle"
+          title="Dernière suppression Leboncoin échouée"
+          :description="article.cross_leboncoin_removal_error || 'Réessayez avec le bouton ci-dessus.'"
         />
       </div>
 
@@ -385,9 +394,10 @@ const emit = defineEmits<{
 
 const config = useRuntimeConfig()
 const route: RouteLocationNormalizedLoaded = useRoute()
-const { getArticle, removeEbayListing, startVintedBatchDelist, bulkDelistChannels } = useArticles()
+const { getArticle, removeEbayListing, startVintedBatchDelist } = useArticles()
 const { closeAll: closeAllDrawers } = useGoupixDrawerStack()
-const { canUseDesktopWorkers } = useDesktopWorkers()
+const { canUseDesktopWorkers, notifyPcUnreachable } = useDesktopWorkers()
+const { removeLeboncoinListingsAndAnnounce } = useLeboncoinListingRemoval()
 const { lookup } = usePricing()
 const { search: searchEbayMarket, error: ebaySearchComposableError } = useMarketSearch()
 const toast = useToast()
@@ -875,27 +885,31 @@ async function onRemoveVinted(): Promise<void> {
 }
 
 /**
- * Marque l'annonce Leboncoin hors ligne dans GoupixDex, sans la supprimer sur Leboncoin.
- * @returns {Promise<void>} Résolue une fois la fiche à jour, ou l'échec annoncé.
+ * Fait supprimer l'annonce Leboncoin par le PC, puis recharge la fiche avec le résultat.
+ * @returns {Promise<void>} Résolue une fois le bilan annoncé et la fiche à jour.
  */
 async function onRemoveLeboncoin(): Promise<void> {
-  if (!article.value?.published_on_leboncoin) {
+  const current: Article | null = article.value
+  if (!current?.published_on_leboncoin) {
     return
   }
-  const shouldMarkOffline: boolean = await confirmAction({
+  if (!canUseDesktopWorkers.value) {
+    notifyPcUnreachable('La suppression Leboncoin')
+    return
+  }
+  const shouldRemove: boolean = await confirmAction({
     title: 'Retirer l’annonce Leboncoin ?',
-    body: 'GoupixDex ne supprime pas l’annonce sur Leboncoin : supprimez-la via « Voir sur Leboncoin », puis confirmez pour la marquer hors ligne ici. La fiche GoupixDex sera conservée.',
-    confirmLabel: 'Marquer hors ligne',
+    body: 'Chrome va s’ouvrir sur votre PC pour supprimer l’annonce sur Leboncoin. La fiche GoupixDex sera conservée.',
+    confirmLabel: 'Retirer de Leboncoin',
     confirmColor: 'error',
   })
-  if (!shouldMarkOffline) {
+  if (!shouldRemove) {
     return
   }
   removingLeboncoin.value = true
   try {
-    await bulkDelistChannels({ article_ids: [id.value], vinted: false, ebay: false, leboncoin: true })
+    await removeLeboncoinListingsAndAnnounce([current])
     await reloadArticle()
-    toast.add({ title: 'Annonce Leboncoin marquée hors ligne', color: 'success' })
   } catch (error: unknown) {
     toast.add({ title: 'Retrait Leboncoin', description: apiErrorMessage(error), color: 'error' })
   } finally {

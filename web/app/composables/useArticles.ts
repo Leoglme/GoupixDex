@@ -1,3 +1,4 @@
+import type { LeboncoinListingRemovalStart, LeboncoinListingRemovalStatus } from '~/types/LeboncoinListingRemoval'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 export interface ArticleImage {
@@ -43,8 +44,11 @@ export interface Article {
   cross_vinted_removal_failed?: boolean
   cross_ebay_removal_error?: string | null
   cross_vinted_removal_error?: string | null
+  cross_leboncoin_removal_failed?: boolean
+  cross_leboncoin_removal_error?: string | null
   /** Vendu sur eBay mais annonce Vinted encore présente — action desktop ou réessai. */
   pending_vinted_unlist?: boolean
+  pending_leboncoin_unlist?: boolean
   created_at: string
   sold_at: string | null
   order_line_id?: number | null
@@ -292,6 +296,38 @@ export function useArticles() {
   }
 
   /**
+   * Lance sur le PC (worker Leboncoin, direct ou relayé) la suppression des annonces Leboncoin de ces articles.
+   *
+   * @param {number[]} articleIds - Articles dont l’annonce Leboncoin doit être supprimée.
+   * @returns {Promise<LeboncoinListingRemovalStart>} Identifiant du retrait, à suivre avec `getLeboncoinListingRemoval`.
+   * @throws {Error} `LEBONCOIN_LOCAL_WORKER_REQUIRED` quand le PC n’est pas joignable.
+   */
+  async function startLeboncoinListingRemoval(articleIds: number[]): Promise<LeboncoinListingRemovalStart> {
+    if (!import.meta.client || !canUseDesktopWorkers.value || !$leboncoinLocal) {
+      throw new Error('LEBONCOIN_LOCAL_WORKER_REQUIRED')
+    }
+    const { data } = await $leboncoinLocal.post<LeboncoinListingRemovalStart>('/articles/leboncoin-delist', {
+      article_ids: articleIds,
+    })
+    return data
+  }
+
+  /**
+   * Avancement d’un retrait Leboncoin lancé sur le PC.
+   *
+   * @param {string} jobId - Identifiant renvoyé au lancement.
+   * @returns {Promise<LeboncoinListingRemovalStatus>} `finished` puis le résultat de chaque article.
+   * @throws {Error} `LEBONCOIN_LOCAL_WORKER_REQUIRED` quand le PC n’est pas joignable.
+   */
+  async function getLeboncoinListingRemoval(jobId: string): Promise<LeboncoinListingRemovalStatus> {
+    if (!import.meta.client || !canUseDesktopWorkers.value || !$leboncoinLocal) {
+      throw new Error('LEBONCOIN_LOCAL_WORKER_REQUIRED')
+    }
+    const { data } = await $leboncoinLocal.get<LeboncoinListingRemovalStatus>(`/articles/leboncoin-delist/${jobId}`)
+    return data
+  }
+
+  /**
    * POST `/articles/:id/remove-ebay-listing` — retire l’annonce eBay (API).
    *
    * @returns Updated article after eBay delist.
@@ -435,6 +471,8 @@ export function useArticles() {
     markSold,
     retryCrossEbayRemoval,
     vintedUnlistAfterEbaySale,
+    startLeboncoinListingRemoval,
+    getLeboncoinListingRemoval,
     removeEbayListing,
     publishArticleToVinted,
     publishArticleToEbay,

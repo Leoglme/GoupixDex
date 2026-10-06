@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -17,6 +18,8 @@ from services.vinted_publish_service import ProgressFn, listed_vinted_price, pub
 from services.vinted_service import VintedService
 
 logger = logging.getLogger(__name__)
+
+_VINTED_LISTING_REMOVAL_LOCK = asyncio.Lock()
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -88,6 +91,31 @@ class DesktopVintedRunnerService:
 
     @staticmethod
     async def _run_vinted_listing_removal(
+        article_id: int,
+        user_id: int,
+        token: str,
+        remote_base: str,
+        *,
+        progress: ProgressFn | None = None,
+        batch_position_label: str = "",
+    ) -> VintedListingRemovalOutcome:
+        """
+        Supprime une annonce Vinted à la fois : les retraits lancés ensemble (vente d’un lot) partageraient sinon le même Chrome.
+
+        Args et Returns : voir :meth:`_remove_vinted_listing`.
+        """
+        async with _VINTED_LISTING_REMOVAL_LOCK:
+            return await DesktopVintedRunnerService._remove_vinted_listing(
+                article_id,
+                user_id,
+                token,
+                remote_base,
+                progress=progress,
+                batch_position_label=batch_position_label,
+            )
+
+    @staticmethod
+    async def _remove_vinted_listing(
         article_id: int,
         user_id: int,
         token: str,

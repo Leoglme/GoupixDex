@@ -96,11 +96,14 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "cross_vinted_removal_failed": bool(article.cross_vinted_removal_failed),
         "cross_ebay_removal_error": article.cross_ebay_removal_error,
         "cross_vinted_removal_error": article.cross_vinted_removal_error,
+        "cross_leboncoin_removal_failed": bool(article.cross_leboncoin_removal_failed),
+        "cross_leboncoin_removal_error": article.cross_leboncoin_removal_error,
         "pending_vinted_unlist": bool(
             article.is_sold
             and (article.sale_source or "").lower() == "ebay"
             and article.published_on_vinted
         ),
+        "pending_leboncoin_unlist": bool(article.is_sold and getattr(article, "published_on_leboncoin", False)),
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "order_line_id": article.order_line_id,
@@ -131,6 +134,8 @@ def clear_leboncoin_publication_fields(article: Article) -> None:
     article.published_on_leboncoin = False
     article.leboncoin_listing_id = None
     article.leboncoin_published_at = None
+    article.cross_leboncoin_removal_failed = False
+    article.cross_leboncoin_removal_error = None
 
 
 def article_live_on_any_marketplace(article: Article) -> bool:

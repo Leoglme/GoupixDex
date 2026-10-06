@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, s
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app_types.leboncoin import LeboncoinListingRemovalJob
 from core.deps import get_bearer_or_query_token
 from core.win32_asyncio import ensure_proactor_event_loop
 from schemas.articles import VintedBatchStartBody
@@ -93,6 +94,8 @@ _lbc_browser_lock = asyncio.Lock()
 
 _INTROSPECT_CACHE_TTL_SEC = 120.0
 _introspect_cache: dict[str, tuple[float, int]] = {}
+_listing_removal_jobs: dict[str, LeboncoinListingRemovalJob] = {}
+_LISTING_REMOVAL_JOB_TTL_SEC = 15 * 60
 
 
 def _introspect_cache_key(raw_token: str) -> str:
@@ -183,6 +186,56 @@ async def start_leboncoin_batch(
         "job_id": job_id,
         "stream_path": f"/articles/leboncoin-batch/{job_id}/stream",
     }
+
+
+async def _run_listing_removal_job(
+    job_id: str, article_ids: list[int], user_id: int, raw_token: str, remote: str
+) -> None:
+    """Exécute un retrait Leboncoin et garde son résultat le temps que l’appareil qui l’a demandé le lise."""
+    job = _listing_removal_jobs[job_id]
+    try:
+        job["outcomes"] = await DesktopLeboncoinRunnerService.run_leboncoin_listings_removal(
+            article_ids, user_id, raw_token, remote
+        )
+    except Exception:
+        logger.exception("Leboncoin listing removal job crashed job_id=%s", job_id)
+        job["outcomes"] = [
+            {"article_id": article_id, "delisted": False, "detail": "Erreur interne du worker Leboncoin."}
+            for article_id in article_ids
+        ]
+    finally:
+        job["is_finished"] = True
+        asyncio.get_running_loop().call_later(_LISTING_REMOVAL_JOB_TTL_SEC, _listing_removal_jobs.pop, job_id, None)
+
+
+@router.post("/leboncoin-delist", status_code=status.HTTP_202_ACCEPTED)
+async def start_leboncoin_delist(
+    body: VintedBatchStartBody,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+    raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
+    remote: Annotated[str, Depends(get_remote_base_flexible)],
+) -> dict[str, object]:
+    """Supprime sur Leboncoin les annonces de ces articles ; chaque résultat est aussi enregistré sur sa fiche GoupixDex."""
+    job_id = str(uuid.uuid4())
+    _listing_removal_jobs[job_id] = {"user_id": user_id, "is_finished": False, "outcomes": []}
+    asyncio.create_task(
+        _run_listing_removal_job(job_id, list(dict.fromkeys(body.article_ids)), user_id, raw_token, remote)
+    )
+    return {"job_id": job_id}
+
+
+@router.get("/leboncoin-delist/{job_id}")
+async def leboncoin_delist_status(
+    job_id: str,
+    user_id: Annotated[int, Depends(get_user_id_introspected)],
+) -> dict[str, object]:
+    """Avancement d’un retrait Leboncoin : ``finished`` puis le résultat de chaque article."""
+    job = _listing_removal_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Retrait introuvable ou expiré.")
+    if job["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied for this job.")
+    return {"finished": job["is_finished"], "outcomes": job["outcomes"]}
 
 
 @router.get("/leboncoin-batch/{job_id}/stream")
