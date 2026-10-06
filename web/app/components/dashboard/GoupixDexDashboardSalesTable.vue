@@ -82,6 +82,7 @@
 
 <script setup lang="ts">
 import type { RecentSaleRow } from '~/composables/useStats'
+import type { Marketplace } from '~/types/Marketplace'
 
 const { openArticleFromClick } = useOpenArticleDrawer()
 
@@ -134,8 +135,9 @@ function formatDate(raw: string | null): string {
   })
 }
 
-const SOURCE_STYLES: Record<'vinted' | 'ebay', { label: string; bg: string; text: string }> = {
+const SOURCE_STYLES: Record<Marketplace, { label: string; bg: string; text: string }> = {
   vinted: { label: 'Vinted', bg: 'rgb(0, 131, 143)', text: '#fff' },
   ebay: { label: 'eBay', bg: 'rgb(134, 184, 23)', text: '#fff' },
+  leboncoin: { label: 'Leboncoin', bg: 'rgb(255, 110, 20)', text: '#fff' },
 }
 </script>

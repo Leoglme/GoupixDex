@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from models.article import Article
 from services import article_service
 Period = Literal["daily", "weekly", "monthly"]
+SALE_SOURCES: tuple[str, ...] = ("vinted", "ebay", "leboncoin")
 
 
 def _as_utc(value: dt.datetime | None) -> dt.datetime | None:
@@ -73,12 +74,12 @@ def list_sold_sales(
     """
     All sold articles for the user, newest first.
 
-    ``sale_source`` may be ``vinted``, ``ebay``, or omitted for both channels.
+    ``sale_source`` may be ``vinted``, ``ebay``, ``leboncoin``, or omitted for every channel.
     """
     rows = article_service.list_articles_for_user(db, user_id)
     sold = [a for a in rows if a.is_sold]
     src = (sale_source or "").strip().lower()
-    if src in {"vinted", "ebay"}:
+    if src in SALE_SOURCES:
         sold = [a for a in sold if (a.sale_source or "").lower() == src]
 
     sold.sort(key=lambda a: _as_utc(a.sold_at) or dt.datetime.min.replace(tzinfo=dt.UTC), reverse=True)
@@ -86,16 +87,14 @@ def list_sold_sales(
 
     revenue_eur = sum(p for a in sold for p in [_sale_proceeds_eur(a)] if p is not None)
     profit_eur = sum(_profit_eur(a) for a in sold)
-    vinted_count = sum(1 for a in sold if (a.sale_source or "").lower() == "vinted")
-    ebay_count = sum(1 for a in sold if (a.sale_source or "").lower() == "ebay")
+    channel_split = _channel_split(sold)
 
     return {
         "sales": sales,
         "count": len(sales),
         "revenue_eur": round(revenue_eur, 2),
         "profit_eur": round(profit_eur, 2),
-        "vinted_count": vinted_count,
-        "ebay_count": ebay_count,
+        **{f"{source}_count": channel_split[f"{source}_count"] for source in SALE_SOURCES},
     }
 
 
@@ -108,6 +107,18 @@ def _bucket_key(value: dt.datetime, period: Period) -> dt.datetime:
         # Monday as week start
         return base - dt.timedelta(days=base.weekday())
     return base
+
+
+def _channel_split(sold: list[Article]) -> dict[str, Any]:
+    """Nombre de ventes et chiffre d’affaires de chaque canal (``vinted_count``, ``vinted_revenue_eur``…)."""
+    split: dict[str, Any] = {}
+    for source in SALE_SOURCES:
+        sold_on_source = [a for a in sold if (a.sale_source or "").lower() == source]
+        split[f"{source}_count"] = len(sold_on_source)
+        split[f"{source}_revenue_eur"] = round(
+            sum(p for a in sold_on_source for p in [_sale_proceeds_eur(a)] if p is not None), 2
+        )
+    return split
 
 
 def _iter_buckets(start: dt.datetime, end: dt.datetime, period: Period) -> list[dt.datetime]:
@@ -181,42 +192,6 @@ def compute_dashboard_stats(
         p for a in sold for p in [_sale_proceeds_eur(a)] if p is not None
     )
 
-    # Channel breakdown over the selected range (Vinted vs eBay)
-    vinted_count = sum(1 for a in sold_in_range if a.sale_source == "vinted")
-    ebay_count = sum(1 for a in sold_in_range if a.sale_source == "ebay")
-    vinted_revenue_period = sum(
-        p
-        for a in sold_in_range
-        if a.sale_source == "vinted"
-        for p in [_sale_proceeds_eur(a)]
-        if p is not None
-    )
-    ebay_revenue_period = sum(
-        p
-        for a in sold_in_range
-        if a.sale_source == "ebay"
-        for p in [_sale_proceeds_eur(a)]
-        if p is not None
-    )
-
-    # Same split across all-time (used for the Vinted vs eBay pie)
-    vinted_count_total = sum(1 for a in sold if a.sale_source == "vinted")
-    ebay_count_total = sum(1 for a in sold if a.sale_source == "ebay")
-    vinted_revenue_total_split = sum(
-        p
-        for a in sold
-        if a.sale_source == "vinted"
-        for p in [_sale_proceeds_eur(a)]
-        if p is not None
-    )
-    ebay_revenue_total_split = sum(
-        p
-        for a in sold
-        if a.sale_source == "ebay"
-        for p in [_sale_proceeds_eur(a)]
-        if p is not None
-    )
-
     top_profitable = sorted(sold, key=_profit_eur, reverse=True)
     with_duration = [(a, _hours_to_sell(a)) for a in sold]
     with_duration = [(a, h) for a, h in with_duration if h is not None]
@@ -271,18 +246,8 @@ def compute_dashboard_stats(
         "period_sales_count": period_sales_count,
         "profit_total_eur": round(profit_total, 2),
         "vinted_revenue_eur": round(vinted_revenue_total, 2),
-        "channel_split_period": {
-            "vinted_count": vinted_count,
-            "ebay_count": ebay_count,
-            "vinted_revenue_eur": round(vinted_revenue_period, 2),
-            "ebay_revenue_eur": round(ebay_revenue_period, 2),
-        },
-        "channel_split_total": {
-            "vinted_count": vinted_count_total,
-            "ebay_count": ebay_count_total,
-            "vinted_revenue_eur": round(vinted_revenue_total_split, 2),
-            "ebay_revenue_eur": round(ebay_revenue_total_split, 2),
-        },
+        "channel_split_period": _channel_split(sold_in_range),
+        "channel_split_total": _channel_split(sold),
         "inventory_count": inventory_count,
         "inventory_purchase_total_eur": round(inventory_purchase_total_eur, 2),
         "inventory_sell_total_eur": round(inventory_sell_total_eur, 2),

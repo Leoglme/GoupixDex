@@ -1,4 +1,5 @@
 import type { LeboncoinListingRemovalStart, LeboncoinListingRemovalStatus } from '~/types/LeboncoinListingRemoval'
+import type { Marketplace } from '~/types/Marketplace'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 
 export interface ArticleImage {
@@ -25,7 +26,7 @@ export interface Article {
   /** Actual proceeds (may differ from listed price if negotiated). */
   sold_price: number | null
   /** Sales channel recorded at checkout. */
-  sale_source: 'vinted' | 'ebay' | null
+  sale_source: Marketplace | null
   is_sold: boolean
   /** False = fiche masquée dans « Mes articles » (données conservées). */
   offers_for_sale?: boolean
@@ -262,7 +263,7 @@ export function useArticles() {
    * @param payload - `{ sold_price, sale_source }` for the PATCH body.
    * @returns {Promise<Article>} Updated article marked sold.
    */
-  async function markSold(id: number, payload: { sold_price: number; sale_source: 'vinted' | 'ebay' }) {
+  async function markSold(id: number, payload: { sold_price: number; sale_source: Marketplace }) {
     const { data } = await $api.patch<Article>(`/articles/${id}/sold`, payload)
     return data
   }

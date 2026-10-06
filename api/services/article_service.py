@@ -100,10 +100,14 @@ def article_to_dict(article: Article) -> dict[str, Any]:
         "cross_leboncoin_removal_error": article.cross_leboncoin_removal_error,
         "pending_vinted_unlist": bool(
             article.is_sold
-            and (article.sale_source or "").lower() == "ebay"
+            and (article.sale_source or "").lower() in ("ebay", "leboncoin")
             and article.published_on_vinted
         ),
-        "pending_leboncoin_unlist": bool(article.is_sold and getattr(article, "published_on_leboncoin", False)),
+        "pending_leboncoin_unlist": bool(
+            article.is_sold
+            and (article.sale_source or "").lower() != "leboncoin"
+            and getattr(article, "published_on_leboncoin", False)
+        ),
         "created_at": article.created_at.isoformat(),
         "sold_at": article.sold_at.isoformat() if article.sold_at else None,
         "order_line_id": article.order_line_id,

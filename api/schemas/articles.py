@@ -46,7 +46,7 @@ class SoldPatch(BaseModel):
     """Mark as sold: actual proceeds and channel (listing price ``sell_price`` is unchanged)."""
 
     sold_price: Decimal = Field(ge=0)
-    sale_source: Literal["vinted", "ebay"] = "vinted"
+    sale_source: Literal["vinted", "ebay", "leboncoin"] = "vinted"
 
 
 class ConfirmVintedPublishBody(BaseModel):

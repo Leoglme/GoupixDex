@@ -36,7 +36,7 @@ from services import article_service, collection_article_sync_service
 from services.article_market_reference_service import refresh_article_market_reference
 from services.cardmarket_order_service import assign_article_order_line
 from services.combined_marketplace_service import CombinedMarketplaceService
-from services.cross_marketplace_removal_service import run_background_ebay_removal_after_vinted_sale
+from services.cross_marketplace_removal_service import run_background_ebay_removal_after_sale
 from services.ebay_background_service import EbayBackgroundService
 from services.ebay_listing_delete_service import clear_ebay_publication_fields, delete_ebay_listing_for_article
 from services.user_settings_service import ebay_listing_config_complete, get_or_create_user_settings
@@ -691,14 +691,14 @@ async def retry_cross_ebay_removal(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Relance la suppression eBay après une vente Vinted (échec réseau / token, etc.)."""
+    """Relance la suppression eBay après une vente Vinted ou Leboncoin (échec réseau / token, etc.)."""
     article = article_service.get_article(db, article_id, user.id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    if not article.is_sold or (article.sale_source or "").lower() != "vinted":
+    if not article.is_sold or (article.sale_source or "").lower() not in ("vinted", "leboncoin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Réservé aux articles vendus sur Vinted.",
+            detail="Réservé aux articles vendus sur Vinted ou Leboncoin.",
         )
     if not article.published_on_ebay:
         raise HTTPException(
@@ -1035,7 +1035,7 @@ def mark_sold(
     article.cross_leboncoin_removal_error = None
 
     need_ebay_bg = (
-        body.sale_source == "vinted"
+        body.sale_source != "ebay"
         and article.published_on_ebay
         and (bool(article.ebay_listing_id) or bool(article.ebay_inventory_sku))
     )
@@ -1047,7 +1047,7 @@ def mark_sold(
 
     if need_ebay_bg:
         background_tasks.add_task(
-            run_background_ebay_removal_after_vinted_sale,
+            run_background_ebay_removal_after_sale,
             article_id,
             user.id,
         )

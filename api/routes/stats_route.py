@@ -53,10 +53,10 @@ def dashboard(
 def sold_sales(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
-    sale_source: Literal["vinted", "ebay"] | None = Query(
+    sale_source: Literal["vinted", "ebay", "leboncoin"] | None = Query(
         None,
         description="Filter by channel; omit for all sold articles.",
     ),
 ) -> dict[str, Any]:
-    """All sold articles (Vinted and/or eBay), same row shape as dashboard ``recent_sales``."""
+    """All sold articles (Vinted, eBay and/or Leboncoin), same row shape as dashboard ``recent_sales``."""
     return list_sold_sales(db, user.id, sale_source=sale_source)

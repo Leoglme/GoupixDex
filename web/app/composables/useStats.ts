@@ -1,3 +1,5 @@
+import type { Marketplace } from '~/types/Marketplace'
+
 export type DashboardPeriod = 'daily' | 'weekly' | 'monthly'
 
 export interface DashboardRange {
@@ -22,7 +24,7 @@ export interface RecentSaleRow {
   sold_price_eur: number | null
   /** Amount used for revenue / margin (sold_price or legacy sell_price). */
   realized_price_eur: number | null
-  sale_source: 'vinted' | 'ebay' | null
+  sale_source: Marketplace | null
   purchase_price_eur: number
   profit_eur: number
 }
@@ -30,8 +32,10 @@ export interface RecentSaleRow {
 export interface ChannelSplit {
   vinted_count: number
   ebay_count: number
+  leboncoin_count: number
   vinted_revenue_eur: number
   ebay_revenue_eur: number
+  leboncoin_revenue_eur: number
 }
 
 export interface DashboardStats {
@@ -49,9 +53,9 @@ export interface DashboardStats {
   profit_total_eur: number
   /** All-time sales revenue (kept for legacy callers). */
   vinted_revenue_eur: number
-  /** Vinted vs eBay breakdown over the selected range. */
+  /** Vinted / eBay / Leboncoin breakdown over the selected range. */
   channel_split_period: ChannelSplit
-  /** Vinted vs eBay breakdown across all time. */
+  /** Vinted / eBay / Leboncoin breakdown across all time. */
   channel_split_total: ChannelSplit
   inventory_count: number
   inventory_purchase_total_eur: number
@@ -89,9 +93,10 @@ export interface SoldSalesResponse {
   profit_eur: number
   vinted_count: number
   ebay_count: number
+  leboncoin_count: number
 }
 
-export type SoldSalesChannelFilter = 'vinted' | 'ebay' | null
+export type SoldSalesChannelFilter = Marketplace | null
 
 /**
  * Serialize a `Date` as ISO string for dashboard query params.

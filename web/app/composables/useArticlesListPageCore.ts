@@ -6,6 +6,7 @@ import type {
   EbayLeboncoinDelist,
   EbayLeboncoinDelistFailure,
 } from '~/types/EbayLeboncoinDelist'
+import type { ArticleSaleConfirmation } from '~/types/GoupixDexArticleMarkSoldDrawer'
 import type { Marketplace } from '~/types/Marketplace'
 import type { PublishReviewChoice } from '~/types/PublishReviewPrompt'
 import { useBulkMarketplacePublication } from '~/composables/useBulkMarketplacePublication'
@@ -148,17 +149,9 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
 
   /**
    * Enregistre la vente puis fait retirer par le PC les annonces restées en ligne ailleurs (Vinted, Leboncoin).
-   * @param payload - Vente unitaire ou lot avec répartition calculée côté modale.
+   * @param payload - Vente unitaire ou lot avec répartition calculée côté drawer.
    */
-  async function confirmSold(
-    payload:
-      | { mode: 'single'; soldPrice: number; saleSource: 'vinted' | 'ebay' }
-      | {
-          mode: 'bundle'
-          saleSource: 'vinted' | 'ebay'
-          allocations: { id: number; soldPrice: number }[]
-        },
-  ) {
+  async function confirmSold(payload: ArticleSaleConfirmation) {
     const rows = soldArticles.value
     if (!rows?.length) {
       return

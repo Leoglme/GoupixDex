@@ -83,11 +83,7 @@ class DesktopVintedRunnerService:
     @staticmethod
     def _article_needs_vinted_unlist(article_d: dict[str, Any]) -> bool:
         """True when GoupixDex still expects a live Vinted listing to be removed."""
-        return bool(
-            article_d.get("is_sold")
-            and str(article_d.get("sale_source") or "").lower() == "ebay"
-            and article_d.get("published_on_vinted")
-        )
+        return bool(article_d.get("pending_vinted_unlist"))
 
     @staticmethod
     async def _run_vinted_listing_removal(

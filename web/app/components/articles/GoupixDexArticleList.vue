@@ -807,6 +807,9 @@ function soldStatusLabel(row: Article): string {
   if (row.sale_source === 'vinted') {
     return 'Vinted'
   }
+  if (row.sale_source === 'leboncoin') {
+    return 'Leboncoin'
+  }
   return 'Oui'
 }
 
@@ -825,9 +828,10 @@ function realizedSalePrice(row: Article): number | null {
   return row.sell_price
 }
 
-/** Vinted / eBay brand colors for the sold-status badge when source is known */
+/** Vinted / eBay / Leboncoin brand colors for the sold-status badge when source is known */
 const SOLD_BADGE_VINTED = '#00838f'
 const SOLD_BADGE_EBAY = '#86b817'
+const SOLD_BADGE_LEBONCOIN = '#ff6e14'
 
 /**
  * Badge colors when we know the marketplace source of the sale.
@@ -843,6 +847,9 @@ function soldStatusBrandStyle(row: Article): { backgroundColor: string; color: s
   }
   if (row.sale_source === 'ebay') {
     return { backgroundColor: SOLD_BADGE_EBAY, color: '#ffffff' }
+  }
+  if (row.sale_source === 'leboncoin') {
+    return { backgroundColor: SOLD_BADGE_LEBONCOIN, color: '#ffffff' }
   }
   return null
 }

@@ -1,4 +1,4 @@
-"""Tâches asynchrones : retirer l’annonce eBay après une vente déclarée sur Vinted."""
+"""Tâches asynchrones : retirer l’annonce eBay après une vente déclarée sur Vinted ou Leboncoin."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from services.ebay_listing_delete_service import clear_ebay_publication_fields, 
 logger = logging.getLogger(__name__)
 
 
-async def run_background_ebay_removal_after_vinted_sale(article_id: int, user_id: int) -> None:
-    """Appelé depuis ``BackgroundTasks`` après ``PATCH …/sold`` (source Vinted)."""
+async def run_background_ebay_removal_after_sale(article_id: int, user_id: int) -> None:
+    """Appelé depuis ``BackgroundTasks`` après ``PATCH …/sold`` (source Vinted ou Leboncoin)."""
     db = SessionLocal()
     try:
         article = article_service.get_article(db, article_id, user_id)

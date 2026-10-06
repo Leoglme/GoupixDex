@@ -211,7 +211,7 @@ async def vinted_unlist_after_ebay_sale(
     raw_token: Annotated[str, Depends(get_bearer_or_query_token)],
     remote: Annotated[str, Depends(get_remote_base_flexible)],
 ) -> dict[str, object]:
-    """Retire l’annonce Vinted après une vente déclarée sur eBay (Chrome / nodriver)."""
+    """Retire l’annonce Vinted après une vente déclarée sur eBay ou Leboncoin (Chrome / nodriver)."""
     asyncio.create_task(
         DesktopVintedRunnerService.run_vinted_unlist_after_ebay_sale(article_id, user_id, raw_token, remote)
     )

@@ -125,11 +125,10 @@
     </template>
   </UDashboardPanel>
 
-  <GoupixDexArticleMarkSoldModal
+  <GoupixDexArticleMarkSoldDrawer
     v-model:open="soldOpen"
     :articles="soldArticles"
-    :ebay-enabled="ebayPublishAvailable"
-    :loading="soldSubmitting"
+    :is-saving="soldSubmitting"
     @confirm="confirmSold"
   />
 

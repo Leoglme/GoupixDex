@@ -206,6 +206,7 @@ const numberFmt: Intl.NumberFormat = new Intl.NumberFormat('fr-FR')
 const CHANNEL_COLORS = {
   vinted: 'rgb(0, 131, 143)',
   ebay: 'rgb(134, 184, 23)',
+  leboncoin: 'rgb(255, 110, 20)',
 } as const
 
 type PieSegment = { value: number; label: string; color: string; count: number }
@@ -230,6 +231,14 @@ const channelSegments: ComputedRef<PieSegment[]> = computed(() => {
       value: split.ebay_revenue_eur,
       count: split.ebay_count,
       color: CHANNEL_COLORS.ebay,
+    })
+  }
+  if (split.leboncoin_revenue_eur > 0 || split.leboncoin_count > 0) {
+    out.push({
+      label: 'Leboncoin',
+      value: split.leboncoin_revenue_eur,
+      count: split.leboncoin_count,
+      color: CHANNEL_COLORS.leboncoin,
     })
   }
   return out

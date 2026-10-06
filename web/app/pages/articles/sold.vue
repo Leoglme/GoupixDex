@@ -21,7 +21,7 @@
       <div class="app-dashboard-page w-full">
         <GoupixDexPageHeader
           title="Mes articles"
-          description="Ventes enregistrées sur Vinted et eBay, de la plus récente à la plus ancienne."
+          description="Ventes enregistrées sur Vinted, eBay et Leboncoin, de la plus récente à la plus ancienne."
         />
 
         <GoupixDexPageTabs :items="ARTICLES_PAGE_TABS">
@@ -66,8 +66,8 @@
             <GoupixDexStatsCard
               v-if="channelFilter === null"
               title="Répartition"
-              :value="`${payload.vinted_count} / ${payload.ebay_count}`"
-              description="Vinted / eBay"
+              :value="`${payload.vinted_count} / ${payload.ebay_count} / ${payload.leboncoin_count}`"
+              description="Vinted / eBay / Leboncoin"
               icon="i-lucide-pie-chart"
             />
           </div>
@@ -94,7 +94,7 @@ definePageMeta({ middleware: 'auth' })
 
 useGoupixPageSeo(
   'Mes articles — Vendus',
-  'Historique de vos ventes Vinted et eBay enregistrées dans GoupixDex : prix, marge et canal de vente.',
+  'Historique de vos ventes Vinted, eBay et Leboncoin enregistrées dans GoupixDex : prix, marge et canal de vente.',
 )
 
 const { fetchSoldSales } = useStats()
@@ -108,6 +108,7 @@ const channelOptions: { label: string; value: SoldSalesChannelFilter }[] = [
   { label: 'Tous', value: null },
   { label: 'Vinted', value: 'vinted' },
   { label: 'eBay', value: 'ebay' },
+  { label: 'Leboncoin', value: 'leboncoin' },
 ]
 
 const eur = new Intl.NumberFormat('fr-FR', {
@@ -124,7 +125,10 @@ const channelDescription = computed(() => {
   if (channelFilter.value === 'ebay') {
     return 'Canal eBay uniquement'
   }
-  return 'Vinted et eBay'
+  if (channelFilter.value === 'leboncoin') {
+    return 'Canal Leboncoin uniquement'
+  }
+  return 'Vinted, eBay et Leboncoin'
 })
 
 const emptyTableMessage = computed(() => {
@@ -133,6 +137,9 @@ const emptyTableMessage = computed(() => {
   }
   if (channelFilter.value === 'ebay') {
     return 'Aucune vente eBay enregistrée.'
+  }
+  if (channelFilter.value === 'leboncoin') {
+    return 'Aucune vente Leboncoin enregistrée.'
   }
   return 'Aucune vente enregistrée pour le moment.'
 })
