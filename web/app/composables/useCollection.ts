@@ -22,6 +22,8 @@ export interface CollectionCard {
   image_url: string | null
   quantity: number
   purchase_price_eur: number | null
+  /** Prix marché unitaire relevé au moment du scan (modifiable). */
+  scan_market_price_eur: number | null
   notes: string | null
   article_id: number | null
   is_article_online: boolean
@@ -73,6 +75,7 @@ export interface CollectionPatchBody {
   quantity?: number
   language?: CollectionLanguage | string
   purchase_price_eur?: number | null
+  scan_market_price_eur?: number | null
   notes?: string | null
   market_price_eur?: number | null
   reset_market_price?: boolean

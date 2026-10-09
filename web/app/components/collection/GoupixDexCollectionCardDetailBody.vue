@@ -99,6 +99,10 @@
         <p v-else-if="card.market_price_eur != null" class="text-muted text-xs">
           Cardmarket · {{ eur.format(lineMarketEur) }} pour {{ card.quantity }} exemplaire(s)
         </p>
+        <p v-if="card.scan_market_price_eur != null" class="text-muted text-xs">
+          Au scan {{ eur.format(card.scan_market_price_eur) }}
+          <template v-if="sinceScanPercent != null"> · {{ formatSignedPercent(sinceScanPercent) }} depuis</template>
+        </p>
         <UButton
           :to="cardmarketLink"
           target="_blank"
@@ -138,16 +142,21 @@
             />
           </UFormField>
         </div>
-        <UFormField label="Prix d'achat (€)" hint="pour suivre ta plus-value">
-          <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
-        </UFormField>
+        <div class="grid grid-cols-2 gap-2">
+          <UFormField label="Prix d'achat (€)" hint="plus-value">
+            <UInput v-model="purchaseText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
+          </UFormField>
+          <UFormField label="Prix marché au scan (€)">
+            <UInput v-model="scanMarketText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
+          </UFormField>
+        </div>
         <div class="flex items-end gap-2">
           <UFormField
             label="Prix marché (€)"
             :hint="card.market_price_overridden ? 'saisi à la main' : 'corrige un prix erroné'"
             class="flex-1"
           >
-            <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="Auto" class="w-full" />
+            <UInput v-model="marketText" type="text" inputmode="decimal" placeholder="Auto" class="w-full" />
           </UFormField>
           <UButton
             v-if="card.market_price_overridden"
@@ -255,6 +264,7 @@ const quantityDraft = ref(1)
 const languageDraft = ref('fr')
 const notesDraft = ref('')
 const purchaseText = ref('')
+const scanMarketText = ref('')
 const marketText = ref('')
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
@@ -279,6 +289,19 @@ const cardmarketLink = computed<string>(() =>
   }),
 )
 
+const sinceScanPercent = computed<number | null>(() => {
+  const scanPrice = card.value?.scan_market_price_eur
+  const marketPrice = card.value?.market_price_eur
+  if (scanPrice == null || marketPrice == null || scanPrice <= 0) {
+    return null
+  }
+  return (marketPrice / scanPrice - 1) * 100
+})
+
+const isMarketPriceDirty = computed<boolean>(
+  () => parseEuroAmount(marketText.value) !== (card.value?.market_price_eur ?? null),
+)
+
 const isDirty = computed<boolean>(() => {
   const current = card.value
   if (!current) {
@@ -288,9 +311,9 @@ const isDirty = computed<boolean>(() => {
     quantityDraft.value !== current.quantity ||
     languageDraft.value !== current.language ||
     notesDraft.value.trim() !== (current.notes ?? '') ||
-    (purchaseText.value.trim() || '') !==
-      (current.purchase_price_eur != null ? String(current.purchase_price_eur) : '') ||
-    (marketText.value.trim() || '') !== (current.market_price_eur != null ? String(current.market_price_eur) : '')
+    parseEuroAmount(purchaseText.value) !== current.purchase_price_eur ||
+    parseEuroAmount(scanMarketText.value) !== current.scan_market_price_eur ||
+    isMarketPriceDirty.value
   )
 })
 
@@ -321,6 +344,7 @@ function syncDrafts(c: CollectionCard): void {
   languageDraft.value = c.language
   notesDraft.value = c.notes ?? ''
   purchaseText.value = c.purchase_price_eur != null ? String(c.purchase_price_eur) : ''
+  scanMarketText.value = c.scan_market_price_eur != null ? String(c.scan_market_price_eur) : ''
   marketText.value = c.market_price_eur != null ? String(c.market_price_eur) : ''
 }
 
@@ -408,7 +432,9 @@ async function onSaveDraft(): Promise<void> {
       language: languageDraft.value,
       notes: notesDraft.value.trim() || null,
       purchase_price_eur: parseEuroAmount(purchaseText.value),
-      market_price_eur: parseEuroAmount(marketText.value),
+      scan_market_price_eur: parseEuroAmount(scanMarketText.value),
+      // Envoyé seulement s'il a changé : sinon le prix passerait en « saisi à la main ».
+      ...(isMarketPriceDirty.value ? { market_price_eur: parseEuroAmount(marketText.value) } : {}),
     })
     card.value = updated
     syncDrafts(updated)

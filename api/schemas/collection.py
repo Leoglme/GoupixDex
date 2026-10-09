@@ -23,6 +23,8 @@ class CollectionCardUpdateBody(BaseModel):
     language: str | None = Field(default=None, min_length=2, max_length=8)
     #: Prix d'achat unitaire payé, optionnel (base du pourcentage de plus-value).
     purchase_price_eur: float | None = Field(default=None, ge=0, le=1000000)
+    #: Prix marché relevé au scan, corrigé à la main.
+    scan_market_price_eur: float | None = Field(default=None, ge=0, le=1000000)
     notes: str | None = Field(default=None, max_length=2000)
     #: Prix marché saisi à la main (corrige un mapping Cardmarket TCGdex erroné, fréquent en JP).
     market_price_eur: float | None = Field(default=None, ge=0, le=1000000)

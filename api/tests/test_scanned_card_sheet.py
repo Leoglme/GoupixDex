@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from collections.abc import Iterator
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -163,6 +164,33 @@ def test_adding_an_owned_card_adds_one_copy(db: Session) -> None:
 
     assert created is False
     assert card_json["quantity"] == 3
+
+
+def test_scanning_a_new_card_records_its_market_price_at_scan_time(db: Session) -> None:
+    card_json, _ = scan_stream_service._add_or_increment(1, _card_meta(), notes=None)
+
+    assert card_json["scan_market_price_eur"] == 2.11
+
+
+def test_scanning_another_copy_keeps_the_first_scan_price(db: Session) -> None:
+    card = _collection_card(db, language="fr", quantity=1)
+    card.scan_market_price_eur = Decimal("1.50")
+    db.commit()
+    db.close()
+
+    card_json, _ = scan_stream_service._add_or_increment(1, _card_meta(market_price_eur=3.4), notes=None)
+
+    assert card_json["scan_market_price_eur"] == 1.5
+    assert card_json["market_price_eur"] == 3.4
+
+
+def test_scanning_an_owned_card_without_scan_price_records_it(db: Session) -> None:
+    _collection_card(db, language="fr", quantity=1)
+    db.close()
+
+    card_json, _ = scan_stream_service._add_or_increment(1, _card_meta(), notes=None)
+
+    assert card_json["scan_market_price_eur"] == 2.11
 
 
 def test_removing_a_card_never_deletes_an_empty_binder_placeholder(db: Session) -> None:

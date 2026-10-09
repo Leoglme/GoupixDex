@@ -232,6 +232,7 @@ def patch_collection_card(
         language=body.language,
         notes=body.notes,
         purchase_price_eur=body.purchase_price_eur,
+        scan_market_price_eur=body.scan_market_price_eur,
         market_price_eur=body.market_price_eur,
         reset_market_price=body.reset_market_price,
     )

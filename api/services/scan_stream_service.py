@@ -27,6 +27,7 @@ import logging
 import secrets
 import threading
 import time
+from decimal import Decimal
 from typing import Any, Literal
 
 from sqlalchemy.orm import Session
@@ -209,6 +210,12 @@ def build_scanned_card_preview(
     }
 
 
+def _scan_market_price(meta: dict[str, Any]) -> Decimal | None:
+    """Cote Cardmarket de la carte au moment du scan, arrondie au centime."""
+    market_price_eur = meta.get("market_price_eur")
+    return Decimal(str(round(float(market_price_eur), 2))) if market_price_eur is not None else None
+
+
 def _add_one_copy(
     db: Session,
     user_id: int,
@@ -236,6 +243,9 @@ def _add_one_copy(
             cardmarket_id_product=meta.get("cardmarket_id_product"),
             market_price_eur=meta.get("market_price_eur"),
         )
+        # Garde la cote du premier exemplaire scanné (ou corrigée à la main) ; un emplacement vide repart de zéro.
+        if fills_binder_placeholder or existing.scan_market_price_eur is None:
+            existing.scan_market_price_eur = _scan_market_price(meta)
         return existing, fills_binder_placeholder
 
     row = CollectionCard(
@@ -253,6 +263,7 @@ def _add_one_copy(
         language=meta["language"],
         image_url=meta["image_url"],
         quantity=1,
+        scan_market_price_eur=_scan_market_price(meta),
         notes=(notes.strip() if notes else None),
     )
     collection_card_service.apply_market_price(

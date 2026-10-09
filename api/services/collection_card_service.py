@@ -96,6 +96,9 @@ def collection_card_to_dict(card: CollectionCard) -> dict[str, Any]:
         "quantity": quantity,
         "is_placeholder": bool(card.is_placeholder),
         "purchase_price_eur": float(card.purchase_price_eur) if card.purchase_price_eur is not None else None,
+        "scan_market_price_eur": (
+            float(card.scan_market_price_eur) if card.scan_market_price_eur is not None else None
+        ),
         "notes": card.notes,
         "article_id": card.article_id,
         "is_article_online": card.article_id is not None and is_article_online(card.article),
@@ -201,6 +204,7 @@ def update_collection_card(
     language: str | None = None,
     notes: str | None = None,
     purchase_price_eur: float | None = None,
+    scan_market_price_eur: float | None = None,
     market_price_eur: float | None = None,
     reset_market_price: bool = False,
 ) -> CollectionCard:
@@ -215,6 +219,8 @@ def update_collection_card(
         card.notes = notes.strip() or None
     if purchase_price_eur is not None:
         card.purchase_price_eur = Decimal(str(round(float(purchase_price_eur), 2)))
+    if scan_market_price_eur is not None:
+        card.scan_market_price_eur = Decimal(str(round(float(scan_market_price_eur), 2)))
     if reset_market_price:
         card.market_price_overridden = False
         auto_price = resolve_market_price_eur(card.cardmarket_id_product, None)
