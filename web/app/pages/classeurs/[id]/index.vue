@@ -208,12 +208,46 @@
 
         <div v-else class="app-dashboard-page space-y-4 pt-4 sm:pt-5">
           <div
-            v-if="isCompletionBinder"
+            v-if="isCompletionBinder || gridItems.length > 0"
+            class="sticky top-0 z-20 -mx-3 space-y-1.5 bg-(--app-bg)/90 px-3 py-2 backdrop-blur sm:mx-0 sm:px-0"
+          >
+            <UInput
+              v-model="gridSearch"
+              type="search"
+              inputmode="search"
+              enterkeyhint="search"
+              autocomplete="off"
+              icon="i-lucide-search"
+              size="lg"
+              placeholder="Nom (FR ou EN), n° de carte ou rang…"
+              aria-label="Chercher une carte dans le classeur"
+              class="w-full"
+              :ui="{ trailing: 'pe-1' }"
+            >
+              <template v-if="gridSearch" #trailing>
+                <UButton
+                  color="neutral"
+                  variant="link"
+                  size="sm"
+                  icon="i-lucide-circle-x"
+                  aria-label="Effacer la recherche"
+                  @click="gridSearch = ''"
+                />
+              </template>
+            </UInput>
+            <p v-if="isGridSearching" class="text-muted text-xs tabular-nums">{{ gridSearchSummary }}</p>
+          </div>
+
+          <p v-if="isCompletionBinder && isGridSearching && visibleCompletionCells.length === 0" :class="noResultClass">
+            Aucune carte ne correspond à « {{ gridSearch.trim() }} ».
+          </p>
+          <div
+            v-else-if="isCompletionBinder"
             class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
           >
             <component
               :is="cell.item ? 'button' : 'div'"
-              v-for="cell in completionCells"
+              v-for="cell in visibleCompletionCells"
               :key="cell.key"
               :type="cell.item ? 'button' : undefined"
               class="block w-full text-left"
@@ -234,6 +268,7 @@
                   :fallback-src="cell.dex?.artworkUrl ?? null"
                 />
                 <GoupixDexBinderPokedexPlaceholder v-else-if="cell.dex" :placeholder="cell.dex" />
+                <span v-if="isGridSearching" class="tile-badge num top-1.5 left-1.5">n°{{ cell.rank }}</span>
                 <span v-if="cell.item && cell.item.quantity > 1" class="tile-badge num top-1.5 right-1.5">
                   ×{{ cell.item.quantity }}
                 </span>
@@ -244,6 +279,13 @@
               <p v-if="cell.item && cell.dex" class="truncate text-[10px] leading-tight text-(--app-faint)">
                 {{ cell.item.card_name }}
               </p>
+              <p
+                v-if="isGridSearching"
+                class="text-[10px] leading-tight font-semibold"
+                :class="cell.item?.kind === 'owned' ? 'text-(--app-green)' : 'text-(--app-faint)'"
+              >
+                {{ cell.item?.kind === 'owned' ? 'Possédée' : 'Manquante' }}
+              </p>
             </component>
           </div>
 
@@ -251,9 +293,12 @@
             <p v-if="gridItems.length === 0" class="text-muted py-12 text-center text-sm">
               Aucune carte dans ce classeur. Passe en mode Pages pour en ranger.
             </p>
+            <p v-else-if="isGridSearching && visibleGridItems.length === 0" :class="noResultClass">
+              Aucune carte ne correspond à « {{ gridSearch.trim() }} ».
+            </p>
             <div v-else class="app-pokemon-card-grid">
               <button
-                v-for="item in gridItems"
+                v-for="{ item, rank } in visibleGridItems"
                 :key="item.id"
                 type="button"
                 class="block w-full cursor-pointer text-left"
@@ -264,6 +309,7 @@
                     :src="item.image_url || limitlessCardImageUrl(item.tcgdex_card_id)"
                     :alt="item.card_name"
                   />
+                  <span v-if="isGridSearching" class="tile-badge num top-1.5 left-1.5">n°{{ rank }}</span>
                   <span v-if="item.quantity > 1" class="tile-badge num top-1.5 right-1.5">×{{ item.quantity }}</span>
                 </div>
                 <p class="mt-1 truncate text-xs font-medium">{{ item.card_name }}</p>
@@ -302,6 +348,8 @@ import type { PokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { pokedexPlaceholder } from '~/utils/pokedex/kanto'
 import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 import { formatSignedPercent } from '~/utils/sealedProducts'
+import type { BinderGridSearchEntry } from '~/utils/binder/binder-grid-search'
+import { binderGridSearchNames, matchesBinderGridSearch } from '~/utils/binder/binder-grid-search'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -350,6 +398,13 @@ interface CompletionCell {
   key: string
   item: BinderPocketItem | null
   dex: PokedexPlaceholder | null
+  /** Rang de la pochette dans le classeur (1 = première). */
+  rank: number
+}
+
+interface GridItemCell {
+  item: BinderPocketItem
+  rank: number
 }
 
 /**
@@ -375,9 +430,71 @@ const completionCells = computed<CompletionCell[]>(() => {
   for (const position of [...positions].sort((a, b) => a - b)) {
     const item = byPosition.get(position) ?? null
     const dexNumber = slots[String(position)]
-    cells.push({ key: item ? item.id : `ph-${position}`, item, dex: dexNumber ? pokedexPlaceholder(dexNumber) : null })
+    cells.push({
+      key: item ? item.id : `ph-${position}`,
+      item,
+      dex: dexNumber ? pokedexPlaceholder(dexNumber) : null,
+      rank: position + 1,
+    })
   }
   return cells
+})
+
+// --- Recherche dans la grille : nom FR/EN, n° de carte ou rang dans le classeur ---
+const gridSearch = ref('')
+const isGridSearching = computed<boolean>(() => gridSearch.value.trim() !== '')
+const noResultClass = 'text-muted py-12 text-center text-sm'
+
+/**
+ * Index de recherche d'une pochette.
+ * @param {BinderPocketItem | null} item - Carte rangée, ou `null` pour une pochette Pokédex vide.
+ * @param {PokedexPlaceholder | null} dex - Pokémon attendu dans la pochette (mode complétion).
+ * @param {number} rank - Rang de la pochette dans le classeur.
+ * @returns {BinderGridSearchEntry} Entrée prête pour `matchesBinderGridSearch`.
+ */
+function gridSearchEntry(
+  item: BinderPocketItem | null,
+  dex: PokedexPlaceholder | null,
+  rank: number,
+): BinderGridSearchEntry {
+  return {
+    rank,
+    cardNumber: item?.local_id ?? null,
+    names: binderGridSearchNames(item?.card_name, dex?.dexNumber ?? null),
+  }
+}
+
+const completionSearchIndex = computed<{ cell: CompletionCell; entry: BinderGridSearchEntry }[]>(() =>
+  completionCells.value.map((cell) => ({ cell, entry: gridSearchEntry(cell.item, cell.dex, cell.rank) })),
+)
+
+const gridItemsSearchIndex = computed<{ cell: GridItemCell; entry: BinderGridSearchEntry }[]>(() =>
+  gridItems.value.map((item, index) => {
+    const rank = item.position != null && item.position >= 0 ? item.position + 1 : index + 1
+    return { cell: { item, rank }, entry: gridSearchEntry(item, null, rank) }
+  }),
+)
+
+const visibleCompletionCells = computed<CompletionCell[]>(() =>
+  completionSearchIndex.value
+    .filter(({ entry }) => matchesBinderGridSearch(entry, gridSearch.value))
+    .map(({ cell }) => cell),
+)
+
+const visibleGridItems = computed<GridItemCell[]>(() =>
+  gridItemsSearchIndex.value
+    .filter(({ entry }) => matchesBinderGridSearch(entry, gridSearch.value))
+    .map(({ cell }) => cell),
+)
+
+const gridSearchSummary = computed<string>(() => {
+  if (isCompletionBinder.value) {
+    const cells = visibleCompletionCells.value
+    const owned = cells.filter((cell) => cell.item?.kind === 'owned').length
+    return `${cells.length} résultat${cells.length > 1 ? 's' : ''} · ${owned} possédée${owned > 1 ? 's' : ''}`
+  }
+  const count = visibleGridItems.value.length
+  return `${count} résultat${count > 1 ? 's' : ''}`
 })
 
 const binderMetaLine = computed(() => {
