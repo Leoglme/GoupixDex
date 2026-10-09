@@ -109,10 +109,10 @@
             <UInputNumber v-model="quantityDraft" :min="1" :max="999" class="w-full" />
           </UFormField>
           <UFormField label="Achat (€)">
-            <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
+            <UInput v-model="purchaseText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
           </UFormField>
           <UFormField label="Marché (€)">
-            <UInput v-model="marketText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
+            <UInput v-model="marketText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
           </UFormField>
         </div>
         <UFormField label="Notes">

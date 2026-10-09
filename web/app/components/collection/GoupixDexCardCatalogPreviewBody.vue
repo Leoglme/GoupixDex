@@ -66,7 +66,7 @@
 
     <!-- Prix d'achat (optionnel) -->
     <UFormField label="Prix d'achat (€)" hint="optionnel — pour suivre ta plus-value">
-      <UInput v-model="purchaseText" type="number" min="0" step="0.01" placeholder="—" class="w-full" />
+      <UInput v-model="purchaseText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
     </UFormField>
 
     <!-- Ajout -->
