@@ -17,7 +17,7 @@
  * meilleur alignement gagne pour chaque carte candidate.
  *
  * Protocole :
- *   → { t:'init', binUrl, jsonUrl }        ← { t:'ready' } | { t:'init-error', message }
+ *   → { t:'init', binUrl, jsonUrl, deltaUrl }  ← { t:'ready' } | { t:'init-error', message }
  *   → { t:'match', seq, buf, w, h, language }  ← { t:'result', seq, result }
  * `buf` = RGBA de la carte REDRESSÉE (le détecteur a warpé le quad en rectangle).
  */
@@ -198,9 +198,45 @@ function distTo(variant, i) {
   return ((1 - W_ART) * dw + W_ART * da) / 256
 }
 
-/** Charge l'index binaire GPXH + les métadonnées. */
+/**
+ * Cartes que l'API calcule chaque nuit pour les sets absents de l'index livré ; un échec laisse l'index livré seul.
+ * @param {string | undefined} url - URL de `GET /scan-index/phash-delta`.
+ * @returns {Promise<Array<[string, string, string, string, string, string, string]>>} Lignes `[id, langue, nom, set, numéro, empreintes base64, image]`.
+ */
+async function loadDeltaCards(url) {
+  if (!url) return []
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) return []
+    const body = await resp.json()
+    return Array.isArray(body.cards) ? body.cards : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Empreintes base64 d'une carte calculée par l'API en vue binaire, comme un enregistrement de l'index livré.
+ * @param {string} b64 - 64 octets en base64 : carte entière puis illustration.
+ * @returns {DataView | null} Vue sur les 64 octets, `null` si la valeur est invalide.
+ */
+function decodeHashes(b64) {
+  try {
+    const raw = atob(b64)
+    if (raw.length !== 64) return null
+    return new DataView(Uint8Array.from(raw, (ch) => ch.charCodeAt(0)).buffer)
+  } catch {
+    return null
+  }
+}
+
+/** Charge l'index binaire GPXH + les métadonnées, complétés des cartes calculées par l'API. */
 async function init(d) {
-  const [binResp, jsonResp] = await Promise.all([fetch(d.binUrl), fetch(d.jsonUrl)])
+  const [binResp, jsonResp, deltaCards] = await Promise.all([
+    fetch(d.binUrl),
+    fetch(d.jsonUrl),
+    loadDeltaCards(d.deltaUrl),
+  ])
   if (!binResp.ok || !jsonResp.ok) {
     throw new Error(`phash HTTP ${binResp.status}/${jsonResp.status}`)
   }
@@ -213,8 +249,15 @@ async function init(d) {
   if (!magicOk || count !== meta.cards.length) {
     throw new Error('phash: index binaire invalide')
   }
-  const wholes = new Uint32Array(count * WORDS)
-  const arts = new Uint32Array(count * WORDS)
+  const known = new Set(meta.cards.map((c) => `${c[1]}/${c[0]}`))
+  const extraRows = []
+  for (const row of deltaCards) {
+    const hashes = Array.isArray(row) && !known.has(`${row[1]}/${row[0]}`) ? decodeHashes(row[5]) : null
+    if (hashes) extraRows.push({ row, hashes })
+  }
+  const total = count + extraRows.length
+  const wholes = new Uint32Array(total * WORDS)
+  const arts = new Uint32Array(total * WORDS)
   for (let i = 0; i < count; i += 1) {
     const base = 16 + i * 64
     for (let w = 0; w < WORDS; w += 1) {
@@ -222,23 +265,32 @@ async function init(d) {
       arts[i * WORDS + w] = view.getUint32(base + 32 + w * 4, true)
     }
   }
-  const cards = meta.cards.map(([tcgdexCardId, locale, name, setId, localId]) => ({
-    tcgdexCardId,
-    locale,
-    name,
-    setId,
-    localId,
-  }))
+  extraRows.forEach(({ hashes }, k) => {
+    const i = count + k
+    for (let w = 0; w < WORDS; w += 1) {
+      wholes[i * WORDS + w] = hashes.getUint32(w * 4, true)
+      arts[i * WORDS + w] = hashes.getUint32(32 + w * 4, true)
+    }
+  })
+  const cards = meta.cards
+    .concat(extraRows.map(({ row }) => row))
+    .map(([tcgdexCardId, locale, name, setId, localId]) => ({
+      tcgdexCardId,
+      locale,
+      name,
+      setId,
+      localId,
+    }))
   // Indices groupés par langue : quand une langue de session est fixée, on ne
-  // compare qu'à ce sous-ensemble (~6× moins que les 94k 6 langues) = beaucoup
+  // compare qu'à ce sous-ensemble (~6× moins que les ~100k 6 langues) = beaucoup
   // plus rapide sur téléphone.
   const byLocale = {}
-  for (let i = 0; i < count; i += 1) {
+  for (let i = 0; i < total; i += 1) {
     const loc = cards[i].locale
     if (!byLocale[loc]) byLocale[loc] = []
     byLocale[loc].push(i)
   }
-  engine = { wholes, arts, cards, count, byLocale }
+  engine = { wholes, arts, cards, count: total, byLocale }
 }
 
 /**

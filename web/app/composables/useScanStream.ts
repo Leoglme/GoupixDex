@@ -515,7 +515,6 @@ export function useScanStream() {
    * @param language - Physical language stored in the collection (`fr` | `en` | `ja`).
    * @param direction - `in` (add, default) or `out` (checkout / decrement).
    * @param eventId - Identifiant des événements, choisi par l'appelant pour suivre l'issue (sinon généré par le serveur).
-   * @param binderId - Classeur où ranger l'exemplaire ajouté, `null` pour la collection seule.
    * @returns {Promise<UploadResponse>} `{ event_id, status: 'queued' }`.
    */
   async function commitMatchedScan(
@@ -523,11 +522,10 @@ export function useScanStream() {
     language: string,
     direction: ScanDirection = 'in',
     eventId?: string,
-    binderId: number | null = null,
   ): Promise<UploadResponse> {
     const { data } = await $api.post<UploadResponse>(
       '/scan-stream/match',
-      { tcgdex_card_id: tcgdexCardId, language, direction, event_id: eventId, binder_id: binderId },
+      { tcgdex_card_id: tcgdexCardId, language, direction, event_id: eventId },
       { timeout: 15_000 },
     )
     if (pollingActive || connectionMode.value !== 'websocket') {

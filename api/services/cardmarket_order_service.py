@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import logging
 import re
 from decimal import Decimal
 from typing import Any
@@ -10,11 +12,16 @@ from typing import Any
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from core.database import SessionLocal
 from models.article import Article
 from models.cardmarket_order import CardmarketOrder
 from models.cardmarket_order_line import CardmarketOrderLine
+from models.collection_card import CollectionCard
 from schemas.orders import OrderLineUpdate
 from services.cardmarket_pdf_parser import ParsedCardLine, ParsedCardmarketPdf, normalize_card_number_token, normalize_pokemon_key
+
+logger = logging.getLogger(__name__)
+
 
 def _order_by_paid_at_desc_nulls_last() -> tuple:
     """
@@ -570,6 +577,137 @@ def match_order_lines(
         "latest_purchase_order_line_id": latest_price_line_id,
         "suggested_purchase_price": float(suggested_purchase) if suggested_purchase is not None else None,
     }
+
+
+def _comparable_card_number(raw: str | None) -> str:
+    """Numéro de collection comparable entre facture et TCGdex : premier segment, sans zéros de tête (« 074/165 » ≡ « 74 »)."""
+    number = normalize_card_number_token(raw).upper()
+    if number.isdigit():
+        return number.lstrip("0") or "0"
+    return number
+
+
+def _collection_card_set_codes(card: CollectionCard) -> set[str]:
+    """Codes d'extension qu'une facture Cardmarket peut porter pour cette carte : code officiel (``mew``) ou id TCGdex (``sv2a``)."""
+    return {code.strip().lower() for code in (card.set_code, card.tcgdex_set_id) if code and code.strip()}
+
+
+def _order_line_matches_card(line: CardmarketOrderLine, card: CollectionCard) -> bool:
+    """Même extension, même numéro et même langue imprimée."""
+    return (
+        (line.set_code or "").lower() in _collection_card_set_codes(card)
+        and _comparable_card_number(line.card_number) == _comparable_card_number(card.card_number)
+        and line.language_code == _normalize_cardmarket_language_for_match(card.language)
+    )
+
+
+def _awaits_purchase_price(card: CollectionCard) -> bool:
+    """Carte possédée sans prix d'achat ; une carte en vente tient le sien de son article."""
+    return card.purchase_price_eur is None and not card.is_placeholder and card.article_id is None
+
+
+def _user_order_lines_latest_first(db: Session, user_id: int, set_codes: set[str] | None = None) -> list[CardmarketOrderLine]:
+    """Lignes de commande de l'utilisateur, de la commande la plus récente à la plus ancienne."""
+    q = (
+        db.query(CardmarketOrderLine)
+        .join(CardmarketOrder, CardmarketOrder.id == CardmarketOrderLine.order_id)
+        .filter(CardmarketOrder.user_id == user_id)
+    )
+    if set_codes is not None:
+        q = q.filter(func.lower(CardmarketOrderLine.set_code).in_(set_codes))
+    return q.order_by(*_order_by_paid_at_desc_nulls_last(), CardmarketOrderLine.id.desc()).all()
+
+
+def _remaining_units_by_line(db: Session, lines: list[CardmarketOrderLine]) -> dict[int, int]:
+    """Exemplaires de chaque ligne pas encore liés à un article, en une requête."""
+    if not lines:
+        return {}
+    linked: dict[int, int] = {
+        int(line_id): int(count)
+        for line_id, count in db.query(Article.order_line_id, func.count(Article.id))
+        .filter(Article.order_line_id.in_([line.id for line in lines]))
+        .group_by(Article.order_line_id)
+        .all()
+    }
+    return {line.id: max(0, int(line.quantity) - linked.get(line.id, 0)) for line in lines}
+
+
+def _set_price_from_latest_matching_line(
+    card: CollectionCard,
+    lines: list[CardmarketOrderLine],
+    remaining_by_line: dict[int, int],
+) -> bool:
+    """Pose sur la carte le prix de la première ligne qui lui correspond et a encore un exemplaire libre."""
+    for line in lines:
+        if remaining_by_line.get(line.id, 0) > 0 and _order_line_matches_card(line, card):
+            card.purchase_price_eur = line.unit_price_eur
+            return True
+    return False
+
+
+def fill_purchase_price_from_orders(db: Session, card: CollectionCard) -> bool:
+    """
+    Renseigne, sans commit, le prix d'achat d'une carte de la collection qui n'en a pas, d'après les commandes
+    Cardmarket de son propriétaire : même extension, même numéro et même langue, dans la commande la plus récente
+    dont un exemplaire n'est pas déjà lié à un article (la carte qu'on scanne sort en général du dernier colis).
+
+    Returns:
+        ``True`` quand un prix a été posé.
+    """
+    set_codes = _collection_card_set_codes(card)
+    if not _awaits_purchase_price(card) or not set_codes:
+        return False
+    lines = _user_order_lines_latest_first(db, card.user_id, set_codes)
+    return _set_price_from_latest_matching_line(card, lines, _remaining_units_by_line(db, lines))
+
+
+def fill_collection_purchase_prices_from_orders(db: Session, user_id: int) -> int:
+    """
+    Renseigne, avec commit, le prix d'achat des cartes de la collection qui n'en ont pas d'après les commandes
+    Cardmarket : une carte scannée avant l'import de sa commande reçoit son prix à l'import.
+
+    Returns:
+        Nombre de cartes dont le prix a été posé.
+    """
+    cards = (
+        db.query(CollectionCard)
+        .filter(
+            CollectionCard.user_id == user_id,
+            CollectionCard.purchase_price_eur.is_(None),
+            CollectionCard.is_placeholder.is_(False),
+            CollectionCard.article_id.is_(None),
+        )
+        .all()
+    )
+    if not cards:
+        return 0
+    lines = _user_order_lines_latest_first(db, user_id)
+    remaining_by_line = _remaining_units_by_line(db, lines)
+    filled = sum(1 for card in cards if _set_price_from_latest_matching_line(card, lines, remaining_by_line))
+    if filled:
+        db.commit()
+    return filled
+
+
+def _fill_purchase_prices_for_all_users() -> int:
+    """Prix d'achat des cartes possédées sans prix, d'après les commandes de chaque utilisateur qui en a importé."""
+    db = SessionLocal()
+    try:
+        user_ids = [int(user_id) for (user_id,) in db.query(CardmarketOrder.user_id).distinct().all()]
+        return sum(fill_collection_purchase_prices_from_orders(db, user_id) for user_id in user_ids)
+    finally:
+        db.close()
+
+
+async def backfill_purchase_prices_async() -> None:
+    """Au démarrage : les cartes scannées avant que l'ajout reprenne le prix des commandes reçoivent le leur."""
+    try:
+        filled = await asyncio.to_thread(_fill_purchase_prices_for_all_users)
+    except Exception:
+        logger.exception("Purchase price backfill from Cardmarket orders crashed")
+        return
+    if filled:
+        logger.info("Purchase price backfill: %d collection cards priced from Cardmarket orders", filled)
 
 
 def assign_article_order_line(

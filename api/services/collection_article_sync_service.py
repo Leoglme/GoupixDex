@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from models.article import Article
 from models.collection_card import CollectionCard
-from services import collection_card_price_history_service, collection_card_service
+from services import binder_service, collection_card_price_history_service, collection_card_service
 from services.cardmarket_local_price_service import resolve_market_price_eur
 from services.collection_card_lookup_service import fetch_card_for_collection
 from services.species_locale_names_service import fetch_species_names_by_dex
@@ -385,10 +385,28 @@ def attach_collection_card(db: Session, *, user_id: int, collection_card_id: int
     return True
 
 
+def _other_owned_copy(db: Session, card: CollectionCard) -> CollectionCard | None:
+    """Autre exemplaire possédé de la même carte (même id TCGdex, même langue), sur une autre ligne de la collection."""
+    return (
+        db.query(CollectionCard)
+        .filter(
+            CollectionCard.user_id == card.user_id,
+            CollectionCard.tcgdex_card_id == card.tcgdex_card_id,
+            CollectionCard.language == card.language,
+            CollectionCard.id != card.id,
+            CollectionCard.is_placeholder.is_(False),
+            CollectionCard.quantity > 0,
+        )
+        .order_by(CollectionCard.id)
+        .first()
+    )
+
+
 def remove_collection_card_for_sold_article(db: Session, article: Article) -> bool:
     """
-    Carte vendue → elle quitte la collection : la ligne reliée est supprimée, ou, si elle compte
-    plusieurs exemplaires, décrémentée d'un et déliée (les autres restent possédés).
+    Carte vendue → elle quitte la collection et ses classeurs : la ligne reliée est supprimée, ou, si elle
+    compte plusieurs exemplaires, décrémentée d'un et déliée (les autres restent possédés et rangés). Quand
+    un autre exemplaire de la même carte est sur une autre ligne, il reprend les pochettes de celle vendue.
     ``True`` si la collection a changé.
     """
     card = linked_collection_card(db, article)
@@ -398,6 +416,7 @@ def remove_collection_card_for_sold_article(db: Session, article: Article) -> bo
         card.quantity = int(card.quantity) - 1
         card.article_id = None
     else:
+        binder_service.hand_over_binder_pockets(db, card, _other_owned_copy(db, card))
         db.delete(card)
     db.commit()
     return True

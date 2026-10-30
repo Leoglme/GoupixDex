@@ -27,6 +27,7 @@ from schemas.collection import (
 )
 from services import (
     binder_service,
+    cardmarket_order_service,
     collection_article_sync_service,
     collection_card_price_history_service,
     collection_card_service,
@@ -111,6 +112,7 @@ def add_to_collection(
             existing.notes = body.notes.strip() or existing.notes
         if body.purchase_price_eur is not None:
             existing.purchase_price_eur = Decimal(str(round(body.purchase_price_eur, 2)))
+        cardmarket_order_service.fill_purchase_price_from_orders(db, existing)
         collection_card_service.apply_market_price(
             existing,
             cardmarket_id_product=meta["cardmarket_id_product"],
@@ -148,6 +150,7 @@ def add_to_collection(
         cardmarket_id_product=meta["cardmarket_id_product"],
         market_price_eur=meta["market_price_eur"],
     )
+    cardmarket_order_service.fill_purchase_price_from_orders(db, row)
     db.add(row)
     db.commit()
     db.refresh(row)

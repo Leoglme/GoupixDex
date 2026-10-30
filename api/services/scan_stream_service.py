@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from core.database import SessionLocal
 from models.binder import BinderItem
 from models.collection_card import CollectionCard
-from services import binder_service, collection_card_service
+from services import binder_service, cardmarket_order_service, collection_card_service
 from services.card_image_enhance import enhance_for_ocr
 from services.card_image_gate import assess_card_image
 from services.collection_card_lookup_service import fetch_card_for_collection
@@ -222,9 +222,30 @@ def _add_one_copy(
     meta: dict[str, Any],
     *,
     notes: str | None,
+    wanted_row: CollectionCard | None = None,
 ) -> tuple[CollectionCard, bool]:
-    """Ajoute un exemplaire de la carte, sans commit, et renvoie ``(carte, created)``."""
-    existing = collection_card_service.find_existing_for_user(
+    """
+    Ajoute un exemplaire de la carte, sans commit, et renvoie ``(carte, created)``.
+
+    ``wanted_row`` est la carte « Manquante » qu'un classeur garde pour elle : c'est elle qui devient possédée,
+    même si la collection a une autre ligne de la même carte. Le prix d'achat manquant est repris des commandes
+    Cardmarket.
+    """
+    card, created = _add_copy_to_row(db, user_id, meta, notes=notes, wanted_row=wanted_row)
+    cardmarket_order_service.fill_purchase_price_from_orders(db, card)
+    return card, created
+
+
+def _add_copy_to_row(
+    db: Session,
+    user_id: int,
+    meta: dict[str, Any],
+    *,
+    notes: str | None,
+    wanted_row: CollectionCard | None,
+) -> tuple[CollectionCard, bool]:
+    """Ajoute l'exemplaire à la ligne existante (ou prévue par un classeur), sinon crée la ligne."""
+    existing = wanted_row or collection_card_service.find_existing_for_user(
         db,
         user_id,
         tcgdex_card_id=meta["tcgdex_card_id"],
@@ -297,43 +318,65 @@ def _add_or_increment(
         db.close()
 
 
-def _add_to_binder_slot(
+def _binder_slot_awaiting_card(db: Session, user_id: int, meta: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Pochette d'un classeur qui attend la carte : celle où un classeur la prévoit (« Manquante »), sinon la pochette
+    vide de son Pokémon dans un classeur Pokédex qui collectionne ce genre de cartes.
+    """
+    slots = binder_service.fillable_binder_slots_for_card(
+        db,
+        user_id,
+        tcgdex_card_id=meta["tcgdex_card_id"],
+        language=meta["language"],
+        pokedex_number=meta.get("dex_id"),
+        rarity=meta.get("rarity"),
+    )
+    return next((slot for slot in slots if slot["kind"] == "wanted_card"), slots[0] if slots else None)
+
+
+def _wanted_card_row(db: Session, user_id: int, binder_slot: dict[str, Any]) -> CollectionCard | None:
+    """Carte « Manquante » que le classeur garde dans cette pochette."""
+    return (
+        db.query(CollectionCard)
+        .join(BinderItem, BinderItem.collection_card_id == CollectionCard.id)
+        .filter(
+            CollectionCard.user_id == user_id,
+            BinderItem.binder_id == int(binder_slot["binder_id"]),
+            BinderItem.position == int(binder_slot["position"]),
+        )
+        .first()
+    )
+
+
+def _add_and_place_in_awaiting_binder(
     user_id: int,
     meta: dict[str, Any],
-    binder_id: int,
-) -> tuple[dict[str, Any], bool, dict[str, Any]]:
+) -> tuple[dict[str, Any], bool, dict[str, Any] | None]:
     """
-    Ajoute un exemplaire et le range dans le classeur : sa pochette prévue ou la pochette vide de son Pokémon.
+    Ajoute un exemplaire et le range dans le classeur qui attend la carte, s'il y en a un.
 
-    Renvoie ``(card_dict, created, binder_placement)``.
-
-    Raises:
-        ValueError: le classeur est introuvable, ou n'a plus de place pour cette carte.
+    Renvoie ``(card_dict, created, binder_placement)`` ; ``binder_placement`` vaut ``None`` hors classeur.
     """
     db = SessionLocal()
     try:
-        binder = binder_service.get_binder_with_cards(db, binder_id, user_id)
-        if binder is None:
-            msg = "Classeur introuvable."
-            raise ValueError(msg)
-        slot = binder_service.binder_slot_for_card(
-            binder,
-            tcgdex_card_id=meta["tcgdex_card_id"],
-            language=meta["language"],
-            pokedex_number=meta.get("dex_id"),
-            rarity=meta.get("rarity"),
+        binder_slot = _binder_slot_awaiting_card(db, user_id, meta)
+        wanted_row = (
+            _wanted_card_row(db, user_id, binder_slot)
+            if binder_slot is not None and binder_slot["kind"] == "wanted_card"
+            else None
         )
-        if slot is None:
-            msg = f"Cette carte n'a plus de place libre dans « {binder.name} »."
-            raise ValueError(msg)
-
-        card, created = _add_one_copy(db, user_id, meta, notes=None)
-        if slot["kind"] == "pokedex_slot":
-            db.add(BinderItem(binder_id=binder.id, collection_card_id=card.id, position=slot["position"]))
-        binder_placement = {"binder_id": binder.id, "binder_name": binder.name, **slot}
+        card, created = _add_one_copy(db, user_id, meta, notes=None, wanted_row=wanted_row)
+        if binder_slot is not None and binder_slot["kind"] == "pokedex_slot":
+            db.add(
+                BinderItem(
+                    binder_id=int(binder_slot["binder_id"]),
+                    collection_card_id=card.id,
+                    position=int(binder_slot["position"]),
+                )
+            )
         db.commit()
         db.refresh(card)
-        return collection_card_service.collection_card_to_dict(card), created, binder_placement
+        return collection_card_service.collection_card_to_dict(card), created, binder_slot
     finally:
         db.close()
 
@@ -893,14 +936,14 @@ async def _process_matched_scan(
     tcgdex_card_id: str,
     physical_language: str,
     direction: ScanDirection,
-    binder_id: int | None,
 ) -> None:
     """
     Commit a card identified **on the phone** by the visual match index, once
     the user tapped « Ajouter » / « Retirer » on its sheet: no photo, no OCR,
     no TCGdex resolution — straight to the collection, with the same
     ``queued`` then ``added`` / ``removed`` events the OCR pipeline emits so
-    every listening client renders it identically. Each tap is one copy.
+    every listening client renders it identically. Each tap is one copy; an
+    added copy goes straight into the binder pocket waiting for it, if any.
     """
     hub = get_scan_stream_hub()
     loop = asyncio.get_running_loop()
@@ -968,22 +1011,15 @@ async def _process_matched_scan(
         )
         return
 
-    binder_placement: dict[str, Any] | None = None
     try:
         meta = await loop.run_in_executor(
             None,
             lambda: scanned_card_meta(tcgdex_card_id, physical_language),
         )
-        if binder_id is None:
-            card_dict, created = await loop.run_in_executor(
-                None,
-                lambda: _add_or_increment(user_id, meta, notes=None),
-            )
-        else:
-            card_dict, created, binder_placement = await loop.run_in_executor(
-                None,
-                lambda: _add_to_binder_slot(user_id, meta, binder_id),
-            )
+        card_dict, created, binder_placement = await loop.run_in_executor(
+            None,
+            lambda: _add_and_place_in_awaiting_binder(user_id, meta),
+        )
     except Exception as exc:
         logger.warning("scan-match commit failed event=%s card=%s: %s", event_id, tcgdex_card_id, exc)
         await hub.publish(
@@ -1023,7 +1059,6 @@ def submit_matched_scan(
     physical_language: str,
     direction: ScanDirection = "in",
     client_event_id: str | None = None,
-    binder_id: int | None = None,
 ) -> str:
     """
     Enqueue the commit of a card identified on-device (visual match). Returns
@@ -1038,7 +1073,6 @@ def submit_matched_scan(
             tcgdex_card_id=tcgdex_card_id,
             physical_language=physical_language,
             direction=direction,
-            binder_id=binder_id if direction == "in" else None,
         )
     )
     _background_tasks.add(task)

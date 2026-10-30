@@ -11,6 +11,7 @@
       <div class="aspect-[63/88] w-24 shrink-0 overflow-hidden rounded-lg bg-white/10 shadow-lg">
         <GoupixDexCardImage
           :image-url="props.scannedCard.imageUrl"
+          :fallback-image-url="props.scannedCard.preview?.image_url"
           :tcgdex-card-id="props.scannedCard.decision.tcgdexCardId"
           :alt="cardName"
           img-class="h-full w-full object-cover"
@@ -56,37 +57,33 @@
       </div>
     </div>
 
-    <div class="mt-4 flex flex-col gap-2">
-      <button
-        v-for="actionButton in actionButtons"
-        :key="actionButton.key"
-        type="button"
-        class="flex h-14 w-full cursor-pointer items-center gap-3 rounded-2xl border px-3 text-left text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-        :class="
-          actionButtonState(actionButton) === 'done'
-            ? 'border-emerald-400/30 bg-emerald-500/15'
-            : 'border-white/10 bg-white/10 active:bg-white/15'
-        "
-        :disabled="isActionButtonDisabled(actionButton)"
-        @click="emit('confirm', actionButton.binderId)"
+    <button
+      type="button"
+      class="mt-4 flex h-14 w-full cursor-pointer items-center gap-3 rounded-2xl border px-3 text-left text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+      :class="
+        props.scannedCard.action === 'done'
+          ? 'border-emerald-400/30 bg-emerald-500/15'
+          : 'border-white/10 bg-white/10 active:bg-white/15'
+      "
+      :disabled="isWaitingForServer || isAbsentFromCollection"
+      @click="emit('confirm')"
+    >
+      <span
+        class="flex size-9 shrink-0 items-center justify-center rounded-full"
+        :class="{
+          'bg-emerald-400/20 text-emerald-300': props.scannedCard.action === 'done',
+          'bg-red-500/20 text-red-300': props.scannedCard.action !== 'done' && isCheckout,
+          'bg-(--app-accent)/20 text-(--app-accent)': props.scannedCard.action !== 'done' && !isCheckout,
+        }"
       >
-        <span
-          class="flex size-9 shrink-0 items-center justify-center rounded-full"
-          :class="{
-            'bg-emerald-400/20 text-emerald-300': actionButtonState(actionButton) === 'done',
-            'bg-red-500/20 text-red-300': actionButtonState(actionButton) !== 'done' && isCheckout,
-            'bg-(--app-accent)/20 text-(--app-accent)': actionButtonState(actionButton) !== 'done' && !isCheckout,
-          }"
-        >
-          <UIcon
-            :name="actionButtonIcon(actionButton)"
-            class="size-5"
-            :class="{ 'animate-spin': actionButtonState(actionButton) === 'pending' }"
-          />
-        </span>
-        <span class="min-w-0 truncate">{{ actionButtonLabel(actionButton) }}</span>
-      </button>
-    </div>
+        <UIcon
+          :name="actionButtonIcon"
+          class="size-5"
+          :class="{ 'animate-spin': props.scannedCard.action === 'pending' }"
+        />
+      </span>
+      <span class="min-w-0 truncate">{{ actionButtonLabel }}</span>
+    </button>
     <div v-if="lastAddFromSheet" class="mt-2 flex items-center gap-3 pl-3 text-sm">
       <span class="flex size-9 shrink-0 items-center justify-center">
         <UIcon name="i-lucide-circle-check" class="size-4 text-emerald-300" />
@@ -114,9 +111,8 @@
 
 <script lang="ts" setup>
 import type { ComputedRef, PropType } from 'vue'
-import type { FillableBinderSlot } from '~/types/binders'
 import type { GoupixDexScannedCardSheetProps, ScannedCardActionButton } from '~/types/GoupixDexScannedCardSheet'
-import type { ScannedCard, ScannedCardAction, ScannedCardAdd, ScannedCardPreview } from '~/types/ScannedCardSheet'
+import type { ScannedCard, ScannedCardAdd, ScannedCardPreview } from '~/types/ScannedCardSheet'
 import { readableSetLabel } from '~/utils/cards/readableSet'
 
 const props: GoupixDexScannedCardSheetProps = defineProps({
@@ -131,7 +127,7 @@ const props: GoupixDexScannedCardSheetProps = defineProps({
 })
 
 const emit = defineEmits<{
-  confirm: [binderId: number | null]
+  confirm: []
   undo: []
   close: []
 }>()
@@ -190,15 +186,9 @@ const lastAddFromSheetLabel: ComputedRef<string> = computed((): string => {
   return binderName ? `Rangée dans ${binderName}` : 'Ajoutée à ma collection'
 })
 
-const fillableBinderSlots: ComputedRef<FillableBinderSlot[]> = computed((): FillableBinderSlot[] =>
-  isCheckout.value ? [] : (props.scannedCard.preview?.fillable_binder_slots ?? []),
-)
-
-const collectionActionButton: ComputedRef<ScannedCardActionButton> = computed((): ScannedCardActionButton => {
+const actionButton: ComputedRef<ScannedCardActionButton> = computed((): ScannedCardActionButton => {
   if (isCheckout.value) {
     return {
-      key: 'collection',
-      binderId: null,
       idleLabel: isAbsentFromCollection.value ? 'Absente de ma collection' : 'Retirer de ma collection',
       pendingLabel: 'Retrait en cours…',
       doneLabel: 'Retirée de ma collection',
@@ -206,8 +196,6 @@ const collectionActionButton: ComputedRef<ScannedCardActionButton> = computed(()
     }
   }
   return {
-    key: 'collection',
-    binderId: null,
     idleLabel: 'Ajouter à ma collection',
     pendingLabel: 'Ajout en cours…',
     doneLabel: 'Ajoutée à ma collection',
@@ -215,76 +203,21 @@ const collectionActionButton: ComputedRef<ScannedCardActionButton> = computed(()
   }
 })
 
-const actionButtons: ComputedRef<ScannedCardActionButton[]> = computed((): ScannedCardActionButton[] => [
-  collectionActionButton.value,
-  ...fillableBinderSlots.value.map(binderActionButton),
-])
-
-/**
- * Bouton qui ajoute un exemplaire et le range dans la pochette que lui garde un classeur.
- * @param {FillableBinderSlot} slot - Pochette du classeur que la carte peut remplir.
- * @returns {ScannedCardActionButton} Bouton « Ajouter au classeur … ».
- */
-function binderActionButton(slot: FillableBinderSlot): ScannedCardActionButton {
-  return {
-    key: `binder-${slot.binder_id}`,
-    binderId: slot.binder_id,
-    idleLabel: `Ajouter au classeur ${slot.binder_name}`,
-    pendingLabel: 'Rangement en cours…',
-    doneLabel: `Rangée dans ${slot.binder_name}`,
-    idleIcon: 'i-lucide-book-open',
-  }
-}
-
-/**
- * État montré par un bouton : celui de l'action en cours quand c'est lui qui l'a lancée, sinon le repos.
- * @param {ScannedCardActionButton} actionButton - Bouton de la fiche.
- * @returns {ScannedCardAction} État à afficher.
- */
-function actionButtonState(actionButton: ScannedCardActionButton): ScannedCardAction {
-  return props.scannedCard.actionBinderId === actionButton.binderId ? props.scannedCard.action : 'idle'
-}
-
-/**
- * Indique si un bouton de la fiche doit être désactivé.
- * @param {ScannedCardActionButton} actionButton - Bouton de la fiche.
- * @returns {boolean} `true` quand le bouton doit être désactivé.
- */
-function isActionButtonDisabled(actionButton: ScannedCardActionButton): boolean {
-  if (isWaitingForServer.value) {
-    return true
-  }
-  if (actionButton.binderId === null) {
-    return isAbsentFromCollection.value
-  }
-  return actionButtonState(actionButton) === 'done'
-}
-
-/**
- * Libellé d'un bouton selon son état.
- * @param {ScannedCardActionButton} actionButton - Bouton de la fiche.
- * @returns {string} Libellé affiché.
- */
-function actionButtonLabel(actionButton: ScannedCardActionButton): string {
-  switch (actionButtonState(actionButton)) {
+const actionButtonLabel: ComputedRef<string> = computed((): string => {
+  switch (props.scannedCard.action) {
     case 'pending':
-      return actionButton.pendingLabel
+      return actionButton.value.pendingLabel
     case 'done':
-      return actionButton.doneLabel
+      return actionButton.value.doneLabel
     case 'failed':
       return 'Réessayer'
     default:
-      return actionButton.idleLabel
+      return actionButton.value.idleLabel
   }
-}
+})
 
-/**
- * Icône d'un bouton selon son état.
- * @param {ScannedCardActionButton} actionButton - Bouton de la fiche.
- * @returns {string} Nom de l'icône.
- */
-function actionButtonIcon(actionButton: ScannedCardActionButton): string {
-  switch (actionButtonState(actionButton)) {
+const actionButtonIcon: ComputedRef<string> = computed((): string => {
+  switch (props.scannedCard.action) {
     case 'pending':
       return 'i-lucide-loader-circle'
     case 'done':
@@ -292,7 +225,7 @@ function actionButtonIcon(actionButton: ScannedCardActionButton): string {
     case 'failed':
       return 'i-lucide-rotate-ccw'
     default:
-      return actionButton.idleIcon
+      return actionButton.value.idleIcon
   }
-}
+})
 </script>

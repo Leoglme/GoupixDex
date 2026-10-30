@@ -24,12 +24,14 @@ import { limitlessCardImageUrl } from '~/utils/cards/limitlessCardImage'
 const props = withDefaults(
   defineProps<{
     imageUrl?: string | null
+    fallbackImageUrl?: string | null
     tcgdexCardId?: string | null
     alt?: string
     imgClass?: string
   }>(),
   {
     imageUrl: null,
+    fallbackImageUrl: null,
     tcgdexCardId: null,
     alt: '',
     imgClass: 'h-full w-full object-contain',
@@ -40,9 +42,11 @@ const failedSrcs = ref<Set<string>>(new Set())
 
 const candidates = computed<string[]>(() => {
   const list: string[] = []
-  const primary = (props.imageUrl ?? '').trim()
-  if (primary) {
-    list.push(primary)
+  for (const url of [props.imageUrl, props.fallbackImageUrl]) {
+    const trimmed = (url ?? '').trim()
+    if (trimmed && !list.includes(trimmed)) {
+      list.push(trimmed)
+    }
   }
   const fallback = limitlessCardImageUrl(props.tcgdexCardId)
   if (fallback && !list.includes(fallback)) {

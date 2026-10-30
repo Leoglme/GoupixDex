@@ -1,5 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { ScanCardLanguage, ScanPhashResult } from '~/types/ScanMatch'
+import { scanPhashDeltaUrl } from '~/utils/cards/scanPhashDelta'
 
 /** Réponse au-delà de ce délai = worker mort, la tentative est abandonnée. */
 const MATCH_TIMEOUT_MS = 8000
@@ -18,11 +19,13 @@ const pendingMatches: Map<number, (result: ScanPhashResult) => void> = new Map()
 
 /**
  * Démarre le worker pHash (une fois par session) : il charge l'index binaire
- * d'empreintes perceptuelles (94k cartes 6 langues, sets JA récents inclus) et
- * matche par distance de Hamming — instantané, et REFUSE au lieu de deviner.
+ * d'empreintes perceptuelles (94k cartes 6 langues, sets JA récents inclus),
+ * complété des cartes calculées chaque nuit par l'API, et matche par distance
+ * de Hamming — instantané, et REFUSE au lieu de deviner.
+ * @param {string} deltaUrl - Cartes absentes de l'index livré (`GET /scan-index/phash-delta`).
  * @returns {Promise<void>} Résolue quand le worker est prêt, rejetée sinon.
  */
-function startWorkerOnce(): Promise<void> {
+function startWorkerOnce(deltaUrl: string): Promise<void> {
   if (!workerReadyPromise) {
     workerReadyPromise = new Promise<void>((resolve, reject) => {
       if (typeof Worker === 'undefined') {
@@ -60,6 +63,7 @@ function startWorkerOnce(): Promise<void> {
         t: 'init',
         binUrl: '/scan-index/phash-v1.bin',
         jsonUrl: '/scan-index/phash-v1.json',
+        deltaUrl,
       })
     })
     workerReadyPromise.catch((): void => {
@@ -77,6 +81,7 @@ function startWorkerOnce(): Promise<void> {
  * @returns {object} État de chargement, `load()` et `match()`.
  */
 export function useScanPhash() {
+  const deltaUrl: string = scanPhashDeltaUrl()
   const isReady: Ref<boolean> = ref(false)
   const loadFailed: Ref<boolean> = ref(false)
   const ready: ComputedRef<boolean> = computed(() => isReady.value)
@@ -91,7 +96,7 @@ export function useScanPhash() {
       return
     }
     try {
-      await startWorkerOnce()
+      await startWorkerOnce(deltaUrl)
       isReady.value = true
       loadFailed.value = false
     } catch {

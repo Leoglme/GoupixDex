@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import models  # noqa: F401 — enregistre tous les mappers (relations croisées entre modèles)
 from models.article import Article
 from models.base import Base
+from models.binder import Binder, BinderItem
 from models.collection_card import CollectionCard
 from services import collection_article_sync_service as sync
 from services import collection_card_service, scan_stream_service
@@ -87,6 +88,67 @@ def test_selling_one_of_several_copies_keeps_the_others(db: Session) -> None:
 def test_selling_an_article_without_collection_card_changes_nothing(db: Session) -> None:
     article = _for_sale_article(db)
     assert sync.remove_collection_card_for_sold_article(db, article) is False
+
+
+def _put_in_binder(db: Session, card: CollectionCard, *, binder_id: int = 1, position: int = 4) -> None:
+    if db.get(Binder, binder_id) is None:
+        db.add(Binder(id=binder_id, user_id=1, name="Japonaises"))
+        db.flush()
+    db.add(BinderItem(binder_id=binder_id, collection_card_id=card.id, position=position))
+    db.commit()
+
+
+def _pockets_of(db: Session, card_id: int) -> list[tuple[int, int]]:
+    items = db.query(BinderItem).filter(BinderItem.collection_card_id == card_id).all()
+    return [(item.binder_id, item.position) for item in items]
+
+
+def test_a_sold_card_leaves_its_binder_pocket(db: Session) -> None:
+    article = _for_sale_article(db)
+    card = _linked_card(db, article)
+    card_id = card.id
+    _put_in_binder(db, card)
+
+    sync.remove_collection_card_for_sold_article(db, article)
+
+    assert db.get(CollectionCard, card_id) is None
+    assert db.query(BinderItem).count() == 0
+
+
+def test_selling_one_of_two_copies_of_a_row_keeps_it_in_its_binder(db: Session) -> None:
+    article = _for_sale_article(db)
+    card = _linked_card(db, article, quantity=2)
+    _put_in_binder(db, card)
+
+    sync.remove_collection_card_for_sold_article(db, article)
+
+    db.refresh(card)
+    assert card.quantity == 1
+    assert _pockets_of(db, card.id) == [(1, 4)]
+
+
+def test_the_other_copy_of_a_sold_card_takes_over_its_binder_pocket(db: Session) -> None:
+    article = _for_sale_article(db)
+    sold_copy = _linked_card(db, article)
+    sold_copy_id = sold_copy.id
+    _put_in_binder(db, sold_copy)
+    kept_copy = CollectionCard(
+        user_id=1,
+        tcgdex_card_id="SV4M-077",
+        tcgdex_set_id="SV4M",
+        card_number="077",
+        display_name="Porygon-Z",
+        language="ja",
+        quantity=1,
+    )
+    db.add(kept_copy)
+    db.commit()
+
+    sync.remove_collection_card_for_sold_article(db, article)
+
+    assert db.get(CollectionCard, sold_copy_id) is None
+    assert _pockets_of(db, kept_copy.id) == [(1, 4)]
+    assert _pockets_of(db, sold_copy_id) == []
 
 
 def test_card_whose_article_is_not_listed_anywhere_is_not_online(db: Session) -> None:

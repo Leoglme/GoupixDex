@@ -238,7 +238,7 @@ async def nightly_refresh_loop_async() -> None:
     """Endless loop: run the refresh every night at the configured local hour."""
     settings = get_settings()
     while True:
-        await asyncio.sleep(_seconds_until_next_run(settings.cardmarket_refresh_hour_local))
+        await asyncio.sleep(seconds_until_next_run(settings.cardmarket_refresh_hour_local))
         try:
             await asyncio.to_thread(refresh_market_prices)
         except CardmarketDataUnavailableError as exc:
@@ -247,7 +247,7 @@ async def nightly_refresh_loop_async() -> None:
             logger.exception("Nightly Cardmarket refresh crashed")
 
 
-def _seconds_until_next_run(hour_local: int) -> float:
+def seconds_until_next_run(hour_local: int) -> float:
     """Seconds until the next occurrence of ``hour_local`` in Europe/Paris."""
     now = dt.datetime.now(_PARIS_TZ)
     next_run = now.replace(hour=hour_local, minute=0, second=0, microsecond=0)

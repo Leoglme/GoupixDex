@@ -16,6 +16,7 @@ from models.cardmarket_order import CardmarketOrder
 from models.user import User
 from schemas.orders import OrderLineUpdate
 from services.cardmarket_order_service import (
+    fill_collection_purchase_prices_from_orders,
     get_order_detail,
     get_order_line_for_user,
     list_linkable_order_lines,
@@ -190,7 +191,7 @@ async def reimport_order_pdf(
             ) from exc
 
     try:
-        return reimport_order_from_parsed(
+        detail = reimport_order_from_parsed(
             db,
             user.id,
             order_id,
@@ -200,6 +201,8 @@ async def reimport_order_pdf(
         )
     except ValueError as exc:
         raise _order_value_error_to_http(exc) from exc
+    fill_collection_purchase_prices_from_orders(db, user.id)
+    return detail
 
 
 @router.post("/import", status_code=status.HTTP_201_CREATED)
@@ -227,6 +230,7 @@ async def import_order_pdf(
             status_code=status.HTTP_409_CONFLICT,
             detail="This order is already imported.",
         ) from exc
+    fill_collection_purchase_prices_from_orders(db, user.id)
 
     detail = get_order_detail(db, user.id, order.id)
     if detail is None:

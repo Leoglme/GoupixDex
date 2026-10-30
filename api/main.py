@@ -37,6 +37,7 @@ from routes import ebay_route
 from routes import portfolio_route
 from routes import pricing_route
 from routes import scan as scan_routes
+from routes import scan_index_route
 from routes import sealed_route
 from routes import scan_stream_route
 from routes import settings_route
@@ -58,7 +59,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Background jobs: Cardmarket price guide bootstrap + nightly refresh loop."""
+    """Background jobs: Cardmarket price guide bootstrap + nightly refresh loop, scan index complement, purchase prices."""
     from services.local_desktop_workers import (
         auto_start_amazon_worker_enabled,
         start_managed_amazon_worker,
@@ -68,14 +69,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         bootstrap_market_prices_async,
         nightly_refresh_loop_async,
     )
+    from services.cardmarket_order_service import backfill_purchase_prices_async
+    from services.scan_phash_index_service import scan_phash_refresh_loop_async
 
     if auto_start_amazon_worker_enabled():
         await asyncio.to_thread(start_managed_amazon_worker)
 
-    background_tasks: list[asyncio.Task[None]] = []
+    background_tasks: list[asyncio.Task[None]] = [asyncio.create_task(backfill_purchase_prices_async())]
     if settings.cardmarket_nightly_refresh_enabled:
         background_tasks.append(asyncio.create_task(bootstrap_market_prices_async()))
         background_tasks.append(asyncio.create_task(nightly_refresh_loop_async()))
+    if settings.scan_phash_refresh_enabled:
+        background_tasks.append(asyncio.create_task(scan_phash_refresh_loop_async()))
     try:
         yield
     finally:
@@ -201,6 +206,7 @@ app.include_router(binders_route.router)
 app.include_router(stats_route.router)
 app.include_router(scan_routes.router)
 app.include_router(scan_stream_route.router)
+app.include_router(scan_index_route.router)
 app.include_router(desktop_relay_route.router)
 app.include_router(shipping_route.router)
 app.include_router(amazon_accounts_routes.router)

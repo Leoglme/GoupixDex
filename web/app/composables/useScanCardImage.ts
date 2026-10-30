@@ -1,27 +1,75 @@
 import type { ScanMatchDecision } from '~/types/ScanMatch'
+import { scanPhashDeltaUrl } from '~/utils/cards/scanPhashDelta'
+
+type ScanPhashDeltaRow = [
+  tcgdexCardId: string,
+  locale: string,
+  name: string,
+  setId: string,
+  localId: string,
+  hashesBase64: string,
+  imageUrl: string,
+]
 
 /**
  * Images STOCKÉES (id TCGdex vers URL) : les JA récentes dont TCGdex n'a pas
  * l'image (CDN limitless), livrées à part (~900 Ko). Chargées une fois.
  */
 let storedImages: Record<string, string> = {}
+let deltaImageByLocaleAndCardId: Record<string, string> = {}
 let imagesPromise: Promise<void> | null = null
 
 /**
- * Charge la table des images stockées (idempotent, non bloquant). Un échec
- * laisse la construction depuis l'id TCGdex prendre le relais.
- * @returns {Promise<void>} Résolue quand la table est chargée (ou l'échec acté).
+ * Lit la table d'images livrée avec l'index.
+ * @returns {Promise<Record<string, string>>} Id TCGdex vers URL, vide en cas d'échec.
  */
-function loadStoredImages(): Promise<void> {
+async function fetchShippedImages(): Promise<Record<string, string>> {
+  try {
+    const response: Response = await fetch('/scan-index/phash-images.json')
+    return response.ok ? ((await response.json()) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Lit les images des cartes calculées par l'API (même réponse que celle chargée par le worker pHash).
+ * @param {string} deltaUrl - URL de `GET /scan-index/phash-delta`.
+ * @returns {Promise<Record<string, string>>} `langue/id` vers URL, vide en cas d'échec.
+ */
+async function fetchDeltaImages(deltaUrl: string): Promise<Record<string, string>> {
+  try {
+    const response: Response = await fetch(deltaUrl)
+    if (!response.ok) {
+      return {}
+    }
+    const body: { cards?: ScanPhashDeltaRow[] } = await response.json()
+    const images: Record<string, string> = {}
+    for (const [tcgdexCardId, locale, , , , , imageUrl] of body.cards ?? []) {
+      if (imageUrl) {
+        images[`${locale}/${tcgdexCardId}`] = imageUrl
+      }
+    }
+    return images
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Charge les tables d'images stockées (idempotent, non bloquant). Un échec
+ * laisse la construction depuis l'id TCGdex prendre le relais.
+ * @param {string} deltaUrl - URL de `GET /scan-index/phash-delta`.
+ * @returns {Promise<void>} Résolue quand les tables sont chargées (ou l'échec acté).
+ */
+function loadStoredImages(deltaUrl: string): Promise<void> {
   if (!imagesPromise) {
-    imagesPromise = fetch('/scan-index/phash-images.json')
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((m: Record<string, string>) => {
-        storedImages = m
-      })
-      .catch((): void => {
-        storedImages = {}
-      })
+    imagesPromise = Promise.all([fetchShippedImages(), fetchDeltaImages(deltaUrl)]).then(
+      ([shipped, delta]: [Record<string, string>, Record<string, string>]): void => {
+        storedImages = shipped
+        deltaImageByLocaleAndCardId = delta
+      },
+    )
   }
   return imagesPromise
 }
@@ -44,7 +92,8 @@ function deriveSerie(setId: string): string {
  * @returns {string} URL de la vignette.
  */
 function cardImageUrl(decision: ScanMatchDecision): string {
-  const stored = storedImages[decision.tcgdexCardId]
+  const stored =
+    deltaImageByLocaleAndCardId[`${decision.language}/${decision.tcgdexCardId}`] ?? storedImages[decision.tcgdexCardId]
   if (stored) {
     return stored
   }
@@ -58,5 +107,6 @@ function cardImageUrl(decision: ScanMatchDecision): string {
  * @returns {object} `loadStoredImages()` et `cardImageUrl()`.
  */
 export function useScanCardImage() {
-  return { loadStoredImages, cardImageUrl }
+  const deltaUrl: string = scanPhashDeltaUrl()
+  return { loadStoredImages: (): Promise<void> => loadStoredImages(deltaUrl), cardImageUrl }
 }

@@ -87,6 +87,12 @@ class AppSettings(BaseSettings):
     cardmarket_refresh_hour_local: int = Field(default=4, ge=0, le=23)
     #: Set ``false`` to disable the in-process nightly refresh loop (e.g. one-shot scripts).
     cardmarket_nightly_refresh_enabled: bool = True
+    #: Calcule chaque nuit les empreintes des cartes que l'index de scan livré avec le site ne connaît pas.
+    scan_phash_refresh_enabled: bool = True
+    #: Heure locale (Europe/Paris) de ce calcul.
+    scan_phash_refresh_hour_local: int = Field(default=5, ge=0, le=23)
+    #: Métadonnées de l'index de scan servi par le site : les cartes qui n'y sont pas sont calculées.
+    scan_index_base_url: str = "https://goupixdex.dibodev.fr/scan-index/phash-v1.json"
     #: Min seconds between two « sold-scrape » calls **per user** (limits burst traffic to eBay).
     ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
     resend_api_key: str | None = None

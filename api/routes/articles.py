@@ -899,6 +899,8 @@ async def create_article(
         collection_article_sync_service.attach_collection_card(
             db, user_id=user.id, collection_card_id=linked_collection_card_id, article=article
         )
+        if sold_flag:
+            collection_article_sync_service.remove_collection_card_for_sold_article(db, article)
     elif not sold_flag:
         collection_article_sync_service.ensure_collection_card_for_article(db, article)
 

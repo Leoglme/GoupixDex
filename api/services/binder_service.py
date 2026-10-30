@@ -569,6 +569,25 @@ def move_pocket(db: Session, binder: Binder, pocket_key_str: str, to_pocket: int
     db.commit()
 
 
+def hand_over_binder_pockets(db: Session, card: CollectionCard, replacement_copy: CollectionCard | None) -> None:
+    """
+    Vide les pochettes de classeur où est rangée ``card``, sans commit : ``replacement_copy``, un autre exemplaire
+    de la même carte, y reprend sa place ; un classeur qui le contient déjà garde la sienne.
+    """
+    binders_holding_replacement: set[int] = set()
+    if replacement_copy is not None:
+        binders_holding_replacement = {
+            int(binder_id)
+            for (binder_id,) in db.query(BinderItem.binder_id)
+            .filter(BinderItem.collection_card_id == replacement_copy.id)
+            .all()
+        }
+    for item in db.query(BinderItem).filter(BinderItem.collection_card_id == card.id).all():
+        if replacement_copy is not None and item.binder_id not in binders_holding_replacement:
+            db.add(BinderItem(binder_id=item.binder_id, collection_card_id=replacement_copy.id, position=item.position))
+        db.delete(item)
+
+
 def remove_from_pocket(db: Session, binder: Binder, pocket_key_str: str) -> None:
     card_id = parse_pocket_key(pocket_key_str)
     if card_id is None:

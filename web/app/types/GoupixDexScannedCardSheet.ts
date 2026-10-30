@@ -6,8 +6,6 @@ export type GoupixDexScannedCardSheetProps = {
 }
 
 export type ScannedCardActionButton = {
-  key: string
-  binderId: number | null
   idleLabel: string
   pendingLabel: string
   doneLabel: string
