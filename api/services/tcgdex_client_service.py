@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from typing import Any, cast
 from urllib.parse import quote, urlencode
 
@@ -10,14 +12,24 @@ import httpx
 
 from app_types.tcgdex import TcgdexCardDetail, TcgdexSeriesDetail, TcgdexSetBrief, TcgdexSetDetail
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_BASE_URL = "https://api.tcgdex.net/v2"
 DEFAULT_TIMEOUT_SEC = 30.0
 DEFAULT_USER_AGENT = "GoupixDex/1.0 (+catalog)"
+
+_RETRY_DELAYS_S: tuple[float, ...] = (1.0, 3.0)
+#: 500 exclu : sinon une seule extension en erreur 500 ferait échouer l'index du catalogue chaque nuit.
+_UNAVAILABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
 
 # Locales we actively use in GoupixDex; others may work but are not validated here.
 SUPPORTED_LOCALES = frozenset({"en", "fr", "ja"})
 SETS_PER_PAGE_MAX = 100
 SETS_PER_PAGE_DEFAULT = 50
+
+
+class TcgdexUnavailableError(RuntimeError):
+    """TCGdex encore tombé (429, 502-504 ou injoignable) après tous les essais, à la différence d'une ressource absente."""
 
 
 class TcgdexClientService:
@@ -117,8 +129,7 @@ class TcgdexClientService:
     def _fetch_json(self, path: str) -> Any:
         normalized = path if path.startswith("/") else f"/{path}"
         url = f"{self._base}{normalized}"
-        headers = {"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT}
-        response = httpx.get(url, headers=headers, timeout=self._timeout)
+        response = self._get_with_retry(url)
         body_text = response.text
         if not response.is_success:
             msg = f"TCGdex request failed ({response.status_code} {response.reason_phrase}): {body_text}"
@@ -128,6 +139,30 @@ class TcgdexClientService:
         except json.JSONDecodeError as exc:
             msg = "TCGdex response was not valid JSON"
             raise RuntimeError(msg) from exc
+
+    def _get_with_retry(self, url: str) -> httpx.Response:
+        """
+        GET d'une URL TCGdex, réessayé tant que TCGdex est momentanément tombé.
+
+        Raises:
+            TcgdexUnavailableError: TCGdex répondait encore 429/502-504, ou restait injoignable, au dernier essai.
+        """
+        headers = {"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT}
+        pending_delays_s = list(_RETRY_DELAYS_S)
+        while True:
+            try:
+                response = httpx.get(url, headers=headers, timeout=self._timeout)
+            except httpx.TransportError as exc:
+                failure = f"TCGdex unreachable ({type(exc).__name__}: {exc})"
+            else:
+                if response.status_code not in _UNAVAILABLE_STATUS_CODES:
+                    return response
+                failure = f"TCGdex request failed ({response.status_code} {response.reason_phrase}): {response.text.strip()}"
+            if not pending_delays_s:
+                raise TcgdexUnavailableError(failure)
+            retry_delay_s = pending_delays_s.pop(0)
+            logger.warning("%s on %s, retrying in %.0fs", failure, url, retry_delay_s)
+            time.sleep(retry_delay_s)
 
 
 def _normalize_locale(locale: str) -> str:

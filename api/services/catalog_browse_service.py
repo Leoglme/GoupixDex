@@ -39,7 +39,7 @@ from services.catalog_limitless_ja_service import (
     latin_display_name_for_ja_set,
     limitless_jp_set_names_by_code,
 )
-from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService
+from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService, TcgdexUnavailableError
 
 _CACHE_TTL_SEC = 600.0
 _CACHE_VERSION = "latin-labels-v9"
@@ -570,6 +570,9 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
     All TCGdex series with nested sets (newest first), same shape as TailTCG ``catalogSeries``.
 
     Fetches each series detail in parallel; heavily cached for browsing sessions.
+
+    Raises:
+        TcgdexUnavailableError: TCGdex est tombé ; un arbre incomplet ne doit jamais être mis en cache ni publié.
     """
     loc = _ensure_locale(locale)
     cache_key = f"browse:{_CACHE_VERSION}:{loc}"
@@ -586,6 +589,8 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
     def _load_one(series_id: str) -> dict[str, Any] | None:
         try:
             return get_series_for_ui(loc, series_id)
+        except TcgdexUnavailableError:
+            raise
         except RuntimeError:
             return None
 
@@ -714,12 +719,19 @@ def _external_card_totals(loc: str, set_ids: list[str]) -> dict[str, int]:
 
 
 def _set_release_facts(loc: str, set_ids: list[str]) -> dict[str, tuple[str | None, int]]:
-    """Date de sortie et nombre réel de cartes de chaque extension (absents des fiches de série TCGdex), -1 si illisible."""
+    """
+    Date de sortie et nombre réel de cartes de chaque extension (absents des fiches de série TCGdex), -1 si illisible.
+
+    Raises:
+        TcgdexUnavailableError: TCGdex est tombé ; sans ces faits, les extensions fantômes réapparaissent et l'ordre de sortie est perdu.
+    """
     client = _client()
 
     def _facts(set_id: str) -> tuple[str | None, int]:
         try:
             detail = client.get_set(loc, set_id)
+        except TcgdexUnavailableError:
+            raise
         except (RuntimeError, ValueError):
             return (None, -1)
         release_date = detail.get("releaseDate")

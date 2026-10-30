@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +26,7 @@ OUT_DIR = REPO_ROOT / "web" / "public" / "catalog-index"
 
 INDEX_VERSION = 2
 LOCALES = ("fr", "en", "ja")
+TCGDEX_OUTAGE_PAUSES_S: tuple[float, ...] = (60.0, 180.0, 300.0)
 
 
 def _setup_import_path() -> None:
@@ -33,30 +35,55 @@ def _setup_import_path() -> None:
 
 
 def build_locale_payload(locale: str) -> list[dict]:
+    """
+    Arbre allégé du catalogue d'une langue, reconstruit de zéro après une pause tant que TCGdex est tombé.
+
+    Raises:
+        TcgdexUnavailableError: TCGdex était encore tombé après la dernière pause.
+    """
     from services.catalog_browse_service import browse_catalog_for_ui, _cache  # noqa: PLC0415
     from services.catalog_set_logos import slim_browse_series_row  # noqa: PLC0415
+    from services.tcgdex_client_service import TcgdexUnavailableError  # noqa: PLC0415
 
-    _cache._store.clear()
-    raw = browse_catalog_for_ui(locale)
-    return [slim_browse_series_row(s) for s in raw if isinstance(s, dict)]
+    pending_pauses_s = list(TCGDEX_OUTAGE_PAUSES_S)
+    while True:
+        _cache._store.clear()
+        try:
+            raw = browse_catalog_for_ui(locale)
+        except TcgdexUnavailableError as exc:
+            if not pending_pauses_s:
+                raise
+            pause_s = pending_pauses_s.pop(0)
+            print(f"  {exc} — retrying {locale} in {pause_s:.0f} s", flush=True)
+            time.sleep(pause_s)
+        else:
+            return [slim_browse_series_row(s) for s in raw if isinstance(s, dict)]
 
 
 def main() -> int:
     _setup_import_path()
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    from services.tcgdex_client_service import TcgdexUnavailableError  # noqa: PLC0415
 
-    manifest_locales: dict[str, str] = {}
     generated_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
+    series_by_locale: dict[str, list[dict]] = {}
     for loc in LOCALES:
         print(f"Building browse index for {loc}…", flush=True)
-        series = build_locale_payload(loc)
+        try:
+            series_by_locale[loc] = build_locale_payload(loc)
+        except TcgdexUnavailableError as exc:
+            print(f"::error::TCGdex still down, published index left untouched: {exc}", flush=True)
+            return 1
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    manifest_locales: dict[str, str] = {}
+    for loc, series in series_by_locale.items():
         filename = f"browse-{loc}-v{INDEX_VERSION}.json"
         out_path = OUT_DIR / filename
         payload = {"locale": loc, "version": INDEX_VERSION, "generated_at": generated_at, "series": series}
         out_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         manifest_locales[loc] = filename
-        print(f"  -> {len(series)} series, {out_path.stat().st_size // 1024} KiB", flush=True)
+        print(f"  {loc} -> {len(series)} series, {out_path.stat().st_size // 1024} KiB", flush=True)
 
     manifest = {
         "version": INDEX_VERSION,
