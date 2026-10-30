@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import io
-from collections import Counter
 from collections.abc import Iterator
 from typing import Any
 
@@ -61,10 +60,7 @@ class _FakeTcgdex:
 def fake_sources(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Index livré, TCGdex, scans de repli et téléchargements simulés ; renvoie les URL téléchargées."""
     downloaded: list[str] = []
-    shipped = service._ShippedIndex(
-        keys=frozenset({"ja/M6a-001", "ja/M6a-002"}),
-        cards_per_set=Counter({("ja", "M6a"): 2}),
-    )
+    shipped = service._ShippedIndex(names={"ja/M6a-001": "タマタマ", "ja/M6a-002": "アローラナッシー"})
     monkeypatch.setattr(service, "_load_shipped_index", lambda url: shipped)
     monkeypatch.setattr(service, "TcgdexClientService", _FakeTcgdex)
     monkeypatch.setattr(
@@ -97,6 +93,19 @@ def test_only_cards_missing_from_the_shipped_index_are_computed(db: Session, fak
     assert rows["M6a-151"].hashes is None
     assert rows["M6a-R"].hashes is None
     assert (report.cards_hashed, report.cards_without_image) == (1, 2)
+
+
+def test_a_shipped_id_now_given_to_another_card_is_computed_again(
+    db: Session, fake_sources: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shipped = service._ShippedIndex(
+        names={"ja/M6a-001": "タマタマ", "ja/M6a-002": "アローラ ナッシー", "ja/M6a-150": "ゲンガー", "ja/M6a-R": "基本炎エネルギー"}
+    )
+    monkeypatch.setattr(service, "_load_shipped_index", lambda url: shipped)
+
+    service.refresh_scan_phash_cards(db)
+
+    assert {row.tcgdex_card_id for row in db.query(ScanPhashCard).all()} == {"M6a-151", "M6a-R"}
 
 
 def test_the_scanner_receives_only_the_computed_cards(db: Session, fake_sources: list[str]) -> None:

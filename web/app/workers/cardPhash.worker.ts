@@ -230,7 +230,7 @@ function decodeHashes(b64) {
   }
 }
 
-/** Charge l'index binaire GPXH + les métadonnées, complétés des cartes calculées par l'API. */
+/** Charge l'index binaire GPXH + les métadonnées, complétés des cartes calculées par l'API (qui remplacent un id réattribué). */
 async function init(d) {
   const [binResp, jsonResp, deltaCards] = await Promise.all([
     fetch(d.binUrl),
@@ -249,11 +249,15 @@ async function init(d) {
   if (!magicOk || count !== meta.cards.length) {
     throw new Error('phash: index binaire invalide')
   }
-  const known = new Set(meta.cards.map((c) => `${c[1]}/${c[0]}`))
+  const shippedIndexByKey = new Map(meta.cards.map((c, i) => [`${c[1]}/${c[0]}`, i]))
   const extraRows = []
+  const replacingRows = []
   for (const row of deltaCards) {
-    const hashes = Array.isArray(row) && !known.has(`${row[1]}/${row[0]}`) ? decodeHashes(row[5]) : null
-    if (hashes) extraRows.push({ row, hashes })
+    const hashes = Array.isArray(row) ? decodeHashes(row[5]) : null
+    if (!hashes) continue
+    const shippedIndex = shippedIndexByKey.get(`${row[1]}/${row[0]}`)
+    if (shippedIndex === undefined) extraRows.push({ row, hashes })
+    else replacingRows.push({ index: shippedIndex, row, hashes })
   }
   const total = count + extraRows.length
   const wholes = new Uint32Array(total * WORDS)
@@ -265,22 +269,25 @@ async function init(d) {
       arts[i * WORDS + w] = view.getUint32(base + 32 + w * 4, true)
     }
   }
-  extraRows.forEach(({ hashes }, k) => {
-    const i = count + k
+  const writeHashes = (i, hashes) => {
     for (let w = 0; w < WORDS; w += 1) {
       wholes[i * WORDS + w] = hashes.getUint32(w * 4, true)
       arts[i * WORDS + w] = hashes.getUint32(32 + w * 4, true)
     }
+  }
+  extraRows.forEach(({ hashes }, k) => writeHashes(count + k, hashes))
+  replacingRows.forEach(({ index, hashes }) => writeHashes(index, hashes))
+  const rows = meta.cards.concat(extraRows.map(({ row }) => row))
+  replacingRows.forEach(({ index, row }) => {
+    rows[index] = row
   })
-  const cards = meta.cards
-    .concat(extraRows.map(({ row }) => row))
-    .map(([tcgdexCardId, locale, name, setId, localId]) => ({
-      tcgdexCardId,
-      locale,
-      name,
-      setId,
-      localId,
-    }))
+  const cards = rows.map(([tcgdexCardId, locale, name, setId, localId]) => ({
+    tcgdexCardId,
+    locale,
+    name,
+    setId,
+    localId,
+  }))
   // Indices groupés par langue : quand une langue de session est fixée, on ne
   // compare qu'à ce sous-ensemble (~6× moins que les ~100k 6 langues) = beaucoup
   // plus rapide sur téléphone.

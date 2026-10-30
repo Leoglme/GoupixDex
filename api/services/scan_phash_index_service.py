@@ -23,7 +23,7 @@ import logging
 import math
 import threading
 import time
-from collections import Counter
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -165,10 +165,9 @@ def compute_card_phash(image_bytes: bytes) -> bytes:
 
 @dataclass(frozen=True)
 class _ShippedIndex:
-    """Index livré avec le site : clés ``langue/id`` et nombre de cartes par set."""
+    """Index livré avec le site : nom de chaque carte, par clé ``langue/id``."""
 
-    keys: frozenset[str]
-    cards_per_set: Counter[tuple[str, str]]
+    names: dict[str, str]
 
 
 @dataclass
@@ -185,9 +184,8 @@ class _PendingCard:
 
 @dataclass(frozen=True)
 class _StoredCard:
-    """Carte déjà enregistrée : son set, si son empreinte est calculée, et quand elle a été tentée."""
+    """Carte déjà enregistrée : si son empreinte est calculée, et quand elle a été tentée."""
 
-    set_id: str
     is_hashed: bool
     checked_at: dt.datetime
 
@@ -210,10 +208,18 @@ def _load_shipped_index(url: str) -> _ShippedIndex:
     if len(rows) < _MIN_SHIPPED_CARDS:
         msg = f"Index de scan livré incomplet ({len(rows)} cartes)"
         raise RuntimeError(msg)
-    return _ShippedIndex(
-        keys=frozenset(f"{row[1]}/{row[0]}" for row in rows),
-        cards_per_set=Counter((row[1], row[3]) for row in rows),
-    )
+    return _ShippedIndex(names={f"{row[1]}/{row[0]}": row[2] for row in rows})
+
+
+def _comparable_name(name: str) -> str:
+    """Nom de carte sans espaces ni écarts de largeur ou de casse (« ホゲータ ex » ≡ « ホゲータex »)."""
+    return unicodedata.normalize("NFKC", name).replace(" ", "").casefold()
+
+
+def _is_shipped_under_this_name(shipped: _ShippedIndex, key: str, tcgdex_name: str) -> bool:
+    """Vrai quand l'index livré a cette carte ; faux s'il a l'id pour une autre carte (M6a-R : énergie, puis Mew)."""
+    shipped_name = shipped.names.get(key)
+    return shipped_name is not None and _comparable_name(shipped_name) == _comparable_name(tcgdex_name)
 
 
 def _as_utc(value: dt.datetime) -> dt.datetime:
@@ -229,14 +235,13 @@ def _stored_cards_snapshot(db: Session) -> dict[tuple[str, str], _StoredCard]:
     rows = db.query(
         ScanPhashCard.locale,
         ScanPhashCard.tcgdex_card_id,
-        ScanPhashCard.set_id,
         ScanPhashCard.hashes.is_not(None),
         ScanPhashCard.checked_at,
     ).all()
     db.rollback()
     return {
-        (locale, card_id): _StoredCard(set_id=set_id, is_hashed=bool(is_hashed), checked_at=_as_utc(checked_at))
-        for locale, card_id, set_id, is_hashed, checked_at in rows
+        (locale, card_id): _StoredCard(is_hashed=bool(is_hashed), checked_at=_as_utc(checked_at))
+        for locale, card_id, is_hashed, checked_at in rows
     }
 
 
@@ -288,27 +293,18 @@ def _pending_cards_for_locale(
     report: ScanPhashRefreshReport,
 ) -> list[_PendingCard]:
     """
-    Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré, jamais
-    calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Si TCGdex tombe en route, les sets
-    déjà lus sont gardés ; un set illisible est sauté.
+    Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré (ou qu'il
+    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Si TCGdex
+    tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
     """
     sets = _list_all_sets_once_tcgdex_answers(client, locale)
     if sets is None:
         report.unavailable_locales.append(locale)
         return []
-    stored_per_set = Counter(card.set_id for (card_locale, _), card in stored.items() if card_locale == locale)
-    sets_to_retry = {
-        card.set_id
-        for (card_locale, _), card in stored.items()
-        if card_locale == locale and not card.is_hashed and card.checked_at < retry_before
-    }
     pending: list[_PendingCard] = []
     for brief in reversed(sets):
         set_id = str(brief.get("id") or "")
-        card_count = brief.get("cardCount")
-        total = card_count.get("total") if isinstance(card_count, dict) else None
-        known = shipped.cards_per_set[(locale, set_id)] + stored_per_set[set_id]
-        if not set_id or (isinstance(total, int) and known >= total and set_id not in sets_to_retry):
+        if not set_id:
             continue
         try:
             detail: dict[str, Any] = dict(client.get_set(locale, set_id))
@@ -326,7 +322,8 @@ def _pending_cards_for_locale(
             local_id = card.get("localId")
             if not isinstance(card_id, str) or not isinstance(local_id, str):
                 continue
-            if f"{locale}/{card_id}" in shipped.keys:
+            name = str(card.get("name") or "")
+            if _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
                 continue
             stored_card = stored.get((locale, card_id))
             if stored_card is not None and (stored_card.is_hashed or stored_card.checked_at >= retry_before):
@@ -347,7 +344,7 @@ def _pending_cards_for_locale(
                     card_id=card_id,
                     set_id=set_id,
                     local_id=local_id,
-                    name=str(card.get("name") or ""),
+                    name=name,
                     image_url=image_url,
                 )
             )
@@ -398,8 +395,8 @@ def refresh_scan_phash_cards(db: Session, *, max_new_cards: int = MAX_NEW_CARDS_
     """
     Calcule et enregistre les empreintes des cartes TCGdex absentes de l'index livré.
 
-    Seuls les sets dont TCGdex annonce plus de cartes que l'index livré et la base n'en connaissent
-    sont relus. Une langue où TCGdex reste injoignable quelques minutes est sautée, les autres continuent.
+    Chaque set est relu : une carte ajoutée tard (secrètes) ou un id réattribué par TCGdex est repéré. Une langue
+    où TCGdex reste injoignable quelques minutes est sautée, les autres continuent.
 
     Raises:
         httpx.HTTPError: L'index livré est injoignable (sans lui, tout serait recalculé).
