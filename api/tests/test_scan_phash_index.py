@@ -19,6 +19,7 @@ from models.base import Base
 from models.scan_phash_card import ScanPhashCard
 from services import scan_phash_index_service as service
 from services.card_image_fallback_service import CardImageUrls
+from services.tcgdex_client_service import TcgdexUnavailableError
 
 _HASHES = bytes(range(64))
 
@@ -129,6 +130,42 @@ def test_a_second_run_downloads_nothing_until_missing_images_are_due(db: Session
     db.commit()
     service.refresh_scan_phash_cards(db)
     assert fake_sources == ["https://cdn.example/M6a-R.jpg"]
+
+
+class _FakeTcgdexFailingOnM6(_FakeTcgdex):
+    """TCGdex qui liste M6 avant M6a (ordre de sortie) mais n'arrive plus à servir la fiche de M6."""
+
+    def __init__(self, failure: RuntimeError) -> None:
+        self.failure = failure
+
+    def list_sets(self, locale: str, page: int = 1, per_page: int = 50) -> list[dict[str, Any]]:
+        if locale != "ja":
+            return []
+        return [{"id": "M6", "cardCount": {"total": 113}}, {"id": "M6a", "cardCount": {"total": 5}}]
+
+    def get_set(self, locale: str, set_id: str) -> dict[str, Any]:
+        if set_id == "M6":
+            raise self.failure
+        return super().get_set(locale, set_id)
+
+
+@pytest.mark.parametrize(
+    ("failure", "unavailable_locales"),
+    [(TcgdexUnavailableError("503 no available server"), ["ja"]), (RuntimeError("404 Not Found"), [])],
+)
+def test_a_set_tcgdex_cannot_serve_keeps_the_sets_read_before(
+    db: Session,
+    fake_sources: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: RuntimeError,
+    unavailable_locales: list[str],
+) -> None:
+    monkeypatch.setattr(service, "TcgdexClientService", lambda: _FakeTcgdexFailingOnM6(failure))
+
+    report = service.refresh_scan_phash_cards(db)
+
+    assert db.query(ScanPhashCard).filter(ScanPhashCard.hashes.is_not(None)).count() == 1
+    assert report.unavailable_locales == unavailable_locales
 
 
 def _card_picture(width: int, height: int, *, art_left: float) -> bytes:
