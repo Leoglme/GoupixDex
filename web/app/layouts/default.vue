@@ -23,7 +23,7 @@
         <button
           v-if="!collapsed"
           type="button"
-          class="mb-3 flex w-full cursor-pointer items-center justify-between rounded-lg border border-(--app-line) bg-(--app-bg) px-2.5 py-1.5 text-xs text-(--app-faint) transition-colors hover:border-(--app-ink-soft) hover:text-(--app-ink-soft)"
+          class="mb-3 flex w-full cursor-pointer items-center justify-between rounded-lg border border-(--app-line) bg-(--app-bg) px-2.5 py-1.5 text-xs text-(--app-faint) transition-colors hover:border-(--app-ink-soft) hover:text-(--app-ink-soft) pointer-coarse:min-h-11"
           @click="openPalette()"
         >
           <span class="flex items-center gap-2">
@@ -258,7 +258,7 @@ function navMenuUi(collapsed: boolean): { root: string; list: string; item: stri
     root: 'gap-1',
     list: 'flex flex-col gap-y-0.5',
     item: 'shrink-0',
-    link: collapsed ? 'justify-center' : 'gap-2.5 rounded-lg py-1.5',
+    link: collapsed ? 'justify-center pointer-coarse:min-h-11' : 'gap-2.5 rounded-lg py-1.5 pointer-coarse:min-h-11',
   }
 }
 

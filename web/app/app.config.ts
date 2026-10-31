@@ -53,40 +53,40 @@ export default defineAppConfig({
         trigger: 'cursor-pointer',
       },
     },
-    // Sur téléphone : champs de 44 px de haut, et texte de 16 px sans quoi iOS zoome au focus.
+    // Sur écran tactile : champs de 44 px de haut, et texte de 16 px sans quoi iOS zoome au focus.
     input: {
       slots: {
-        base: 'max-sm:min-h-11 max-sm:text-base',
+        base: 'pointer-coarse:min-h-11 pointer-coarse:text-base',
       },
     },
     inputNumber: {
       slots: {
-        base: 'max-sm:min-h-11 max-sm:text-base',
+        base: 'pointer-coarse:min-h-11 pointer-coarse:text-base',
       },
     },
     textarea: {
       slots: {
-        base: 'max-sm:text-base',
+        base: 'pointer-coarse:text-base',
       },
     },
     // Menus, listes et infobulles au-dessus des volets maison (z-50) et des modales (z-[101]) qui les ouvrent.
     select: {
       slots: {
-        base: 'cursor-pointer max-sm:min-h-11 max-sm:text-base',
+        base: 'cursor-pointer pointer-coarse:min-h-11 pointer-coarse:text-base',
         item: 'cursor-pointer',
         content: 'z-[105]',
       },
     },
     selectMenu: {
       slots: {
-        base: 'cursor-pointer max-sm:min-h-11 max-sm:text-base',
+        base: 'cursor-pointer pointer-coarse:min-h-11 pointer-coarse:text-base',
         item: 'cursor-pointer',
         content: 'z-[105]',
       },
     },
     inputMenu: {
       slots: {
-        base: 'cursor-pointer max-sm:min-h-11 max-sm:text-base',
+        base: 'cursor-pointer pointer-coarse:min-h-11 pointer-coarse:text-base',
         item: 'cursor-pointer',
         content: 'z-[105]',
       },
