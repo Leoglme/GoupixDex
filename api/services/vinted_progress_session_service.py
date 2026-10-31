@@ -28,6 +28,11 @@ class _VintedProgressChannel:
             self._done = True
             self._condition.notify_all()
 
+    @property
+    def is_done(self) -> bool:
+        """Vrai une fois la publication terminée (événement ``done`` écrit)."""
+        return self._done
+
     async def iter_events(self) -> AsyncIterator[dict[str, Any]]:
         """Replay history then wait for further entries until ``done``."""
         i = 0
@@ -56,8 +61,9 @@ class VintedProgressSessionService:
 
     @classmethod
     def register(cls, article_id: int) -> None:
-        """Create a session if missing (Vinted + eBay may share the same SSE stream)."""
-        if article_id not in cls._sessions:
+        """Garde la session qui tourne (Vinted + eBay partagent le flux) ; une tentative après une session finie repart d'une session neuve, sans rejouer son ``done``."""
+        current_session = cls._sessions.get(article_id)
+        if current_session is None or current_session.is_done:
             cls._sessions[article_id] = _VintedProgressChannel()
 
     @classmethod
@@ -100,11 +106,13 @@ class VintedProgressSessionService:
 
     @classmethod
     def cleanup_later(cls, article_id: int, delay_sec: float = 300.0) -> None:
-        """Drop the session after a few minutes (avoids leaks in dev)."""
+        """Drop the session after a few minutes (avoids leaks in dev), unless a new attempt has replaced it meanwhile."""
+        finished_session = cls._sessions.get(article_id)
 
         async def _run() -> None:
             await asyncio.sleep(delay_sec)
-            cls._sessions.pop(article_id, None)
+            if cls._sessions.get(article_id) is finished_session:
+                cls._sessions.pop(article_id, None)
 
         try:
             asyncio.get_running_loop().create_task(_run())

@@ -135,6 +135,17 @@ def _build_browser_args(*, headless: bool, discreet: bool) -> list[str]:
     return base
 
 
+_LISTED_ITEM_URL_RE = re.compile(r"/items/\d+")
+
+
+class VintedPublishNotConfirmedError(RuntimeError):
+    """Après « Ajouter », Vinted n'a montré ni le profil ni la fiche de l'annonce : elle n'est peut-être pas créée."""
+
+    def __init__(self, vinted_messages: list[str]) -> None:
+        shown_message = f" Message affiché par Vinted : « {' · '.join(vinted_messages)} »." if vinted_messages else ""
+        super().__init__(f"Vinted n'a pas confirmé la mise en ligne.{shown_message}")
+
+
 class VintedService:
     """
     Static-style service mirroring the previous TypeScript class: one browser, one tab.
@@ -1962,15 +1973,40 @@ class VintedService:
         return None
 
     @classmethod
+    async def _read_visible_vinted_messages(cls, tab: Tab) -> list[str]:
+        """Messages que Vinted affiche à l'écran (erreurs du formulaire, alertes, fenêtres), pour expliquer une publication non confirmée."""
+        try:
+            raw = await tab.evaluate(
+                """
+                (() => {
+                  const shownElements = document.querySelectorAll(
+                    '[role="alert"], [role="dialog"], [data-testid*="error"], [class*="Validation"], [class*="validation"]'
+                  );
+                  const texts = [...shownElements]
+                    .map((element) => (element.innerText || '').trim().replace(/\\s+/g, ' '))
+                    .filter((text) => text.length > 0);
+                  return JSON.stringify([...new Set(texts)].slice(0, 3).map((text) => text.slice(0, 200)));
+                })()
+                """,
+                return_by_value=True,
+            )
+            messages = json.loads(raw) if isinstance(raw, str) else []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Vinted messages unreadable after publish: %s", exc)
+            return []
+        return [message for message in messages if isinstance(message, str)]
+
+    @classmethod
     async def publish(cls, *, progress: FormProgressFn | None = None) -> None:
         """
-        Click the Vinted upload/save button, then wait for real confirmation on the member profile.
+        Click the Vinted upload/save button, then wait for the member profile or the new listing page (``/items/<id>``, not ``/items/new``).
 
         Returns:
             None
 
         Raises:
-            RuntimeError: If the button is missing or post-publish confirmation fails.
+            RuntimeError: If the upload button is missing.
+            VintedPublishNotConfirmedError: If Vinted shows neither page within a minute.
         """
         tab = cls._require_tab()
         before_count = await cls._read_member_articles_count(tab)
@@ -1992,19 +2028,20 @@ class VintedService:
 
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
-            await tab
-            url = (tab.target.url or "").lower()
+            url = (await cls._read_page_url(tab)).lower()
             after_count = await cls._read_member_articles_count(tab)
             on_member_profile = "/member/" in url
+            on_listed_item_page = _LISTED_ITEM_URL_RE.search(url) is not None
             count_incremented = (
                 after_count is not None
                 and before_count is not None
                 and after_count > before_count
             )
-            if on_member_profile and (count_incremented or before_count is None):
+            if on_listed_item_page or (on_member_profile and (count_incremented or before_count is None)):
                 shot = await cls._tab_screenshot_data_url(tab)
                 logger.info(
-                    "Item listed successfully (member profile reached, count %s -> %s).",
+                    "Item listed successfully (url %s, count %s -> %s).",
+                    url[:160],
                     before_count,
                     after_count,
                 )
@@ -2028,20 +2065,21 @@ class VintedService:
             await asyncio.sleep(0.35)
 
         shot = await cls._tab_screenshot_data_url(tab)
+        final_url = await cls._read_page_url(tab)
+        vinted_messages = await cls._read_visible_vinted_messages(tab)
+        logger.warning("Publish not confirmed: url %s, Vinted messages %s", final_url[:160], vinted_messages)
         if progress:
             await progress(
                 {
                     "type": "log",
                     "step": "publish",
                     "form_step": "publish_wait_failed",
-                    "message": "Publish not confirmed: no profile redirect or count unchanged.",
-                    "detail": f"count_before={before_count}",
+                    "message": "Publish not confirmed: no profile or listing page after « Ajouter ».",
+                    "detail": f"url={final_url[:160]} count_before={before_count} messages={vinted_messages}",
                     "screenshot": shot,
                 }
             )
-        raise RuntimeError(
-            "Publish not confirmed (no member redirect and/or article count unchanged)."
-        )
+        raise VintedPublishNotConfirmedError(vinted_messages)
 
     @classmethod
     def _parse_vinted_member_id_from_eval_json(cls, raw: Any) -> int | None:
@@ -2481,6 +2519,34 @@ class VintedService:
         if len(matching_item_ids) > 1:
             raise RuntimeError("Plusieurs annonces portent ce titre sur votre dressing Vinted : retirez la bonne depuis Vinted.")
         return matching_item_ids[0] if matching_item_ids else None
+
+    @classmethod
+    async def find_unclaimed_wardrobe_listing(
+        cls,
+        *,
+        title: str,
+        sell_price: Decimal | float | int | None,
+        other_articles_listing_ids: frozenset[int] = frozenset(),
+    ) -> int | None:
+        """
+        Annonce en ligne du dressing connecté portant ce titre (au prix attendu de préférence), hors annonces reliées à d'autres articles.
+
+        Returns:
+            Son id Vinted, ou ``None`` si le dressing n'en montre pas ou n'a pas pu être lu.
+        """
+        tab = cls._require_tab()
+        try:
+            member_id = await cls.fetch_logged_in_vinted_user_numeric_id()
+        except RuntimeError as exc:
+            logger.warning("Vinted member id unreadable, wardrobe not checked: %s", exc)
+            return None
+        wardrobe_rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
+        if wardrobe_rows is None:
+            return None
+        unclaimed_rows = [
+            row for row in wardrobe_rows if cls._wardrobe_row_item_id(row) not in other_articles_listing_ids
+        ]
+        return cls._pick_wardrobe_item_match(unclaimed_rows, title=title, sell_price=sell_price)
 
     @classmethod
     async def find_member_listing_item_id_for_match(

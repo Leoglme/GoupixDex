@@ -21,9 +21,12 @@ from models.article import Article
 from models.user import User
 from services.os_service import get_project_root
 from services.timer_service import TimerService
-from services.vinted_service import VintedService
+from services.vinted_service import VintedPublishNotConfirmedError, VintedService
 
 logger = logging.getLogger(__name__)
+
+_WARDROBE_LOOKUPS_AFTER_UNCONFIRMED_PUBLISH = 3
+_WARDROBE_LOOKUP_INTERVAL_MS = 4000
 
 _CONDITION_TO_VINTED: dict[str, str] = {
     "Mint": "Neuf sans étiquette",
@@ -77,6 +80,33 @@ async def _resolve_published_vinted_id(article: Article, price: float) -> int | 
     except Exception as exc:  # noqa: BLE001
         logger.warning("vinted_id resolve after publish failed article_id=%s: %s", article.id, exc)
         return None
+
+
+async def _find_listing_created_without_confirmation(
+    article: Article, price: float, other_articles_listing_ids: frozenset[int]
+) -> int | None:
+    """
+    Cherche sur le dressing l'annonce que Vinted a créée sans afficher de confirmation ; elle peut mettre quelques secondes à y apparaître.
+
+    Args:
+        article: Article qui vient d'être soumis.
+        price: Prix saisi sur Vinted.
+        other_articles_listing_ids: Annonces déjà reliées à d'autres articles, jamais retenues.
+
+    Returns:
+        L'id Vinted de l'annonce, ou ``None`` si le dressing ne la montre pas.
+    """
+    for lookup_index in range(_WARDROBE_LOOKUPS_AFTER_UNCONFIRMED_PUBLISH):
+        if lookup_index:
+            await TimerService.wait(_WARDROBE_LOOKUP_INTERVAL_MS)
+        listing_id = await VintedService.find_unclaimed_wardrobe_listing(
+            title=article.title or "",
+            sell_price=price,
+            other_articles_listing_ids=other_articles_listing_ids,
+        )
+        if listing_id is not None:
+            return listing_id
+    return None
 
 
 ProgressFn = Callable[[dict[str, Any]], Awaitable[None]]
@@ -163,14 +193,41 @@ async def run_single_vinted_listing(
     progress: ProgressFn | None,
     *,
     batch_label: str | None = None,
+    other_articles_listing_ids: frozenset[int] = frozenset(),
+    may_reuse_wardrobe_listing: bool = False,
 ) -> dict[str, Any]:
     """
     Full listing flow on an already-open Vinted page:
     materialize images, open sell, fill, publish.
     Does not start or stop Chrome (caller reuses the session).
+
+    Args:
+        other_articles_listing_ids: Annonces reliées à d'autres articles, jamais reprises.
+        may_reuse_wardrobe_listing: Reprend l'annonce du dressing portant ce titre (créée par un essai que Vinted n'a pas confirmé) au lieu de publier deux fois.
     """
     _ = user  # reserved (symmetry with public API)
     prefix = f"{batch_label} — " if batch_label else ""
+    price = float(listed_vinted_price(article))
+
+    if may_reuse_wardrobe_listing:
+        listing_already_online = await VintedService.find_unclaimed_wardrobe_listing(
+            title=article.title or "",
+            sell_price=price,
+            other_articles_listing_ids=other_articles_listing_ids,
+        )
+        if listing_already_online is not None:
+            await _emit(
+                progress,
+                "publish",
+                f"{prefix}Already on your Vinted wardrobe (listing #{listing_already_online}): not listed twice.",
+                form_step="publish_confirmed",
+            )
+            return {
+                "published": True,
+                "detail": "already_listed",
+                "article_id": article.id,
+                "vinted_id": listing_already_online,
+            }
 
     root = get_project_root()
     images_dir = root / "images"
@@ -192,7 +249,6 @@ async def run_single_vinted_listing(
         detail=f"{len(basenames)} file(s)",
     )
 
-    price = float(listed_vinted_price(article))
     payload: ItemPayload = {
         "title": article.title,
         "description": article.description,
@@ -223,7 +279,23 @@ async def run_single_vinted_listing(
     )
     await TimerService.wait(400)
     await _emit(progress, "publish", f"{prefix}Submitting the listing…", form_step="publish_click")
-    await VintedService.publish(progress=progress)
+    try:
+        await VintedService.publish(progress=progress)
+    except VintedPublishNotConfirmedError:
+        created_listing_id = (
+            await _find_listing_created_without_confirmation(article, price, other_articles_listing_ids)
+            if may_reuse_wardrobe_listing
+            else None
+        )
+        if created_listing_id is None:
+            raise
+        await _emit(
+            progress,
+            "publish",
+            f"{prefix}Listing found on your Vinted wardrobe (#{created_listing_id}).",
+            form_step="publish_confirmed",
+        )
+        return {"published": True, "detail": "published", "article_id": article.id, "vinted_id": created_listing_id}
     await TimerService.wait(500)
     vinted_id = await _resolve_published_vinted_id(article, price)
     return {"published": True, "detail": "published", "article_id": article.id, "vinted_id": vinted_id}
@@ -236,9 +308,12 @@ async def publish_article_to_vinted(
     *,
     progress: ProgressFn | None = None,
     vinted_password_plain: str | None = None,
+    other_articles_listing_ids: frozenset[int] = frozenset(),
+    may_reuse_wardrobe_listing: bool = False,
 ) -> dict[str, object]:
     """
     Attempt to list an article on Vinted. Does not raise on failure; returns status dict.
+    ``other_articles_listing_ids`` / ``may_reuse_wardrobe_listing`` : voir :func:`run_single_vinted_listing`.
 
     Password: decrypted ``user.vinted_password`` (Fernet), else ``VINTED_PASSWORD`` env.
     Legacy bcrypt rows cannot be recovered; use env or re-save Vinted password in user settings.
@@ -269,9 +344,16 @@ async def publish_article_to_vinted(
         await _emit(progress, "auth", "Signing in to Vinted…", form_step="auth_start")
         await VintedService.ensure_sign_in(email, password, form_progress=progress)
         await _emit(progress, "auth", "Signed in.", form_step="auth_ok")
-        listing = await run_single_vinted_listing(article, user, stored_image_sources, progress)
+        listing = await run_single_vinted_listing(
+            article,
+            user,
+            stored_image_sources,
+            progress,
+            other_articles_listing_ids=other_articles_listing_ids,
+            may_reuse_wardrobe_listing=may_reuse_wardrobe_listing,
+        )
         await _emit(progress, "browser", "Closing browser…", form_step="browser_close")
-        return {"published": True, "detail": "published", "vinted_id": listing.get("vinted_id")}
+        return {"published": True, "detail": listing.get("detail", "published"), "vinted_id": listing.get("vinted_id")}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Vinted publish failed article_id=%s", article.id)
         await _emit(progress, "error", f"Error: {exc}", form_step="failed", detail=str(exc))

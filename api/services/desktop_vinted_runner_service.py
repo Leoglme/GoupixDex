@@ -20,7 +20,7 @@ from services.vinted_service import VintedService
 
 logger = logging.getLogger(__name__)
 
-_VINTED_LISTING_REMOVAL_LOCK = asyncio.Lock()
+_VINTED_CHROME_LOCK = asyncio.Lock()
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -47,22 +47,44 @@ class DesktopVintedRunnerService:
                 me = await client.get(f"{remote_base}/users/me", headers=hdrs)
                 me.raise_for_status()
                 me_d = me.json()
+                account_articles = await ListingOwnershipService.fetch_account_articles(client, remote_base, hdrs)
 
             article = DesktopStubsService.article_from_api_dict(article_d)
             user = DesktopStubsService.user_stub(me_d["id"], me_d["email"], creds.get("vinted_email"))
             pwd_plain = creds.get("vinted_password")
             image_urls = [im["image_url"] for im in article_d.get("images") or []]
+            other_articles_listing_ids = frozenset(
+                int(listing_id)
+                for listing_id in ListingOwnershipService.collect_other_articles_listing_ids(
+                    account_articles, article_id, "vinted"
+                )
+            )
+            other_copy_listed_without_id = ListingOwnershipService.find_other_unsold_copy_without_listing_id(
+                account_articles, article_d, "vinted"
+            )
 
             async def on_progress(ev: dict[str, Any]) -> None:
                 await vp.emit(article_id, ev)
 
-            result = await publish_article_to_vinted(
-                article,
-                user,
-                image_urls,
-                progress=on_progress,
-                vinted_password_plain=pwd_plain,
-            )
+            if _VINTED_CHROME_LOCK.locked():
+                await on_progress(
+                    {
+                        "type": "log",
+                        "step": "queue",
+                        "message": "Waiting for the previous Vinted task to finish…",
+                        "form_step": "queued",
+                    }
+                )
+            async with _VINTED_CHROME_LOCK:
+                result = await publish_article_to_vinted(
+                    article,
+                    user,
+                    image_urls,
+                    progress=on_progress,
+                    vinted_password_plain=pwd_plain,
+                    other_articles_listing_ids=other_articles_listing_ids,
+                    may_reuse_wardrobe_listing=other_copy_listed_without_id is None,
+                )
             if bool(result.get("published")):
                 vinted_id = result.get("vinted_id")
                 payload: dict[str, Any] = {"vinted_id": vinted_id} if isinstance(vinted_id, int) else {}
@@ -97,11 +119,11 @@ class DesktopVintedRunnerService:
         batch_position_label: str = "",
     ) -> VintedListingRemovalOutcome:
         """
-        Supprime une annonce Vinted à la fois : les retraits lancés ensemble (vente d’un lot) partageraient sinon le même Chrome.
+        Supprime une annonce Vinted à la fois, jamais pendant une publication : ils partageraient sinon le même Chrome.
 
         Args et Returns : voir :meth:`_remove_vinted_listing`.
         """
-        async with _VINTED_LISTING_REMOVAL_LOCK:
+        async with _VINTED_CHROME_LOCK:
             return await DesktopVintedRunnerService._remove_vinted_listing(
                 article_id,
                 user_id,
@@ -363,14 +385,15 @@ class DesktopVintedRunnerService:
                     )
                     r.raise_for_status()
 
-            await VintedBatchOrchestratorService.run_vinted_batch_job(
-                job_id,
-                user_id,
-                items,
-                user,
-                vinted_password_plain=pwd_plain,
-                mark_published=mark_pub,
-            )
+            async with _VINTED_CHROME_LOCK:
+                await VintedBatchOrchestratorService.run_vinted_batch_job(
+                    job_id,
+                    user_id,
+                    items,
+                    user,
+                    vinted_password_plain=pwd_plain,
+                    mark_published=mark_pub,
+                )
         except Exception:
             logger.exception("Desktop Vinted batch crashed job_id=%s", job_id)
             await batch_hub.emit_event(
