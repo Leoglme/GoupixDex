@@ -198,6 +198,17 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
   }
 
   /**
+   * Relit la fiche de la carte affichée, par exemple après la création ou la publication de son article.
+   * @returns {Promise<void>} Résolue quand la fiche est relue, ou tout de suite si aucune carte n'est affichée.
+   */
+  async function reloadScannedCardPreview(): Promise<void> {
+    const card: ScannedCard | null = scannedCard.value
+    if (card) {
+      await loadScannedCardPreview(card)
+    }
+  }
+
+  /**
    * Ferme la fiche sans annuler les exemplaires ajoutés depuis elle.
    * @returns {void}
    */
@@ -256,5 +267,12 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     clearActionTimers()
   })
 
-  return { scannedCard, showScannedCard, confirmScannedCardAction, undoLastScannedCardAdd, dismissScannedCard }
+  return {
+    scannedCard,
+    showScannedCard,
+    confirmScannedCardAction,
+    undoLastScannedCardAdd,
+    reloadScannedCardPreview,
+    dismissScannedCard,
+  }
 }

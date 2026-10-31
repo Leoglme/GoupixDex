@@ -212,7 +212,10 @@
       </template>
     </UAlert>
 
-    <div v-if="mode === 'create' && showEbayPublish" class="border-default space-y-2 rounded-lg border p-4">
+    <div
+      v-if="mode === 'create' && showEbayPublish && !hideEbayOption"
+      class="border-default space-y-2 rounded-lg border p-4"
+    >
       <UCheckbox v-model="publishToEbay" :disabled="!canPublishEbay" label="Publier sur eBay" />
       <p v-if="canPublishEbay" class="text-muted text-sm">
         Une annonce sera créée sur votre compte eBay France en même temps que l'article. Ajoutez au moins une photo pour
@@ -361,6 +364,7 @@ const props = withDefaults(
     loadingHint?: string | null
     /** Hide the "Publish on Vinted" checkbox (e.g. batch create with a global option). */
     hideVintedOption?: boolean
+    hideEbayOption?: boolean
     /** Mode remise en vente : propose republication après enregistrement. */
     relistMode?: boolean
     /** Show the form submit button (disable if the parent handles submit). */
@@ -371,6 +375,7 @@ const props = withDefaults(
   }>(),
   {
     hideVintedOption: false,
+    hideEbayOption: false,
     relistMode: false,
     showSubmitButton: true,
   },

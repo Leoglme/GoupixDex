@@ -179,7 +179,7 @@ def preview_scanned_card(
     tcgdex_card_id: str = Query(..., min_length=3, max_length=64),
     language: str = Query("en", max_length=8),
 ) -> dict[str, Any]:
-    """Fiche d'une carte reconnue sur le téléphone, avant son ajout : cote Cardmarket et exemplaires déjà possédés."""
+    """Fiche d'une carte reconnue sur le téléphone : cote Cardmarket, exemplaires possédés et leur mise en vente."""
     card_id = _validated_card_id(tcgdex_card_id)
     try:
         return build_scanned_card_preview(db, user.id, card_id, _matched_card_language(language))

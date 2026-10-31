@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import models  # noqa: F401 — enregistre tous les mappers (relations croisées entre modèles)
+from models.article import Article
 from models.base import Base
 from models.binder import Binder, BinderItem
 from models.collection_card import CollectionCard
@@ -109,6 +110,119 @@ def test_preview_ignores_empty_binder_placeholders(db: Session, monkeypatch: pyt
     preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
 
     assert preview["owned_quantity"] == 0
+
+
+def _put_on_sale(db: Session, card: CollectionCard | None, **article_fields: Any) -> Article:
+    article = Article(
+        user_id=1,
+        title="Capidextre me02 107/094 - Flammes Fantasmagoriques - Pokémon Français",
+        description="",
+        purchase_price=Decimal("1.50"),
+        **article_fields,
+    )
+    db.add(article)
+    db.commit()
+    if card is not None:
+        card.article_id = article.id
+        db.commit()
+    db.refresh(article)
+    return article
+
+
+def test_preview_shows_where_the_article_of_an_owned_copy_is_online(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    card = _collection_card(db, language="fr", quantity=1)
+    article = _put_on_sale(db, card, published_on_vinted=True, published_on_ebay=True)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["linked_article"] == {
+        "id": article.id,
+        "offers_for_sale": True,
+        "published_on_vinted": True,
+        "published_on_ebay": True,
+        "published_on_leboncoin": False,
+    }
+    assert preview["unlinked_collection_card_id"] is None
+
+
+def test_preview_tells_an_article_withdrawn_from_sale(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    card = _collection_card(db, language="fr", quantity=1)
+    _put_on_sale(db, card, offers_for_sale=False)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["linked_article"]["offers_for_sale"] is False
+
+
+def test_preview_keeps_the_article_online_on_the_most_marketplaces(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    _put_on_sale(db, _collection_card(db, language="fr", quantity=1), published_on_vinted=True)
+    article_online_everywhere = _put_on_sale(
+        db,
+        _collection_card(db, language="en", quantity=1),
+        published_on_vinted=True,
+        published_on_ebay=True,
+        published_on_leboncoin=True,
+    )
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["linked_article"]["id"] == article_online_everywhere.id
+
+
+def test_preview_offers_the_copy_without_article_in_the_scanned_language(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    _collection_card(db, language="en", quantity=1)
+    french_card = _collection_card(db, language="fr", quantity=1)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["linked_article"] is None
+    assert preview["unlinked_collection_card_id"] == french_card.id
+
+
+def test_preview_ignores_the_article_of_the_japanese_card_sharing_its_id(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    _put_on_sale(db, _collection_card(db, language="ja", quantity=1), published_on_vinted=True)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["owned_quantity"] == 0
+    assert preview["linked_article"] is None
+
+
+def test_preview_forgets_a_sold_article_still_linked_to_a_copy(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    card = _collection_card(db, language="fr", quantity=1)
+    _put_on_sale(db, card, is_sold=True, published_on_vinted=True)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["linked_article"] is None
+    assert preview["unlinked_collection_card_id"] == card.id
+
+
+def test_preview_shows_a_sold_card_scanned_again_as_absent_from_the_collection(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
+    _put_on_sale(db, None, is_sold=True, published_on_vinted=True)
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
+
+    assert preview["owned_quantity"] == 0
+    assert preview["linked_article"] is None
+    assert preview["unlinked_collection_card_id"] is None
 
 
 def test_card_sheet_is_read_once_from_tcgdex_for_the_preview_and_the_add(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -20,6 +20,8 @@ export type ScanMatchDecision = {
 /** Physical-card language of the current scan session (`auto` = resolve per card). */
 export type ScanCardLanguage = 'auto' | 'ja' | 'en' | 'fr'
 
+export type ScanMode = 'in' | 'inventory' | 'out'
+
 /** Résultat du matcher pHash (empreinte artwork) : décision SÛRE ou refus. */
 export type ScanPhashResult = {
   /** `match` = carte confiante (plancher + marge vs autre artwork) ; `none` = refus. */

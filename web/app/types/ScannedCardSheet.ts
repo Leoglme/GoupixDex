@@ -3,6 +3,14 @@ import type { ScanDirection, ScanEvent } from '~/composables/useScanStream'
 import type { FillableBinderSlot } from '~/types/binders'
 import type { ScanMatchDecision } from '~/types/ScanMatch'
 
+export type ScannedCardLinkedArticle = {
+  id: number
+  offers_for_sale: boolean
+  published_on_vinted: boolean
+  published_on_ebay: boolean
+  published_on_leboncoin: boolean
+}
+
 export type ScannedCardPreview = {
   tcgdex_card_id: string
   tcgdex_set_id: string
@@ -16,6 +24,8 @@ export type ScannedCardPreview = {
   market_price_eur: number | null
   owned_quantity: number
   fillable_binder_slots: FillableBinderSlot[]
+  linked_article: ScannedCardLinkedArticle | null
+  unlinked_collection_card_id: number | null
 }
 
 export type ScannedCardAction = 'idle' | 'pending' | 'done' | 'failed'
@@ -56,5 +66,6 @@ export type ScannedCardSheet = {
   showScannedCard: (decision: ScanMatchDecision, imageUrl: string, direction: ScanDirection) => void
   confirmScannedCardAction: () => Promise<void>
   undoLastScannedCardAdd: () => Promise<boolean>
+  reloadScannedCardPreview: () => Promise<void>
   dismissScannedCard: () => void
 }

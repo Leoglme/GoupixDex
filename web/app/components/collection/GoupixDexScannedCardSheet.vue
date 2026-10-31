@@ -85,25 +85,12 @@
       </span>
       <span class="min-w-0 truncate">{{ actionButtonLabel }}</span>
     </button>
-    <div v-if="lastAddFromSheet" class="mt-2 flex items-center gap-3 pl-3 text-sm">
-      <span class="flex size-9 shrink-0 items-center justify-center">
-        <UIcon name="i-lucide-circle-check" class="size-4 text-emerald-300" />
-      </span>
-      <span class="min-w-0 flex-1 truncate text-white/80">{{ lastAddFromSheetLabel }}</span>
-      <button
-        type="button"
-        class="flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="isWaitingForServer"
-        @click="emit('undo')"
-      >
-        <UIcon
-          :name="props.scannedCard.isUndoingLastAdd ? 'i-lucide-loader-circle' : 'i-lucide-undo-2'"
-          class="size-4"
-          :class="{ 'animate-spin': props.scannedCard.isUndoingLastAdd }"
-        />
-        Annuler
-      </button>
-    </div>
+    <GoupixDexScannedCardUndoAdd
+      :adds-from-sheet="props.scannedCard.addsFromSheet"
+      :is-undoing-last-add="props.scannedCard.isUndoingLastAdd"
+      :is-disabled="isWaitingForServer"
+      @undo="emit('undo')"
+    />
     <p v-if="props.scannedCard.actionError" class="mt-2 text-xs text-red-300">
       {{ props.scannedCard.actionError }}
     </p>
@@ -113,9 +100,8 @@
 <script lang="ts" setup>
 import type { ComputedRef, PropType } from 'vue'
 import type { GoupixDexScannedCardSheetProps, ScannedCardActionButton } from '~/types/GoupixDexScannedCardSheet'
-import type { ScanMatchDecision } from '~/types/ScanMatch'
-import type { ScannedCard, ScannedCardAdd, ScannedCardPreview } from '~/types/ScannedCardSheet'
-import { hasJapanese, readableCardLabel, readableSetLabel } from '~/utils/cards/readableSet'
+import type { ScannedCard } from '~/types/ScannedCardSheet'
+import { scannedCardName, scannedCardPrintedNumber, scannedCardSetName } from '~/utils/cards/scannedCardLabels'
 
 const props: GoupixDexScannedCardSheetProps = defineProps({
   scannedCard: {
@@ -140,34 +126,11 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2,
 })
 
-const cardName: ComputedRef<string> = computed((): string => {
-  const previewName: string | undefined = props.scannedCard.preview?.display_name
-  if (previewName) {
-    return previewName
-  }
-  const decision: ScanMatchDecision = props.scannedCard.decision
-  return hasJapanese(decision.name) && props.scannedCard.isPreviewLoading
-    ? ''
-    : readableCardLabel(decision.name, decision.localId)
-})
+const cardName: ComputedRef<string> = computed((): string => scannedCardName(props.scannedCard))
 
-const printedNumberLabel: ComputedRef<string> = computed((): string => {
-  const cardNumber: string = props.scannedCard.preview?.card_number ?? props.scannedCard.decision.localId
-  const printedSetTotal: number | null = props.scannedCard.preview?.printed_set_total ?? null
-  if (!/^\d+$/.test(cardNumber)) {
-    return `#${cardNumber}`
-  }
-  if (!printedSetTotal) {
-    return `#${cardNumber.padStart(3, '0')}`
-  }
-  const digitCount: number = Math.max(3, String(printedSetTotal).length)
-  return `${cardNumber.padStart(digitCount, '0')}/${String(printedSetTotal).padStart(digitCount, '0')}`
-})
+const printedNumberLabel: ComputedRef<string> = computed((): string => scannedCardPrintedNumber(props.scannedCard))
 
-const setLabel: ComputedRef<string> = computed((): string => {
-  const preview: ScannedCardPreview | null = props.scannedCard.preview
-  return preview ? readableSetLabel(preview.set_name, preview.set_code, preview.tcgdex_set_id) : ''
-})
+const setLabel: ComputedRef<string> = computed((): string => scannedCardSetName(props.scannedCard))
 
 const marketPriceLabel: ComputedRef<string | null> = computed((): string | null => {
   const marketPrice: number | null | undefined = props.scannedCard.preview?.market_price_eur
@@ -185,15 +148,6 @@ const isAbsentFromCollection: ComputedRef<boolean> = computed(
 const isWaitingForServer: ComputedRef<boolean> = computed(
   (): boolean => props.scannedCard.action === 'pending' || props.scannedCard.isUndoingLastAdd,
 )
-
-const lastAddFromSheet: ComputedRef<ScannedCardAdd | null> = computed(
-  (): ScannedCardAdd | null => props.scannedCard.addsFromSheet.at(-1) ?? null,
-)
-
-const lastAddFromSheetLabel: ComputedRef<string> = computed((): string => {
-  const binderName: string | null = lastAddFromSheet.value?.binderName ?? null
-  return binderName ? `Rangée dans ${binderName}` : 'Ajoutée à ma collection'
-})
 
 const actionButton: ComputedRef<ScannedCardActionButton> = computed((): ScannedCardActionButton => {
   if (isCheckout.value) {

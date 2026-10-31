@@ -214,6 +214,8 @@
                 mode="create"
                 :loading="isCreatingArticle"
                 :show-submit-button="false"
+                :hide-vinted-option="canPublishOnCreate"
+                :hide-ebay-option="canPublishOnCreate"
                 @submit-create="onSubmitCreate"
               />
               <div v-else-if="articlePrefillError" class="space-y-3 py-16 text-center">
@@ -229,7 +231,43 @@
                 <p class="text-muted text-sm">Préparation de la fiche (titre, description, prix)…</p>
               </div>
             </div>
-            <div class="border-default border-t px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+            <div
+              v-if="canPublishOnCreate"
+              class="border-default space-y-2 border-t px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+            >
+              <UButton
+                color="primary"
+                size="xl"
+                block
+                icon="i-lucide-send"
+                :loading="isCreatingArticle && marketplacesChosenOnCreate.length > 0"
+                :disabled="!articlePrefill || isCreatingArticle"
+                @click="submitArticle(props.marketplacesToPublishOnCreate)"
+              >
+                {{ publishOnCreateLabel }}
+                <template #trailing>
+                  <span class="flex shrink-0 items-center gap-1">
+                    <GoupixDexMarketplaceAppIcon
+                      v-for="marketplace in props.marketplacesToPublishOnCreate"
+                      :key="marketplace"
+                      :marketplace="marketplace"
+                    />
+                  </span>
+                </template>
+              </UButton>
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="lg"
+                block
+                :loading="isCreatingArticle && marketplacesChosenOnCreate.length === 0"
+                :disabled="!articlePrefill || isCreatingArticle"
+                @click="submitArticle([])"
+              >
+                Créer sans publier
+              </UButton>
+            </div>
+            <div v-else class="border-default border-t px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
               <UButton
                 color="primary"
                 size="xl"
@@ -278,8 +316,10 @@ import type {
   GoupixDexCollectionCardListingWizardProps,
 } from '~/types/GoupixDexCollectionCardListingWizard'
 import type { ListingPhoto, ListingPhotos, ListingPhotoSide } from '~/types/ListingPhotos'
+import type { Marketplace } from '~/types/Marketplace'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
 import { useListingPhotos } from '~/composables/useListingPhotos'
+import { MARKETPLACES, marketplaceNamesLabel } from '~/utils/marketplaces'
 
 const props: GoupixDexCollectionCardListingWizardProps = defineProps({
   open: {
@@ -290,11 +330,15 @@ const props: GoupixDexCollectionCardListingWizardProps = defineProps({
     type: Object as PropType<CollectionCard>,
     required: true,
   },
+  marketplacesToPublishOnCreate: {
+    type: Array as PropType<Marketplace[]>,
+    default: (): Marketplace[] => [],
+  },
 })
 
 const emit = defineEmits<{
   close: []
-  created: [article: Article]
+  created: [article: Article, marketplacesToPublish: Marketplace[]]
 }>()
 
 const { prepareArticlePrefill } = useCollection()
@@ -325,6 +369,7 @@ const articlePrefill: Ref<CollectionArticlePrefillResponse | null> = ref(null)
 const articlePrefillError: Ref<string | null> = ref(null)
 const isCreatingArticle: Ref<boolean> = ref(false)
 const articleFormRef: Ref<ArticleCreateFormHandle | null> = ref(null)
+const marketplacesChosenOnCreate: Ref<Marketplace[]> = ref([])
 const cameraInputRef: Ref<HTMLInputElement | null> = ref(null)
 const galleryInputRef: Ref<HTMLInputElement | null> = ref(null)
 const extraPhotosInputRef: Ref<HTMLInputElement | null> = ref(null)
@@ -348,6 +393,14 @@ const currentCardSide: ComputedRef<'front' | 'back'> = computed((): 'front' | 'b
 const currentCardSidePhoto: ComputedRef<ListingPhoto | null> = computed(
   (): ListingPhoto | null =>
     photos.value.find((photo: ListingPhoto): boolean => photo.side === currentCardSide.value) ?? null,
+)
+
+const canPublishOnCreate: ComputedRef<boolean> = computed((): boolean => props.marketplacesToPublishOnCreate.length > 0)
+
+const publishOnCreateLabel: ComputedRef<string> = computed((): string =>
+  props.marketplacesToPublishOnCreate.length === MARKETPLACES.length
+    ? 'Créer et publier partout'
+    : `Créer et publier sur ${marketplaceNamesLabel(props.marketplacesToPublishOnCreate)}`,
 )
 
 /**
@@ -441,11 +494,45 @@ async function onExtraPhotosPicked(event: Event): Promise<void> {
 }
 
 /**
+ * Valide la fiche de l'article en retenant les marketplaces où le publier une fois créé.
+ * @param {Marketplace[]} marketplaces - Marketplaces choisies, vide pour créer l'article sans le publier.
+ * @returns {void}
+ */
+function submitArticle(marketplaces: Marketplace[]): void {
+  marketplacesChosenOnCreate.value = marketplaces
+  articleFormRef.value?.submit()
+}
+
+/**
+ * Crée l'article de la carte avec ses photos, puis le confie, avec les marketplaces choisies, à qui a ouvert la mise en ligne.
+ * @param {FormData} formData - Corps multipart construit par le formulaire.
+ * @returns {Promise<void>} Résolue quand l'article est créé ou l'échec affiché.
+ */
+async function createArticleForChosenPublication(formData: FormData): Promise<void> {
+  formData.set('publish_to_vinted', 'false')
+  formData.set('publish_to_ebay', 'false')
+  formData.set('collection_card_id', String(props.card.id))
+  isCreatingArticle.value = true
+  try {
+    const { article } = await createArticle(formData)
+    emit('created', article, marketplacesChosenOnCreate.value)
+  } catch (error: unknown) {
+    toast.add({ title: 'Création impossible', description: apiErrorMessage(error), color: 'error' })
+  } finally {
+    isCreatingArticle.value = false
+  }
+}
+
+/**
  * Crée l'article de la carte avec ses photos, puis ouvre l'article (ou le journal Vinted quand le PC publie).
  * @param {FormData} formData - Corps multipart construit par le formulaire.
  * @returns {Promise<void>} Résolue quand l'article est créé ou l'échec affiché.
  */
 async function onSubmitCreate(formData: FormData): Promise<void> {
+  if (canPublishOnCreate.value) {
+    await createArticleForChosenPublication(formData)
+    return
+  }
   if (!canUseDesktopWorkers.value) {
     formData.set('publish_to_vinted', 'false')
   }
@@ -453,7 +540,7 @@ async function onSubmitCreate(formData: FormData): Promise<void> {
   isCreatingArticle.value = true
   try {
     const { article, vinted } = await createArticle(formData)
-    emit('created', article)
+    emit('created', article, [])
     if (canUseDesktopWorkers.value && vinted.desktop_local && vinted.stream_path) {
       try {
         await publishArticleToVinted(article.id)

@@ -30,9 +30,10 @@ import time
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from core.database import SessionLocal
+from models.article import Article
 from models.binder import BinderItem
 from models.collection_card import CollectionCard
 from services import binder_service, cardmarket_order_service, collection_card_service
@@ -175,13 +176,62 @@ def scanned_card_meta(tcgdex_card_id: str, physical_language: str) -> dict[str, 
     return dict(meta)
 
 
+def _published_marketplace_count(article: Article) -> int:
+    """Nombre de marketplaces (Vinted, eBay, Leboncoin) où l'article est en ligne."""
+    return sum(
+        (bool(article.published_on_vinted), bool(article.published_on_ebay), bool(article.published_on_leboncoin))
+    )
+
+
+def _owned_copies_sale_state(
+    db: Session,
+    user_id: int,
+    tcgdex_card_id: str,
+    print_languages: tuple[str, ...],
+    scanned_language: str,
+) -> dict[str, Any]:
+    """Article invendu le plus en ligne parmi les exemplaires possédés du print, et un exemplaire sans article à mettre en ligne."""
+    owned_cards: list[CollectionCard] = (
+        db.query(CollectionCard)
+        .options(joinedload(CollectionCard.article))
+        .filter(
+            CollectionCard.user_id == user_id,
+            CollectionCard.tcgdex_card_id == tcgdex_card_id,
+            CollectionCard.language.in_(print_languages),
+            CollectionCard.is_placeholder.is_(False),
+        )
+        .order_by(CollectionCard.id)
+        .all()
+    )
+    unsold_articles = [card.article for card in owned_cards if card.article is not None and not card.article.is_sold]
+    cards_without_unsold_article = [card for card in owned_cards if card.article is None or card.article.is_sold]
+    cards_without_unsold_article.sort(key=lambda card: card.language != scanned_language)
+    linked_article = max(
+        unsold_articles,
+        key=lambda article: (_published_marketplace_count(article), bool(article.offers_for_sale), article.id),
+        default=None,
+    )
+    return {
+        "linked_article": None
+        if linked_article is None
+        else {
+            "id": linked_article.id,
+            "offers_for_sale": bool(linked_article.offers_for_sale),
+            "published_on_vinted": bool(linked_article.published_on_vinted),
+            "published_on_ebay": bool(linked_article.published_on_ebay),
+            "published_on_leboncoin": bool(linked_article.published_on_leboncoin),
+        },
+        "unlinked_collection_card_id": cards_without_unsold_article[0].id if cards_without_unsold_article else None,
+    }
+
+
 def build_scanned_card_preview(
     db: Session,
     user_id: int,
     tcgdex_card_id: str,
     physical_language: str,
 ) -> dict[str, Any]:
-    """Fiche d'une carte reconnue avant son ajout : identité, cote et exemplaires déjà possédés du même print."""
+    """Fiche d'une carte reconnue : identité, cote, exemplaires possédés du même print et où en est leur mise en vente."""
     meta = scanned_card_meta(tcgdex_card_id, physical_language)
     owned_by_language = collection_card_service.owned_quantities_by_language(db, user_id, meta["tcgdex_card_id"])
     print_languages = same_print_languages(meta["language"])
@@ -207,6 +257,7 @@ def build_scanned_card_preview(
             pokedex_number=meta.get("dex_id"),
             rarity=meta.get("rarity"),
         ),
+        **_owned_copies_sale_state(db, user_id, meta["tcgdex_card_id"], print_languages, meta["language"]),
     }
 
 

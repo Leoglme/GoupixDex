@@ -1,4 +1,5 @@
 import type { CollectionArticlePrefillResponse, CollectionCard } from '~/composables/useCollection'
+import type { Marketplace } from '~/types/Marketplace'
 
 export type CollectionCardListingStep = 'front' | 'back' | 'photos' | 'article'
 
@@ -16,4 +17,5 @@ export type ArticleCreateFormHandle = {
 export type GoupixDexCollectionCardListingWizardProps = {
   open: boolean
   card: CollectionCard
+  marketplacesToPublishOnCreate: Marketplace[]
 }

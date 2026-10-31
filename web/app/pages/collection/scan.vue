@@ -81,6 +81,7 @@
                 </UButton>
                 <template v-else>
                   <UButton
+                    v-if="!isInventoryMode"
                     size="md"
                     color="primary"
                     variant="solid"
@@ -124,33 +125,36 @@
           </div>
 
           <div class="space-y-2">
-            <div class="border-default grid w-full grid-cols-2 overflow-hidden rounded-xl border">
+            <div class="border-default grid w-full grid-cols-3 overflow-hidden rounded-xl border">
               <button
                 type="button"
-                class="flex cursor-pointer items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors"
-                :class="scanDirection === 'in' ? 'bg-success text-inverted' : 'text-muted hover:text-highlighted'"
-                @click="setScanDirection('in')"
+                class="flex cursor-pointer items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-colors"
+                :class="scanMode === 'in' ? 'bg-success text-inverted' : 'text-muted hover:text-highlighted'"
+                @click="setScanMode('in')"
               >
                 <UIcon name="i-lucide-plus" class="size-4" />
                 Entrée
               </button>
               <button
                 type="button"
-                class="flex cursor-pointer items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors"
-                :class="scanDirection === 'out' ? 'bg-error text-inverted' : 'text-muted hover:text-highlighted'"
-                @click="setScanDirection('out')"
+                class="flex cursor-pointer items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-colors"
+                :class="scanMode === 'inventory' ? 'bg-primary text-inverted' : 'text-muted hover:text-highlighted'"
+                @click="setScanMode('inventory')"
+              >
+                <UIcon name="i-lucide-list-checks" class="size-4" />
+                Inventaire
+              </button>
+              <button
+                type="button"
+                class="flex cursor-pointer items-center justify-center gap-1.5 py-3 text-sm font-semibold transition-colors"
+                :class="scanMode === 'out' ? 'bg-error text-inverted' : 'text-muted hover:text-highlighted'"
+                @click="setScanMode('out')"
               >
                 <UIcon name="i-lucide-minus" class="size-4" />
                 Sortie
               </button>
             </div>
-            <p class="text-muted text-xs">
-              {{
-                scanDirection === 'in'
-                  ? 'Chaque carte reconnue affiche sa fiche : un tap sur « Ajouter » la met dans la collection.'
-                  : 'Chaque carte reconnue affiche sa fiche : un tap sur « Retirer » la sort de la collection (vendue / échangée).'
-              }}
-            </p>
+            <p class="text-muted text-xs">{{ SCAN_MODE_DESCRIPTIONS[scanMode] }}</p>
           </div>
 
           <UAlert
@@ -204,11 +208,14 @@
                     'bg-muted': displayScanStatus.color === 'neutral',
                   }"
                 />
-                <span class="text-highlighted leading-snug">{{ displayScanStatus.label }}</span>
+                <span class="text-highlighted leading-snug">
+                  <strong v-if="isInventoryMode" class="font-extrabold">Inventaire · </strong>
+                  {{ displayScanStatus.label }}
+                </span>
               </div>
 
               <button
-                v-else
+                v-else-if="!isInventoryMode"
                 type="button"
                 :disabled="!webcamReady || uploading"
                 class="bg-primary text-inverted absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full p-3 shadow-lg ring-2 ring-white/80 transition active:scale-95 disabled:opacity-50"
@@ -222,14 +229,29 @@
                 />
               </button>
             </div>
-            <GoupixDexScannedCardSheet
-              v-if="scannedCard"
-              is-embedded
-              :scanned-card="scannedCard"
-              @confirm="confirmScannedCardAction"
-              @undo="onUndoLastScannedCardAdd"
-              @close="dismissScannedCard"
-            />
+            <template v-if="scannedCard">
+              <GoupixDexScannedCardInventorySheet
+                v-if="isInventoryMode"
+                is-embedded
+                :scanned-card="scannedCard"
+                :publishing-marketplaces="scannedCardPublishingMarketplaces"
+                :marketplace-setup-issues="marketplaceSetupIssues"
+                :is-opening-listing-wizard="isOpeningListingWizard"
+                @add-to-collection="confirmScannedCardAction"
+                @put-online="openListingWizardForScannedCard"
+                @publish="publishScannedCardArticle"
+                @undo="onUndoLastScannedCardAdd"
+                @close="dismissScannedCard"
+              />
+              <GoupixDexScannedCardSheet
+                v-else
+                is-embedded
+                :scanned-card="scannedCard"
+                @confirm="confirmScannedCardAction"
+                @undo="onUndoLastScannedCardAdd"
+                @close="dismissScannedCard"
+              />
+            </template>
             <p class="text-muted text-[11px]">
               Centrez chaque carte dans le cadre&nbsp;: sa fiche s'affiche dès qu'elle est reconnue. Retirez-la pour
               enchaîner.
@@ -278,7 +300,8 @@
                 />
                 <!-- Langue de session en survol (verticale, milieu-droite). -->
                 <div
-                  class="absolute top-1/2 right-2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-full border border-white/20 bg-black/50 backdrop-blur-md"
+                  class="absolute right-2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-full border border-white/20 bg-black/50 backdrop-blur-md transition-all duration-200"
+                  :class="scannedCard && isInventoryMode ? 'top-1/3' : 'top-1/2'"
                 >
                   <button
                     v-for="option in SCAN_CARD_LANGUAGE_OPTIONS"
@@ -344,7 +367,10 @@
                       'bg-white/50': displayScanStatus.color === 'neutral',
                     }"
                   />
-                  {{ displayScanStatus.label }}
+                  <span>
+                    <strong v-if="isInventoryMode" class="font-extrabold">Inventaire · </strong>
+                    {{ displayScanStatus.label }}
+                  </span>
                 </div>
 
                 <Transition
@@ -353,8 +379,21 @@
                   leave-active-class="transition duration-150 ease-in"
                   leave-to-class="translate-y-full opacity-0"
                 >
+                  <GoupixDexScannedCardInventorySheet
+                    v-if="scannedCard && isInventoryMode"
+                    class="absolute inset-x-0 bottom-0 z-20 sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2"
+                    :scanned-card="scannedCard"
+                    :publishing-marketplaces="scannedCardPublishingMarketplaces"
+                    :marketplace-setup-issues="marketplaceSetupIssues"
+                    :is-opening-listing-wizard="isOpeningListingWizard"
+                    @add-to-collection="confirmScannedCardAction"
+                    @put-online="openListingWizardForScannedCard"
+                    @publish="publishScannedCardArticle"
+                    @undo="onUndoLastScannedCardAdd"
+                    @close="dismissScannedCard"
+                  />
                   <GoupixDexScannedCardSheet
-                    v-if="scannedCard"
+                    v-else-if="scannedCard"
                     class="absolute right-0 bottom-0 left-0 z-20"
                     :scanned-card="scannedCard"
                     @confirm="confirmScannedCardAction"
@@ -365,6 +404,15 @@
               </div>
             </div>
           </Teleport>
+
+          <GoupixDexCollectionCardListingWizard
+            v-if="listingWizardCard"
+            :open="isListingWizardOpen"
+            :card="listingWizardCard"
+            :marketplaces-to-publish-on-create="marketplacesToPublishOnCreate"
+            @close="closeListingWizard"
+            @created="onListingWizardArticleCreated"
+          />
 
           <Teleport to="body">
             <Transition name="fade">
@@ -539,13 +587,19 @@
 <script setup lang="ts">
 import type { ComputedRef, Ref } from 'vue'
 import { renderSVG } from 'uqr'
+import type { Article } from '~/composables/useArticles'
+import type { CollectionCard } from '~/composables/useCollection'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
+import type { ArticlePublicationQueue } from '~/types/ArticlePublicationQueue'
 import type { CardScannerShortcut } from '~/types/CardScannerShortcut'
-import type { ScanCardLanguage, ScanMatchDecision } from '~/types/ScanMatch'
+import type { Marketplace } from '~/types/Marketplace'
+import type { ScanCardLanguage, ScanMatchDecision, ScanMode } from '~/types/ScanMatch'
 import type { ScannedCardSheet } from '~/types/ScannedCardSheet'
+import { useArticlePublicationQueue } from '~/composables/useArticlePublicationQueue'
 import { useOpenCardScanner } from '~/composables/useOpenCardScanner'
 import { useScannedCardSheet } from '~/composables/useScannedCardSheet'
 import { readableCardLabel } from '~/utils/cards/readableSet'
+import { MARKETPLACES } from '~/utils/marketplaces'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -605,8 +659,111 @@ const {
   showScannedCard,
   confirmScannedCardAction,
   undoLastScannedCardAdd,
+  reloadScannedCardPreview,
   dismissScannedCard,
 }: ScannedCardSheet = useScannedCardSheet({ events, fetchScannedCardPreview, commitMatchedScan, undoScanEvent })
+
+const { getCollectionCard } = useCollection()
+const { marketplaceSetupIssues, loadMarketplaceAvailability } = useMarketplacePublishing()
+const { queueArticlePublication, publishingMarketplacesOfArticle }: ArticlePublicationQueue =
+  useArticlePublicationQueue(reloadScannedCardPreviewOfArticle)
+
+const listingWizardCard: Ref<CollectionCard | null> = ref(null)
+const isListingWizardOpen: Ref<boolean> = ref(false)
+const isOpeningListingWizard: Ref<boolean> = ref(false)
+
+const scannedCardPublishingMarketplaces: ComputedRef<Marketplace[]> = computed((): Marketplace[] => {
+  const articleId: number | undefined = scannedCard.value?.preview?.linked_article?.id
+  return articleId === undefined ? [] : publishingMarketplacesOfArticle(articleId)
+})
+
+const marketplacesToPublishOnCreate: ComputedRef<Marketplace[]> = computed((): Marketplace[] => {
+  const readyMarketplaces: Marketplace[] = MARKETPLACES.filter(
+    (marketplace: Marketplace): boolean => marketplaceSetupIssues.value[marketplace] === null,
+  )
+  return readyMarketplaces.length ? readyMarketplaces : MARKETPLACES
+})
+
+/**
+ * Relit la fiche de la carte affichée quand une publication de son article se termine.
+ * @param {number} articleId - Article dont une publication vient de se terminer.
+ * @returns {void}
+ */
+function reloadScannedCardPreviewOfArticle(articleId: number): void {
+  if (scannedCard.value?.preview?.linked_article?.id === articleId) {
+    reloadScannedCardPreview()
+  }
+}
+
+/**
+ * Ouvre la mise en ligne (photos puis fiche de l'article) de l'exemplaire sans article de la carte affichée, caméra coupée.
+ * @returns {Promise<void>} Résolue quand l'assistant est ouvert ou l'échec affiché.
+ */
+async function openListingWizardForScannedCard(): Promise<void> {
+  if (isOpeningListingWizard.value) {
+    return
+  }
+  isOpeningListingWizard.value = true
+  try {
+    if (!scannedCard.value?.preview?.unlinked_collection_card_id) {
+      await reloadScannedCardPreview()
+    }
+    const collectionCardId: number | null = scannedCard.value?.preview?.unlinked_collection_card_id ?? null
+    if (collectionCardId === null) {
+      toast.add({
+        title: 'Mise en ligne impossible',
+        description: 'Cette carte n’est plus dans votre collection.',
+        color: 'warning',
+      })
+      return
+    }
+    listingWizardCard.value = await getCollectionCard(collectionCardId)
+    stopWebcam()
+    isListingWizardOpen.value = true
+  } catch (error: unknown) {
+    toast.add({ title: 'Mise en ligne impossible', description: apiErrorMessage(error), color: 'error' })
+  } finally {
+    isOpeningListingWizard.value = false
+  }
+}
+
+/**
+ * Ferme la mise en ligne et rouvre la caméra pour enchaîner sur la carte suivante.
+ * @returns {void}
+ */
+function closeListingWizard(): void {
+  isListingWizardOpen.value = false
+  listingWizardCard.value = null
+  startWebcam(true)
+}
+
+/**
+ * Ferme la mise en ligne une fois l'article créé, le publie sur les marketplaces choisies et met la fiche à jour.
+ * @param {Article} article - Article tout juste créé.
+ * @param {Marketplace[]} marketplacesToPublish - Marketplaces où le publier, vide pour le garder hors ligne.
+ * @returns {Promise<void>} Résolue quand la fiche de la carte est relue.
+ */
+async function onListingWizardArticleCreated(article: Article, marketplacesToPublish: Marketplace[]): Promise<void> {
+  closeListingWizard()
+  if (marketplacesToPublish.length) {
+    queueArticlePublication(article.id, marketplacesToPublish)
+  } else {
+    toast.add({ title: 'Article créé', color: 'success' })
+  }
+  await reloadScannedCardPreview()
+}
+
+/**
+ * Publie l'article de la carte affichée sur les marketplaces où il manque.
+ * @param {Marketplace[]} marketplaces - Marketplaces visées.
+ * @returns {void}
+ */
+function publishScannedCardArticle(marketplaces: Marketplace[]): void {
+  const articleId: number | undefined = scannedCard.value?.preview?.linked_article?.id
+  if (articleId !== undefined) {
+    queueArticlePublication(articleId, marketplaces)
+  }
+}
 
 const clearingProblems = ref(false)
 const dismissingId = ref<string | null>(null)
@@ -659,19 +816,33 @@ const uploadLanguage: ComputedRef<string> = computed(() =>
 // "Cash register" mode: auto-capture a card the instant it is held steady.
 const autoScan = ref(true)
 
-/**
- * Cash-register direction: `in` adds each scanned card to the collection,
- * `out` removes it (sold / traded away). Resets to `in` on every visit —
- * a sticky "out" mode would silently empty the binder.
- */
-const scanDirection = ref<ScanDirection>('in')
+const SCAN_MODE_DESCRIPTIONS: Record<ScanMode, string> = {
+  in: 'Chaque carte reconnue affiche sa fiche : un tap sur « Ajouter » la met dans la collection.',
+  inventory:
+    'Chaque carte reconnue montre où elle en est (collection, article, annonces) et ce qu’il reste à faire. Rien ne bouge sans votre tap.',
+  out: 'Chaque carte reconnue affiche sa fiche : un tap sur « Retirer » la sort de la collection (vendue / échangée).',
+}
 
 /**
- * Switch the cash-register direction (with an audio unlock, since it's a gesture).
- * @param direction - `in` or `out`.
+ * Cash-register mode: `in` adds each scanned card to the collection, `out`
+ * removes it (sold / traded away), `inventory` shows where it stands for sale.
+ * Resets to `in` on every visit — a sticky "out" mode would silently empty the binder.
  */
-function setScanDirection(direction: ScanDirection): void {
-  scanDirection.value = direction
+const scanMode: Ref<ScanMode> = ref('in')
+
+const scanDirection: ComputedRef<ScanDirection> = computed(
+  (): ScanDirection => (scanMode.value === 'out' ? 'out' : 'in'),
+)
+
+const isInventoryMode: ComputedRef<boolean> = computed((): boolean => scanMode.value === 'inventory')
+
+/**
+ * Change le mode de scan (avec déblocage du son, puisque c'est un geste).
+ * @param {ScanMode} mode - `in`, `inventory` ou `out`.
+ * @returns {void}
+ */
+function setScanMode(mode: ScanMode): void {
+  scanMode.value = mode
   unlockAudio()
 }
 
@@ -1975,6 +2146,7 @@ watch(soundOn, (on: boolean): void => {
 onMounted(async () => {
   setScanPageCameraOpener(onActivateAutoScan)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  loadMarketplaceAvailability()
   nowTicker = setInterval((): void => {
     nowEpochSec.value = Math.floor(Date.now() / 1000)
   }, 10_000)
