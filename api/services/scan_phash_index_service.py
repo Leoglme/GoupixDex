@@ -36,6 +36,7 @@ from config import get_settings
 from core.database import SessionLocal
 from models.scan_phash_card import ScanPhashCard
 from services.card_image_fallback_service import CardImageUrls, fallback_card_images
+from services.catalog_external_cards_service import external_set_cards
 from services.market_price_refresh_service import seconds_until_next_run
 from services.tcgdex_client_service import SETS_PER_PAGE_MAX, TcgdexClientService, TcgdexUnavailableError
 
@@ -53,8 +54,8 @@ _STORE_BATCH_SIZE = 300
 _DELTA_CACHE_TTL_SEC = 900.0
 _USER_AGENT = "GoupixDex/1.0 (+scan-index)"
 _POCKET_SERIES_ID = "tcgp"
-#: Sets dont l'index livré porte, sous le bon nom, l'empreinte d'une autre carte (M1S : n° 057 à 092 mélangés).
-_SHIPPED_SETS_WITH_SHUFFLED_HASHES: frozenset[tuple[str, str]] = frozenset({("ja", "M1S")})
+#: Sets dont TCGdex, et l'index livré bâti dessus, attache les images aux mauvaises cartes (M1S : n° 057 à 092).
+_SETS_WITH_SHUFFLED_TCGDEX_IMAGES: frozenset[tuple[str, str]] = frozenset({("ja", "M1S")})
 
 _GRAY_WIDTH = 96
 _GRAY_HEIGHT = 132
@@ -186,9 +187,10 @@ class _PendingCard:
 
 @dataclass(frozen=True)
 class _StoredCard:
-    """Carte déjà enregistrée : si son empreinte est calculée, et quand elle a été tentée."""
+    """Carte déjà enregistrée : si son empreinte est calculée, depuis quelle image, et quand elle a été tentée."""
 
     is_hashed: bool
+    image_url: str | None
     checked_at: dt.datetime
 
 
@@ -238,12 +240,15 @@ def _stored_cards_snapshot(db: Session) -> dict[tuple[str, str], _StoredCard]:
         ScanPhashCard.locale,
         ScanPhashCard.tcgdex_card_id,
         ScanPhashCard.hashes.is_not(None),
+        ScanPhashCard.image_url,
         ScanPhashCard.checked_at,
     ).all()
     db.rollback()
     return {
-        (locale, card_id): _StoredCard(is_hashed=bool(is_hashed), checked_at=_as_utc(checked_at))
-        for locale, card_id, is_hashed, checked_at in rows
+        (locale, card_id): _StoredCard(
+            is_hashed=bool(is_hashed), image_url=image_url, checked_at=_as_utc(checked_at)
+        )
+        for locale, card_id, is_hashed, image_url, checked_at in rows
     }
 
 
@@ -286,6 +291,15 @@ def _fallback_images(locale: str, detail: dict[str, Any]) -> dict[str, CardImage
         return {}
 
 
+def _limitless_low_images(set_id: str) -> dict[str, str]:
+    """Images Limitless d'un set par numéro (« 070 »), là où TCGdex mélange les siennes ; vides si la source ne répond pas."""
+    try:
+        return {card.local_id: card.images.low for card in external_set_cards(set_id) if card.images is not None}
+    except (RuntimeError, ValueError, httpx.HTTPError) as exc:
+        logger.warning("Scan pHash refresh: Limitless images of %s unavailable (%s)", set_id, exc)
+        return {}
+
+
 def _pending_cards_for_locale(
     client: TcgdexClientService,
     locale: str,
@@ -296,8 +310,9 @@ def _pending_cards_for_locale(
 ) -> list[_PendingCard]:
     """
     Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré (ou qu'il
-    a sous un autre nom ou avec l'empreinte d'une autre carte), jamais calculées, ou restées sans image depuis plus de
-    ``_MISSING_IMAGE_RETRY``. Si TCGdex tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
+    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Un set dont
+    TCGdex mélange les images est entièrement calculé depuis Limitless, et recalculé si l'image enregistrée était autre.
+    Si TCGdex tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
     """
     sets = _list_all_sets_once_tcgdex_answers(client, locale)
     if sets is None:
@@ -319,28 +334,36 @@ def _pending_cards_for_locale(
             continue
         report.sets_read += 1
         fallback_images: dict[str, CardImageUrls] | None = None
-        are_shipped_hashes_trusted = (locale, set_id) not in _SHIPPED_SETS_WITH_SHUFFLED_HASHES
+        limitless_images: dict[str, str] | None = (
+            _limitless_low_images(set_id) if (locale, set_id) in _SETS_WITH_SHUFFLED_TCGDEX_IMAGES else None
+        )
         for card in detail.get("cards") or []:
             card_id = card.get("id")
             local_id = card.get("localId")
             if not isinstance(card_id, str) or not isinstance(local_id, str):
                 continue
             name = str(card.get("name") or "")
-            if are_shipped_hashes_trusted and _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
-                continue
             stored_card = stored.get((locale, card_id))
-            if stored_card is not None and (stored_card.is_hashed or stored_card.checked_at >= retry_before):
-                continue
-            if fallback_images is None:
-                fallback_images = _fallback_images(locale, detail)
-            fallback = fallback_images.get(local_id)
-            image = card.get("image")
-            if fallback is not None:
-                image_url: str | None = fallback.low
-            elif isinstance(image, str) and image:
-                image_url = f"{image.rstrip('/')}/low.webp"
+            image_url: str | None
+            if limitless_images is not None:
+                image_url = limitless_images.get(local_id)
+                if stored_card is not None and stored_card.is_hashed and stored_card.image_url == image_url:
+                    continue
             else:
-                image_url = None
+                if _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
+                    continue
+                if stored_card is not None and (stored_card.is_hashed or stored_card.checked_at >= retry_before):
+                    continue
+                if fallback_images is None:
+                    fallback_images = _fallback_images(locale, detail)
+                fallback = fallback_images.get(local_id)
+                image = card.get("image")
+                if fallback is not None:
+                    image_url = fallback.low
+                elif isinstance(image, str) and image:
+                    image_url = f"{image.rstrip('/')}/low.webp"
+                else:
+                    image_url = None
             pending.append(
                 _PendingCard(
                     locale=locale,

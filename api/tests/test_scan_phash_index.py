@@ -18,6 +18,7 @@ from models.base import Base
 from models.scan_phash_card import ScanPhashCard
 from services import scan_phash_index_service as service
 from services.card_image_fallback_service import CardImageUrls
+from services.catalog_external_cards_service import ExternalCard
 from services.tcgdex_client_service import TcgdexUnavailableError
 
 _HASHES = bytes(range(64))
@@ -108,24 +109,60 @@ def test_a_shipped_id_now_given_to_another_card_is_computed_again(
     assert {row.tcgdex_card_id for row in db.query(ScanPhashCard).all()} == {"M6a-151", "M6a-R"}
 
 
-def test_a_shipped_card_of_a_set_with_shuffled_hashes_is_computed_from_its_own_image(
-    db: Session, fake_sources: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(service, "_SHIPPED_SETS_WITH_SHUFFLED_HASHES", frozenset({("ja", "M6a")}))
-    monkeypatch.setattr(
-        service,
-        "fallback_card_images",
-        lambda locale, detail: {
-            "001": CardImageUrls(low="https://cdn.example/M6a-001.jpg", high="https://cdn.example/M6a-001-hd.jpg")
-        },
+def _limitless_card(local_id: str) -> ExternalCard:
+    return ExternalCard(
+        local_id=local_id,
+        name_ja=None,
+        name_en=None,
+        rarity=None,
+        images=CardImageUrls(
+            low=f"https://limitless.example/M6a_{local_id}_SM.png", high=f"https://limitless.example/M6a_{local_id}_LG.png"
+        ),
+        source="limitless",
     )
 
+
+@pytest.fixture
+def shuffled_tcgdex_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M6a déclaré comme un set dont TCGdex mélange les images, avec ses scans Limitless."""
+    monkeypatch.setattr(service, "_SETS_WITH_SHUFFLED_TCGDEX_IMAGES", frozenset({("ja", "M6a")}))
+    monkeypatch.setattr(service, "external_set_cards", lambda set_id: [_limitless_card("001"), _limitless_card("150")])
+
+
+@pytest.mark.usefixtures("shuffled_tcgdex_images")
+def test_a_set_whose_tcgdex_images_are_shuffled_is_computed_from_limitless(
+    db: Session, fake_sources: list[str]
+) -> None:
     service.refresh_scan_phash_cards(db)
 
     rows = {row.tcgdex_card_id: row for row in db.query(ScanPhashCard).all()}
     assert rows["M6a-001"].hashes == _HASHES
-    assert rows["M6a-001"].image_url == "https://cdn.example/M6a-001.jpg"
-    assert "M6a-002" in rows
+    assert rows["M6a-001"].image_url == "https://limitless.example/M6a_001_SM.png"
+    assert rows["M6a-150"].image_url == "https://limitless.example/M6a_150_SM.png"
+    assert "https://cdn.example/M6a-150.jpg" not in fake_sources
+
+
+@pytest.mark.usefixtures("shuffled_tcgdex_images")
+def test_a_card_hashed_from_a_shuffled_tcgdex_image_is_computed_again(db: Session, fake_sources: list[str]) -> None:
+    db.add(
+        ScanPhashCard(
+            locale="ja",
+            tcgdex_card_id="M6a-001",
+            set_id="M6a",
+            local_id="001",
+            name="タマタマ",
+            hashes=bytes(64),
+            image_url="https://assets.tcgdex.net/ja/M/M6a/001/low.webp",
+            checked_at=dt.datetime.now(dt.UTC),
+        )
+    )
+    db.commit()
+
+    service.refresh_scan_phash_cards(db)
+
+    stored_row = db.query(ScanPhashCard).filter(ScanPhashCard.tcgdex_card_id == "M6a-001").one()
+    assert stored_row.hashes == _HASHES
+    assert stored_row.image_url == "https://limitless.example/M6a_001_SM.png"
 
 
 def test_the_scanner_receives_only_the_computed_cards(db: Session, fake_sources: list[str]) -> None:
