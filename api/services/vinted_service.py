@@ -1997,9 +1997,56 @@ class VintedService:
         return [message for message in messages if isinstance(message, str)]
 
     @classmethod
+    async def _close_cookie_banner_if_shown(cls, tab: Tab) -> bool:
+        """Accepte le bandeau cookies OneTrust quand Vinted le remontre par-dessus le formulaire, malgré un consentement déjà enregistré."""
+        try:
+            is_closed = await tab.evaluate(
+                """
+                (() => {
+                  const acceptButton = document.querySelector('#onetrust-accept-btn-handler');
+                  if (!acceptButton || acceptButton.offsetParent === null) return false;
+                  acceptButton.click();
+                  return true;
+                })()
+                """,
+                return_by_value=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Cookie banner check failed: %s", exc)
+            return False
+        if is_closed is not True:
+            return False
+        logger.info("Accepted the OneTrust cookie banner shown over the listing form.")
+        await asyncio.sleep(0.5)
+        return True
+
+    @staticmethod
+    def _keep_failure_screenshot(screenshot_data_url: str | None) -> None:
+        """Garde la capture d'une publication non confirmée à côté du journal du worker, pour voir ce que Vinted affichait."""
+        log_folder = next(
+            (
+                Path(handler.baseFilename).parent
+                for handler in logging.getLogger().handlers
+                if isinstance(handler, logging.FileHandler)
+            ),
+            None,
+        )
+        if log_folder is None or not screenshot_data_url or "," not in screenshot_data_url:
+            return
+        screenshot_path = log_folder / f"vinted-publish-not-confirmed-{time.strftime('%Y%m%d-%H%M%S')}.jpg"
+        try:
+            screenshot_path.write_bytes(base64.b64decode(screenshot_data_url.split(",", 1)[1]))
+        except (OSError, ValueError) as exc:
+            logger.warning("Failure screenshot not saved: %s", exc)
+            return
+        logger.info("Failure screenshot saved: %s", screenshot_path)
+
+    @classmethod
     async def publish(cls, *, progress: FormProgressFn | None = None) -> None:
         """
         Click the Vinted upload/save button, then wait for the member profile or the new listing page (``/items/<id>``, not ``/items/new``).
+
+        The OneTrust cookie banner, shown again despite a stored consent, is closed before the click and once while waiting.
 
         Returns:
             None
@@ -2011,6 +2058,7 @@ class VintedService:
         tab = cls._require_tab()
         before_count = await cls._read_member_articles_count(tab)
         await cls._scroll_selector_into_view('[data-testid="upload-form-save-button"]')
+        await cls._close_cookie_banner_if_shown(tab)
         btn = await tab.select('[data-testid="upload-form-save-button"]', timeout=15)
         if btn is None:
             raise RuntimeError("upload-form-save-button not found")
@@ -2027,6 +2075,7 @@ class VintedService:
             )
 
         deadline = time.monotonic() + 60.0
+        has_clicked_again_after_cookie_banner = False
         while time.monotonic() < deadline:
             url = (await cls._read_page_url(tab)).lower()
             after_count = await cls._read_member_articles_count(tab)
@@ -2062,9 +2111,16 @@ class VintedService:
                         }
                     )
                 return
+            if not has_clicked_again_after_cookie_banner and await cls._close_cookie_banner_if_shown(tab):
+                has_clicked_again_after_cookie_banner = True
+                save_button = await tab.select('[data-testid="upload-form-save-button"]', timeout=2)
+                if save_button is not None:
+                    await save_button.click()
+                    logger.info("Clicked « Ajouter » again once the cookie banner was closed.")
             await asyncio.sleep(0.35)
 
         shot = await cls._tab_screenshot_data_url(tab)
+        cls._keep_failure_screenshot(shot)
         final_url = await cls._read_page_url(tab)
         vinted_messages = await cls._read_visible_vinted_messages(tab)
         logger.warning("Publish not confirmed: url %s, Vinted messages %s", final_url[:160], vinted_messages)

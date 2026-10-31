@@ -166,24 +166,59 @@ def test_an_unconfirmed_publish_missing_from_the_wardrobe_fails_with_the_message
 
 
 class FakeVintedTab:
-    """Onglet nodriver dont ``target.url`` reste figée sur le formulaire alors que la page a changé d'adresse."""
+    """Onglet nodriver simulé : ``target.url`` reste figée sur le formulaire, un bandeau cookies affiché absorbe « Ajouter »."""
 
-    def __init__(self, url_after_publish: str) -> None:
+    def __init__(
+        self,
+        url_after_publish: str,
+        *,
+        is_cookie_banner_shown: bool = False,
+        shows_cookie_banner_on_first_click: bool = False,
+    ) -> None:
         self.target = type("Target", (), {"url": "https://www.vinted.fr/items/new"})()
         self.page_url = "https://www.vinted.fr/items/new"
         self.url_after_publish = url_after_publish
+        self.is_cookie_banner_shown = is_cookie_banner_shown
+        self.shows_cookie_banner_on_first_click = shows_cookie_banner_on_first_click
+        self.upload_clicks = 0
 
     async def select(self, _selector: str, timeout: int = 0) -> Any:
         tab = self
 
         class UploadButton:
             async def click(self) -> None:
-                tab.page_url = tab.url_after_publish
+                tab.upload_clicks += 1
+                if tab.shows_cookie_banner_on_first_click and tab.upload_clicks == 1:
+                    tab.is_cookie_banner_shown = True
+                    return
+                if not tab.is_cookie_banner_shown:
+                    tab.page_url = tab.url_after_publish
 
         return UploadButton()
 
     async def evaluate(self, script: str, **_kwargs: Any) -> Any:
-        return self.page_url if script == "location.href" else None
+        if script == "location.href":
+            return self.page_url
+        if "onetrust-accept-btn-handler" in script:
+            was_cookie_banner_shown = self.is_cookie_banner_shown
+            self.is_cookie_banner_shown = False
+            return was_cookie_banner_shown
+        return None
+
+
+def publish_on(monkeypatch: pytest.MonkeyPatch, tab: FakeVintedTab) -> None:
+    """Clique « Ajouter » sur l'onglet simulé et attend la confirmation de Vinted."""
+
+    async def no_scroll(_selector: str) -> None:
+        return None
+
+    async def no_screenshot(_tab: object) -> None:
+        return None
+
+    monkeypatch.setattr(VintedService, "_require_tab", lambda: tab)
+    monkeypatch.setattr(VintedService, "_scroll_selector_into_view", no_scroll)
+    monkeypatch.setattr(VintedService, "_tab_screenshot_data_url", no_screenshot)
+    asyncio.run(VintedService.publish())
 
 
 @pytest.mark.parametrize(
@@ -196,17 +231,25 @@ class FakeVintedTab:
 def test_publish_is_confirmed_by_the_page_address_read_in_the_page(
     monkeypatch: pytest.MonkeyPatch, url_after_publish: str
 ) -> None:
-    async def no_scroll(_selector: str) -> None:
-        return None
+    publish_on(monkeypatch, FakeVintedTab(url_after_publish))
 
-    async def no_screenshot(_tab: object) -> None:
-        return None
 
-    monkeypatch.setattr(VintedService, "_require_tab", lambda: FakeVintedTab(url_after_publish))
-    monkeypatch.setattr(VintedService, "_scroll_selector_into_view", no_scroll)
-    monkeypatch.setattr(VintedService, "_tab_screenshot_data_url", no_screenshot)
+def test_a_cookie_banner_covering_the_form_is_closed_before_clicking_add(monkeypatch: pytest.MonkeyPatch) -> None:
+    tab = FakeVintedTab("https://www.vinted.fr/member/198987080", is_cookie_banner_shown=True)
 
-    asyncio.run(VintedService.publish())
+    publish_on(monkeypatch, tab)
+
+    assert tab.upload_clicks == 1
+
+
+def test_a_cookie_banner_that_swallows_the_click_is_closed_then_add_clicked_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tab = FakeVintedTab("https://www.vinted.fr/member/198987080", shows_cookie_banner_on_first_click=True)
+
+    publish_on(monkeypatch, tab)
+
+    assert tab.upload_clicks == 2
 
 
 @pytest.fixture
