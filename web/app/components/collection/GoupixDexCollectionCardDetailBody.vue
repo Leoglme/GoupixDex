@@ -24,9 +24,6 @@
           <p class="text-muted mt-0.5 truncate text-sm">
             {{ readableSetLabel(card.set_name, card.set_code, card.tcgdex_set_id) }} · #{{ card.card_number }}
           </p>
-          <p v-if="hasJapanese(card.set_name)" class="text-muted truncate text-[11px] opacity-70">
-            {{ card.set_name }}
-          </p>
           <div class="mt-2 flex flex-wrap items-center gap-1.5">
             <UBadge color="primary" variant="subtle" size="sm">{{ languageLabel(card.language) }}</UBadge>
             <UBadge v-if="card.rarity" color="warning" variant="subtle" size="sm">{{ card.rarity }}</UBadge>
@@ -225,7 +222,7 @@ import type { GoupixBinderPocketRef } from '~/types/GoupixDrawerStack'
 import type { GoupixPriceHistoryResponse } from '~/types/PriceHistory'
 import { cardmarketUrl } from '~/utils/cards/cardmarketUrl'
 import { formatSignedPercent, parseEuroAmount } from '~/utils/sealedProducts'
-import { hasJapanese, readableSetLabel } from '~/utils/cards/readableSet'
+import { readableSetLabel } from '~/utils/cards/readableSet'
 
 /**
  * Corps de fiche d'une carte de collection, partagé entre le drawer et la page.

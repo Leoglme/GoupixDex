@@ -184,12 +184,12 @@ def test_tcgplayer_unnumbered_japanese_group_matches_english_names(monkeypatch: 
     assert found == {"001": cards[0].urls, "002": cards[1].urls}
 
 
-def test_japanese_english_name_uses_prefix_species_and_energy_types() -> None:
-    assert fallback._japanese_english_name("暗いクロバット", 169) == "Dark Crobat"
-    assert fallback._japanese_english_name("R団のファイヤー", 146) == "Rocket's Moltres"
-    assert fallback._japanese_english_name("基本闘エネルギー", None) == "Fighting Energy"
-    assert fallback._japanese_english_name("オーキドはかせ", None) is None
-    assert fallback._tcgplayer_name(fallback._japanese_english_name("ニドラン♂", 32) or "") == "nidoranm"
+def test_japanese_card_english_name_uses_prefix_species_and_energy_types() -> None:
+    assert fallback.japanese_card_english_name("暗いクロバット", 169) == "Dark Crobat"
+    assert fallback.japanese_card_english_name("R団のファイヤー", 146) == "Rocket's Moltres"
+    assert fallback.japanese_card_english_name("基本闘エネルギー", None) == "Fighting Energy"
+    assert fallback.japanese_card_english_name("オーキドはかせ", None) is None
+    assert fallback._tcgplayer_name(fallback.japanese_card_english_name("ニドラン♂", 32) or "") == "nidoranm"
 
 
 def test_reprint_artwork_skips_the_same_set_and_tcg_pocket(monkeypatch: pytest.MonkeyPatch) -> None:

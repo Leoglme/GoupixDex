@@ -1,4 +1,4 @@
-// Affichage lisible d'un nom de set : les sets japonais uniquement (m1l, sv-p…) n'ont pas
+// Affichage lisible d'un nom de set ou de carte : les sets japonais uniquement (m1l, sv-p…) n'ont pas
 // de nom FR/EN chez TCGdex ; on montre alors le code du set (SV-P, M1L), latin et reconnu.
 
 const JAPANESE_RE = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/
@@ -10,6 +10,16 @@ const JAPANESE_RE = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/
  */
 export function hasJapanese(text: string | null | undefined): boolean {
   return !!text && JAPANESE_RE.test(text)
+}
+
+/**
+ * Libellé de carte lisible : le nom s'il est latin, sinon « Carte 012 ».
+ * @param name Nom de la carte (peut être en japonais).
+ * @param localId Numéro de la carte dans son extension.
+ * @returns Le nom latin, ou le numéro de la carte.
+ */
+export function readableCardLabel(name: string, localId: string): string {
+  return hasJapanese(name) ? `Carte ${localId}` : name
 }
 
 /**

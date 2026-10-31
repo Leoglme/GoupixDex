@@ -20,7 +20,8 @@
 
       <div class="min-w-0 flex-1">
         <div class="flex items-start gap-2">
-          <p class="min-w-0 flex-1 truncate pt-0.5 text-xl leading-tight font-bold">{{ cardName }}</p>
+          <p v-if="cardName" class="min-w-0 flex-1 truncate pt-0.5 text-xl leading-tight font-bold">{{ cardName }}</p>
+          <div v-else class="mt-0.5 h-6 min-w-0 flex-1 animate-pulse rounded bg-white/10" />
           <button
             type="button"
             class="-mt-1 -mr-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed"
@@ -112,8 +113,9 @@
 <script lang="ts" setup>
 import type { ComputedRef, PropType } from 'vue'
 import type { GoupixDexScannedCardSheetProps, ScannedCardActionButton } from '~/types/GoupixDexScannedCardSheet'
+import type { ScanMatchDecision } from '~/types/ScanMatch'
 import type { ScannedCard, ScannedCardAdd, ScannedCardPreview } from '~/types/ScannedCardSheet'
-import { readableSetLabel } from '~/utils/cards/readableSet'
+import { hasJapanese, readableCardLabel, readableSetLabel } from '~/utils/cards/readableSet'
 
 const props: GoupixDexScannedCardSheetProps = defineProps({
   scannedCard: {
@@ -138,9 +140,16 @@ const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 2,
 })
 
-const cardName: ComputedRef<string> = computed(
-  (): string => props.scannedCard.preview?.display_name || props.scannedCard.decision.name,
-)
+const cardName: ComputedRef<string> = computed((): string => {
+  const previewName: string | undefined = props.scannedCard.preview?.display_name
+  if (previewName) {
+    return previewName
+  }
+  const decision: ScanMatchDecision = props.scannedCard.decision
+  return hasJapanese(decision.name) && props.scannedCard.isPreviewLoading
+    ? ''
+    : readableCardLabel(decision.name, decision.localId)
+})
 
 const printedNumberLabel: ComputedRef<string> = computed((): string => {
   const cardNumber: string = props.scannedCard.preview?.card_number ?? props.scannedCard.decision.localId

@@ -92,7 +92,7 @@ export interface TcgdexCardInSetBrief {
 export interface TcgdexSetDetail extends TcgdexSetBrief {
   cards?: TcgdexCardInSetBrief[]
   releaseDate?: string
-  serie?: { id?: string; name?: string }
+  serie?: { id?: string; name?: string; display_name?: string }
   abbreviation?: { official?: string }
   tcgOnline?: string
 }

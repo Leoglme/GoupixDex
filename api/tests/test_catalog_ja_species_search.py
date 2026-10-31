@@ -25,7 +25,7 @@ class _FakeTcgdex:
 
 @pytest.fixture
 def card_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[str, dict[str, str]]]]:
-    """TCGdex, PokéAPI et scans de repli simulés ; renvoie les recherches de cartes envoyées à TCGdex."""
+    """TCGdex, PokéAPI, scans de repli et libellés latins simulés ; renvoie les recherches envoyées à TCGdex."""
     requests: list[tuple[str, dict[str, str]]] = []
 
     def fake_card_rows(locale: str, params: dict[str, str]) -> list[dict[str, Any]]:
@@ -53,6 +53,7 @@ def card_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[str, d
     )
     monkeypatch.setattr(service, "list_sets_for_ui", lambda *args, **kwargs: [])
     monkeypatch.setattr(service, "latin_display_name_for_ja_set", lambda set_id: None)
+    monkeypatch.setattr(service, "attach_latin_card_labels", lambda cards: None)
     service._cache._store.clear()
     yield requests
     service._cache._store.clear()

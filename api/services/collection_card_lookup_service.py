@@ -14,6 +14,12 @@ from services.cardmarket_local_price_service import (
 )
 from services.catalog_browse_service import readable_set_name
 from services.catalog_external_cards_service import ExternalCard, external_card
+from services.japanese_latin_labels_service import (
+    english_card_name,
+    has_japanese_script,
+    latin_card_label,
+    latin_set_name,
+)
 from services.species_locale_names_service import (
     fetch_species_locale_names,
     fetch_species_names_by_dex,
@@ -37,13 +43,9 @@ def _strip(value: Any) -> str:
     return str(value).strip() if isinstance(value, str) else ""
 
 
-def _latin_display_name(en: str, fr: str, ja: str) -> str:
-    """Always prefer a Latin-script name (FR → EN) — JA used only as last resort."""
-    if fr:
-        return fr
-    if en:
-        return en
-    return ja or "Pokémon"
+def _latin_display_name(en: str, fr: str, ja: str, *, set_id: str, local_id: str) -> str:
+    """Always prefer a Latin-script name (FR → EN) — JA only through its Latin label."""
+    return fr or en or latin_card_label(set_id, local_id, ja)
 
 
 _CARD_SUFFIX_RE = re.compile(r"(ex|vmax|vstar|v-union|v|gx)\s*$", re.IGNORECASE)
@@ -281,6 +283,8 @@ def fetch_card_for_collection(
         if not name_ja and species_ja:
             name_ja = _strip(species_ja)
 
+    if not name_en and has_japanese_script(name_ja):
+        name_en = english_card_name(set_id, local_raw, name_ja) or ""
     name_fr = name_fr or name_en
 
     if not name_ja and name_en:
@@ -300,8 +304,8 @@ def fetch_card_for_collection(
             image_url = fallback_image.low
             image_url_high = fallback_image.high
 
-    set_name = readable_set_name(_set_name_from_card(primary) or _strip(set_detail.get("name")))
-    display_name = _latin_display_name(name_en, name_fr, name_ja)
+    set_name = latin_set_name(set_id, readable_set_name(_set_name_from_card(primary) or _strip(set_detail.get("name"))))
+    display_name = _latin_display_name(name_en, name_fr, name_ja, set_id=set_id, local_id=local_raw)
 
     # Cardmarket mapping + market price come for free in the payloads we already
     # fetched: TCGdex embeds ``pricing.cardmarket.idProduct`` on every mapped card.
@@ -366,13 +370,13 @@ def _external_card_row(
         "tcgdex_card_id": card_id,
         "tcgdex_set_id": set_id,
         "set_code": set_code or set_id.upper(),
-        "set_name": readable_set_name(_strip(set_detail.get("name"))) or None,
+        "set_name": latin_set_name(set_id, readable_set_name(_strip(set_detail.get("name")))) or None,
         "card_number": normalize_card_number_for_pokewallet(local_id),
         "printed_set_total": None,
         "card_name_en": name_en or None,
         "card_name_fr": name_fr or None,
         "card_name_ja": name_ja or None,
-        "display_name": _latin_display_name(name_en, name_fr, name_ja),
+        "display_name": _latin_display_name(name_en, name_fr, name_ja, set_id=set_id, local_id=local_id),
         "rarity": card.rarity,
         "dex_id": None,
         "language": language,

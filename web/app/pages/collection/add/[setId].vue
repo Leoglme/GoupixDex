@@ -40,7 +40,7 @@
               <h1 class="text-highlighted text-2xl font-semibold tracking-tight">{{ setDisplayName }}</h1>
               <p class="text-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 <span class="bg-muted/30 rounded px-1.5 py-0.5 font-mono text-xs uppercase">{{ setDetail.id }}</span>
-                <span v-if="setDetail.serie?.name">{{ setDetail.serie.name }}</span>
+                <span v-if="setDetail.serie?.name">{{ setDetail.serie.display_name ?? setDetail.serie.name }}</span>
                 <span v-if="cardTotal">{{ cardTotal }} cartes</span>
                 <span v-if="releaseLabel">{{ releaseLabel }}</span>
               </p>

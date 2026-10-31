@@ -545,6 +545,7 @@ import type { ScanCardLanguage, ScanMatchDecision } from '~/types/ScanMatch'
 import type { ScannedCardSheet } from '~/types/ScannedCardSheet'
 import { useOpenCardScanner } from '~/composables/useOpenCardScanner'
 import { useScannedCardSheet } from '~/composables/useScannedCardSheet'
+import { readableCardLabel } from '~/utils/cards/readableSet'
 
 definePageMeta({ middleware: 'auth', layout: 'default' })
 
@@ -1755,7 +1756,7 @@ function showRecognizedCard(decision: ScanMatchDecision): void {
   }
 
   lastRecognizedCard = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
-  flashInstantMatch(decision.name)
+  flashInstantMatch(readableCardLabel(decision.name, decision.localId))
   playBeep()
   vibrate(60)
   showScannedCard(decision, scanCardImage.cardImageUrl(decision), scanDirection.value)

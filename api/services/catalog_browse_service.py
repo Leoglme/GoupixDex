@@ -41,6 +41,7 @@ from services.catalog_limitless_ja_service import (
     latin_display_name_for_ja_set,
     limitless_jp_set_names_by_code,
 )
+from services.japanese_latin_labels_service import attach_latin_card_labels, latin_series_name
 from services.species_locale_names_service import fetch_species_names_by_dex
 from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService, TcgdexUnavailableError
 
@@ -523,16 +524,6 @@ def get_series_for_ui(locale: str, series_id: str) -> dict[str, Any]:
         except RuntimeError:
             pass
 
-    if loc == "ja":
-        try:
-            en_detail = client.get_series("en", sid)
-            if isinstance(en_detail, dict):
-                en_name = en_detail.get("name")
-                if isinstance(en_name, str) and en_name.strip() and not _is_japanese_script(en_name):
-                    detail["display_name"] = en_name.strip()
-        except RuntimeError:
-            pass
-
     enrich_series_detail(detail)
     sets = detail.get("sets")
     if isinstance(sets, list):
@@ -553,9 +544,8 @@ def get_series_for_ui(locale: str, series_id: str) -> dict[str, Any]:
     if loc != "ja":
         nm = detail.get("name")
         detail["display_name"] = nm if isinstance(nm, str) else detail.get("id")
-    elif not detail.get("display_name") or _is_japanese_script(str(detail.get("display_name") or "")):
-        series_fallback = {"M": "MEGA", "SV": "Scarlet & Violet", "S": "Sun & Moon"}.get(sid.upper())
-        detail["display_name"] = series_fallback or sid.upper()
+    else:
+        detail["display_name"] = latin_series_name(sid, detail.get("name"))
 
     _cache.set(cache_key, detail)
     return detail
@@ -993,6 +983,8 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
             set_name = set_name_by_id.get(set_id)
             row["set_name"] = readable_set_name(set_name) if set_name else set_id
         out.append(row)
+    if loc == "ja":
+        attach_latin_card_labels(out)
 
     _cache.set(cache_key, out)
     return out
@@ -1047,8 +1039,18 @@ def get_set_for_ui(locale: str, set_id: str) -> dict[str, Any]:
     _append_merged_subset_cards(cast(dict[str, Any], detail), loc)
     if loc == "ja" and not detail.get("cards"):
         _fill_external_cards(cast(dict[str, Any], detail))
+    if loc == "ja":
+        _attach_latin_labels_to_set(cast(dict[str, Any], detail))
     _cache.set(cache_key, detail)
     return detail
+
+
+def _attach_latin_labels_to_set(detail: dict[str, Any]) -> None:
+    """Noms latins des cartes et de la série d'une extension japonaise, que TCGdex ne nomme qu'en japonais."""
+    attach_latin_card_labels([card for card in detail.get("cards") or [] if isinstance(card, dict)])
+    serie = detail.get("serie")
+    if isinstance(serie, dict) and isinstance(serie.get("id"), str):
+        serie["display_name"] = latin_series_name(serie["id"], serie.get("name"))
 
 
 def _fill_external_cards(detail: dict[str, Any]) -> None:

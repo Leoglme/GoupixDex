@@ -728,7 +728,7 @@ def _species_english_names() -> dict[int, str]:
     return {int(dex): str(name) for dex, name in payload.items()}
 
 
-def _japanese_english_name(japanese_name: str, dex_id: int | None) -> str | None:
+def japanese_card_english_name(japanese_name: str, dex_id: int | None) -> str | None:
     """Nom anglais TCGplayer d'une carte japonaise : énergie de base, ou préfixe (Dark, Rocket's…) + espèce."""
     energy = _JAPANESE_ENERGY_RE.fullmatch(japanese_name)
     if energy and energy.group(1) in _JAPANESE_ENERGY_TYPES:
@@ -765,7 +765,7 @@ def _japanese_card_english_names(set_detail: dict[str, Any], local_ids: list[str
         dex_ids = list(pool.map(dex_id_of, wanted))
     names: dict[str, str] = {}
     for card, dex_id in zip(wanted, dex_ids, strict=True):
-        english = _japanese_english_name(str(card.get("name") or ""), dex_id)
+        english = japanese_card_english_name(str(card.get("name") or ""), dex_id)
         if english:
             names[str(card["localId"])] = _tcgplayer_name(english)
     return names

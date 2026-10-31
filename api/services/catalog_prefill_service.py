@@ -15,6 +15,7 @@ from services.cardmarket_local_price_service import (
     resolve_market_price_eur,
 )
 from services.collection_card_lookup_service import fetch_card_for_collection
+from services.japanese_latin_labels_service import has_japanese_script
 from services.price_history_seed_service import synthesized_price_points
 from services.scan_service import build_title_and_description
 from services.species_locale_names_service import fetch_species_locale_names
@@ -34,22 +35,20 @@ def _pick_display_pokemon_name(
     name_fr: str,
     name_ja: str | None,
 ) -> str:
-    """Prefer the catalog UI locale, then fall back so the article form matches the picker."""
+    """Prefer the catalog UI locale (French for Japanese), then fall back so the article form matches the picker."""
     ja_s = (name_ja or "").strip()
     pool = {"en": name_en.strip(), "fr": name_fr.strip(), "ja": ja_s}
     raw = (browse_locale or "").strip().lower()
     loc = raw if raw in SUPPORTED_LOCALES else ""
     if not loc:
         order: tuple[str, ...] = ("en", "fr", "ja")
-    elif loc == "ja":
-        order = ("ja", "fr", "en")
-    elif loc == "fr":
+    elif loc in ("ja", "fr"):
         order = ("fr", "en", "ja")
     else:
         order = ("en", "fr", "ja")
     for key in order:
         v = pool.get(key, "")
-        if v:
+        if v and not has_japanese_script(v):
             return v
     return name_en or name_fr or "Pokémon"
 
