@@ -1,11 +1,11 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { ScanCardLanguage, ScanPhashResult } from '~/types/ScanMatch'
-import { scanPhashDeltaUrl } from '~/utils/cards/scanPhashDelta'
+import { scanPhashDeltaUrl } from '~/utils/cards/scanIndexDelta'
 
 /** Réponse au-delà de ce délai = worker mort, la tentative est abandonnée. */
 const MATCH_TIMEOUT_MS = 8000
 
-const EMPTY_RESULT: ScanPhashResult = { status: 'none', decision: null, score: 1 }
+const EMPTY_RESULT: ScanPhashResult = { status: 'none', decision: null, topCandidate: null, score: 1 }
 
 type PhashWorkerReply =
   | { t: 'ready' }

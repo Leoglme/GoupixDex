@@ -1,5 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { ScanCardLanguage, ScanIdentifyResult } from '~/types/ScanMatch'
+import { scanEmbedDeltaUrl } from '~/utils/cards/scanIndexDelta'
 
 const ORT_UMD_URL = '/ort/ort.wasm.min.js'
 const ORT_WASM_BASE = '/ort/'
@@ -32,9 +33,10 @@ const pendingIdentifies: Map<number, (result: ScanIdentifyResult) => void> = new
  * chargement complet : onnxruntime + modèle + index + PCA vivent dans le
  * worker — l'inférence gelait l'interface quand elle tournait sur le main
  * thread (0,5-1 s par tentative sur téléphone).
+ * @param {string} s0DeltaUrl - Embeddings des cartes absentes de l'index livré (`GET /scan-index/embed-delta`).
  * @returns {Promise<void>} Résolue quand le worker est prêt, rejetée sinon.
  */
-function startWorkerOnce(): Promise<void> {
+function startWorkerOnce(s0DeltaUrl: string): Promise<void> {
   if (!workerReadyPromise) {
     workerReadyPromise = new Promise<void>((resolve, reject) => {
       if (typeof Worker === 'undefined') {
@@ -75,6 +77,7 @@ function startWorkerOnce(): Promise<void> {
         s0ModelUrl: '/scan-model/mobileclip-s0-vision-fp16.onnx',
         s0BinUrl: '/scan-index/embed-v3.bin',
         s0JsonUrl: '/scan-index/embed-v3.json',
+        s0DeltaUrl,
         mnetModelUrl: '/scan-model/mobilenet-embed-int8.onnx',
         mnetBinUrl: '/scan-index/embed-v2.bin',
         mnetPcaUrl: '/scan-index/embed-pca-v2.bin',
@@ -97,6 +100,7 @@ function startWorkerOnce(): Promise<void> {
  * @returns {object} État de chargement, `load()` et `identify()`.
  */
 export function useScanEmbedIndex() {
+  const s0DeltaUrl: string = scanEmbedDeltaUrl()
   const isReady: Ref<boolean> = ref(false)
   const loadFailed: Ref<boolean> = ref(false)
   const ready: ComputedRef<boolean> = computed(() => isReady.value)
@@ -111,7 +115,7 @@ export function useScanEmbedIndex() {
       return
     }
     try {
-      await startWorkerOnce()
+      await startWorkerOnce(s0DeltaUrl)
       isReady.value = true
       loadFailed.value = false
     } catch {

@@ -95,6 +95,14 @@ class AppSettings(BaseSettings):
     scan_phash_refresh_hour_local: int = Field(default=5, ge=0, le=23)
     #: Métadonnées de l'index de scan servi par le site : les cartes qui n'y sont pas sont calculées.
     scan_index_base_url: str = "https://goupixdex.dibodev.fr/scan-index/phash-v1.json"
+    #: Calcule chaque nuit les embeddings des cartes que l'index visuel de scan livré avec le site ne connaît pas.
+    scan_embed_refresh_enabled: bool = True
+    #: Heure locale (Europe/Paris) de ce calcul, après celui des empreintes.
+    scan_embed_refresh_hour_local: int = Field(default=6, ge=0, le=23)
+    #: Métadonnées de l'index visuel servi par le site : les cartes qui n'y sont pas sont calculées.
+    scan_embed_index_url: str = "https://goupixdex.dibodev.fr/scan-index/embed-v3.json"
+    #: Modèle visuel que le site sert au scanner : l'API calcule avec le même.
+    scan_embed_model_url: str = "https://goupixdex.dibodev.fr/scan-model/mobileclip-s0-vision-fp16.onnx"
     #: Min seconds between two « sold-scrape » calls **per user** (limits burst traffic to eBay).
     ebay_sold_scrape_min_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
     resend_api_key: str | None = None

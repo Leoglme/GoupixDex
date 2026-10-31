@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 import models  # noqa: F401 — enregistre tous les mappers (relations croisées entre modèles)
 from models.base import Base
 from models.scan_phash_card import ScanPhashCard
+from services import scan_index_cards_service as cards_service
 from services import scan_phash_index_service as service
 from services.card_image_fallback_service import CardImageUrls
 from services.catalog_external_cards_service import ExternalCard
@@ -61,11 +62,11 @@ class _FakeTcgdex:
 def fake_sources(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Index livré, TCGdex, scans de repli et téléchargements simulés ; renvoie les URL téléchargées."""
     downloaded: list[str] = []
-    shipped = service._ShippedIndex(names={"ja/M6a-001": "タマタマ", "ja/M6a-002": "アローラナッシー"})
-    monkeypatch.setattr(service, "_load_shipped_index", lambda url: shipped)
+    shipped = cards_service.ShippedIndex(names={"ja/M6a-001": "タマタマ", "ja/M6a-002": "アローラナッシー"})
+    monkeypatch.setattr(service, "load_shipped_index", lambda url, min_cards: shipped)
     monkeypatch.setattr(service, "TcgdexClientService", _FakeTcgdex)
     monkeypatch.setattr(
-        service,
+        cards_service,
         "fallback_card_images",
         lambda locale, detail: {
             "150": CardImageUrls(low="https://cdn.example/M6a-150.jpg", high="https://cdn.example/M6a-150-hd.jpg"),
@@ -93,16 +94,16 @@ def test_only_cards_missing_from_the_shipped_index_are_computed(db: Session, fak
     assert rows["M6a-150"].image_url == "https://cdn.example/M6a-150.jpg"
     assert rows["M6a-151"].hashes is None
     assert rows["M6a-R"].hashes is None
-    assert (report.cards_hashed, report.cards_without_image) == (1, 2)
+    assert (report.cards_computed, report.cards_without_image) == (1, 2)
 
 
 def test_a_shipped_id_now_given_to_another_card_is_computed_again(
     db: Session, fake_sources: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    shipped = service._ShippedIndex(
+    shipped = cards_service.ShippedIndex(
         names={"ja/M6a-001": "タマタマ", "ja/M6a-002": "アローラ ナッシー", "ja/M6a-150": "ゲンガー", "ja/M6a-R": "基本炎エネルギー"}
     )
-    monkeypatch.setattr(service, "_load_shipped_index", lambda url: shipped)
+    monkeypatch.setattr(service, "load_shipped_index", lambda url, min_cards: shipped)
 
     service.refresh_scan_phash_cards(db)
 
@@ -125,8 +126,8 @@ def _limitless_card(local_id: str) -> ExternalCard:
 @pytest.fixture
 def set_hashed_from_limitless(monkeypatch: pytest.MonkeyPatch) -> None:
     """M6a déclaré comme un set aux empreintes mélangées, avec ses scans Limitless."""
-    monkeypatch.setattr(service, "_SETS_HASHED_FROM_LIMITLESS", frozenset({("ja", "M6a")}))
-    monkeypatch.setattr(service, "external_set_cards", lambda set_id: [_limitless_card("001"), _limitless_card("150")])
+    monkeypatch.setattr(cards_service, "SETS_COMPUTED_FROM_LIMITLESS", frozenset({("ja", "M6a")}))
+    monkeypatch.setattr(cards_service, "external_set_cards", lambda set_id: [_limitless_card("001"), _limitless_card("150")])
 
 
 @pytest.mark.usefixtures("set_hashed_from_limitless")

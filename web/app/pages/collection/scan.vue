@@ -1853,6 +1853,26 @@ const FAST_COMMIT_MIN_SIM = 0.72
 const FAST_COMMIT_MIN_MARGIN = 0.06
 /** Scores d'agrégation glissants par carte (décroissance à chaque tentative). */
 const candidateScores: Map<string, { decision: ScanMatchDecision; score: number }> = new Map()
+const PHASH_CONFIRMATION_MAX_SCORE = 0.4
+const PHASH_CONFIRMATION_MAX_AGE_MS = 2000
+let latestPhashTopCandidate: { decision: ScanMatchDecision; seenAt: number } | null = null
+
+/**
+ * Carte de la pHash qui confirme le meilleur hit de l'embedding : la même (ou une réimpression de même illustration), vue à l'instant à une distance plausible.
+ * @param {string | null} embeddingTopCardId - Meilleur hit brut de l'embedding.
+ * @returns {ScanMatchDecision | null} Carte confirmée par les deux matchers, ou `null`.
+ */
+function phashCandidateConfirming(embeddingTopCardId: string | null): ScanMatchDecision | null {
+  if (embeddingTopCardId === null || latestPhashTopCandidate === null) {
+    return null
+  }
+  const phashCandidate: ScanMatchDecision = latestPhashTopCandidate.decision
+  const isSeenJustNow: boolean = Date.now() - latestPhashTopCandidate.seenAt <= PHASH_CONFIRMATION_MAX_AGE_MS
+  const isSameIllustration: boolean =
+    phashCandidate.tcgdexCardId === embeddingTopCardId ||
+    (phashCandidate.reprintTcgdexCardIds ?? []).includes(embeddingTopCardId)
+  return isSeenJustNow && isSameIllustration ? phashCandidate : null
+}
 
 /**
  * Identification d'un crop carte produit par le worker (quad suivi ou fenêtre
@@ -1913,11 +1933,17 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
       candidateScores.delete(key)
     }
   }
-  if (result.topCandidate && result.topCandidateSim >= AGG_MIN_SIM) {
-    const key = result.topCandidate.tcgdexCardId
-    const entry = candidateScores.get(key) ?? { decision: result.topCandidate, score: 0 }
-    entry.decision = result.topCandidate
-    entry.score += result.topCandidateSim - AGG_SCORE_BASE
+  const phashConfirmedCandidate: ScanMatchDecision | null = phashCandidateConfirming(result.topCardId)
+  const creditedCandidate: ScanMatchDecision | null = phashConfirmedCandidate ?? result.topCandidate
+  const creditedCandidateSim: number = phashConfirmedCandidate ? result.topSim : result.topCandidateSim
+  if (creditedCandidate && creditedCandidateSim >= AGG_MIN_SIM) {
+    const key: string = creditedCandidate.tcgdexCardId
+    const entry: { decision: ScanMatchDecision; score: number } = candidateScores.get(key) ?? {
+      decision: creditedCandidate,
+      score: 0,
+    }
+    entry.decision = creditedCandidate
+    entry.score += creditedCandidateSim - AGG_SCORE_BASE
     candidateScores.set(key, entry)
   }
   let leader: { decision: ScanMatchDecision; score: number } | null = null
@@ -1997,14 +2023,23 @@ async function onPhashCrop(buf: ArrayBuffer, w: number, h: number): Promise<void
     return
   }
   phashInFlight = true
-  let result: Awaited<ReturnType<typeof scanPhash.match>> = { status: 'none', decision: null, score: 1 }
+  let result: Awaited<ReturnType<typeof scanPhash.match>> = {
+    status: 'none',
+    decision: null,
+    topCandidate: null,
+    score: 1,
+  }
   try {
     result = await scanPhash.match(buf, w, h, scanCardLanguage.value)
   } catch {
-    result = { status: 'none', decision: null, score: 1 }
+    result = { status: 'none', decision: null, topCandidate: null, score: 1 }
   } finally {
     phashInFlight = false
   }
+  latestPhashTopCandidate =
+    result.topCandidate !== null && result.score <= PHASH_CONFIRMATION_MAX_SCORE
+      ? { decision: result.topCandidate, seenAt: Date.now() }
+      : null
   if (autoScanPhase.value === 'cooldown' || result.status !== 'match' || !result.decision) {
     return
   }

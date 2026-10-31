@@ -22,7 +22,7 @@
  * 0.627/m0.104 sur un crop terrain que S0 tranche correctement).
  *
  * Messages entrants :
- *  - { t:'init', ortUrl, wasmBase, s0ModelUrl, s0BinUrl, s0JsonUrl,
+ *  - { t:'init', ortUrl, wasmBase, s0ModelUrl, s0BinUrl, s0JsonUrl, s0DeltaUrl,
  *      mnetModelUrl, mnetBinUrl, mnetPcaUrl, mnetJsonUrl }
  *  - { t:'identify', seq, bufs: ArrayBuffer[] (RGBA 256×256), language }
  * Messages sortants :
@@ -85,6 +85,83 @@ function parseIndex(binBuf, meta) {
   return { cards, vectors, scales, dim, localeRows }
 }
 
+/**
+ * Embeddings S0 que l'API calcule chaque nuit pour les cartes absentes de l'index livré (sets JA récents) ; un échec laisse l'index livré seul.
+ * @param {string | undefined} url - URL de `GET /scan-index/embed-delta`.
+ * @returns {Promise<Array<[string, string, string, string, string, string]>>} Lignes `[id, langue, nom, set, numéro, embedding base64]`.
+ */
+async function loadS0DeltaCards(url) {
+  if (!url) return []
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) return []
+    const body = await resp.json()
+    return body.dim === S0_DIM && Array.isArray(body.cards) ? body.cards : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Décode une ligne du complément : 512 int8 puis l'échelle float32 petit-boutiste, comme une ligne de l'index livré.
+ * @param {Array<string>} row - `[id, langue, nom, set, numéro, embedding base64]`.
+ * @returns {{ card: object, vector: Int8Array, scale: number } | null} Ligne décodée, `null` si l'embedding est invalide.
+ */
+function decodeS0DeltaRow([tcgdexCardId, locale, name, setId, localId, b64]) {
+  let raw
+  try {
+    raw = atob(b64)
+  } catch {
+    return null
+  }
+  if (raw.length !== S0_DIM + 4) return null
+  const bytes = new Uint8Array(raw.length)
+  for (let k = 0; k < raw.length; k += 1) {
+    bytes[k] = raw.charCodeAt(k)
+  }
+  return {
+    card: { tcgdexCardId, locale, name, setId, localId },
+    vector: new Int8Array(bytes.buffer, 0, S0_DIM),
+    scale: new DataView(bytes.buffer).getFloat32(S0_DIM, true),
+  }
+}
+
+/**
+ * Index S0 complété des cartes calculées par l'API : celle que l'index livré a déjà sous la même langue/id y est remplacée, les autres sont ajoutées.
+ * @param {object} index - Index S0 livré, décodé par `parseIndex`.
+ * @param {Array<Array<string>>} rows - Lignes du complément (`loadS0DeltaCards`).
+ * @returns {object} Index au même format, complété.
+ */
+function withS0DeltaCards(index, rows) {
+  const decoded = rows.map(decodeS0DeltaRow).filter((row) => row !== null)
+  if (decoded.length === 0) return index
+  const dim = index.dim
+  const shippedRowByKey = new Map(index.cards.map((c, i) => [c.locale + '/' + c.tcgdexCardId, i]))
+  const added = []
+  for (const row of decoded) {
+    const i = shippedRowByKey.get(row.card.locale + '/' + row.card.tcgdexCardId)
+    if (i === undefined) {
+      added.push(row)
+      continue
+    }
+    index.vectors.set(row.vector, i * dim)
+    index.scales[i] = row.scale
+    index.cards[i] = row.card
+  }
+  const shippedCount = index.cards.length
+  const vectors = new Int8Array((shippedCount + added.length) * dim)
+  const scales = new Float32Array(shippedCount + added.length)
+  vectors.set(index.vectors)
+  scales.set(index.scales)
+  added.forEach((row, n) => {
+    vectors.set(row.vector, (shippedCount + n) * dim)
+    scales[shippedCount + n] = row.scale
+  })
+  const cards = index.cards.concat(added.map((row) => row.card))
+  const localeRows = new Set(cards.map((c) => c.tcgdexCardId + '|' + c.locale))
+  return { cards, vectors, scales, dim, localeRows }
+}
+
 /** Charge onnxruntime (UMD via importScripts) + les 2 modèles + les 2 index. */
 async function init(d) {
   importScripts(d.ortUrl)
@@ -93,7 +170,10 @@ async function init(d) {
   ort.env.wasm.numThreads = 1
 
   const urls = [d.s0ModelUrl, d.s0BinUrl, d.s0JsonUrl, d.mnetModelUrl, d.mnetBinUrl, d.mnetPcaUrl, d.mnetJsonUrl]
-  const responses = await Promise.all(urls.map((u) => fetch(u)))
+  const [responses, s0DeltaCards] = await Promise.all([
+    Promise.all(urls.map((u) => fetch(u))),
+    loadS0DeltaCards(d.s0DeltaUrl),
+  ])
   const bad = responses.find((r) => !r.ok)
   if (bad) {
     throw new Error(`scan-embed HTTP ${bad.status} sur ${bad.url}`)
@@ -108,7 +188,7 @@ async function init(d) {
     responses[6].json(),
   ])
 
-  const s0Index = parseIndex(s0Bin, s0Json)
+  const s0Index = withS0DeltaCards(parseIndex(s0Bin, s0Json), s0DeltaCards)
   const mnetIndex = parseIndex(mnetBin, mnetJson)
   const mnetPcaMean = new Float32Array(mnetPca, 0, MNET_RAW_DIM)
   const mnetPcaComponents = new Float32Array(mnetPca, MNET_RAW_DIM * 4, MNET_RAW_DIM * mnetIndex.dim)

@@ -29,6 +29,7 @@ export type ScanPhashResult = {
   status: 'match' | 'none'
   /** Carte reconnue prête à committer, ou `null` si refus. */
   decision: ScanMatchDecision | null
+  topCandidate: ScanMatchDecision | null
   /** Distance de Hamming normalisée du meilleur alignement (0 = identique). */
   score: number
 }

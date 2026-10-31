@@ -1,5 +1,5 @@
 import type { ScanMatchDecision } from '~/types/ScanMatch'
-import { scanPhashDeltaUrl } from '~/utils/cards/scanPhashDelta'
+import { scanPhashDeltaUrl } from '~/utils/cards/scanIndexDelta'
 
 type ScanPhashDeltaRow = [
   tcgdexCardId: string,

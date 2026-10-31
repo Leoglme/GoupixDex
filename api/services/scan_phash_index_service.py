@@ -21,11 +21,7 @@ import datetime as dt
 import io
 import logging
 import math
-import threading
-import time
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -35,27 +31,31 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from core.database import SessionLocal
 from models.scan_phash_card import ScanPhashCard
-from services.card_image_fallback_service import CardImageUrls, fallback_card_images
-from services.catalog_external_cards_service import SETS_WITH_SHUFFLED_TCGDEX_IMAGES, external_set_cards
 from services.market_price_refresh_service import seconds_until_next_run
-from services.tcgdex_client_service import SETS_PER_PAGE_MAX, TcgdexClientService, TcgdexUnavailableError
+from services.scan_index_cards_service import (
+    INDEXED_LOCALES,
+    SCAN_INDEX_USER_AGENT,
+    DeltaPayloadCache,
+    PendingCard,
+    ScanIndexRefreshReport,
+    StoredCard,
+    as_utc,
+    download_image,
+    load_shipped_index,
+    pending_cards_for_locale,
+)
+from services.tcgdex_client_service import TcgdexClientService
 
 logger = logging.getLogger(__name__)
 
-INDEXED_LOCALES: tuple[str, ...] = ("ja", "en", "fr")
 MAX_NEW_CARDS_PER_RUN = 10000
 _MIN_SHIPPED_CARDS = 50000
 _MISSING_IMAGE_RETRY = dt.timedelta(days=3)
 _STARTUP_DELAY_SEC = 180.0
-_TCGDEX_COMEBACK_PAUSES_SEC: tuple[float, ...] = (60.0, 180.0)
 _RETRY_AFTER_INCOMPLETE_RUN_SEC = 3600.0
 _DOWNLOAD_WORKERS = 6
 _STORE_BATCH_SIZE = 300
 _DELTA_CACHE_TTL_SEC = 900.0
-_USER_AGENT = "GoupixDex/1.0 (+scan-index)"
-_POCKET_SERIES_ID = "tcgp"
-#: Sets aux empreintes fausses dans l'index livré : ceux dont TCGdex mélange les images, et M4 (n° 103 et 120).
-_SETS_HASHED_FROM_LIMITLESS: frozenset[tuple[str, str]] = SETS_WITH_SHUFFLED_TCGDEX_IMAGES | frozenset({("ja", "M4")})
 
 _GRAY_WIDTH = 96
 _GRAY_HEIGHT = 132
@@ -166,72 +166,7 @@ def compute_card_phash(image_bytes: bytes) -> bytes:
     return _dct_hash(_window_grid(gray, _WHOLE_WINDOW)) + _dct_hash(_window_grid(gray, _ART_WINDOW))
 
 
-@dataclass(frozen=True)
-class _ShippedIndex:
-    """Index livré avec le site : nom de chaque carte, par clé ``langue/id``."""
-
-    names: dict[str, str]
-
-
-@dataclass
-class _PendingCard:
-    """Carte TCGdex absente de l'index livré, avec l'image qui servira au calcul."""
-
-    locale: str
-    card_id: str
-    set_id: str
-    local_id: str
-    name: str
-    image_url: str | None = None
-
-
-@dataclass(frozen=True)
-class _StoredCard:
-    """Carte déjà enregistrée : si son empreinte est calculée, depuis quelle image, et quand elle a été tentée."""
-
-    is_hashed: bool
-    image_url: str | None
-    checked_at: dt.datetime
-
-
-@dataclass
-class ScanPhashRefreshReport:
-    """Bilan d'un passage : sets relus, cartes calculées, cartes encore sans image."""
-
-    sets_read: int = 0
-    cards_hashed: int = 0
-    cards_without_image: int = 0
-    unavailable_locales: list[str] = field(default_factory=list)
-
-
-def _load_shipped_index(url: str) -> _ShippedIndex:
-    """Lit les métadonnées de l'index servi aux clients (celles que le scanner charge)."""
-    response = httpx.get(url, headers={"User-Agent": _USER_AGENT}, timeout=60.0, follow_redirects=True)
-    response.raise_for_status()
-    rows: list[list[str]] = response.json()["cards"]
-    if len(rows) < _MIN_SHIPPED_CARDS:
-        msg = f"Index de scan livré incomplet ({len(rows)} cartes)"
-        raise RuntimeError(msg)
-    return _ShippedIndex(names={f"{row[1]}/{row[0]}": row[2] for row in rows})
-
-
-def _comparable_name(name: str) -> str:
-    """Nom de carte sans espaces ni écarts de largeur ou de casse (« ホゲータ ex » ≡ « ホゲータex »)."""
-    return unicodedata.normalize("NFKC", name).replace(" ", "").casefold()
-
-
-def _is_shipped_under_this_name(shipped: _ShippedIndex, key: str, tcgdex_name: str) -> bool:
-    """Vrai quand l'index livré a cette carte ; faux s'il a l'id pour une autre carte (M6a-R : énergie, puis Mew)."""
-    shipped_name = shipped.names.get(key)
-    return shipped_name is not None and _comparable_name(shipped_name) == _comparable_name(tcgdex_name)
-
-
-def _as_utc(value: dt.datetime) -> dt.datetime:
-    """MariaDB rend des dates sans fuseau : elles sont en UTC."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=dt.UTC)
-
-
-def _stored_cards_snapshot(db: Session) -> dict[tuple[str, str], _StoredCard]:
+def _stored_cards_snapshot(db: Session) -> dict[tuple[str, str], StoredCard]:
     """
     Cartes déjà enregistrées, puis connexion rendue : le parcours de TCGdex qui suit dure plusieurs minutes et la
     base distante coupe une connexion restée inactive aussi longtemps.
@@ -245,155 +180,23 @@ def _stored_cards_snapshot(db: Session) -> dict[tuple[str, str], _StoredCard]:
     ).all()
     db.rollback()
     return {
-        (locale, card_id): _StoredCard(
-            is_hashed=bool(is_hashed), image_url=image_url, checked_at=_as_utc(checked_at)
-        )
+        (locale, card_id): StoredCard(is_computed=bool(is_hashed), image_url=image_url, checked_at=as_utc(checked_at))
         for locale, card_id, is_hashed, image_url, checked_at in rows
     }
 
 
-def _list_all_sets(client: TcgdexClientService, locale: str) -> list[dict[str, Any]]:
-    """Tous les sets d'une langue, sans ceux de Pokémon TCG Pocket (cartes de l'appli mobile)."""
-    try:
-        pocket_sets = client.get_series(locale, _POCKET_SERIES_ID).get("sets") or []
-    except TcgdexUnavailableError:
-        raise
-    except RuntimeError:
-        pocket_sets = []
-    pocket_ids = {row.get("id") for row in pocket_sets}
-    sets: list[dict[str, Any]] = []
-    page = 1
-    while True:
-        rows = client.list_sets(locale, page=page, per_page=SETS_PER_PAGE_MAX)
-        sets.extend(dict(row) for row in rows if row.get("id") not in pocket_ids)
-        if len(rows) < SETS_PER_PAGE_MAX:
-            return sets
-        page += 1
-
-
-def _list_all_sets_once_tcgdex_answers(client: TcgdexClientService, locale: str) -> list[dict[str, Any]] | None:
-    """Sets d'une langue, en laissant à TCGdex quelques minutes pour revenir s'il est tombé ; ``None`` s'il reste muet."""
-    for pause_sec in (0.0, *_TCGDEX_COMEBACK_PAUSES_SEC):
-        time.sleep(pause_sec)
-        try:
-            return _list_all_sets(client, locale)
-        except TcgdexUnavailableError as exc:
-            logger.warning("Scan pHash refresh: TCGdex unavailable for %s (%s)", locale, exc)
-    return None
-
-
-def _fallback_images(locale: str, detail: dict[str, Any]) -> dict[str, CardImageUrls]:
-    """Scans de repli du catalogue pour ce set, vides si une de leurs sources ne répond pas."""
-    try:
-        return fallback_card_images(locale, detail)
-    except (RuntimeError, httpx.HTTPError) as exc:
-        logger.warning("Scan pHash refresh: fallback images of %s/%s unavailable (%s)", locale, detail.get("id"), exc)
-        return {}
-
-
-def _limitless_low_images(set_id: str) -> dict[str, str]:
-    """Images Limitless d'un set aux empreintes mélangées, par numéro (« 070 ») ; vides si la source ne répond pas."""
-    try:
-        return {card.local_id: card.images.low for card in external_set_cards(set_id) if card.images is not None}
-    except (RuntimeError, ValueError, httpx.HTTPError) as exc:
-        logger.warning("Scan pHash refresh: Limitless images of %s unavailable (%s)", set_id, exc)
-        return {}
-
-
-def _pending_cards_for_locale(
-    client: TcgdexClientService,
-    locale: str,
-    shipped: _ShippedIndex,
-    stored: dict[tuple[str, str], _StoredCard],
-    retry_before: dt.datetime,
-    report: ScanPhashRefreshReport,
-) -> list[_PendingCard]:
-    """
-    Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré (ou qu'il
-    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Un set aux
-    empreintes mélangées est entièrement calculé depuis Limitless, et recalculé si l'image enregistrée était autre.
-    Si TCGdex tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
-    """
-    sets = _list_all_sets_once_tcgdex_answers(client, locale)
-    if sets is None:
-        report.unavailable_locales.append(locale)
-        return []
-    pending: list[_PendingCard] = []
-    for brief in reversed(sets):
-        set_id = str(brief.get("id") or "")
-        if not set_id:
-            continue
-        try:
-            detail: dict[str, Any] = dict(client.get_set(locale, set_id))
-        except TcgdexUnavailableError as exc:
-            logger.warning("Scan pHash refresh: TCGdex unavailable during %s (%s)", locale, exc)
-            report.unavailable_locales.append(locale)
-            return pending
-        except RuntimeError as exc:
-            logger.warning("Scan pHash refresh: set %s/%s skipped (%s)", locale, set_id, exc)
-            continue
-        report.sets_read += 1
-        fallback_images: dict[str, CardImageUrls] | None = None
-        limitless_images: dict[str, str] | None = (
-            _limitless_low_images(set_id) if (locale, set_id) in _SETS_HASHED_FROM_LIMITLESS else None
-        )
-        for card in detail.get("cards") or []:
-            card_id = card.get("id")
-            local_id = card.get("localId")
-            if not isinstance(card_id, str) or not isinstance(local_id, str):
-                continue
-            name = str(card.get("name") or "")
-            stored_card = stored.get((locale, card_id))
-            image_url: str | None
-            if limitless_images is not None:
-                image_url = limitless_images.get(local_id)
-                if stored_card is not None and stored_card.is_hashed and stored_card.image_url == image_url:
-                    continue
-            else:
-                if _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
-                    continue
-                if stored_card is not None and (stored_card.is_hashed or stored_card.checked_at >= retry_before):
-                    continue
-                if fallback_images is None:
-                    fallback_images = _fallback_images(locale, detail)
-                fallback = fallback_images.get(local_id)
-                image = card.get("image")
-                if fallback is not None:
-                    image_url = fallback.low
-                elif isinstance(image, str) and image:
-                    image_url = f"{image.rstrip('/')}/low.webp"
-                else:
-                    image_url = None
-            pending.append(
-                _PendingCard(
-                    locale=locale,
-                    card_id=card_id,
-                    set_id=set_id,
-                    local_id=local_id,
-                    name=name,
-                    image_url=image_url,
-                )
-            )
-    return pending
-
-
 def _hash_image_at(http: httpx.Client, url: str | None) -> bytes | None:
     """Empreintes de l'image à cette URL, ``None`` si elle est introuvable ou illisible."""
-    if url is None:
+    image_bytes = download_image(http, url)
+    if image_bytes is None:
         return None
     try:
-        response = http.get(url)
-    except httpx.HTTPError:
-        return None
-    if response.status_code != 200 or not response.content:
-        return None
-    try:
-        return compute_card_phash(response.content)
+        return compute_card_phash(image_bytes)
     except (UnidentifiedImageError, OSError, ValueError):
         return None
 
 
-def _save_computed_cards(db: Session, cards: list[_PendingCard], hashes: list[bytes | None], now: dt.datetime) -> None:
+def _save_computed_cards(db: Session, cards: list[PendingCard], hashes: list[bytes | None], now: dt.datetime) -> None:
     """Enregistre un lot dans sa propre transaction ; le scanner le reçoit dès la requête suivante."""
     rows_by_card = {
         (row.locale, row.tcgdex_card_id): row
@@ -417,7 +220,7 @@ def _save_computed_cards(db: Session, cards: list[_PendingCard], hashes: list[by
     _delta_cache.clear()
 
 
-def refresh_scan_phash_cards(db: Session, *, max_new_cards: int = MAX_NEW_CARDS_PER_RUN) -> ScanPhashRefreshReport:
+def refresh_scan_phash_cards(db: Session, *, max_new_cards: int = MAX_NEW_CARDS_PER_RUN) -> ScanIndexRefreshReport:
     """
     Calcule et enregistre les empreintes des cartes TCGdex absentes de l'index livré.
 
@@ -428,49 +231,27 @@ def refresh_scan_phash_cards(db: Session, *, max_new_cards: int = MAX_NEW_CARDS_
         httpx.HTTPError: L'index livré est injoignable (sans lui, tout serait recalculé).
         RuntimeError: L'index livré est incomplet.
     """
-    shipped = _load_shipped_index(get_settings().scan_index_base_url)
+    shipped = load_shipped_index(get_settings().scan_index_base_url, min_cards=_MIN_SHIPPED_CARDS)
     stored = _stored_cards_snapshot(db)
     now = dt.datetime.now(dt.UTC)
-    report = ScanPhashRefreshReport()
+    report = ScanIndexRefreshReport()
     client = TcgdexClientService()
-    pending: list[_PendingCard] = []
+    pending: list[PendingCard] = []
     for locale in INDEXED_LOCALES:
-        pending.extend(_pending_cards_for_locale(client, locale, shipped, stored, now - _MISSING_IMAGE_RETRY, report))
+        pending.extend(pending_cards_for_locale(client, locale, shipped, stored, now - _MISSING_IMAGE_RETRY, report))
     pending = pending[:max_new_cards]
-    with httpx.Client(headers={"User-Agent": _USER_AGENT}, timeout=45.0, follow_redirects=True) as http:
+    with httpx.Client(headers={"User-Agent": SCAN_INDEX_USER_AGENT}, timeout=45.0, follow_redirects=True) as http:
         with ThreadPoolExecutor(max_workers=_DOWNLOAD_WORKERS) as pool:
             for start in range(0, len(pending), _STORE_BATCH_SIZE):
                 batch = pending[start : start + _STORE_BATCH_SIZE]
                 hashes = list(pool.map(lambda card: _hash_image_at(http, card.image_url), batch))
                 _save_computed_cards(db, batch, hashes, now)
-                report.cards_hashed += sum(1 for card_hashes in hashes if card_hashes is not None)
+                report.cards_computed += sum(1 for card_hashes in hashes if card_hashes is not None)
                 report.cards_without_image += sum(1 for card_hashes in hashes if card_hashes is None)
     return report
 
 
-class _DeltaCache:
-    """Charge utile de ``GET /scan-index/phash-delta``, gardée quelques minutes."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._entry: tuple[float, dict[str, Any]] | None = None
-
-    def get(self) -> dict[str, Any] | None:
-        with self._lock:
-            if self._entry is None or time.monotonic() - self._entry[0] > _DELTA_CACHE_TTL_SEC:
-                return None
-            return self._entry[1]
-
-    def set(self, payload: dict[str, Any]) -> None:
-        with self._lock:
-            self._entry = (time.monotonic(), payload)
-
-    def clear(self) -> None:
-        with self._lock:
-            self._entry = None
-
-
-_delta_cache = _DeltaCache()
+_delta_cache: DeltaPayloadCache[dict[str, Any]] = DeltaPayloadCache(_DELTA_CACHE_TTL_SEC)
 
 
 def scan_phash_delta_payload(db: Session) -> dict[str, Any]:
@@ -504,7 +285,7 @@ def scan_phash_delta_payload(db: Session) -> dict[str, Any]:
     return payload
 
 
-def run_scan_phash_refresh() -> ScanPhashRefreshReport:
+def run_scan_phash_refresh() -> ScanIndexRefreshReport:
     """Un passage complet dans sa propre session (à lancer hors de la boucle asyncio)."""
     db = SessionLocal()
     try:

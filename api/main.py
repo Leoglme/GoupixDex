@@ -73,6 +73,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from services.catalog_browse_service import keep_browse_catalog_warm_async
     from services.collection_card_image_repair_service import replace_shuffled_tcgdex_images_async
     from services.japanese_latin_labels_service import relabel_japanese_collection_cards_async
+    from services.scan_embed_index_service import scan_embed_refresh_loop_async
     from services.scan_phash_index_service import scan_phash_refresh_loop_async
 
     if auto_start_amazon_worker_enabled():
@@ -88,6 +89,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         background_tasks.append(asyncio.create_task(nightly_refresh_loop_async()))
     if settings.scan_phash_refresh_enabled:
         background_tasks.append(asyncio.create_task(scan_phash_refresh_loop_async()))
+    if settings.scan_embed_refresh_enabled:
+        background_tasks.append(asyncio.create_task(scan_embed_refresh_loop_async()))
     if settings.catalog_browse_warm_enabled:
         background_tasks.append(asyncio.create_task(keep_browse_catalog_warm_async()))
     try:

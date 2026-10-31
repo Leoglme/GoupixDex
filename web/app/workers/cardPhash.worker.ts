@@ -308,7 +308,7 @@ async function init(d) {
  * ou si une AUTRE carte est trop proche (ambigu).
  */
 function match(rgba, cw, ch, language) {
-  if (!engine) return { status: 'none', decision: null, score: 1 }
+  if (!engine) return { status: 'none', decision: null, topCandidate: null, score: 1 }
   const g = cardGray(rgba, cw, ch)
   const coarse = COARSE.map((t) => variantWords(g, t))
   // Sous-ensemble de la langue de session (sinon tout l'index) — le gros gain de vitesse.
@@ -376,18 +376,18 @@ function match(rgba, cw, ch, language) {
       reprintTcgdexCardIds.push(candidateCard.tcgdexCardId)
     }
   }
+  const topCandidate = {
+    tcgdexCardId: chosen.tcgdexCardId,
+    language: language && language !== 'auto' ? language : chosen.locale,
+    name: chosen.name,
+    setId: chosen.setId,
+    localId: chosen.localId,
+    reprintTcgdexCardIds,
+  }
   return {
     status: confident ? 'match' : 'none',
-    decision: confident
-      ? {
-          tcgdexCardId: chosen.tcgdexCardId,
-          language: language && language !== 'auto' ? language : chosen.locale,
-          name: chosen.name,
-          setId: chosen.setId,
-          localId: chosen.localId,
-          reprintTcgdexCardIds,
-        }
-      : null,
+    decision: confident ? topCandidate : null,
+    topCandidate,
     score: top.score,
     rival: rivalScore,
     topName: topCard.name,
@@ -407,7 +407,7 @@ self.onmessage = (e) => {
     try {
       result = match(new Uint8ClampedArray(d.buf), d.w, d.h, d.language)
     } catch (err) {
-      result = { status: 'none', decision: null, score: 1 }
+      result = { status: 'none', decision: null, topCandidate: null, score: 1 }
     }
     self.postMessage({ t: 'result', seq: d.seq, result })
   }
