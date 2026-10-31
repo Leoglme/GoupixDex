@@ -53,6 +53,8 @@ _STORE_BATCH_SIZE = 300
 _DELTA_CACHE_TTL_SEC = 900.0
 _USER_AGENT = "GoupixDex/1.0 (+scan-index)"
 _POCKET_SERIES_ID = "tcgp"
+#: Sets dont l'index livré porte, sous le bon nom, l'empreinte d'une autre carte (M1S : n° 057 à 092 mélangés).
+_SHIPPED_SETS_WITH_SHUFFLED_HASHES: frozenset[tuple[str, str]] = frozenset({("ja", "M1S")})
 
 _GRAY_WIDTH = 96
 _GRAY_HEIGHT = 132
@@ -294,8 +296,8 @@ def _pending_cards_for_locale(
 ) -> list[_PendingCard]:
     """
     Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré (ou qu'il
-    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Si TCGdex
-    tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
+    a sous un autre nom ou avec l'empreinte d'une autre carte), jamais calculées, ou restées sans image depuis plus de
+    ``_MISSING_IMAGE_RETRY``. Si TCGdex tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
     """
     sets = _list_all_sets_once_tcgdex_answers(client, locale)
     if sets is None:
@@ -317,13 +319,14 @@ def _pending_cards_for_locale(
             continue
         report.sets_read += 1
         fallback_images: dict[str, CardImageUrls] | None = None
+        are_shipped_hashes_trusted = (locale, set_id) not in _SHIPPED_SETS_WITH_SHUFFLED_HASHES
         for card in detail.get("cards") or []:
             card_id = card.get("id")
             local_id = card.get("localId")
             if not isinstance(card_id, str) or not isinstance(local_id, str):
                 continue
             name = str(card.get("name") or "")
-            if _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
+            if are_shipped_hashes_trusted and _is_shipped_under_this_name(shipped, f"{locale}/{card_id}", name):
                 continue
             stored_card = stored.get((locale, card_id))
             if stored_card is not None and (stored_card.is_hashed or stored_card.checked_at >= retry_before):

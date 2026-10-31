@@ -108,6 +108,26 @@ def test_a_shipped_id_now_given_to_another_card_is_computed_again(
     assert {row.tcgdex_card_id for row in db.query(ScanPhashCard).all()} == {"M6a-151", "M6a-R"}
 
 
+def test_a_shipped_card_of_a_set_with_shuffled_hashes_is_computed_from_its_own_image(
+    db: Session, fake_sources: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "_SHIPPED_SETS_WITH_SHUFFLED_HASHES", frozenset({("ja", "M6a")}))
+    monkeypatch.setattr(
+        service,
+        "fallback_card_images",
+        lambda locale, detail: {
+            "001": CardImageUrls(low="https://cdn.example/M6a-001.jpg", high="https://cdn.example/M6a-001-hd.jpg")
+        },
+    )
+
+    service.refresh_scan_phash_cards(db)
+
+    rows = {row.tcgdex_card_id: row for row in db.query(ScanPhashCard).all()}
+    assert rows["M6a-001"].hashes == _HASHES
+    assert rows["M6a-001"].image_url == "https://cdn.example/M6a-001.jpg"
+    assert "M6a-002" in rows
+
+
 def test_the_scanner_receives_only_the_computed_cards(db: Session, fake_sources: list[str]) -> None:
     service.refresh_scan_phash_cards(db)
 
