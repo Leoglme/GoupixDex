@@ -52,7 +52,11 @@ export type ScannedCard = {
 
 export type ScannedCardSheetDependencies = {
   events: Ref<ScanEvent[]>
-  fetchScannedCardPreview: (tcgdexCardId: string, language: string) => Promise<ScannedCardPreview>
+  fetchScannedCardPreview: (
+    tcgdexCardId: string,
+    language: string,
+    reprintTcgdexCardIds: string[],
+  ) => Promise<ScannedCardPreview>
   commitMatchedScan: (
     tcgdexCardId: string,
     language: string,

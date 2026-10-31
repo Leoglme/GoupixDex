@@ -15,6 +15,7 @@ export type ScanMatchDecision = {
   name: string
   setId: string
   localId: string
+  reprintTcgdexCardIds?: string[]
 }
 
 /** Physical-card language of the current scan session (`auto` = resolve per card). */

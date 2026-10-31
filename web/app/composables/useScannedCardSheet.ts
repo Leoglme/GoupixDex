@@ -42,7 +42,7 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
   }
 
   /**
-   * Charge la fiche serveur de la carte affichée ; une réponse arrivée après une plus récente est ignorée.
+   * Charge la fiche serveur de la carte affichée et adopte le print qu'elle montre (une réimpression possédée) ; une réponse arrivée après une plus récente est ignorée.
    * @param {ScannedCard} card - Carte affichée au moment de la demande.
    * @returns {Promise<void>} Résolue quand la fiche est appliquée, ou abandonnée.
    */
@@ -51,7 +51,11 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     const requestNumber: number = previewRequestCount
     let preview: ScannedCardPreview | null = null
     try {
-      preview = await dependencies.fetchScannedCardPreview(card.decision.tcgdexCardId, card.decision.language)
+      preview = await dependencies.fetchScannedCardPreview(
+        card.decision.tcgdexCardId,
+        card.decision.language,
+        card.decision.reprintTcgdexCardIds ?? [],
+      )
     } catch {
       preview = null
     }
@@ -65,6 +69,19 @@ export function useScannedCardSheet(dependencies: ScannedCardSheetDependencies):
     if (preview) {
       card.preview = preview
       card.ownedQuantity = preview.owned_quantity
+      const shownCardId: string = preview.tcgdex_card_id
+      if (shownCardId.toLowerCase() !== card.decision.tcgdexCardId.toLowerCase()) {
+        const printGroup: string[] = [card.decision.tcgdexCardId, ...(card.decision.reprintTcgdexCardIds ?? [])]
+        card.decision = {
+          ...card.decision,
+          tcgdexCardId: shownCardId,
+          setId: preview.tcgdex_set_id,
+          localId: preview.card_number,
+          reprintTcgdexCardIds: printGroup.filter(
+            (printCardId: string): boolean => printCardId.toLowerCase() !== shownCardId.toLowerCase(),
+          ),
+        }
+      }
     }
   }
 

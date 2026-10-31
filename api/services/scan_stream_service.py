@@ -30,6 +30,7 @@ import time
 from decimal import Decimal
 from typing import Any, Literal
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from core.database import SessionLocal
@@ -226,14 +227,68 @@ def _owned_copies_sale_state(
     }
 
 
+def _preferred_owned_print(
+    db: Session,
+    user_id: int,
+    scanned_card_id: str,
+    reprint_card_ids: list[str],
+    print_languages: tuple[str, ...],
+) -> str:
+    """
+    Print à afficher parmi celui reconnu et ses réimpressions de même illustration, que le scanner ne sait pas départager.
+
+    Args:
+        db: Session.
+        user_id: Propriétaire de la collection.
+        scanned_card_id: Print reconnu par le scanner.
+        reprint_card_ids: Autres prints de la même illustration, dans la même langue.
+        print_languages: Langues qui partagent l'id TCGdex du print.
+
+    Returns:
+        Le print possédé dont l'article invendu est le plus en ligne (le print reconnu à égalité), sinon le print reconnu.
+    """
+    if not reprint_card_ids:
+        return scanned_card_id
+    candidate_ids = {card_id.lower() for card_id in (scanned_card_id, *reprint_card_ids)}
+    owned_cards: list[CollectionCard] = (
+        db.query(CollectionCard)
+        .options(joinedload(CollectionCard.article))
+        .filter(
+            CollectionCard.user_id == user_id,
+            func.lower(CollectionCard.tcgdex_card_id).in_(candidate_ids),
+            CollectionCard.language.in_(print_languages),
+            CollectionCard.is_placeholder.is_(False),
+            CollectionCard.quantity > 0,
+        )
+        .all()
+    )
+    if not owned_cards:
+        return scanned_card_id
+
+    def sale_progress(card: CollectionCard) -> tuple[int, bool, bool]:
+        """Où en est la vente de cet exemplaire : marketplaces en ligne, encore en vente, print reconnu."""
+        article = card.article if card.article is not None and not card.article.is_sold else None
+        return (
+            _published_marketplace_count(article) if article is not None else -1,
+            bool(article.offers_for_sale) if article is not None else False,
+            card.tcgdex_card_id.lower() == scanned_card_id.lower(),
+        )
+
+    return max(owned_cards, key=sale_progress).tcgdex_card_id
+
+
 def build_scanned_card_preview(
     db: Session,
     user_id: int,
     tcgdex_card_id: str,
     physical_language: str,
+    reprint_card_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Fiche d'une carte reconnue : identité, cote, exemplaires possédés du même print et où en est leur mise en vente."""
-    meta = scanned_card_meta(tcgdex_card_id, physical_language)
+    """Fiche d'une carte reconnue : identité, cote, exemplaires possédés du même print et où en est leur mise en vente ; parmi des réimpressions de même illustration, celle que l'on possède."""
+    shown_card_id = _preferred_owned_print(
+        db, user_id, tcgdex_card_id, reprint_card_ids or [], same_print_languages(physical_language)
+    )
+    meta = scanned_card_meta(shown_card_id, physical_language)
     owned_by_language = collection_card_service.owned_quantities_by_language(db, user_id, meta["tcgdex_card_id"])
     print_languages = same_print_languages(meta["language"])
     return {

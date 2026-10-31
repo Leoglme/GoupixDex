@@ -44,6 +44,7 @@ const T_MARGIN = 0.055
  * ce ne sont pas des rivales. La rivale = la 1ʳᵉ carte d'un artwork DIFFÉRENT.
  */
 const REPRINT_EPS = 0.04
+const MAX_REPRINTS = 6
 
 const COS = (() => {
   const t = new Float64Array(K * N)
@@ -361,6 +362,20 @@ function match(rgba, cw, ch, language) {
       }
     }
   }
+  const reprintTcgdexCardIds = []
+  for (const candidate of scored) {
+    if (candidate.score - top.score > REPRINT_EPS || reprintTcgdexCardIds.length >= MAX_REPRINTS) {
+      break
+    }
+    const candidateCard = engine.cards[candidate.i]
+    const isOtherPrintOfChosenCard =
+      candidateCard.tcgdexCardId !== chosen.tcgdexCardId &&
+      candidateCard.name === chosen.name &&
+      candidateCard.locale === chosen.locale
+    if (isOtherPrintOfChosenCard && !reprintTcgdexCardIds.includes(candidateCard.tcgdexCardId)) {
+      reprintTcgdexCardIds.push(candidateCard.tcgdexCardId)
+    }
+  }
   return {
     status: confident ? 'match' : 'none',
     decision: confident
@@ -370,6 +385,7 @@ function match(rgba, cw, ch, language) {
           name: chosen.name,
           setId: chosen.setId,
           localId: chosen.localId,
+          reprintTcgdexCardIds,
         }
       : null,
     score: top.score,

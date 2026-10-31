@@ -496,11 +496,20 @@ export function useScanStream() {
    *
    * @param {string} tcgdexCardId - Identifiant TCGdex de la carte (ex. `me02-107`).
    * @param {string} language - Langue physique retenue (`fr` | `en` | `ja`).
+   * @param {string[]} reprintTcgdexCardIds - Réimpressions de même illustration : la fiche montre celle que l'on possède.
    * @returns {Promise<ScannedCardPreview>} Identité, cote Cardmarket et exemplaires déjà possédés du même print.
    */
-  async function fetchScannedCardPreview(tcgdexCardId: string, language: string): Promise<ScannedCardPreview> {
+  async function fetchScannedCardPreview(
+    tcgdexCardId: string,
+    language: string,
+    reprintTcgdexCardIds: string[],
+  ): Promise<ScannedCardPreview> {
     const { data } = await $api.get<ScannedCardPreview>('/scan-stream/card-preview', {
-      params: { tcgdex_card_id: tcgdexCardId, language },
+      params: {
+        tcgdex_card_id: tcgdexCardId,
+        language,
+        reprint_card_ids: reprintTcgdexCardIds.length ? reprintTcgdexCardIds.join(',') : undefined,
+      },
       timeout: 15_000,
     })
     return data

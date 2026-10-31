@@ -147,6 +147,7 @@ async def upload_scan_photo(
 
 _TCGDEX_CARD_ID_RE = re.compile(r"^[A-Za-z0-9.]+-[A-Za-z0-9.]+$")
 _CLIENT_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_MAX_REPRINT_CARD_IDS = 6
 
 
 class MatchedScanPayload(BaseModel):
@@ -166,6 +167,17 @@ def _validated_card_id(raw: str) -> str:
     return card_id
 
 
+def _valid_reprint_card_ids(raw: str | None) -> list[str]:
+    """Réimpressions de même illustration envoyées par le téléphone (« sv8-084,mc-583 ») ; les identifiants mal formés sont ignorés."""
+    if not raw:
+        return []
+    card_ids = [part.strip() for part in raw.split(",")]
+    valid_card_ids = [
+        card_id for card_id in card_ids if card_id and len(card_id) <= 64 and _TCGDEX_CARD_ID_RE.fullmatch(card_id)
+    ]
+    return valid_card_ids[:_MAX_REPRINT_CARD_IDS]
+
+
 def _matched_card_language(value: str | None) -> str:
     """Langue physique d'une carte reconnue sur le téléphone : sans OCR, ``auto`` devient l'anglais."""
     physical_language = _clean_language(value)
@@ -178,11 +190,18 @@ def preview_scanned_card(
     user: Annotated[User, Depends(get_current_user)],
     tcgdex_card_id: str = Query(..., min_length=3, max_length=64),
     language: str = Query("en", max_length=8),
+    reprint_card_ids: str | None = Query(None, max_length=500),
 ) -> dict[str, Any]:
     """Fiche d'une carte reconnue sur le téléphone : cote Cardmarket, exemplaires possédés et leur mise en vente."""
     card_id = _validated_card_id(tcgdex_card_id)
     try:
-        return build_scanned_card_preview(db, user.id, card_id, _matched_card_language(language))
+        return build_scanned_card_preview(
+            db,
+            user.id,
+            card_id,
+            _matched_card_language(language),
+            _valid_reprint_card_ids(reprint_card_ids),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:

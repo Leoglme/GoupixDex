@@ -1818,7 +1818,7 @@ function flashInstantMatch(name: string): void {
 }
 
 /** Dernière carte reconnue — anti-doublon tant que la même carte reste devant la caméra. */
-let lastRecognizedCard: { cardId: string; direction: ScanDirection; at: number } | null = null
+let lastRecognizedCard: { cardIds: string[]; direction: ScanDirection; at: number } | null = null
 const SAME_CARD_RECOGNITION_DEBOUNCE_MS: number = 3000
 
 /** Une inférence à la fois — un crop arrivé pendant l'inférence est ignoré. */
@@ -1894,7 +1894,7 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
     const committedCardSeen =
       result.topCardId !== null &&
       lastRecognizedCard !== null &&
-      result.topCardId === lastRecognizedCard.cardId &&
+      lastRecognizedCard.cardIds.includes(result.topCardId) &&
       result.topSim >= STILL_SAME_CARD_MIN_SIM
     if (committedCardSeen && lastRecognizedCard) {
       lastRecognizedCard.at = Date.now()
@@ -1942,7 +1942,7 @@ async function onIdentifyCrop(bufs: ArrayBuffer[]): Promise<void> {
 }
 
 /**
- * Affiche la fiche d'une carte reconnue (pHash OU embedding), sauf si c'est la même carte revue juste après.
+ * Affiche la fiche d'une carte reconnue (pHash OU embedding), sauf si c'est la même carte (ou une réimpression de même illustration) revue juste après.
  * @param {ScanMatchDecision} decision - Carte reconnue.
  * @returns {void}
  */
@@ -1951,7 +1951,7 @@ function showRecognizedCard(decision: ScanMatchDecision): void {
   const now: number = Date.now()
   const isSameCardStillInView: boolean =
     lastRecognizedCard !== null &&
-    lastRecognizedCard.cardId === decision.tcgdexCardId &&
+    lastRecognizedCard.cardIds.includes(decision.tcgdexCardId) &&
     lastRecognizedCard.direction === scanDirection.value &&
     now - lastRecognizedCard.at < SAME_CARD_RECOGNITION_DEBOUNCE_MS
   reportIdentifyOutcome(true)
@@ -1960,7 +1960,11 @@ function showRecognizedCard(decision: ScanMatchDecision): void {
     return
   }
 
-  lastRecognizedCard = { cardId: decision.tcgdexCardId, direction: scanDirection.value, at: now }
+  lastRecognizedCard = {
+    cardIds: [decision.tcgdexCardId, ...(decision.reprintTcgdexCardIds ?? [])],
+    direction: scanDirection.value,
+    at: now,
+  }
   flashInstantMatch(readableCardLabel(decision.name, decision.localId))
   playBeep()
   vibrate(60)

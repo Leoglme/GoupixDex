@@ -226,6 +226,55 @@ def test_preview_shows_a_sold_card_scanned_again_as_absent_from_the_collection(
     assert preview["unlinked_collection_card_id"] is None
 
 
+def _reprint_meta(tcgdex_card_id: str, physical_language: str) -> dict[str, Any]:
+    """Fiche TCGdex du print demandé : les réimpressions d'une illustration ne diffèrent que par leur id."""
+    return _card_meta(tcgdex_card_id, physical_language)
+
+
+def test_preview_shows_the_owned_reprint_whose_article_is_online(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", _reprint_meta)
+    _put_on_sale(db, _collection_card(db, language="ja", quantity=1, tcgdex_card_id="SV8-084"), offers_for_sale=False)
+    article_online_everywhere = _put_on_sale(
+        db,
+        _collection_card(db, language="ja", quantity=1, tcgdex_card_id="MC-583"),
+        published_on_vinted=True,
+        published_on_ebay=True,
+        published_on_leboncoin=True,
+    )
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV8-084", "ja", ["mc-583"])
+
+    assert preview["tcgdex_card_id"] == "MC-583"
+    assert preview["owned_quantity"] == 1
+    assert preview["linked_article"]["id"] == article_online_everywhere.id
+
+
+def test_preview_shows_an_owned_reprint_when_the_scanned_print_is_not_owned(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", _reprint_meta)
+    _collection_card(db, language="ja", quantity=1, tcgdex_card_id="MC-583")
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV8-084", "ja", ["MC-583"])
+
+    assert preview["tcgdex_card_id"] == "MC-583"
+    assert preview["owned_quantity"] == 1
+
+
+def test_preview_keeps_the_scanned_print_when_no_reprint_is_owned(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", _reprint_meta)
+    _collection_card(db, language="fr", quantity=1, tcgdex_card_id="MC-583")
+
+    preview = scan_stream_service.build_scanned_card_preview(db, 1, "SV8-084", "ja", ["MC-583"])
+
+    assert preview["tcgdex_card_id"] == "SV8-084"
+    assert preview["owned_quantity"] == 0
+
+
 def test_card_sheet_is_read_once_from_tcgdex_for_the_preview_and_the_add(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
