@@ -1701,30 +1701,60 @@ class LeboncoinService:
         return None
 
     @classmethod
-    async def _newest_listing_id_with_title(cls, tab: Tab, title: str) -> str | None:
-        """Identifiant de l'annonce la plus récente de « Mes annonces » dont le lien porte ce titre."""
-        listing_id = await tab.evaluate(
+    async def _listing_ids_with_title(cls, tab: Tab, title: str) -> list[str] | None:
+        """
+        Identifiants des annonces de « Mes annonces » dont le lien porte ce titre.
+
+        Returns:
+            Les identifiants trouvés, ou None si la page n'a pas pu être lue.
+        """
+        raw = await tab.evaluate(
             f"""
             (() => {{
               const normalize = (text) => (text || '')
                 .normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
                 .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
               const wantedTitle = normalize({json.dumps(title)});
-              let newestListingId = null;
+              const listingIds = [];
               for (const anchor of document.querySelectorAll('a[href*="/ad/"]')) {{
                 const match = (anchor.getAttribute('href') || '').match(/\\/ad\\/[^/?#]+\\/(\\d{{4,}})/);
-                if (!match || !normalize(anchor.textContent).includes(wantedTitle)) continue;
-                if (newestListingId === null || Number(match[1]) > Number(newestListingId)) newestListingId = match[1];
+                if (match && normalize(anchor.textContent).includes(wantedTitle)) listingIds.push(match[1]);
               }}
-              return newestListingId;
+              return JSON.stringify(listingIds);
             }})()
             """,
             return_by_value=True,
         )
-        return str(listing_id) if isinstance(listing_id, str) and listing_id else None
+        if not isinstance(raw, str):
+            return None
+        return [str(listing_id) for listing_id in json.loads(raw)]
 
     @classmethod
-    async def find_listing_id_in_my_ads(cls, title: str, *, timeout_sec: float = 60.0) -> str | None:
+    async def read_listing_ids_with_title_in_my_ads(cls, title: str) -> frozenset[str] | None:
+        """
+        Relève, avant un dépôt, les annonces de « Mes annonces » qui portent déjà ce titre.
+
+        Returns:
+            Leurs identifiants, ou None si « Mes annonces » n'a pas pu être lue.
+        """
+        tab = cls._require_tab()
+        try:
+            await tab.get(MY_ADS_URL)
+            await cls._wait_for_my_ads_list(tab)
+            listing_ids = await cls._listing_ids_with_title(tab, title)
+        except Exception:  # noqa: BLE001
+            logger.warning("Leboncoin: « Mes annonces » illisible avant le dépôt", exc_info=True)
+            return None
+        return frozenset(listing_ids) if listing_ids is not None else None
+
+    @classmethod
+    async def find_listing_id_in_my_ads(
+        cls,
+        title: str,
+        *,
+        listing_ids_before_deposit: frozenset[str],
+        timeout_sec: float = 60.0,
+    ) -> str | None:
         """
         Retrouve l'annonce déposée dans « Mes annonces », où Leboncoin l'affiche une fois validée (15 à 25 s après le dépôt).
 
@@ -1738,9 +1768,13 @@ class LeboncoinService:
             reload_at = min(deadline, time.monotonic() + _MY_ADS_RELOAD_SEC)
             while time.monotonic() < reload_at:
                 await tab.sleep(1.0)
-                listing_id = await cls._newest_listing_id_with_title(tab, title)
-                if listing_id:
-                    return listing_id
+                new_listing_ids = [
+                    listing_id
+                    for listing_id in await cls._listing_ids_with_title(tab, title) or []
+                    if listing_id not in listing_ids_before_deposit
+                ]
+                if new_listing_ids:
+                    return max(new_listing_ids, key=int)
         return None
 
     @classmethod
@@ -1827,7 +1861,13 @@ class LeboncoinService:
         raise RuntimeError("Page de l’annonce Leboncoin non chargée : impossible de vérifier qu’elle est retirée.")
 
     @classmethod
-    async def _mark_delete_trigger_of_listing(cls, tab: Tab, listing_id: str | None, title: str) -> int:
+    async def _mark_delete_trigger_of_listing(
+        cls,
+        tab: Tab,
+        listing_id: str | None,
+        title: str,
+        other_articles_listing_ids: frozenset[str] = frozenset(),
+    ) -> int:
         """
         Pose le marqueur sur la corbeille de l'annonce visée : par son identifiant, sinon par son titre exact.
 
@@ -1838,6 +1878,7 @@ class LeboncoinService:
             f"""
             (() => {{
               const listingId = {json.dumps(listing_id or "")};
+              const otherArticlesListingIds = new Set({json.dumps(sorted(other_articles_listing_ids))});
               const normalize = (text) => (text || '')
                 .normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')
                 .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -1845,10 +1886,14 @@ class LeboncoinService:
               const marker = {json.dumps(_DELETE_TRIGGER_MARKER)};
               document.querySelectorAll('[' + marker + ']').forEach((el) => el.removeAttribute(marker));
               const listingHref = new RegExp('/(?:ad/[^/]+|annonce)/' + listingId + '(?:[/?#]|$)');
+              const cardListingIds = (card) => [...card.querySelectorAll('a[href]')]
+                .map((a) => ((a.getAttribute('href') || '').match(/\\/(?:ad\\/[^/]+|annonce)\\/(\\d+)/) || [])[1])
+                .filter(Boolean);
               const matches = [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].filter((card) => {{
                 if (listingId) {{
                   return [...card.querySelectorAll('a[href]')].some((a) => listingHref.test(a.getAttribute('href') || ''));
                 }}
+                if (cardListingIds(card).some((cardListingId) => otherArticlesListingIds.has(cardListingId))) return false;
                 const shownTitle = card.querySelector('a[href*="/ad/"] p[title]');
                 return !!shownTitle && normalize(shownTitle.getAttribute('title')) === wantedTitle;
               }});
@@ -1870,7 +1915,13 @@ class LeboncoinService:
         return int(search["matchCount"])
 
     @classmethod
-    async def _find_listing_delete_trigger(cls, tab: Tab, listing_id: str | None, title: str) -> bool:
+    async def _find_listing_delete_trigger(
+        cls,
+        tab: Tab,
+        listing_id: str | None,
+        title: str,
+        other_articles_listing_ids: frozenset[str] = frozenset(),
+    ) -> bool:
         """
         Cherche l'annonce dans « Mes annonces », en faisant défiler la liste tant que Leboncoin en charge d'autres.
 
@@ -1883,7 +1934,7 @@ class LeboncoinService:
         """
         state = await cls._wait_for_my_ads_list(tab)
         for _ in range(_MY_ADS_MAX_SCROLL_LOADS):
-            match_count = await cls._mark_delete_trigger_of_listing(tab, listing_id, title)
+            match_count = await cls._mark_delete_trigger_of_listing(tab, listing_id, title, other_articles_listing_ids)
             if match_count == 1:
                 return True
             if match_count > 1:
@@ -1964,13 +2015,20 @@ class LeboncoinService:
         raise RuntimeError("Leboncoin n’a pas confirmé la suppression de l’annonce.")
 
     @classmethod
-    async def delete_listing(cls, listing_id: str | None, title: str) -> bool:
+    async def delete_listing(
+        cls,
+        listing_id: str | None,
+        title: str,
+        *,
+        other_articles_listing_ids: frozenset[str] = frozenset(),
+    ) -> bool:
         """
         Supprime une annonce comme à la main : « Mes annonces », corbeille, puis « Valider » (retrait du site sous 45 min).
 
         Args:
             listing_id: Identifiant Leboncoin de l'annonce, quand GoupixDex l'a relevé au dépôt.
             title: Titre exact de l'annonce, utilisé seulement sans identifiant.
+            other_articles_listing_ids: Annonces d'autres articles du compte, jamais supprimées par une recherche par titre.
 
         Returns:
             True si Leboncoin a accepté la suppression, False si l'annonce n'est déjà plus en ligne.
@@ -1982,7 +2040,7 @@ class LeboncoinService:
         await tab.get(MY_ADS_URL)
         await cls._accept_didomi_cookies(tab, timeout_sec=4.0)
         numeric_listing_id = re.sub(r"\D", "", listing_id or "") or None
-        if not await cls._find_listing_delete_trigger(tab, numeric_listing_id, title):
+        if not await cls._find_listing_delete_trigger(tab, numeric_listing_id, title, other_articles_listing_ids):
             if numeric_listing_id and await cls._is_listing_still_public(tab, numeric_listing_id):
                 raise RuntimeError(
                     "L’annonce est encore en ligne sur Leboncoin mais n’apparaît pas dans « Mes annonces » : réessayez."

@@ -157,8 +157,8 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
       return
     }
     soldSubmitting.value = true
+    const soldArticlesAfterSale: Article[] = []
     try {
-      const soldArticlesAfterSale: Article[] = []
       if (payload.mode === 'single') {
         const id = rows[0]?.id
         if (id == null) {
@@ -188,16 +188,25 @@ export function useArticlesListPageCore(variant: ArticlesListPageVariant) {
           color: 'success',
         })
       }
-      removeListingsLeftOnline(soldArticlesAfterSale)
-      soldOpen.value = false
-      soldArticles.value = null
-      articleListSelectionReset.value += 1
-      await refresh()
     } catch (e) {
-      toast.add({ title: 'Erreur', description: apiErrorMessage(e), color: 'error' })
+      toast.add({
+        title: soldArticlesAfterSale.length
+          ? `${soldArticlesAfterSale.length} sur ${rows.length} articles marqués comme vendus`
+          : 'Erreur',
+        description: apiErrorMessage(e),
+        color: 'error',
+      })
     } finally {
       soldSubmitting.value = false
     }
+    if (!soldArticlesAfterSale.length) {
+      return
+    }
+    removeListingsLeftOnline(soldArticlesAfterSale)
+    soldOpen.value = false
+    soldArticles.value = null
+    articleListSelectionReset.value += 1
+    await refresh()
   }
 
   /**

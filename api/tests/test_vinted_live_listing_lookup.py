@@ -33,9 +33,17 @@ def fake_wardrobe(
     monkeypatch.setattr(VintedService, "find_member_listing_item_id_for_match", profile_tiles_lookup)
 
 
-def find_listing(vinted_id: int | None, title: str = TITLE) -> int | None:
+def find_listing(
+    vinted_id: int | None, title: str = TITLE, other_articles_listing_ids: frozenset[int] = frozenset()
+) -> int | None:
     return asyncio.run(
-        VintedService.find_live_member_listing(object(), vinted_id=vinted_id, title=title, sell_price=Decimal("5.00"))
+        VintedService.find_live_member_listing(
+            object(),  # type: ignore[arg-type]
+            vinted_id=vinted_id,
+            title=title,
+            sell_price=Decimal("5.00"),
+            other_articles_listing_ids=other_articles_listing_ids,
+        )
     )
 
 
@@ -63,6 +71,28 @@ def test_duplicate_titles_without_the_expected_price_are_not_guessed(monkeypatch
     fake_wardrobe(monkeypatch, [_wardrobe_row(1, price="6.0"), _wardrobe_row(2, price="7.0")])
     with pytest.raises(RuntimeError, match="Plusieurs annonces"):
         find_listing(None)
+
+
+def test_two_copies_at_the_same_price_are_not_guessed(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_wardrobe(monkeypatch, [_wardrobe_row(1), _wardrobe_row(2)])
+    with pytest.raises(RuntimeError, match="Plusieurs annonces"):
+        find_listing(None)
+
+
+def test_the_listing_of_the_other_copy_is_never_taken(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_wardrobe(monkeypatch, [_wardrobe_row(1), _wardrobe_row(2)])
+    assert find_listing(None, other_articles_listing_ids=frozenset({1})) == 2
+
+
+def test_listing_already_gone_is_absent_even_when_the_other_copy_is_online(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_wardrobe(monkeypatch, [_wardrobe_row(1)])
+    assert find_listing(None, other_articles_listing_ids=frozenset({1})) is None
+
+
+def test_unreadable_wardrobe_never_returns_the_listing_of_the_other_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_wardrobe(monkeypatch, None, profile_tile_match=1)
+    with pytest.raises(RuntimeError, match="illisible"):
+        find_listing(None, other_articles_listing_ids=frozenset({1}))
 
 
 def test_unreadable_wardrobe_never_marks_a_listing_absent(monkeypatch: pytest.MonkeyPatch) -> None:

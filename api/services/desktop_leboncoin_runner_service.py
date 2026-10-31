@@ -14,6 +14,7 @@ from services.desktop_stubs_service import DesktopStubsService
 from services.leboncoin_listing_copy import build_leboncoin_listing_copy
 from services.leboncoin_publish_service import ProgressFn, publish_article_to_leboncoin
 from services.leboncoin_service import LeboncoinService
+from services.listing_ownership_service import ListingOwnershipService
 from services.vinted_batch_session_service import VintedBatchSessionService as batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as progress_hub
 
@@ -110,13 +111,32 @@ class DesktopLeboncoinRunnerService:
                 ar = await client.get(f"{remote_base}/articles/{article_id}", headers=hdrs)
                 ar.raise_for_status()
                 article_d = ar.json()
-            if article_d.get("user_id") != user_id:
-                return {"article_id": article_id, "delisted": False, "detail": "Article introuvable sur ce compte."}
-            if not article_d.get("published_on_leboncoin"):
-                return {"article_id": article_id, "delisted": True, "detail": "Déjà retirée de Leboncoin."}
+                if article_d.get("user_id") != user_id:
+                    return {"article_id": article_id, "delisted": False, "detail": "Article introuvable sur ce compte."}
+                if not article_d.get("published_on_leboncoin"):
+                    return {"article_id": article_id, "delisted": True, "detail": "Déjà retirée de Leboncoin."}
+                account_articles = (
+                    []
+                    if article_d.get("leboncoin_listing_id")
+                    else await ListingOwnershipService.fetch_account_articles(client, remote_base, hdrs)
+                )
+            other_unsold_copy_id = ListingOwnershipService.find_other_unsold_copy_without_listing_id(
+                account_articles, article_d, "leboncoin"
+            )
+            if other_unsold_copy_id is not None:
+                raise RuntimeError(
+                    f"L’article #{other_unsold_copy_id}, encore en vente, porte le même titre sur Leboncoin : "
+                    "supprimez la bonne annonce depuis « Mes annonces »."
+                )
             await open_browser()
             listing_title, _ = build_leboncoin_listing_copy(DesktopStubsService.article_from_api_dict(article_d))
-            was_online = await LeboncoinService.delete_listing(article_d.get("leboncoin_listing_id"), listing_title)
+            was_online = await LeboncoinService.delete_listing(
+                article_d.get("leboncoin_listing_id"),
+                listing_title,
+                other_articles_listing_ids=ListingOwnershipService.collect_other_articles_listing_ids(
+                    account_articles, article_id, "leboncoin"
+                ),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Leboncoin listing removal failed article_id=%s", article_id)
             detail = (str(exc) or type(exc).__name__)[:480]

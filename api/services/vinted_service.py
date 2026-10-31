@@ -2438,6 +2438,7 @@ class VintedService:
         vinted_id: int | None,
         title: str,
         sell_price: Decimal | float | int | None,
+        other_articles_listing_ids: frozenset[int] = frozenset(),
     ) -> int | None:
         """
         Cherche l’annonce en ligne d’un article sur le dressing connecté : par son id s’il est connu, sinon par titre et prix.
@@ -2446,7 +2447,7 @@ class VintedService:
             L’id de l’annonce, ou ``None`` quand le dressing a répondu sans la lister en ligne (supprimée, vendue ou jamais publiée).
 
         Raises:
-            RuntimeError: Dressing illisible sans autre moyen de trouver l’annonce, ou plusieurs annonces du même titre sans prix pour trancher.
+            RuntimeError: Dressing illisible sans autre moyen de trouver l’annonce, ou plusieurs annonces du même titre sans moyen de trancher.
         """
         member_id = await cls.fetch_logged_in_vinted_user_numeric_id()
         wardrobe_rows = await cls._fetch_member_wardrobe_rows(tab, member_id)
@@ -2454,7 +2455,7 @@ class VintedService:
             if vinted_id is not None:
                 return vinted_id
             item_id = await cls.find_member_listing_item_id_for_match(tab, title=title, sell_price=sell_price)
-            if item_id is None:
+            if item_id is None or item_id in other_articles_listing_ids:
                 raise RuntimeError("Dressing Vinted illisible et annonce introuvable : réessayez dans quelques minutes.")
             return item_id
 
@@ -2462,13 +2463,24 @@ class VintedService:
         if vinted_id is not None:
             return vinted_id if any(cls._wardrobe_row_item_id(row) == vinted_id for row in live_rows) else None
 
-        item_id = cls._pick_wardrobe_item_match(live_rows, title=title, sell_price=sell_price)
         normalized_title = cls._normalize_match_token(title)
-        if item_id is None and any(
-            cls._normalize_match_token(str(row.get("title") or "")) == normalized_title for row in live_rows
-        ):
+        same_title_listing_prices_in_cents: dict[int, int | None] = {}
+        for row in live_rows:
+            item_id = cls._wardrobe_row_item_id(row)
+            if item_id is None or item_id in other_articles_listing_ids:
+                continue
+            if cls._normalize_match_token(str(row.get("title") or "")) == normalized_title:
+                same_title_listing_prices_in_cents[item_id] = cls._price_in_cents(row.get("price"))
+        expected_price_cents = cls._price_in_cents(sell_price)
+        same_price_item_ids = [
+            item_id
+            for item_id, price_cents in same_title_listing_prices_in_cents.items()
+            if expected_price_cents is not None and price_cents == expected_price_cents
+        ]
+        matching_item_ids = same_price_item_ids or list(same_title_listing_prices_in_cents)
+        if len(matching_item_ids) > 1:
             raise RuntimeError("Plusieurs annonces portent ce titre sur votre dressing Vinted : retirez la bonne depuis Vinted.")
-        return item_id
+        return matching_item_ids[0] if matching_item_ids else None
 
     @classmethod
     async def find_member_listing_item_id_for_match(

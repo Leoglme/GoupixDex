@@ -11,6 +11,7 @@ import httpx
 from app_types.vinted import VintedListingRemovalOutcome
 from services.desktop_api_confirmation_service import post_confirmation_to_api
 from services.desktop_stubs_service import DesktopStubsService
+from services.listing_ownership_service import ListingOwnershipService
 from services.vinted_batch_orchestrator_service import VintedBatchOrchestratorService
 from services.vinted_batch_session_service import VintedBatchSessionService as batch_hub
 from services.vinted_progress_session_service import VintedProgressSessionService as vp
@@ -206,6 +207,11 @@ class DesktopVintedRunnerService:
                 me = await client.get(f"{remote_base}/users/me", headers=hdrs)
                 me.raise_for_status()
                 me_d = me.json()
+                account_articles = (
+                    await ListingOwnershipService.fetch_account_articles(client, remote_base, hdrs)
+                    if article_d.get("vinted_id") is None
+                    else []
+                )
 
             article = DesktopStubsService.article_from_api_dict(article_d)
             user = DesktopStubsService.user_stub(me_d["id"], me_d["email"], creds.get("vinted_email"))
@@ -217,6 +223,14 @@ class DesktopVintedRunnerService:
 
             raw_vid = article_d.get("vinted_id")
             item_id = int(raw_vid) if raw_vid is not None else None
+            other_unsold_copy_id = ListingOwnershipService.find_other_unsold_copy_without_listing_id(
+                account_articles, article_d, "vinted"
+            )
+            if other_unsold_copy_id is not None:
+                raise RuntimeError(
+                    f"L’article #{other_unsold_copy_id}, encore en vente, porte le même titre sur Vinted : "
+                    "supprimez la bonne annonce depuis Vinted."
+                )
 
             await log_step("Connexion à Vinted…", "auth")
             browser_started = await VintedService.ensure_browser_session()
@@ -228,6 +242,12 @@ class DesktopVintedRunnerService:
                 vinted_id=item_id,
                 title=article.title or "",
                 sell_price=listed_vinted_price(article),
+                other_articles_listing_ids=frozenset(
+                    int(listing_id)
+                    for listing_id in ListingOwnershipService.collect_other_articles_listing_ids(
+                        account_articles, article_id, "vinted"
+                    )
+                ),
             )
             if live_listing_id is None:
                 is_listing_absent = True

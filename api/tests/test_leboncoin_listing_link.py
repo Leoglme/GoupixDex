@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any, Self
 
@@ -14,6 +15,7 @@ from services.desktop_stubs_service import DesktopStubsService
 from services.leboncoin_service import LeboncoinService
 
 CHARCADET_LISTING_ID = "3278016312"
+OTHER_COPY_LISTING_ID = "3278016001"
 
 
 class FakeClock:
@@ -27,7 +29,7 @@ class FakeClock:
 class FakeMyAdsTab:
     """Onglet « Mes annonces » où l'annonce déposée apparaît après quelques relevés."""
 
-    def __init__(self, clock: FakeClock, listing_ids_by_poll: list[str | None]) -> None:
+    def __init__(self, clock: FakeClock, listing_ids_by_poll: list[list[str]]) -> None:
         self.clock = clock
         self.listing_ids_by_poll = listing_ids_by_poll
         self.opened_urls: list[str] = []
@@ -40,11 +42,11 @@ class FakeMyAdsTab:
         self.clock.now += seconds
 
     async def evaluate(self, _script: str, **_options: object) -> Any:
-        return self.listing_ids_by_poll.pop(0) if self.listing_ids_by_poll else None
+        return json.dumps(self.listing_ids_by_poll.pop(0) if self.listing_ids_by_poll else [])
 
 
 def use_my_ads_tab(
-    monkeypatch: pytest.MonkeyPatch, listing_ids_by_poll: list[str | None]
+    monkeypatch: pytest.MonkeyPatch, listing_ids_by_poll: list[list[str]]
 ) -> FakeMyAdsTab:
     clock = FakeClock()
     tab = FakeMyAdsTab(clock, listing_ids_by_poll)
@@ -56,11 +58,12 @@ def use_my_ads_tab(
 def test_deposited_ad_is_found_once_leboncoin_lists_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tab = use_my_ads_tab(monkeypatch, [None] * 10 + [CHARCADET_LISTING_ID])
+    tab = use_my_ads_tab(monkeypatch, [[]] * 10 + [[CHARCADET_LISTING_ID]])
 
     listing_id = asyncio.run(
         LeboncoinService.find_listing_id_in_my_ads(
-            "Charbambin / Charcadet m2 083/080 AR"
+            "Charbambin / Charcadet m2 083/080 AR",
+            listing_ids_before_deposit=frozenset(),
         )
     )
 
@@ -71,6 +74,49 @@ def test_deposited_ad_is_found_once_leboncoin_lists_it(
     ]
 
 
+def test_other_copy_ad_already_listed_is_never_taken_for_the_deposited_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_my_ads_tab(
+        monkeypatch,
+        [[OTHER_COPY_LISTING_ID]] * 10 + [[OTHER_COPY_LISTING_ID, CHARCADET_LISTING_ID]],
+    )
+
+    listing_id = asyncio.run(
+        LeboncoinService.find_listing_id_in_my_ads(
+            "Charbambin / Charcadet m2 083/080 AR",
+            listing_ids_before_deposit=frozenset({OTHER_COPY_LISTING_ID}),
+        )
+    )
+
+    assert listing_id == CHARCADET_LISTING_ID
+
+
+def test_ads_with_the_title_are_read_before_the_deposit(monkeypatch: pytest.MonkeyPatch) -> None:
+    tab = use_my_ads_tab(monkeypatch, [[OTHER_COPY_LISTING_ID]])
+
+    async def list_loaded(_tab: object) -> dict[str, int]:
+        return {"shown": 1, "online": 1}
+
+    monkeypatch.setattr(LeboncoinService, "_wait_for_my_ads_list", list_loaded)
+
+    listing_ids = asyncio.run(LeboncoinService.read_listing_ids_with_title_in_my_ads("Charcadet"))
+
+    assert listing_ids == frozenset({OTHER_COPY_LISTING_ID})
+    assert tab.opened_urls == [leboncoin_service.MY_ADS_URL]
+
+
+def test_unreadable_my_ads_before_the_deposit_gives_no_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_my_ads_tab(monkeypatch, [])
+
+    async def session_expired(_tab: object) -> dict[str, int]:
+        raise RuntimeError("Session Leboncoin expirée")
+
+    monkeypatch.setattr(LeboncoinService, "_wait_for_my_ads_list", session_expired)
+
+    assert asyncio.run(LeboncoinService.read_listing_ids_with_title_in_my_ads("Charcadet")) is None
+
+
 def test_lookup_gives_up_when_the_ad_is_still_not_listed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -78,7 +124,9 @@ def test_lookup_gives_up_when_the_ad_is_still_not_listed(
 
     assert (
         asyncio.run(
-            LeboncoinService.find_listing_id_in_my_ads("Charcadet", timeout_sec=20.0)
+            LeboncoinService.find_listing_id_in_my_ads(
+                "Charcadet", listing_ids_before_deposit=frozenset(), timeout_sec=20.0
+            )
         )
         is None
     )
@@ -214,9 +262,7 @@ def test_failed_lookup_keeps_the_ad_published(monkeypatch: pytest.MonkeyPatch) -
     async def signal_deposit() -> None:
         signalled_deposits.append(True)
 
-    async def broken_lookup(
-        _cls: type, _title: str, *, timeout_sec: float = 60.0
-    ) -> str | None:
+    async def broken_lookup(_cls: type, _title: str, **_options: object) -> str | None:
         raise RuntimeError("CDP perdu")
 
     monkeypatch.setattr(
@@ -225,9 +271,35 @@ def test_failed_lookup_keeps_the_ad_published(monkeypatch: pytest.MonkeyPatch) -
 
     listing_id = asyncio.run(
         leboncoin_publish_service._signal_deposit_and_find_listing_id(
-            "Charcadet", None, signal_deposit
+            "Charcadet", None, signal_deposit, listing_ids_before_deposit=frozenset()
         )
     )
 
     assert listing_id is None
+    assert signalled_deposits == [True]
+
+
+def test_listing_link_is_not_searched_without_the_ads_read_before_the_deposit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signalled_deposits: list[bool] = []
+    lookups: list[str] = []
+
+    async def signal_deposit() -> None:
+        signalled_deposits.append(True)
+
+    async def lookup(_cls: type, title: str, **_options: object) -> str | None:
+        lookups.append(title)
+        return OTHER_COPY_LISTING_ID
+
+    monkeypatch.setattr(LeboncoinService, "find_listing_id_in_my_ads", classmethod(lookup))
+
+    listing_id = asyncio.run(
+        leboncoin_publish_service._signal_deposit_and_find_listing_id(
+            "Charcadet", None, signal_deposit, listing_ids_before_deposit=None
+        )
+    )
+
+    assert listing_id is None
+    assert lookups == []
     assert signalled_deposits == [True]

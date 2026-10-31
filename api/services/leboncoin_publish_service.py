@@ -36,10 +36,14 @@ async def _emit(progress: ProgressFn | None, step: str, message: str, *, form_st
 
 
 async def _signal_deposit_and_find_listing_id(
-    title: str, progress: ProgressFn | None, on_deposited: DepositedFn | None
+    title: str,
+    progress: ProgressFn | None,
+    on_deposited: DepositedFn | None,
+    *,
+    listing_ids_before_deposit: frozenset[str] | None,
 ) -> str | None:
     """
-    Signale le dépôt puis cherche le lien de l'annonce dans « Mes annonces », sans jamais faire échouer la publication.
+    Signale le dépôt puis, si « Mes annonces » a été relevée avant, y cherche le lien de l'annonce, sans jamais faire échouer la publication.
 
     Returns:
         L'identifiant de l'annonce, ou None quand Leboncoin ne l'y affiche pas encore.
@@ -48,8 +52,11 @@ async def _signal_deposit_and_find_listing_id(
     try:
         if on_deposited is not None:
             await on_deposited()
-        await _emit(progress, "listing_link", "Annonce déposée — récupération de son lien dans « Mes annonces »…")
-        listing_id = await LeboncoinService.find_listing_id_in_my_ads(title)
+        if listing_ids_before_deposit is not None:
+            await _emit(progress, "listing_link", "Annonce déposée — récupération de son lien dans « Mes annonces »…")
+            listing_id = await LeboncoinService.find_listing_id_in_my_ads(
+                title, listing_ids_before_deposit=listing_ids_before_deposit
+            )
     except Exception:
         logger.warning("Leboncoin listing lookup failed", exc_info=True)
     if listing_id:
@@ -113,8 +120,10 @@ async def publish_article_to_leboncoin(
             await _emit(progress, "browser", "Ouverture de Chrome (profil Leboncoin)…", form_step="browser_start")
             await LeboncoinService.init_browser()
             browser_started = True
-            await LeboncoinService.init_page()
+            await LeboncoinService.init_page("about:blank")
             await TimerService.wait(100)
+            await _emit(progress, "my_ads", "Relevé de vos annonces Leboncoin portant déjà ce titre…")
+            listing_ids_before_deposit = await LeboncoinService.read_listing_ids_with_title_in_my_ads(title)
 
             result = await LeboncoinService.publish_pokemon_listing(
                 title=title,
@@ -136,7 +145,9 @@ async def publish_article_to_leboncoin(
                 }
             listing_id = result.get("listing_id")
             if not listing_id:
-                listing_id = await _signal_deposit_and_find_listing_id(title, progress, on_deposited)
+                listing_id = await _signal_deposit_and_find_listing_id(
+                    title, progress, on_deposited, listing_ids_before_deposit=listing_ids_before_deposit
+                )
             return {
                 "published": True,
                 "detail": "published",

@@ -55,6 +55,8 @@ class FakeAsyncClient:
         return None
 
     async def get(self, url: str, **_options: object) -> FakeResponse:
+        if url.endswith("/articles"):
+            return FakeResponse(list(self.articles.values()))  # type: ignore[arg-type]
         return FakeResponse(self.articles[int(url.rsplit("/", 1)[-1])])
 
 
@@ -63,6 +65,7 @@ class FakeLeboncoin:
         self.browser_opened = 0
         self.browser_closed = 0
         self.deleted: list[tuple[str | None, str]] = []
+        self.other_articles_listing_ids: list[frozenset[str]] = []
         self.reports: list[tuple[str, dict[str, Any]]] = []
         errors = deletion_errors or {}
 
@@ -75,10 +78,13 @@ class FakeLeboncoin:
         def close_browser() -> None:
             self.browser_closed += 1
 
-        async def delete_listing(listing_id: str | None, title: str) -> bool:
+        async def delete_listing(
+            listing_id: str | None, title: str, *, other_articles_listing_ids: frozenset[str] = frozenset()
+        ) -> bool:
             if listing_id in errors:
                 raise RuntimeError(errors[listing_id])
             self.deleted.append((listing_id, title))
+            self.other_articles_listing_ids.append(other_articles_listing_ids)
             return True
 
         async def post_confirmation(url: str, _headers: dict[str, str], payload: dict[str, Any]) -> None:
@@ -142,6 +148,41 @@ def test_article_without_leboncoin_listing_never_opens_chrome(monkeypatch: pytes
     assert outcomes == [{"article_id": 80, "delisted": True, "detail": "Déjà retirée de Leboncoin."}]
     assert leboncoin.browser_opened == 0
     assert leboncoin.reports == []
+
+
+def test_listing_without_id_is_searched_without_the_other_copy_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    leboncoin = FakeLeboncoin(monkeypatch)
+    FakeAsyncClient.articles = {
+        80: article_payload(80, leboncoin_listing_id=None),
+        81: article_payload(81, leboncoin_listing_id="3278047139"),
+    }
+
+    run_removal([80])
+
+    assert leboncoin.deleted == [(None, "Charbambin / Charcadet m2 083/080 AR")]
+    assert leboncoin.other_articles_listing_ids == [frozenset({"3278047139"})]
+    assert leboncoin.reports == [("/articles/80/confirm-leboncoin-unlist", {})]
+
+
+def test_other_copy_on_sale_without_listing_id_blocks_the_removal_before_chrome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leboncoin = FakeLeboncoin(monkeypatch)
+    FakeAsyncClient.articles = {
+        80: article_payload(80, leboncoin_listing_id=None),
+        81: article_payload(81, leboncoin_listing_id=None),
+    }
+
+    outcomes = run_removal([80])
+
+    detail = (
+        "L’article #81, encore en vente, porte le même titre sur Leboncoin : "
+        "supprimez la bonne annonce depuis « Mes annonces »."
+    )
+    assert outcomes == [{"article_id": 80, "delisted": False, "detail": detail}]
+    assert leboncoin.browser_opened == 0
+    assert leboncoin.deleted == []
+    assert leboncoin.reports == [("/articles/80/fail-leboncoin-cross-removal", {"detail": detail})]
 
 
 class FakeMyAdsTab:
@@ -301,7 +342,9 @@ def fake_listing_missing_from_my_ads(monkeypatch: pytest.MonkeyPatch, *, is_stil
     async def no_cookie_banner(_tab: object, timeout_sec: float = 0.0) -> None:
         return None
 
-    async def not_in_my_ads(_tab: object, _listing_id: str | None, _title: str) -> bool:
+    async def not_in_my_ads(
+        _tab: object, _listing_id: str | None, _title: str, _other_articles_listing_ids: frozenset[str]
+    ) -> bool:
         return False
 
     async def public_page(_tab: object, _listing_id: str) -> bool:
