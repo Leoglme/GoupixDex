@@ -217,7 +217,7 @@
       </div>
     </div>
 
-    <GoupixDexBinderPickerModal
+    <GoupixDexBinderPickerDrawer
       v-model:open="pickerOpen"
       v-model:query="pickerQ"
       v-model:set-filter="pickerSet"

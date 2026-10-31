@@ -1,7 +1,13 @@
 <template>
-  <GoupixDexDialogModal v-model:open="open" title="Ranger une carte" :description="placeLabel" width-class="max-w-2xl">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div class="relative min-w-0 flex-1">
+  <GoupixDexAppDrawer
+    :open="open"
+    title="Ranger une carte"
+    :subtitle="placeLabel"
+    icon="i-lucide-book-open"
+    @close="open = false"
+  >
+    <div class="flex flex-col gap-2">
+      <div class="relative">
         <UIcon
           name="i-lucide-search"
           class="text-muted pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
@@ -17,12 +23,7 @@
           @keydown.escape.stop
         />
       </div>
-      <select
-        v-if="setOptions.length > 1"
-        v-model="setFilter"
-        class="app-input shrink-0 sm:max-w-[13rem]"
-        aria-label="Extension"
-      >
+      <select v-if="setOptions.length > 1" v-model="setFilter" class="app-input" aria-label="Extension">
         <option value="">Toutes les extensions</option>
         <option v-for="s in setOptions" :key="s" :value="s">{{ s }}</option>
       </select>
@@ -36,7 +37,7 @@
       Résultats collection + catalogue officiel.
     </p>
 
-    <div class="mt-4 max-h-[min(52vh,26rem)] overflow-y-auto pr-0.5">
+    <div class="mt-4">
       <p v-if="showEmptyHint" class="text-muted py-6 text-center text-sm leading-relaxed">
         Tape au moins {{ catalogMinQuery }} caractères pour chercher dans le catalogue Pokémon, ou ajoute des cartes
         depuis
@@ -46,7 +47,7 @@
         .
       </p>
       <p v-else-if="results.length === 0" class="text-muted py-6 text-center text-sm">Aucune carte ne correspond.</p>
-      <ul v-else class="grid grid-cols-3 gap-3 sm:grid-cols-4">
+      <ul v-else class="grid grid-cols-3 gap-3">
         <li v-for="c in results" :key="pickerItemKey(c)">
           <button type="button" class="group/c block w-full cursor-pointer text-left" @click="$emit('pick', c)">
             <div
@@ -82,7 +83,7 @@
         {{ maxResults }} cartes affichées — affine la recherche pour en voir d'autres.
       </p>
     </div>
-  </GoupixDexDialogModal>
+  </GoupixDexAppDrawer>
 </template>
 
 <script setup lang="ts">
