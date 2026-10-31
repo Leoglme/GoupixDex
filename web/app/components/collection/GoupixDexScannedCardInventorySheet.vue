@@ -225,9 +225,9 @@ const marketplacesToPublish: ComputedRef<Marketplace[]> = computed((): Marketpla
 )
 
 const saleSteps: ComputedRef<ScannedCardSaleStep[]> = computed((): ScannedCardSaleStep[] => [
-  collectionSaleStep(),
-  articleSaleStep(),
-  onlineSaleStep(),
+  buildCollectionSaleStep(),
+  buildArticleSaleStep(),
+  buildOnlineSaleStep(),
 ])
 
 const nextSaleAction: ComputedRef<ScannedCardSaleActionButton | null> = computed(
@@ -321,7 +321,7 @@ function isLinkedArticleOnline(article: ScannedCardLinkedArticle, marketplace: M
  * Première ligne de la fiche : la carte est-elle dans ma collection, et en combien d'exemplaires.
  * @returns {ScannedCardSaleStep} Ligne « collection ».
  */
-function collectionSaleStep(): ScannedCardSaleStep {
+function buildCollectionSaleStep(): ScannedCardSaleStep {
   if (ownedQuantity.value > 0) {
     return {
       name: 'collection',
@@ -338,7 +338,7 @@ function collectionSaleStep(): ScannedCardSaleStep {
  * Deuxième ligne : l'article de la carte, retiré de la vente ou non ; bloquée tant que la carte n'est pas dans la collection.
  * @returns {ScannedCardSaleStep} Ligne « article ».
  */
-function articleSaleStep(): ScannedCardSaleStep {
+function buildArticleSaleStep(): ScannedCardSaleStep {
   const article: ScannedCardLinkedArticle | null = linkedArticle.value
   if (ownedQuantity.value === 0) {
     return { name: 'article', status: 'blocked', label: 'Pas d’article', detail: null, marketplaces: [] }
@@ -359,7 +359,7 @@ function articleSaleStep(): ScannedCardSaleStep {
  * Troisième ligne : où l'article est en ligne, avec l'icône de chaque marketplace ; bloquée tant qu'il n'y a pas d'article.
  * @returns {ScannedCardSaleStep} Ligne « en ligne ».
  */
-function onlineSaleStep(): ScannedCardSaleStep {
+function buildOnlineSaleStep(): ScannedCardSaleStep {
   const article: ScannedCardLinkedArticle | null = linkedArticle.value
   const marketplaces: ScannedCardSaleStepMarketplace[] = MARKETPLACES.map(
     (marketplace: Marketplace): ScannedCardSaleStepMarketplace => ({

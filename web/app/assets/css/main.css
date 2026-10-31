@@ -116,7 +116,7 @@ html.dark {
   --ui-info: var(--app-blue);
 }
 
-/* Hauteur laissée libre en bas des pages et des toasts sous GoupixDexMobileTabBar. */
+/* Hauteur laissée libre en bas des pages sous GoupixDexMobileTabBar. */
 :root {
   --app-tab-bar-offset: 0px;
 }
