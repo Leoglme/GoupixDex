@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -53,14 +53,25 @@ from services.vinted_batch_background_service import VintedBatchBackgroundServic
 router = APIRouter(prefix="/articles", tags=["articles"])
 
 
-def _parse_decimal(value: str | None) -> Decimal | None:
+def _parse_decimal(value: str | None, field_label: str) -> Decimal | None:
+    """Montant facultatif du formulaire, ``None`` si le champ est vide."""
     if value is None or str(value).strip() == "":
         return None
-    return Decimal(str(value).strip())
+    return _parse_decimal_required(value, field_label)
 
 
-def _parse_decimal_required(value: str) -> Decimal:
-    return Decimal(str(value).strip())
+def _parse_decimal_required(value: str, field_label: str) -> Decimal:
+    """Montant tapé dans le formulaire, espaces et virgule décimale compris (« 1 234,50 ») ; refus 400 qui nomme le champ si ce n'est pas un nombre."""
+    try:
+        amount = Decimal("".join(str(value).split()).replace(",", "."))
+    except InvalidOperation:
+        amount = None
+    if amount is None or not amount.is_finite():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_label} invalide : « {str(value).strip()} ».",
+        )
+    return amount
 
 
 def _parse_optional_order_line_id(raw: str | None) -> int | None:
@@ -807,8 +818,8 @@ async def create_article(
     if sold_flag and sold_at_dt is None:
         sold_at_dt = dt.datetime.now(dt.UTC)
 
-    sell_dec = _parse_decimal(sell_price)
-    proceeds_dec = _parse_decimal(sold_price) if sold_flag and sold_price else None
+    sell_dec = _parse_decimal(sell_price, "Prix de vente")
+    proceeds_dec = _parse_decimal(sold_price, "Montant encaissé") if sold_flag and sold_price else None
     if sold_flag and proceeds_dec is None:
         proceeds_dec = sell_dec
 
@@ -844,7 +855,7 @@ async def create_article(
         graded_grader_value_id=grader_vid,
         graded_grade_value_id=grade_vid,
         graded_cert_number=cert_norm,
-        purchase_price=_parse_decimal_required(purchase_price),
+        purchase_price=_parse_decimal_required(purchase_price, "Prix d'achat"),
         sell_price=sell_dec,
         sold_price=proceeds_dec if sold_flag else None,
         sale_source=sale_src,
