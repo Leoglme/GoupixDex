@@ -454,7 +454,7 @@ def prepare_article_prefill(
         "card_number": row.card_number,
         "rarity": row.rarity or "",
     }
-    title, description = build_title_and_description(ocr_like, card_info)
+    title, description = build_title_and_description(ocr_like, card_info, physical_language=row.language)
     if row.card_name_ja and row.card_name_ja not in {row.card_name_en, row.card_name_fr}:
         description = f"{description}\nNom (JPN) : {row.card_name_ja}"
 

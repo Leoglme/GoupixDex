@@ -268,7 +268,7 @@ def _preview_payload(
         "card_number": number_pw,
         "rarity": rarity,
     }
-    title, description = build_title_and_description(ocr, card_info)
+    title, description = build_title_and_description(ocr, card_info, physical_language=browse_locale)
     if name_ja:
         j = str(name_ja).strip()
         if j and j != name_en and j != name_fr:

@@ -65,6 +65,7 @@ _CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]")
 #: letters code therefore rules out a Japanese print even when the vision model
 #: "helpfully" returns the Japanese species name for an English card.
 _INTERNATIONAL_SET_CODE_RE = re.compile(r"^[A-Za-z]{2,5}$")
+_LISTING_LANGUAGE_LABELS: dict[str, str] = {"ja": "Japonais", "fr": "Français"}
 
 
 def detect_physical_language_from_ocr(ocr: dict[str, Any]) -> str:
@@ -96,8 +97,11 @@ def detect_physical_language_from_ocr(ocr: dict[str, Any]) -> str:
     return "fr"
 
 
-def _listing_language_label(ocr: GroqVisionCardCollectorResult) -> str:
-    """Return ``Français`` when the printed name matches the French dex name, else ``Japonais``."""
+def _listing_language_label(ocr: GroqVisionCardCollectorResult, physical_language: str | None = None) -> str:
+    """Langue de la carte physique quand elle est connue (japonais, français), sinon ``Français`` si le nom imprimé est le nom français, ``Japonais`` sinon."""
+    known_label = _LISTING_LANGUAGE_LABELS.get(physical_language or "")
+    if known_label is not None:
+        return known_label
     fr = (ocr.get("pokemon_name_french") or "").strip()
     printed = (ocr.get("pokemon_name") or "").strip()
     if fr and printed and fr == printed:
@@ -109,9 +113,14 @@ def build_title_and_description(
     ocr: GroqVisionCardCollectorResult,
     card_info: dict[str, Any] | None,
     condition_label: str = "Near Mint",
+    *,
+    physical_language: str | None = None,
 ) -> tuple[str, str]:
     """
     Build a marketplace title and French description from OCR + optional PokéWallet card payload.
+
+    ``physical_language`` (collection, catalog) names the card's language: the display name of a Japanese card is
+    written in Latin letters, so the printed name can no longer tell it apart from a French card.
 
     Title pattern (nullable fields omitted or shortened as needed)::
 
@@ -130,7 +139,7 @@ def build_title_and_description(
     variant = (ocr.get("card_variant_label") or "").strip()
 
     rarity = (ci.get("rarity") or ocr.get("rarity_english") or "").strip()
-    lang_label = _listing_language_label(ocr)
+    lang_label = _listing_language_label(ocr, physical_language)
 
     # Title: "Fr / En" only when both exist and they are genuinely different species labels.
     if name_fr and name_en:
