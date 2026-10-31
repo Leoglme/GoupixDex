@@ -23,6 +23,7 @@ export type ScannedCardSaleStep = {
   label: string
   detail: string | null
   marketplaces: ScannedCardSaleStepMarketplace[]
+  canOpenArticleEditor: boolean
 }
 
 export type ScannedCardSaleAction = 'add-to-collection' | 'put-online' | 'publish'

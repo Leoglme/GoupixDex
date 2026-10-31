@@ -35,46 +35,60 @@
     </div>
 
     <ul v-if="props.scannedCard.preview" class="mt-3.5 space-y-0.5">
-      <li v-for="saleStep in saleSteps" :key="saleStep.name" class="flex h-10 items-center gap-3">
-        <span
-          class="flex size-7 shrink-0 items-center justify-center rounded-full"
-          :class="{
-            'bg-emerald-400/20 text-emerald-300': saleStep.status === 'done',
-            'border-2 border-(--app-accent)': saleStep.status === 'todo',
-            'border-2 border-dashed border-white/25': saleStep.status === 'blocked',
-            'bg-(--app-accent)/20 text-(--app-accent)': saleStep.status === 'in-progress',
-          }"
+      <li v-for="saleStep in saleSteps" :key="saleStep.name">
+        <component
+          :is="saleStep.canOpenArticleEditor ? 'button' : 'div'"
+          :type="saleStep.canOpenArticleEditor ? 'button' : undefined"
+          :aria-label="saleStep.canOpenArticleEditor ? `Modifier l’${saleStep.label.toLowerCase()}` : undefined"
+          class="flex h-10 items-center gap-3 text-left"
+          :class="
+            saleStep.canOpenArticleEditor
+              ? '-mx-2 w-[calc(100%+1rem)] cursor-pointer rounded-xl px-2 transition-colors active:bg-white/10'
+              : 'w-full'
+          "
+          @click="onSaleStepClick(saleStep)"
         >
-          <UIcon v-if="saleStep.status === 'done'" name="i-lucide-check" class="size-4" />
-          <span v-else-if="saleStep.status === 'todo'" class="size-2 rounded-full bg-(--app-accent)" />
-          <UIcon
-            v-else-if="saleStep.status === 'in-progress'"
-            name="i-lucide-loader-circle"
-            class="size-4 animate-spin"
-          />
-        </span>
-        <span
-          class="min-w-0 flex-1 truncate text-base"
-          :class="{
-            'font-bold': saleStep.status === 'todo',
-            'font-semibold': saleStep.status !== 'todo',
-            'text-white/40': saleStep.status === 'blocked',
-          }"
-        >
-          {{ saleStep.label }}
-        </span>
-        <span v-if="saleStep.detail" class="shrink-0 text-sm font-semibold text-white/60 tabular-nums">
-          {{ saleStep.detail }}
-        </span>
-        <span v-if="saleStep.marketplaces.length" class="flex shrink-0 gap-1.5">
-          <GoupixDexMarketplaceAppIcon
-            v-for="stepMarketplace in saleStep.marketplaces"
-            :key="stepMarketplace.marketplace"
-            :marketplace="stepMarketplace.marketplace"
-            :is-greyed-out="!stepMarketplace.isOnline && !stepMarketplace.isPublishing"
-            :class="{ 'opacity-50': stepMarketplace.isPublishing }"
-          />
-        </span>
+          <span
+            class="flex size-7 shrink-0 items-center justify-center rounded-full"
+            :class="{
+              'bg-emerald-400/20 text-emerald-300': saleStep.status === 'done',
+              'border-2 border-(--app-accent)': saleStep.status === 'todo',
+              'border-2 border-dashed border-white/25': saleStep.status === 'blocked',
+              'bg-(--app-accent)/20 text-(--app-accent)': saleStep.status === 'in-progress',
+            }"
+          >
+            <UIcon v-if="saleStep.status === 'done'" name="i-lucide-check" class="size-4" />
+            <span v-else-if="saleStep.status === 'todo'" class="size-2 rounded-full bg-(--app-accent)" />
+            <UIcon
+              v-else-if="saleStep.status === 'in-progress'"
+              name="i-lucide-loader-circle"
+              class="size-4 animate-spin"
+            />
+          </span>
+          <span
+            class="min-w-0 flex-1 truncate text-base"
+            :class="{
+              'font-bold': saleStep.status === 'todo',
+              'font-semibold': saleStep.status !== 'todo',
+              'text-white/40': saleStep.status === 'blocked',
+            }"
+          >
+            {{ saleStep.label }}
+          </span>
+          <span v-if="saleStep.detail" class="shrink-0 text-sm font-semibold text-white/60 tabular-nums">
+            {{ saleStep.detail }}
+          </span>
+          <span v-if="saleStep.marketplaces.length" class="flex shrink-0 gap-1.5">
+            <GoupixDexMarketplaceAppIcon
+              v-for="stepMarketplace in saleStep.marketplaces"
+              :key="stepMarketplace.marketplace"
+              :marketplace="stepMarketplace.marketplace"
+              :is-greyed-out="!stepMarketplace.isOnline && !stepMarketplace.isPublishing"
+              :class="{ 'opacity-50': stepMarketplace.isPublishing }"
+            />
+          </span>
+          <UIcon v-if="saleStep.canOpenArticleEditor" name="i-lucide-pencil" class="size-4 shrink-0 text-white/50" />
+        </component>
       </li>
     </ul>
     <div v-else-if="props.scannedCard.isPreviewLoading" class="mt-3.5 space-y-2">
@@ -179,6 +193,7 @@ const emit = defineEmits<{
   addToCollection: []
   putOnline: []
   publish: [marketplaces: Marketplace[]]
+  editArticle: []
   undo: []
   close: []
 }>()
@@ -197,6 +212,12 @@ const PUT_ONLINE_BUTTON: ScannedCardSaleActionButton = {
   icon: 'i-lucide-camera',
   marketplaces: [],
 }
+
+const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 2,
+})
 
 const cardName: ComputedRef<string> = computed((): string => scannedCardName(props.scannedCard))
 
@@ -329,29 +350,54 @@ function buildCollectionSaleStep(): ScannedCardSaleStep {
       label: 'Dans ma collection',
       detail: `×${ownedQuantity.value}`,
       marketplaces: [],
+      canOpenArticleEditor: false,
     }
   }
-  return { name: 'collection', status: 'todo', label: 'Pas dans ma collection', detail: null, marketplaces: [] }
+  return {
+    name: 'collection',
+    status: 'todo',
+    label: 'Pas dans ma collection',
+    detail: null,
+    marketplaces: [],
+    canOpenArticleEditor: false,
+  }
 }
 
 /**
- * Deuxième ligne : l'article de la carte, retiré de la vente ou non ; bloquée tant que la carte n'est pas dans la collection.
- * @returns {ScannedCardSaleStep} Ligne « article ».
+ * Deuxième ligne : l'article de la carte, son prix de vente et s'il est retiré de la vente ; bloquée tant que la carte n'est pas dans la collection.
+ * @returns {ScannedCardSaleStep} Ligne « article », qui ouvre sa modification quand l'article existe.
  */
 function buildArticleSaleStep(): ScannedCardSaleStep {
   const article: ScannedCardLinkedArticle | null = linkedArticle.value
   if (ownedQuantity.value === 0) {
-    return { name: 'article', status: 'blocked', label: 'Pas d’article', detail: null, marketplaces: [] }
+    return {
+      name: 'article',
+      status: 'blocked',
+      label: 'Pas d’article',
+      detail: null,
+      marketplaces: [],
+      canOpenArticleEditor: false,
+    }
   }
   if (!article) {
-    return { name: 'article', status: 'todo', label: 'Pas encore d’article', detail: null, marketplaces: [] }
+    return {
+      name: 'article',
+      status: 'todo',
+      label: 'Pas encore d’article',
+      detail: null,
+      marketplaces: [],
+      canOpenArticleEditor: false,
+    }
   }
+  const sellPriceLabel: string | null = article.sell_price != null ? eur.format(article.sell_price) : null
+  const withdrawnLabel: string | null = article.offers_for_sale ? null : 'retiré'
   return {
     name: 'article',
     status: 'done',
     label: `Article #${article.id}`,
-    detail: article.offers_for_sale ? null : 'retiré',
+    detail: [sellPriceLabel, withdrawnLabel].filter(Boolean).join(' · ') || null,
     marketplaces: [],
+    canOpenArticleEditor: true,
   }
 }
 
@@ -368,24 +414,37 @@ function buildOnlineSaleStep(): ScannedCardSaleStep {
       isPublishing: article !== null && props.publishingMarketplaces.includes(marketplace),
     }),
   )
-  if (!article) {
-    return { name: 'online', status: 'blocked', label: 'Pas en ligne', detail: null, marketplaces }
-  }
-  if (props.publishingMarketplaces.length) {
-    return { name: 'online', status: 'in-progress', label: 'Publication en cours…', detail: null, marketplaces }
-  }
-  if (!marketplacesNotOnline.value.length) {
-    return { name: 'online', status: 'done', label: 'En ligne partout', detail: null, marketplaces }
-  }
-  if (marketplacesNotOnline.value.length === MARKETPLACES.length) {
-    return { name: 'online', status: 'todo', label: 'En ligne nulle part', detail: null, marketplaces }
-  }
-  return {
+  const onlineSaleStep: ScannedCardSaleStep = {
     name: 'online',
     status: 'todo',
     label: `Pas sur ${marketplaceNamesLabel(marketplacesNotOnline.value)}`,
     detail: null,
     marketplaces,
+    canOpenArticleEditor: false,
+  }
+  if (!article) {
+    return { ...onlineSaleStep, status: 'blocked', label: 'Pas en ligne' }
+  }
+  if (props.publishingMarketplaces.length) {
+    return { ...onlineSaleStep, status: 'in-progress', label: 'Publication en cours…' }
+  }
+  if (!marketplacesNotOnline.value.length) {
+    return { ...onlineSaleStep, status: 'done', label: 'En ligne partout' }
+  }
+  if (marketplacesNotOnline.value.length === MARKETPLACES.length) {
+    return { ...onlineSaleStep, label: 'En ligne nulle part' }
+  }
+  return onlineSaleStep
+}
+
+/**
+ * Ouvre la modification de l'article quand on touche sa ligne (prix de vente, titre, description).
+ * @param {ScannedCardSaleStep} saleStep - Ligne touchée.
+ * @returns {void}
+ */
+function onSaleStepClick(saleStep: ScannedCardSaleStep): void {
+  if (saleStep.canOpenArticleEditor) {
+    emit('editArticle')
   }
 }
 

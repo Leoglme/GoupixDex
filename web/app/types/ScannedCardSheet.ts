@@ -5,6 +5,7 @@ import type { ScanMatchDecision } from '~/types/ScanMatch'
 
 export type ScannedCardLinkedArticle = {
   id: number
+  sell_price: number | null
   offers_for_sale: boolean
   published_on_vinted: boolean
   published_on_ebay: boolean

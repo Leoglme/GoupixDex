@@ -134,12 +134,13 @@ def test_preview_shows_where_the_article_of_an_owned_copy_is_online(
 ) -> None:
     monkeypatch.setattr(scan_stream_service, "fetch_card_for_collection", lambda **_: _card_meta())
     card = _collection_card(db, language="fr", quantity=1)
-    article = _put_on_sale(db, card, published_on_vinted=True, published_on_ebay=True)
+    article = _put_on_sale(db, card, sell_price=Decimal("2.40"), published_on_vinted=True, published_on_ebay=True)
 
     preview = scan_stream_service.build_scanned_card_preview(db, 1, "me02-107", "fr")
 
     assert preview["linked_article"] == {
         "id": article.id,
+        "sell_price": 2.4,
         "offers_for_sale": True,
         "published_on_vinted": True,
         "published_on_ebay": True,

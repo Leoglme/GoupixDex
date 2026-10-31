@@ -240,6 +240,7 @@
                 @add-to-collection="confirmScannedCardAction"
                 @put-online="openListingWizardForScannedCard"
                 @publish="publishScannedCardArticle"
+                @edit-article="openArticleEditDrawer"
                 @undo="onUndoLastScannedCardAdd"
                 @close="dismissScannedCard"
               />
@@ -389,6 +390,7 @@
                     @add-to-collection="confirmScannedCardAction"
                     @put-online="openListingWizardForScannedCard"
                     @publish="publishScannedCardArticle"
+                    @edit-article="openArticleEditDrawer"
                     @undo="onUndoLastScannedCardAdd"
                     @close="dismissScannedCard"
                   />
@@ -412,6 +414,13 @@
             :marketplaces-to-publish-on-create="marketplacesToPublishOnCreate"
             @close="closeListingWizard"
             @created="onListingWizardArticleCreated"
+          />
+
+          <GoupixDexArticleEditDrawer
+            :open="isArticleEditDrawerOpen"
+            :article-id="editedArticleId"
+            @close="closeArticleEditDrawer"
+            @updated="reloadScannedCardPreview"
           />
 
           <Teleport to="body">
@@ -671,6 +680,8 @@ const { queueArticlePublication, publishingMarketplacesOfArticle }: ArticlePubli
 const listingWizardCard: Ref<CollectionCard | null> = ref(null)
 const isListingWizardOpen: Ref<boolean> = ref(false)
 const isOpeningListingWizard: Ref<boolean> = ref(false)
+const editedArticleId: Ref<number | null> = ref(null)
+const isArticleEditDrawerOpen: Ref<boolean> = ref(false)
 
 const scannedCardPublishingMarketplaces: ComputedRef<Marketplace[]> = computed((): Marketplace[] => {
   const articleId: number | undefined = scannedCard.value?.preview?.linked_article?.id
@@ -751,6 +762,29 @@ async function onListingWizardArticleCreated(article: Article, marketplacesToPub
     toast.add({ title: 'Article créé', color: 'success' })
   }
   await reloadScannedCardPreview()
+}
+
+/**
+ * Ouvre la modification de l'article de la carte affichée (prix de vente, titre, description), caméra coupée.
+ * @returns {void}
+ */
+function openArticleEditDrawer(): void {
+  const articleId: number | undefined = scannedCard.value?.preview?.linked_article?.id
+  if (articleId === undefined) {
+    return
+  }
+  editedArticleId.value = articleId
+  stopWebcam()
+  isArticleEditDrawerOpen.value = true
+}
+
+/**
+ * Ferme la modification de l'article et rouvre la caméra pour enchaîner sur la carte suivante.
+ * @returns {void}
+ */
+function closeArticleEditDrawer(): void {
+  isArticleEditDrawerOpen.value = false
+  startWebcam(true)
 }
 
 /**

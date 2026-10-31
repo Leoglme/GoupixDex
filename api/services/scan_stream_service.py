@@ -216,6 +216,7 @@ def _owned_copies_sale_state(
         if linked_article is None
         else {
             "id": linked_article.id,
+            "sell_price": float(linked_article.sell_price) if linked_article.sell_price is not None else None,
             "offers_for_sale": bool(linked_article.offers_for_sale),
             "published_on_vinted": bool(linked_article.published_on_vinted),
             "published_on_ebay": bool(linked_article.published_on_ebay),
