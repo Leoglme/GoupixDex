@@ -41,6 +41,8 @@
           </template>
         </GoupixDexPageTabs>
 
+        <GoupixDexListingsLeftOnlineBanner />
+
         <div v-if="loading && !payload" class="flex justify-center py-16">
           <UIcon name="i-lucide-loader-2" class="text-primary size-8 animate-spin" />
         </div>

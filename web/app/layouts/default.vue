@@ -109,6 +109,7 @@ import type { AppSidebarNavGroup } from '~/types/AppNavigation'
 import { useDesktopRelay } from '~/composables/useDesktopRelay'
 import { useDesktopRelayAgent } from '~/composables/useDesktopRelayAgent'
 import { useDesktopWorkers } from '~/composables/useDesktopWorkers'
+import { useSoldArticleListingsRemoval } from '~/composables/useSoldArticleListingsRemoval'
 
 useDashboard()
 
@@ -117,6 +118,7 @@ const open: Ref<boolean> = ref(false)
 const { open: openPalette } = useCommandPalette()
 const { isDesktopApp, restartLocalWorkers, syncDevDatabaseFromProd } = useDesktopRuntime()
 const { startDesktopRelayAgent, stopDesktopRelayAgent } = useDesktopRelayAgent()
+const { startMissedListingRemovalsCatchUp, stopMissedListingRemovalsCatchUp } = useSoldArticleListingsRemoval()
 const { connectDesktopRelay, disconnectDesktopRelay } = useDesktopRelay()
 const { canUseDesktopWorkers } = useDesktopWorkers()
 const toast = useToast()
@@ -274,6 +276,7 @@ onMounted((): void => {
   }, 1500)
   if (isDesktopApp.value) {
     startDesktopRelayAgent()
+    startMissedListingRemovalsCatchUp()
   } else {
     connectDesktopRelay()
   }
@@ -281,6 +284,7 @@ onMounted((): void => {
 
 onBeforeUnmount((): void => {
   stopDesktopRelayAgent()
+  stopMissedListingRemovalsCatchUp()
   disconnectDesktopRelay()
 })
 </script>
