@@ -37,6 +37,7 @@ export interface BinderPocketItem {
   set_name?: string | null
   local_id?: string | null
   tcgdex_card_id?: string | null
+  language?: string | null
   image_url: string
   quantity: number
   position: number | null

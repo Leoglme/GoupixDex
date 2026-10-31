@@ -63,6 +63,7 @@ def _pocket_item_dict(item: BinderItem) -> dict[str, Any]:
         "set_name": card.set_name if card else None,
         "local_id": card.card_number if card else None,
         "tcgdex_card_id": card.tcgdex_card_id if card else None,
+        "language": card.language if card else None,
         "image_url": card.image_url if card else "",
         "quantity": int(card.quantity) if card else 1,
         "position": item.position,

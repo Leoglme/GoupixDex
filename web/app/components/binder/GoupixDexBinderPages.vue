@@ -233,6 +233,7 @@
 </template>
 
 <script setup lang="ts">
+import type { ComputedRef } from 'vue'
 import type { BinderCandidateItem, BinderDetail, BinderPocketItem } from '~/types/binders'
 import { binderColorHex } from '~/utils/binder/binder-colors'
 import {
@@ -248,7 +249,7 @@ import {
   type PointerState,
 } from '~/composables/useBinderPages'
 import { buildBinderPickerResults, CATALOG_MIN_QUERY } from '~/composables/useBinderPickerResults'
-import type { CatalogSearchCardHit } from '~/composables/useCardCatalog'
+import type { CatalogLocale, CatalogSearchCardHit } from '~/composables/useCardCatalog'
 import type { BinderPickerItem } from '~/types/binderPicker'
 import type { CoverItem } from '~/components/binder/GoupixDexBinderCover.vue'
 import { binderStyle } from '~/utils/binder/binder-styles'
@@ -340,6 +341,19 @@ const toast = useToast()
 const drawerStack = useGoupixDrawerStack()
 const catalogHits = ref<CatalogSearchCardHit[]>([])
 const catalogSearching = ref(false)
+const binderCatalogLocale: ComputedRef<CatalogLocale> = computed((): CatalogLocale => {
+  const countByLocale: Record<CatalogLocale, number> = { fr: 0, en: 0, ja: 0 }
+  for (const item of props.binder.items) {
+    if (item.language === 'fr' || item.language === 'en' || item.language === 'ja') {
+      countByLocale[item.language] += 1
+    }
+  }
+  const locales: CatalogLocale[] = ['fr', 'ja', 'en']
+  return locales.reduce(
+    (mostUsed: CatalogLocale, locale: CatalogLocale): CatalogLocale =>
+      countByLocale[locale] > countByLocale[mostUsed] ? locale : mostUsed,
+  )
+})
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null
 let catalogSearchAbort: AbortController | null = null
 
@@ -487,7 +501,7 @@ watch(pickerQ, (q) => {
     catalogSearchAbort?.abort()
     const controller = new AbortController()
     catalogSearchAbort = controller
-    void searchCatalogCards('fr', trimmed)
+    void searchCatalogCards(binderCatalogLocale.value, trimmed)
       .then((res) => {
         if (!controller.signal.aborted) catalogHits.value = res.cards
       })
@@ -567,7 +581,12 @@ async function place(c: BinderPickerItem) {
     const before = ov.value
     try {
       if (occupant) await bindersApi.removeFromPocket(props.binder.id, occupant.id)
-      const detail = await bindersApi.placeCatalogInPocket(props.binder.id, c.tcgdex_card_id, pocket, 'fr')
+      const detail = await bindersApi.placeCatalogInPocket(
+        props.binder.id,
+        c.tcgdex_card_id,
+        pocket,
+        binderCatalogLocale.value,
+      )
       await refresh(detail)
     } catch {
       ov.value = before

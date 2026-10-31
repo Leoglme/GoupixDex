@@ -14,16 +14,18 @@ Adds two cross-cutting concerns the legacy ``catalog_route`` had to repeat:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import threading
 import time
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from typing import Any, cast
 
 import httpx
 
-from services.card_image_fallback_service import fallback_card_images
+from services.card_image_fallback_service import CardImageUrls, fallback_card_images
 from services.catalog_external_cards_service import external_set_cards
 from services.catalog_set_logos import enrich_browse_series_tree, enrich_set_visuals_row
 from services.tcgdex_asset_url import (
@@ -39,11 +41,18 @@ from services.catalog_limitless_ja_service import (
     latin_display_name_for_ja_set,
     limitless_jp_set_names_by_code,
 )
+from services.species_locale_names_service import fetch_species_names_by_dex
 from services.tcgdex_client_service import SUPPORTED_LOCALES, TcgdexClientService, TcgdexUnavailableError
+
+logger = logging.getLogger(__name__)
 
 _CACHE_TTL_SEC = 600.0
 _CACHE_VERSION = "latin-labels-v9"
 _CACHE_TTL_BROWSE_SEC = 3600.0
+_BROWSE_WARM_EVERY_SEC = 45 * 60
+_BROWSE_WARM_STARTUP_DELAY_SEC = 60.0
+_SPECIES_SEARCH_MAX_CARDS = 60
+_SEARCH_FALLBACK_IMAGES_BUDGET_SEC = 8.0
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _GLUED_NUMBER_RE = re.compile(r"(?<=[a-z\u00e0-\u00ff]{3})(?=\d)")
 
@@ -565,18 +574,19 @@ def _keep_series_row(row: dict[str, Any]) -> bool:
     return "pocket" not in name.lower()
 
 
-def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
+def browse_catalog_for_ui(locale: str, *, refresh: bool = False) -> list[dict[str, Any]]:
     """
     All TCGdex series with nested sets (newest first), same shape as TailTCG ``catalogSeries``.
 
-    Fetches each series detail in parallel; heavily cached for browsing sessions.
+    Fetches each series detail in parallel; heavily cached for browsing sessions. ``refresh`` rebuilds the
+    tree even while it is still cached.
 
     Raises:
         TcgdexUnavailableError: TCGdex est tombé ; un arbre incomplet ne doit jamais être mis en cache ni publié.
     """
     loc = _ensure_locale(locale)
     cache_key = f"browse:{_CACHE_VERSION}:{loc}"
-    cached = _cache.get(cache_key)
+    cached = None if refresh else _cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -643,6 +653,21 @@ def browse_catalog_for_ui(locale: str) -> list[dict[str, Any]]:
     details = _merge_subset_rows(details, loc)
     _cache.set(cache_key, details, ttl_seconds=_CACHE_TTL_BROWSE_SEC)
     return details
+
+
+async def keep_browse_catalog_warm_async() -> None:
+    """
+    Recalcule en tâche de fond l'arbre du catalogue de chaque langue avant la fin de son cache : à froid il prend
+    plus d'une minute, au-delà du délai du proxy, et la page « Ajouter » restait sur l'index statique, en retard.
+    """
+    await asyncio.sleep(_BROWSE_WARM_STARTUP_DELAY_SEC)
+    while True:
+        for locale in sorted(SUPPORTED_LOCALES):
+            try:
+                await asyncio.to_thread(browse_catalog_for_ui, locale, refresh=True)
+            except Exception:
+                logger.warning("Catalog browse warm-up failed for %s", locale, exc_info=True)
+        await asyncio.sleep(_BROWSE_WARM_EVERY_SEC)
 
 
 def _fill_covers_from_fallback_images(series_details: list[dict[str, Any]], loc: str) -> None:
@@ -767,8 +792,94 @@ def _merge_subset_rows(series_details: list[dict[str, Any]], loc: str) -> list[d
     return merged
 
 
+def _tcgdex_card_rows(locale: str, params: dict[str, str]) -> list[dict[str, Any]]:
+    """Cartes TCGdex d'une langue filtrées par ``params`` (nom, numéro, n° Pokédex…), vides si TCGdex ne répond pas."""
+    try:
+        resp = httpx.get(
+            f"{_client()._base}/{locale}/cards",  # noqa: SLF001 — shared TCGdex root
+            params=params,
+            headers={"Accept": "application/json", "User-Agent": "GoupixDex/1.0 (+catalog)"},
+            timeout=30.0,
+        )
+    except httpx.HTTPError:
+        return []
+    if not resp.is_success:
+        return []
+    raw = resp.json()
+    if not isinstance(raw, list):
+        return []
+    return [dict(row) for row in raw if isinstance(row, dict)]
+
+
+def _dex_number_for_latin_name(name: str) -> int | None:
+    """N° Pokédex du Pokémon nommé en lettres latines (« Sulfura », « Moltres »), lu sur une de ses cartes FR ou EN."""
+    for loc in ("fr", "en"):
+        for row in _tcgdex_card_rows(loc, {"name": f"like:{name}", "pagination:page": "1", "pagination:itemsPerPage": "5"}):
+            card_id = row.get("id")
+            if not isinstance(card_id, str):
+                continue
+            try:
+                dex_ids = _client().get_card(loc, card_id).get("dexId")
+            except (RuntimeError, ValueError):
+                continue
+            dex = next((d for d in dex_ids or [] if isinstance(d, int) and d > 0), None)
+            if dex is not None:
+                return dex
+    return None
+
+
+def _attach_fallback_images(rows: list[dict[str, Any]], loc: str) -> None:
+    """
+    Vignette de repli (``image_low``) des cartes sans scan TCGdex, lue set par set comme sur les pages d'extension.
+    Les sets encore en cours après ``_SEARCH_FALLBACK_IMAGES_BUDGET_SEC`` restent sans vignette pour cette recherche.
+    """
+    set_ids = sorted(
+        {_set_id_from_card_id(row["id"]) for row in rows if not row.get("image") and isinstance(row.get("id"), str)}
+    )
+    if not set_ids:
+        return
+
+    def _set_images(set_id: str) -> tuple[str, dict[str, CardImageUrls]]:
+        try:
+            return set_id, fallback_card_images(loc, dict(_client().get_set(loc, set_id)))
+        except (RuntimeError, ValueError):
+            return set_id, {}
+
+    pool = ThreadPoolExecutor(max_workers=8)
+    done, _ = wait([pool.submit(_set_images, set_id) for set_id in set_ids], timeout=_SEARCH_FALLBACK_IMAGES_BUDGET_SEC)
+    pool.shutdown(wait=False, cancel_futures=True)
+    images_by_set = dict(future.result() for future in done)
+    for row in rows:
+        card_id = row.get("id")
+        if row.get("image") or not isinstance(card_id, str):
+            continue
+        urls = images_by_set.get(_set_id_from_card_id(card_id), {}).get(str(row.get("localId")))
+        if urls is not None:
+            row["image_low"] = urls.low
+
+
+def _japanese_species_rows(name: str, local_id_part: str | None) -> list[dict[str, Any]]:
+    """
+    Cartes japonaises du Pokémon nommé en lettres latines : TCGdex ne connaît en ``ja`` que les noms japonais, la
+    recherche passe donc par le n° Pokédex, et chaque carte prend le nom français de l'espèce.
+    """
+    dex = _dex_number_for_latin_name(name)
+    if dex is None:
+        return []
+    params = {"dexId": str(dex), "pagination:page": "1", "pagination:itemsPerPage": str(_SPECIES_SEARCH_MAX_CARDS)}
+    if local_id_part:
+        params["localId"] = f"like:{local_id_part}"
+    rows = _tcgdex_card_rows("ja", params)
+    french_name = fetch_species_names_by_dex(dex)[0]
+    if french_name:
+        for row in rows:
+            row["display_name"] = french_name
+    _attach_fallback_images(rows, "ja")
+    return rows
+
+
 def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
-    """Card search by name (and optional trailing number), TailTCG-style."""
+    """Card search by name (and optional trailing number), TailTCG-style; a Latin name searched in Japanese goes through its Pokédex number."""
     loc = _ensure_locale(locale)
     q = query.strip()
     if len(q) < 2:
@@ -785,19 +896,7 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
 
     base = _client()._base  # noqa: SLF001 — shared TCGdex root
     headers = {"Accept": "application/json", "User-Agent": "GoupixDex/1.0 (+catalog)"}
-
-    def _fetch(params: dict[str, str]) -> list[dict[str, Any]]:
-        url = f"{base}/{loc}/cards"
-        try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=30.0)
-        except httpx.HTTPError:
-            return []
-        if not resp.is_success:
-            return []
-        raw = resp.json()
-        if not isinstance(raw, list):
-            return []
-        return [dict(row) for row in raw if isinstance(row, dict)]
+    is_species_search = loc == "ja" and bool(name_part) and not _is_japanese_script(name_part)
 
     params: dict[str, str] = {
         "pagination:page": "1",
@@ -811,8 +910,8 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
     else:
         params["name"] = f"like:{name_part or q}"
 
-    rows = _fetch(params)
-    if not rows and name_part and " " in name_part:
+    rows = _japanese_species_rows(name_part, local_id_part) if is_species_search else _tcgdex_card_rows(loc, params)
+    if not rows and not is_species_search and name_part and " " in name_part:
         first = name_part.split()[0]
         params = {
             "pagination:page": "1",
@@ -821,7 +920,7 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
         }
         if local_id_part:
             params["localId"] = f"like:{local_id_part}"
-        rows = _fetch(params)
+        rows = _tcgdex_card_rows(loc, params)
 
     set_name_by_id: dict[str, str] = {}
     name_locale = "fr" if loc == "ja" else loc
@@ -837,7 +936,7 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
         pass
 
     fr_card_labels: dict[tuple[str, str], str] = {}
-    if loc == "ja":
+    if loc == "ja" and not is_species_search:
         try:
             fr_url = f"{base}/fr/cards"
             fr_resp = httpx.get(
@@ -878,7 +977,7 @@ def search_cards_for_ui(locale: str, query: str) -> list[dict[str, Any]]:
             fr_label = fr_card_labels.get(label_key) if label_key else None
             if fr_label:
                 row["display_name"] = fr_label
-            else:
+            elif not row.get("display_name"):
                 _attach_display_name(row, None)
         else:
             _attach_display_name(row, None)

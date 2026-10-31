@@ -87,6 +87,8 @@ class AppSettings(BaseSettings):
     cardmarket_refresh_hour_local: int = Field(default=4, ge=0, le=23)
     #: Set ``false`` to disable the in-process nightly refresh loop (e.g. one-shot scripts).
     cardmarket_nightly_refresh_enabled: bool = True
+    #: Garde en cache l'arbre du catalogue de chaque langue (page « Ajouter » de la collection), recalculé en tâche de fond.
+    catalog_browse_warm_enabled: bool = True
     #: Calcule chaque nuit les empreintes des cartes que l'index de scan livré avec le site ne connaît pas.
     scan_phash_refresh_enabled: bool = True
     #: Heure locale (Europe/Paris) de ce calcul.
