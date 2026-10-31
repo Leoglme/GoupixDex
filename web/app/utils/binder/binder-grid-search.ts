@@ -4,8 +4,8 @@ import { KANTO_DEX_NAMES, KANTO_DEX_NAMES_EN } from '~/utils/pokedex/kanto-dex'
 import { normalizeSearchQuery } from '~/utils/searchNormalize'
 
 export interface BinderGridSearchEntry {
-  /** Rang dans le classeur (1 = première pochette). */
-  rank: number
+  /** Rang de la carte dans le classeur, sans les pochettes vides (n° Pokédex en mode complétion). */
+  rank: number | null
   /** Numéro imprimé de la carte (`064`, `TG05`…), si connu. */
   cardNumber: string | null
   /** Noms déjà normalisés sur lesquels chercher (carte + Pokémon en FR et EN). */

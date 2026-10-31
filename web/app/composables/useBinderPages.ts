@@ -201,6 +201,16 @@ export function useBinderPagesState(
     return ps.length === 2 ? `${ps[0] + 1}–${ps[1] + 1}` : `${ps[0] + 1}`
   }
 
+  /**
+   * Vue (page simple ou double page) qui montre une pochette.
+   * @param {number} pocket - Pochette du classeur (0 = première).
+   * @returns {number} Indice de la vue à ouvrir.
+   */
+  function viewOfPocket(pocket: number): number {
+    const page = Math.floor(pocket / perPage.value)
+    return perView.value === 1 ? page : Math.floor((page + 1) / 2)
+  }
+
   const nav = ref<{ view: number; dir: Dir | null }>({ view: 0, dir: null })
   const view = computed(() => Math.min(nav.value.view, totalViews.value - 1))
   const visible = computed(() => pagesOf(view.value))
@@ -347,6 +357,7 @@ export function useBinderPagesState(
     totalViews,
     pagesOf,
     labelOf,
+    viewOfPocket,
     nav,
     view,
     visible,

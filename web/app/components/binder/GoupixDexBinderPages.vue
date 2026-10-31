@@ -290,6 +290,7 @@ const {
   totalPages,
   totalViews,
   labelOf,
+  viewOfPocket,
   view,
   visible,
   go,
@@ -541,6 +542,7 @@ function onCardDetail(item: BinderPocketItem): void {
  */
 function handlePocketPickerRequest(request: GoupixPocketPickerRequest | null): void {
   if (request && request.binderId === props.binder.id) {
+    openTo(viewOfPocket(request.position))
     openPicker(request.position)
     drawerStack.pocketPickerRequest.value = null
   }
@@ -554,11 +556,6 @@ function openPicker(pocket: number) {
   pickerSet.value = ''
 }
 
-function advancePicker(fromPocket: number) {
-  const next = firstFreeIn(view.value, fromPocket) ?? firstFreeIn(view.value)
-  picker.value = next
-}
-
 async function place(c: BinderPickerItem) {
   const pocket = picker.value
   if (pocket == null) return
@@ -566,7 +563,7 @@ async function place(c: BinderPickerItem) {
 
   if (c.source === 'catalog') {
     const occupant = byPocket.value.get(pocket)
-    advancePicker(pocket)
+    picker.value = null
     const before = ov.value
     try {
       if (occupant) await bindersApi.removeFromPocket(props.binder.id, occupant.id)
@@ -581,12 +578,12 @@ async function place(c: BinderPickerItem) {
 
   const key = `i:${c.collection_card_id}`
   if (pockets.value.has(key)) {
-    advancePicker(pocket)
+    picker.value = null
     await commitMove(key, pocket)
     return
   }
   const occupant = byPocket.value.get(pocket)
-  advancePicker(pocket)
+  picker.value = null
   const before = ov.value
   patchOv(
     [[key, pocket]],

@@ -144,10 +144,26 @@
         </div>
         <div class="grid grid-cols-2 gap-2">
           <UFormField label="Prix d'achat (€)" hint="plus-value">
-            <UInput v-model="purchaseText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
+            <UInput
+              v-model="purchaseText"
+              type="text"
+              inputmode="decimal"
+              placeholder="—"
+              class="w-full"
+              @blur="saveChangedDetails"
+              @keydown.enter="leaveField"
+            />
           </UFormField>
           <UFormField label="Prix marché au scan (€)">
-            <UInput v-model="scanMarketText" type="text" inputmode="decimal" placeholder="—" class="w-full" />
+            <UInput
+              v-model="scanMarketText"
+              type="text"
+              inputmode="decimal"
+              placeholder="—"
+              class="w-full"
+              @blur="saveChangedDetails"
+              @keydown.enter="leaveField"
+            />
           </UFormField>
         </div>
         <div class="flex items-end gap-2">
@@ -156,7 +172,15 @@
             :hint="card.market_price_overridden ? 'saisi à la main' : 'corrige un prix erroné'"
             class="flex-1"
           >
-            <UInput v-model="marketText" type="text" inputmode="decimal" placeholder="Auto" class="w-full" />
+            <UInput
+              v-model="marketText"
+              type="text"
+              inputmode="decimal"
+              placeholder="Auto"
+              class="w-full"
+              @blur="saveChangedDetails"
+              @keydown.enter="leaveField"
+            />
           </UFormField>
           <UButton
             v-if="card.market_price_overridden"
@@ -172,19 +196,9 @@
           </UButton>
         </div>
         <UFormField label="Notes">
-          <UTextarea v-model="notesDraft" :rows="2" class="w-full" />
+          <UTextarea v-model="notesDraft" :rows="2" class="w-full" @blur="saveChangedDetails" />
         </UFormField>
         <div class="flex flex-wrap items-center gap-2">
-          <UButton
-            color="primary"
-            variant="soft"
-            icon="i-lucide-save"
-            :loading="savingDraft"
-            :disabled="!isDirty"
-            @click="onSaveDraft"
-          >
-            Enregistrer
-          </UButton>
           <UButton color="error" variant="ghost" icon="i-lucide-trash-2" :loading="deleting" @click="onDelete">
             Retirer
           </UButton>
@@ -247,7 +261,6 @@ const toast = useToast()
 const card = ref<CollectionCard | null>(null)
 const priceHistory = ref<GoupixPriceHistoryResponse | null>(null)
 const loading = ref(true)
-const savingDraft = ref(false)
 const deleting = ref(false)
 const resettingPrice = ref(false)
 const isListingWizardOpen: Ref<boolean> = ref(false)
@@ -266,6 +279,11 @@ const notesDraft = ref('')
 const purchaseText = ref('')
 const scanMarketText = ref('')
 const marketText = ref('')
+
+const QUANTITY_SAVE_DELAY_MS: number = 600
+let quantitySaveTimer: ReturnType<typeof setTimeout> | null = null
+let isSavingDetails: boolean = false
+let hasDetailsChangedDuringSave: boolean = false
 
 const eur: Intl.NumberFormat = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
@@ -418,16 +436,21 @@ async function onPlaceInBinder(binderSlot: FillableBinderSlot): Promise<void> {
 }
 
 /**
- * Enregistre les modifications de la fiche.
- * @returns Résolue après enregistrement.
+ * Enregistre les détails modifiés de la carte, quand un champ est quitté ou que la quantité ou la langue change.
+ * @returns {Promise<void>} Résolue après l'enregistrement, ou l'échec affiché.
  */
-async function onSaveDraft(): Promise<void> {
-  if (!card.value) {
+async function saveChangedDetails(): Promise<void> {
+  if (!card.value || !isDirty.value) {
     return
   }
-  savingDraft.value = true
+  if (isSavingDetails) {
+    hasDetailsChangedDuringSave = true
+    return
+  }
+
+  isSavingDetails = true
   try {
-    const updated = await patchCollectionCard(card.value.id, {
+    const updated: CollectionCard = await patchCollectionCard(card.value.id, {
       quantity: quantityDraft.value,
       language: languageDraft.value,
       notes: notesDraft.value.trim() || null,
@@ -437,15 +460,43 @@ async function onSaveDraft(): Promise<void> {
       ...(isMarketPriceDirty.value ? { market_price_eur: parseEuroAmount(marketText.value) } : {}),
     })
     card.value = updated
-    syncDrafts(updated)
     emit('updated', updated)
     toast.add({ title: 'Carte mise à jour', color: 'success' })
     loadFillableBinderSlots()
   } catch (e) {
     toast.add({ title: 'Mise à jour impossible', description: apiErrorMessage(e), color: 'error' })
   } finally {
-    savingDraft.value = false
+    isSavingDetails = false
+    if (hasDetailsChangedDuringSave) {
+      hasDetailsChangedDuringSave = false
+      void saveChangedDetails()
+    }
   }
+}
+
+/**
+ * Quitte le champ sur Entrée, ce qui l'enregistre.
+ * @param {KeyboardEvent} event - Appui sur Entrée dans le champ.
+ * @returns {void}
+ */
+function leaveField(event: KeyboardEvent): void {
+  if (event.target instanceof HTMLElement) {
+    event.target.blur()
+  }
+}
+
+/**
+ * Enregistre la quantité une fois les appuis sur − / + terminés.
+ * @returns {void}
+ */
+function scheduleQuantitySave(): void {
+  if (quantitySaveTimer !== null) {
+    clearTimeout(quantitySaveTimer)
+  }
+  quantitySaveTimer = setTimeout((): void => {
+    quantitySaveTimer = null
+    void saveChangedDetails()
+  }, QUANTITY_SAVE_DELAY_MS)
 }
 
 /**
@@ -524,9 +575,23 @@ async function onListingArticleCreated(article: Article): Promise<void> {
 
 watch(
   () => props.cardId,
-  () => {
+  async (): Promise<void> => {
+    await saveChangedDetails()
     void load()
   },
   { immediate: true },
 )
+
+watch(quantityDraft, scheduleQuantitySave)
+
+watch(languageDraft, (): void => {
+  void saveChangedDetails()
+})
+
+onBeforeUnmount((): void => {
+  if (quantitySaveTimer !== null) {
+    clearTimeout(quantitySaveTimer)
+  }
+  void saveChangedDetails()
+})
 </script>

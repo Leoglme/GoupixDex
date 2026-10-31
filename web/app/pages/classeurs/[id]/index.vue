@@ -268,7 +268,9 @@
                   :fallback-src="cell.dex?.artworkUrl ?? null"
                 />
                 <GoupixDexBinderPokedexPlaceholder v-else-if="cell.dex" :placeholder="cell.dex" />
-                <span v-if="isGridSearching" class="tile-badge num top-1.5 left-1.5">n°{{ cell.rank }}</span>
+                <span v-if="isGridSearching && cell.dex" class="tile-badge num top-1.5 left-1.5">
+                  n°{{ cell.dex.dexNumber }}
+                </span>
                 <span v-if="cell.item && cell.item.quantity > 1" class="tile-badge num top-1.5 right-1.5">
                   ×{{ cell.item.quantity }}
                 </span>
@@ -398,8 +400,6 @@ interface CompletionCell {
   key: string
   item: BinderPocketItem | null
   dex: PokedexPlaceholder | null
-  /** Rang de la pochette dans le classeur (1 = première). */
-  rank: number
 }
 
 interface GridItemCell {
@@ -434,7 +434,6 @@ const completionCells = computed<CompletionCell[]>(() => {
       key: item ? item.id : `ph-${position}`,
       item,
       dex: dexNumber ? pokedexPlaceholder(dexNumber) : null,
-      rank: position + 1,
     })
   }
   return cells
@@ -449,13 +448,13 @@ const noResultClass = 'text-muted py-12 text-center text-sm'
  * Index de recherche d'une pochette.
  * @param {BinderPocketItem | null} item - Carte rangée, ou `null` pour une pochette Pokédex vide.
  * @param {PokedexPlaceholder | null} dex - Pokémon attendu dans la pochette (mode complétion).
- * @param {number} rank - Rang de la pochette dans le classeur.
+ * @param {number | null} rank - Rang de la carte sans les pochettes vides (n° Pokédex en mode complétion).
  * @returns {BinderGridSearchEntry} Entrée prête pour `matchesBinderGridSearch`.
  */
 function gridSearchEntry(
   item: BinderPocketItem | null,
   dex: PokedexPlaceholder | null,
-  rank: number,
+  rank: number | null,
 ): BinderGridSearchEntry {
   return {
     rank,
@@ -465,12 +464,15 @@ function gridSearchEntry(
 }
 
 const completionSearchIndex = computed<{ cell: CompletionCell; entry: BinderGridSearchEntry }[]>(() =>
-  completionCells.value.map((cell) => ({ cell, entry: gridSearchEntry(cell.item, cell.dex, cell.rank) })),
+  completionCells.value.map((cell) => ({
+    cell,
+    entry: gridSearchEntry(cell.item, cell.dex, cell.dex?.dexNumber ?? null),
+  })),
 )
 
 const gridItemsSearchIndex = computed<{ cell: GridItemCell; entry: BinderGridSearchEntry }[]>(() =>
   gridItems.value.map((item, index) => {
-    const rank = item.position != null && item.position >= 0 ? item.position + 1 : index + 1
+    const rank = index + 1
     return { cell: { item, rank }, entry: gridSearchEntry(item, null, rank) }
   }),
 )
