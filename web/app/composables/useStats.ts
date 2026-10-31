@@ -2,21 +2,24 @@ import type { Marketplace } from '~/types/Marketplace'
 
 export type DashboardPeriod = 'daily' | 'weekly' | 'monthly'
 
-export interface DashboardRange {
+export type DashboardRange = {
   start: Date
   end: Date
 }
 
-export interface RevenueTimelinePoint {
+export type SalesTimelinePoint = {
   /** ISO datetime of the bucket start */
   date: string
   revenue_eur: number
+  profit_eur: number
+  sales_count: number
 }
 
-export interface RecentSaleRow {
+export type SaleRow = {
   article_id: number
   title: string
   pokemon_name: string | null
+  image_url: string | null
   sold_at: string | null
   /** Listed asking price on the listing. */
   listing_price_eur: number | null
@@ -27,67 +30,62 @@ export interface RecentSaleRow {
   sale_source: Marketplace | null
   purchase_price_eur: number
   profit_eur: number
+  hours_to_sell: number | null
 }
 
-export interface ChannelSplit {
-  vinted_count: number
-  ebay_count: number
-  leboncoin_count: number
-  vinted_revenue_eur: number
-  ebay_revenue_eur: number
-  leboncoin_revenue_eur: number
+export type InventoryArticleRow = {
+  article_id: number
+  title: string
+  pokemon_name: string | null
+  image_url: string | null
+  created_at: string | null
+  sell_price_eur: number | null
 }
 
-export interface DashboardStats {
+export type ChannelSales = {
+  sale_source: Marketplace
+  revenue_eur: number
+  profit_eur: number
+  sales_count: number
+}
+
+export type DashboardPreviousPeriod = {
+  start: string
+  end: string
+  revenue_eur: number
+  profit_eur: number
+  sales_count: number
+}
+
+export type DashboardStats = {
   range: {
     start: string
     end: string
     period: DashboardPeriod
   }
-  /** Profit over the selected range. */
-  profit_period_eur: number
   /** Sales revenue over the selected range. */
   revenue_period_eur: number
+  /** Profit over the selected range. */
+  profit_period_eur: number
   /** Number of sales over the selected range. */
   period_sales_count: number
-  profit_total_eur: number
-  /** All-time sales revenue (kept for legacy callers). */
-  vinted_revenue_eur: number
-  /** Vinted / eBay / Leboncoin breakdown over the selected range. */
-  channel_split_period: ChannelSplit
-  /** Vinted / eBay / Leboncoin breakdown across all time. */
-  channel_split_total: ChannelSplit
+  median_hours_to_sell: number | null
+  previous_period: DashboardPreviousPeriod | null
+  sales_by_channel: ChannelSales[]
+  sales_timeline: SalesTimelinePoint[]
+  recent_sales: SaleRow[]
+  top_profitable: SaleRow[]
+  fastest_sold: SaleRow[]
   inventory_count: number
   inventory_purchase_total_eur: number
   inventory_sell_total_eur: number
   /** Sum of (sell_price - purchase_price) for unsold articles with a price. */
   inventory_estimated_profit_eur: number
-  estimated_cardmarket_inventory_eur: number | null
-  estimated_cardmarket_unsold_eur: number | null
-  market_lookup_errors: number
-  revenue_timeline: RevenueTimelinePoint[]
-  recent_sales: RecentSaleRow[]
-  top_profitable: Array<{
-    article_id: number
-    title: string
-    pokemon_name: string | null
-    profit_eur: number
-  }>
-  fastest_sold: Array<{
-    article_id: number
-    title: string
-    pokemon_name: string | null
-    hours_to_sell: number
-  }>
-}
-
-export interface FetchDashboardOptions {
-  range?: DashboardRange
-  period?: DashboardPeriod
+  inventory_longest_listed: InventoryArticleRow[]
 }
 
 export interface SoldSalesResponse {
-  sales: RecentSaleRow[]
+  sales: SaleRow[]
   count: number
   revenue_eur: number
   profit_eur: number
@@ -112,25 +110,22 @@ function toIsoDate(date: Date): string {
 /**
  * Dashboard aggregates (`GET /stats/dashboard`).
  *
- * @returns `fetchDashboard` with optional range and timeline bucket size.
+ * @returns `fetchDashboard` for the selected range and `fetchSoldSales`.
  */
 export function useStats() {
   const { $api } = useNuxtApp()
 
   /**
-   * Load dashboard KPIs for the selected window.
+   * Charge les ventes de la période et le stock en vente, découpés selon le fuseau horaire du navigateur.
    *
-   * @param options - Optional custom range and aggregation period for the revenue timeline.
+   * @param range - Période choisie dans le tableau de bord.
    * @returns {Promise<DashboardStats>} Full dashboard payload from the API.
    */
-  async function fetchDashboard(options: FetchDashboardOptions = {}) {
-    const params: Record<string, string> = {}
-    if (options.range) {
-      params.start = toIsoDate(options.range.start)
-      params.end = toIsoDate(options.range.end)
-    }
-    if (options.period) {
-      params.period = options.period
+  async function fetchDashboard(range: DashboardRange): Promise<DashboardStats> {
+    const params: Record<string, string> = {
+      start: toIsoDate(range.start),
+      end: toIsoDate(range.end),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
     const { data } = await $api.get<DashboardStats>('/stats/dashboard', { params })
     return data

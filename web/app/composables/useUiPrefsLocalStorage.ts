@@ -3,6 +3,8 @@
  */
 
 import type { DashboardRange } from '~/composables/useStats'
+import type { DashboardRangePresetId } from '~/utils/dashboardRange'
+import { DASHBOARD_RANGE_PRESET_IDS, dashboardRangeForPreset } from '~/utils/dashboardRange'
 
 const ARTICLES_LIST_KEY = 'goupix_articles_list_prefs'
 const DASHBOARD_KEY = 'goupix_dashboard_prefs'
@@ -128,16 +130,22 @@ export function saveArticleListPrefs(prefs: Partial<ArticleListPrefs>): void {
   }
 }
 
-export interface DashboardPrefsPersisted {
-  range: { startIso: string; endIso: string }
+export type DashboardPrefsPersisted = {
+  preset?: DashboardRangePresetId
+  range?: DashboardSavedRange
+}
+
+export type DashboardSavedRange = {
+  startIso: string
+  endIso: string
 }
 
 /**
- * Load persisted dashboard date range / period / market-toggle prefs.
+ * Load persisted dashboard period prefs (one-click period or calendar dates).
  *
- * @returns {Partial<DashboardPrefsPersisted> | null} Parsed prefs, or `null` when absent or invalid.
+ * @returns {DashboardPrefsPersisted | null} Parsed prefs, or `null` when absent or invalid.
  */
-export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
+function loadDashboardPrefs(): DashboardPrefsPersisted | null {
   if (!import.meta.client) {
     return null
   }
@@ -147,7 +155,14 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
       return null
     }
     const p = JSON.parse(raw) as Record<string, unknown>
-    const out: Partial<DashboardPrefsPersisted> = {}
+    const out: DashboardPrefsPersisted = {}
+    const savedPreset: DashboardRangePresetId | undefined = DASHBOARD_RANGE_PRESET_IDS.find(
+      (preset: DashboardRangePresetId): boolean => preset === p.preset,
+    )
+
+    if (savedPreset) {
+      out.preset = savedPreset
+    }
     if (
       p.range &&
       typeof p.range === 'object' &&
@@ -167,22 +182,20 @@ export function loadDashboardPrefs(): Partial<DashboardPrefsPersisted> | null {
 }
 
 /**
- * Persist dashboard UI preferences (range as ISO strings).
+ * Persist the dashboard period: the one-click period when there is one, otherwise the calendar dates.
  *
- * @param prefs - Selected date range for dashboard KPIs.
+ * @param range - Dates shown on the dashboard.
+ * @param preset - One-click period matching these dates, or null for calendar dates.
  * @returns {void} Nothing.
  */
-export function saveDashboardPrefs(prefs: { range: DashboardRange }): void {
+export function saveDashboardPrefs(range: DashboardRange, preset: DashboardRangePresetId | null): void {
   if (!import.meta.client) {
     return
   }
   try {
-    const payload: DashboardPrefsPersisted = {
-      range: {
-        startIso: prefs.range.start.toISOString(),
-        endIso: prefs.range.end.toISOString(),
-      },
-    }
+    const payload: DashboardPrefsPersisted = preset
+      ? { preset }
+      : { range: { startIso: range.start.toISOString(), endIso: range.end.toISOString() } }
     localStorage.setItem(DASHBOARD_KEY, JSON.stringify(payload))
   } catch {
     /* */
@@ -195,11 +208,25 @@ export function saveDashboardPrefs(prefs: { range: DashboardRange }): void {
  * @param p - Stored `{ startIso, endIso }` payload.
  * @returns {DashboardRange | null} Valid inclusive range, or `null` if dates are invalid.
  */
-export function dashboardPrefsToRange(p: DashboardPrefsPersisted['range']): DashboardRange | null {
+function dashboardPrefsToRange(p: DashboardSavedRange): DashboardRange | null {
   const start = new Date(p.startIso)
   const end = new Date(p.endIso)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return null
   }
   return { start, end }
+}
+
+/**
+ * Période enregistrée du tableau de bord : la période en un clic recalculée jusqu'à aujourd'hui, sinon les dates du calendrier.
+ *
+ * @returns {DashboardRange | null} La période à rouvrir, ou `null` sans préférence valide.
+ */
+export function loadDashboardRange(): DashboardRange | null {
+  const prefs: DashboardPrefsPersisted | null = loadDashboardPrefs()
+
+  if (prefs?.preset) {
+    return dashboardRangeForPreset(prefs.preset)
+  }
+  return prefs?.range ? dashboardPrefsToRange(prefs.range) : null
 }

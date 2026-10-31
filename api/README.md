@@ -242,7 +242,7 @@ It exposes job-style endpoints used by the Nuxt frontend (`useWardrobeLocalSync`
 | POST | `/ebay/onboarding/setup` | Create FR inventory location + business policies |
 | POST | `/ebay/policies/fulfillment/ensure` | Create/update “GoupixDex — Shipping” fulfillment policy |
 | GET | `/ebay/status` \| `/ebay/seller-setup` | Connection state and metadata |
-| GET | `/stats/dashboard` | KPIs, revenue timeline, channel split |
+| GET | `/stats/dashboard` | Sales over the chosen range (KPIs vs previous period, timeline, channels, top lists) and stock for sale |
 | GET | `/pricing/lookup` | Reference prices (local Cardmarket guide first, PokéWallet fallback) |
 | GET | `/pricing/market-status` | Age / size / snapshot date of the local Cardmarket price guide |
 | POST | `/pricing/market-refresh` | Manual guide download + full collection revaluation (also nightly at 4 AM Paris) |

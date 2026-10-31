@@ -1,68 +1,79 @@
 import { differenceInCalendarDays, endOfDay, startOfDay, startOfMonth, startOfWeek, subDays, subMonths } from 'date-fns'
-import type { DashboardPeriod, DashboardRange } from '~/composables/useStats'
+import type { DashboardRange } from '~/composables/useStats'
 
-/** Presets shown next to the calendar on the dashboard (replaces the old chart bucket selector). */
-export type DashboardRangePresetId = 'week' | 'month' | 'days30' | 'months3' | 'all' | 'custom'
+export type DashboardRangePresetId = 'days7' | 'days30' | 'months3' | 'months12' | 'all'
 
-function allTimeRangeStart(): Date {
-  return startOfDay(new Date(2000, 0, 1))
-}
+export type DashboardCalendarShortcutId = 'thisWeek' | 'thisMonth' | 'days14' | 'months6'
 
-/**
- * Bucket granularity for the revenue timeline API and chart axis labels.
- */
-export function chartPeriodForDashboardRange(range: DashboardRange): DashboardPeriod {
-  const days = differenceInCalendarDays(range.end, range.start) + 1
-  if (days <= 45) {
-    return 'daily'
-  }
-  if (days <= 190) {
-    return 'weekly'
-  }
-  return 'monthly'
-}
+export const DASHBOARD_RANGE_PRESET_IDS: DashboardRangePresetId[] = ['days7', 'days30', 'months3', 'months12', 'all']
 
-function normalizeRange(r: DashboardRange): DashboardRange {
-  return { start: startOfDay(r.start), end: endOfDay(r.end) }
-}
+const ALL_TIME_RANGE_START: Date = new Date(2000, 0, 1)
 
 /**
- * Compute date bounds for a dashboard preset (week starts Monday).
+ * Bornes d'une période proposée en un clic : 3 mois = 13 semaines pleines, 12 mois = 12 mois calendaires.
+ * @param {DashboardRangePresetId} preset - Période choisie.
+ * @returns {DashboardRange} Du début du premier jour à la fin d'aujourd'hui, en heure locale.
  */
-export function dashboardRangeForPreset(preset: Exclude<DashboardRangePresetId, 'custom'>): DashboardRange {
-  const now = new Date()
-  const end = endOfDay(now)
+export function dashboardRangeForPreset(preset: DashboardRangePresetId): DashboardRange {
+  const now: Date = new Date()
+  const end: Date = endOfDay(now)
+
   switch (preset) {
-    case 'week':
-      return { start: startOfDay(startOfWeek(now, { weekStartsOn: 1 })), end }
-    case 'month':
-      return { start: startOfDay(startOfMonth(now)), end }
+    case 'days7':
+      return { start: startOfDay(subDays(now, 6)), end }
     case 'days30':
-      return { start: startOfDay(subDays(now, 30)), end }
+      return { start: startOfDay(subDays(now, 29)), end }
     case 'months3':
-      return { start: startOfDay(subMonths(now, 3)), end }
+      return { start: startOfDay(subDays(now, 90)), end }
+    case 'months12':
+      return { start: startOfMonth(subMonths(now, 11)), end }
     case 'all':
-      return { start: allTimeRangeStart(), end }
-    default:
-      return { start: startOfDay(subDays(now, 30)), end }
+      return { start: ALL_TIME_RANGE_START, end }
   }
-}
-
-function rangesMatch(a: DashboardRange, b: DashboardRange): boolean {
-  const x = normalizeRange(a)
-  const y = normalizeRange(b)
-  return differenceInCalendarDays(x.start, y.start) === 0 && differenceInCalendarDays(x.end, y.end) === 0
 }
 
 /**
- * Guess which preset matches the current range, or `custom` after calendar tweaks.
+ * Bornes d'un raccourci du calendrier : semaine depuis lundi, mois en cours, 14 jours ou 26 semaines pleines.
+ * @param {DashboardCalendarShortcutId} shortcut - Raccourci choisi.
+ * @returns {DashboardRange} Du début du premier jour à la fin d'aujourd'hui, en heure locale.
  */
-export function detectDashboardRangePreset(range: DashboardRange): DashboardRangePresetId {
-  const presets: Exclude<DashboardRangePresetId, 'custom'>[] = ['week', 'month', 'days30', 'months3', 'all']
-  for (const id of presets) {
-    if (rangesMatch(range, dashboardRangeForPreset(id))) {
-      return id
-    }
+export function dashboardRangeForCalendarShortcut(shortcut: DashboardCalendarShortcutId): DashboardRange {
+  const now: Date = new Date()
+  const end: Date = endOfDay(now)
+
+  switch (shortcut) {
+    case 'thisWeek':
+      return { start: startOfWeek(now, { weekStartsOn: 1 }), end }
+    case 'thisMonth':
+      return { start: startOfMonth(now), end }
+    case 'days14':
+      return { start: startOfDay(subDays(now, 13)), end }
+    case 'months6':
+      return { start: startOfDay(subDays(now, 181)), end }
   }
-  return 'custom'
+}
+
+/**
+ * Indique si deux périodes couvrent les mêmes jours.
+ * @param {DashboardRange} first - Première période.
+ * @param {DashboardRange} second - Seconde période.
+ * @returns {boolean} Vrai quand les premiers et derniers jours coïncident.
+ */
+export function isSameDashboardRange(first: DashboardRange, second: DashboardRange): boolean {
+  return (
+    differenceInCalendarDays(first.start, second.start) === 0 && differenceInCalendarDays(first.end, second.end) === 0
+  )
+}
+
+/**
+ * Retrouve la période en un clic qui correspond aux dates affichées.
+ * @param {DashboardRange} range - Dates affichées.
+ * @returns {DashboardRangePresetId | null} La période, ou null pour des dates choisies au calendrier.
+ */
+export function detectDashboardRangePreset(range: DashboardRange): DashboardRangePresetId | null {
+  return (
+    DASHBOARD_RANGE_PRESET_IDS.find((preset: DashboardRangePresetId): boolean =>
+      isSameDashboardRange(range, dashboardRangeForPreset(preset)),
+    ) ?? null
+  )
 }

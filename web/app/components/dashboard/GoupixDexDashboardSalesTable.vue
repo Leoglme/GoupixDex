@@ -81,14 +81,14 @@
 </template>
 
 <script setup lang="ts">
-import type { RecentSaleRow } from '~/composables/useStats'
+import type { SaleRow } from '~/composables/useStats'
 import type { Marketplace } from '~/types/Marketplace'
 
 const { openArticleFromClick } = useOpenArticleDrawer()
 
 const props = withDefaults(
   defineProps<{
-    sales: RecentSaleRow[]
+    sales: SaleRow[]
     title?: string
     subtitle?: string
     emptyMessage?: string

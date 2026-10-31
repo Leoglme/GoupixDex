@@ -12,4 +12,6 @@ export type GoupixDexStatsCardProps = {
   icon?: string
   /** Small hint under the value. */
   description?: string
+  trendPercent?: number | null
+  isCompactOnMobile?: boolean
 }

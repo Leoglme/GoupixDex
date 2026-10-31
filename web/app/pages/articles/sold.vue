@@ -77,7 +77,7 @@
           <GoupixDexDashboardSalesTable
             :sales="payload.sales"
             title="Toutes les ventes"
-            subtitle="Même tableau que sur le tableau de bord — accès à la fiche article via la flèche"
+            subtitle="Accès à la fiche article via la flèche"
             :empty-message="emptyTableMessage"
             max-height-class="max-h-[min(70vh,48rem)] overflow-auto"
           />

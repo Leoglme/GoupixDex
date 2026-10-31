@@ -37,3 +37,15 @@ export function formatRelativeHours(hours: number | null | undefined): string {
   const years = Math.round(days / 365)
   return `il y a ${years} an${years > 1 ? 's' : ''}`
 }
+
+/**
+ * Format a duration in hours as a short French label, in hours under a day and in days beyond (« 3 h », « 6 j »).
+ * @param hours - Duration in hours (>= 0).
+ * @returns The rounded label, never under « 1 h ».
+ */
+export function formatDurationHours(hours: number): string {
+  if (hours < 24) {
+    return `${Math.max(1, Math.round(hours))} h`
+  }
+  return `${Math.round(hours / 24)} j`
+}

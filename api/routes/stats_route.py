@@ -29,23 +29,38 @@ def _parse_iso(value: str | None) -> dt.datetime | None:
     return parsed
 
 
+def _parse_range_end(value: str | None) -> dt.datetime | None:
+    """Range end: a bare date (``2026-10-31``) covers that whole day, a datetime is kept as is."""
+    parsed = _parse_iso(value)
+    is_bare_date = value is not None and len(value.strip()) == len("YYYY-MM-DD")
+    if parsed is None or not is_bare_date:
+        return parsed
+    return parsed + dt.timedelta(days=1) - dt.timedelta(microseconds=1)
+
+
 @router.get("/dashboard")
 def dashboard(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     start: str | None = Query(None, description="Range start (ISO date or datetime)."),
     end: str | None = Query(None, description="Range end (ISO date or datetime)."),
-    period: Literal["daily", "weekly", "monthly"] = Query(
-        "daily",
-        description="Bucket size for the revenue timeline.",
+    period: Literal["daily", "weekly", "monthly"] | None = Query(
+        None,
+        description="Bucket size for the revenue timeline; omitted = picked from the range length.",
+    ),
+    timezone: str | None = Query(
+        None,
+        max_length=64,
+        description="Browser IANA time zone (e.g. Europe/Paris) used to cut the timeline into local days and months.",
     ),
 ) -> dict[str, Any]:
     return compute_dashboard_stats(
         db,
         user.id,
         range_start=_parse_iso(start),
-        range_end=_parse_iso(end),
+        range_end=_parse_range_end(end),
         period=period,
+        timezone=timezone,
     )
 
 
