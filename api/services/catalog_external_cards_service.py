@@ -18,6 +18,8 @@ from services.card_image_fallback_service import (
 from services.catalog_limitless_ja_service import LimitlessCard, limitless_jp_cards
 
 _BASIC_ENERGY_TYPE = "Basic Energy"
+#: Sets dont TCGdex attache les images aux mauvaises cartes (M1S : n° 057 à 092) : les images Limitless les remplacent.
+SETS_WITH_SHUFFLED_TCGDEX_IMAGES: frozenset[tuple[str, str]] = frozenset({("ja", "M1S")})
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,14 @@ def external_card(set_id: str, local_id: str) -> ExternalCard | None:
     """
     wanted = _tcgdex_local_id(local_id)
     return next((card for card in external_set_cards(set_id) if card.local_id == wanted), None)
+
+
+def limitless_image_of_shuffled_set(locale: str, set_id: str, local_id: str) -> CardImageUrls | None:
+    """Image Limitless d'une carte d'un set dont TCGdex mélange les images ; ``None`` pour un autre set ou sans image."""
+    if (locale, set_id) not in SETS_WITH_SHUFFLED_TCGDEX_IMAGES:
+        return None
+    card = external_card(set_id, local_id)
+    return card.images if card is not None else None
 
 
 def _missing_english_names(set_id: str, cards: list[LimitlessCard]) -> dict[str, str]:

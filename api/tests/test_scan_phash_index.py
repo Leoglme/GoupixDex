@@ -123,14 +123,14 @@ def _limitless_card(local_id: str) -> ExternalCard:
 
 
 @pytest.fixture
-def shuffled_tcgdex_images(monkeypatch: pytest.MonkeyPatch) -> None:
-    """M6a déclaré comme un set dont TCGdex mélange les images, avec ses scans Limitless."""
-    monkeypatch.setattr(service, "_SETS_WITH_SHUFFLED_TCGDEX_IMAGES", frozenset({("ja", "M6a")}))
+def set_hashed_from_limitless(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M6a déclaré comme un set aux empreintes mélangées, avec ses scans Limitless."""
+    monkeypatch.setattr(service, "_SETS_HASHED_FROM_LIMITLESS", frozenset({("ja", "M6a")}))
     monkeypatch.setattr(service, "external_set_cards", lambda set_id: [_limitless_card("001"), _limitless_card("150")])
 
 
-@pytest.mark.usefixtures("shuffled_tcgdex_images")
-def test_a_set_whose_tcgdex_images_are_shuffled_is_computed_from_limitless(
+@pytest.mark.usefixtures("set_hashed_from_limitless")
+def test_a_set_with_shuffled_hashes_is_computed_from_limitless(
     db: Session, fake_sources: list[str]
 ) -> None:
     service.refresh_scan_phash_cards(db)
@@ -142,8 +142,8 @@ def test_a_set_whose_tcgdex_images_are_shuffled_is_computed_from_limitless(
     assert "https://cdn.example/M6a-150.jpg" not in fake_sources
 
 
-@pytest.mark.usefixtures("shuffled_tcgdex_images")
-def test_a_card_hashed_from_a_shuffled_tcgdex_image_is_computed_again(db: Session, fake_sources: list[str]) -> None:
+@pytest.mark.usefixtures("set_hashed_from_limitless")
+def test_a_card_hashed_from_another_image_is_computed_again_from_limitless(db: Session, fake_sources: list[str]) -> None:
     db.add(
         ScanPhashCard(
             locale="ja",

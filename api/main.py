@@ -71,6 +71,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     from services.cardmarket_order_service import backfill_purchase_prices_async
     from services.catalog_browse_service import keep_browse_catalog_warm_async
+    from services.collection_card_image_repair_service import replace_shuffled_tcgdex_images_async
     from services.japanese_latin_labels_service import relabel_japanese_collection_cards_async
     from services.scan_phash_index_service import scan_phash_refresh_loop_async
 
@@ -80,6 +81,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     background_tasks: list[asyncio.Task[None]] = [
         asyncio.create_task(backfill_purchase_prices_async()),
         asyncio.create_task(relabel_japanese_collection_cards_async()),
+        asyncio.create_task(replace_shuffled_tcgdex_images_async()),
     ]
     if settings.cardmarket_nightly_refresh_enabled:
         background_tasks.append(asyncio.create_task(bootstrap_market_prices_async()))

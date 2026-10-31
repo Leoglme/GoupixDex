@@ -36,7 +36,7 @@ from config import get_settings
 from core.database import SessionLocal
 from models.scan_phash_card import ScanPhashCard
 from services.card_image_fallback_service import CardImageUrls, fallback_card_images
-from services.catalog_external_cards_service import external_set_cards
+from services.catalog_external_cards_service import SETS_WITH_SHUFFLED_TCGDEX_IMAGES, external_set_cards
 from services.market_price_refresh_service import seconds_until_next_run
 from services.tcgdex_client_service import SETS_PER_PAGE_MAX, TcgdexClientService, TcgdexUnavailableError
 
@@ -54,8 +54,8 @@ _STORE_BATCH_SIZE = 300
 _DELTA_CACHE_TTL_SEC = 900.0
 _USER_AGENT = "GoupixDex/1.0 (+scan-index)"
 _POCKET_SERIES_ID = "tcgp"
-#: Sets dont TCGdex, et l'index livré bâti dessus, attache les images aux mauvaises cartes (M1S : n° 057 à 092).
-_SETS_WITH_SHUFFLED_TCGDEX_IMAGES: frozenset[tuple[str, str]] = frozenset({("ja", "M1S")})
+#: Sets aux empreintes fausses dans l'index livré : ceux dont TCGdex mélange les images, et M4 (n° 103 et 120).
+_SETS_HASHED_FROM_LIMITLESS: frozenset[tuple[str, str]] = SETS_WITH_SHUFFLED_TCGDEX_IMAGES | frozenset({("ja", "M4")})
 
 _GRAY_WIDTH = 96
 _GRAY_HEIGHT = 132
@@ -292,7 +292,7 @@ def _fallback_images(locale: str, detail: dict[str, Any]) -> dict[str, CardImage
 
 
 def _limitless_low_images(set_id: str) -> dict[str, str]:
-    """Images Limitless d'un set par numéro (« 070 »), là où TCGdex mélange les siennes ; vides si la source ne répond pas."""
+    """Images Limitless d'un set aux empreintes mélangées, par numéro (« 070 ») ; vides si la source ne répond pas."""
     try:
         return {card.local_id: card.images.low for card in external_set_cards(set_id) if card.images is not None}
     except (RuntimeError, ValueError, httpx.HTTPError) as exc:
@@ -310,8 +310,8 @@ def _pending_cards_for_locale(
 ) -> list[_PendingCard]:
     """
     Cartes d'une langue à calculer, des sets les plus récents aux plus anciens : absentes de l'index livré (ou qu'il
-    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Un set dont
-    TCGdex mélange les images est entièrement calculé depuis Limitless, et recalculé si l'image enregistrée était autre.
+    a sous un autre nom), jamais calculées, ou restées sans image depuis plus de ``_MISSING_IMAGE_RETRY``. Un set aux
+    empreintes mélangées est entièrement calculé depuis Limitless, et recalculé si l'image enregistrée était autre.
     Si TCGdex tombe en route, les sets déjà lus sont gardés ; un set illisible est sauté.
     """
     sets = _list_all_sets_once_tcgdex_answers(client, locale)
@@ -335,7 +335,7 @@ def _pending_cards_for_locale(
         report.sets_read += 1
         fallback_images: dict[str, CardImageUrls] | None = None
         limitless_images: dict[str, str] | None = (
-            _limitless_low_images(set_id) if (locale, set_id) in _SETS_WITH_SHUFFLED_TCGDEX_IMAGES else None
+            _limitless_low_images(set_id) if (locale, set_id) in _SETS_HASHED_FROM_LIMITLESS else None
         )
         for card in detail.get("cards") or []:
             card_id = card.get("id")

@@ -13,7 +13,7 @@ from services.cardmarket_local_price_service import (
     resolve_market_price_eur,
 )
 from services.catalog_browse_service import readable_set_name
-from services.catalog_external_cards_service import ExternalCard, external_card
+from services.catalog_external_cards_service import ExternalCard, external_card, limitless_image_of_shuffled_set
 from services.japanese_latin_labels_service import (
     english_card_name,
     has_japanese_script,
@@ -303,6 +303,10 @@ def fetch_card_for_collection(
         if fallback_image is not None:
             image_url = fallback_image.low
             image_url_high = fallback_image.high
+    limitless_image = limitless_image_of_shuffled_set(lang, set_id, local_raw)
+    if limitless_image is not None:
+        image_url = limitless_image.low
+        image_url_high = limitless_image.high
 
     set_name = latin_set_name(set_id, readable_set_name(_set_name_from_card(primary) or _strip(set_detail.get("name"))))
     display_name = _latin_display_name(name_en, name_fr, name_ja, set_id=set_id, local_id=local_raw)
