@@ -102,7 +102,7 @@ useGoupixPageSeo(
 const { fetchSoldSales } = useStats()
 const toast = useToast()
 
-const loading: Ref<boolean> = ref(false)
+const loading: Ref<boolean> = ref(true)
 const payload: Ref<SoldSalesResponse | null> = ref(null)
 const channelFilter: Ref<SoldSalesChannelFilter> = ref(null)
 
@@ -157,11 +157,11 @@ async function load(): Promise<void> {
   }
 }
 
-watch(
-  channelFilter,
-  () => {
-    void load()
-  },
-  { immediate: true },
-)
+watch(channelFilter, (): void => {
+  load()
+})
+
+onMounted((): void => {
+  load()
+})
 </script>
