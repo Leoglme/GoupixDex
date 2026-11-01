@@ -18,6 +18,10 @@ export type ScanMatchDecision = {
   reprintTcgdexCardIds?: string[]
 }
 
+export type ScanIdentifyPhotoResponse = {
+  card: ScanMatchDecision | null
+}
+
 /** Physical-card language of the current scan session (`auto` = resolve per card). */
 export type ScanCardLanguage = 'auto' | 'ja' | 'en' | 'fr'
 
@@ -40,7 +44,7 @@ export type ScanIdentifyResult = {
   decision: ScanMatchDecision | null
   /**
    * Meilleur pari résolu de la tentative — committable même sans marge (top-1
-   * S0, ou print occidental v2 pour un cluster JA) — agrégé dans le temps.
+   * S0, ou print v2 sûr pour un cluster JA) — agrégé dans le temps.
    */
   topCandidate: ScanMatchDecision | null
   /** Similarité du `topCandidate` (0 quand aucun). */

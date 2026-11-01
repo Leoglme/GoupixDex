@@ -597,6 +597,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { renderSVG } from 'uqr'
 import type { Article } from '~/composables/useArticles'
+import type { AutoScanPhase, CardQuad } from '~/composables/useCardAutoScan'
 import type { CollectionCard } from '~/composables/useCollection'
 import type { ScanDirection, ScanEvent, ScanEventStatus } from '~/composables/useScanStream'
 import type { ArticlePublicationQueue } from '~/types/ArticlePublicationQueue'
@@ -657,6 +658,7 @@ const {
   refreshRecent,
   uploadPhoto,
   fetchScannedCardPreview,
+  identifyCardPhoto,
   commitMatchedScan,
   dismissEvent,
   undoScanEvent,
@@ -2041,14 +2043,93 @@ async function onPhashCrop(buf: ArrayBuffer, w: number, h: number): Promise<void
       ? { decision: result.topCandidate, seenAt: Date.now() }
       : null
   if (autoScanPhase.value === 'cooldown' || result.status !== 'match' || !result.decision) {
+    readStalledCardCode()
     return
   }
   showRecognizedCard(result.decision)
 }
 
+const CARD_CODE_READING_AFTER_MS = 2500
+const CARD_CODE_READING_RETRY_MS = 8000
+const CARD_CODE_READING_MARGIN = 0.08
+const CARD_CODE_READING_MAX_EDGE = 1600
+const isReadingCardCode: Ref<boolean> = ref(false)
+let cardInViewSince: number | null = null
+let lastCardCodeReadingAt = 0
+
+/**
+ * Photo nette de la carte cadrée : l'image pleine résolution de la caméra, recadrée avec une marge qui garde le code imprimé en bas.
+ * @param {CardQuad} quad - Coins de la carte, en pixels de la vidéo.
+ * @returns {Promise<File | null>} JPEG de la carte, ou `null` si la vidéo n'est pas prête.
+ */
+async function captureFramedCard(quad: CardQuad): Promise<File | null> {
+  const video: HTMLVideoElement | null = videoEl.value
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    return null
+  }
+  const cornerXs: number[] = quad.map((corner: CardQuad[number]): number => corner.x)
+  const cornerYs: number[] = quad.map((corner: CardQuad[number]): number => corner.y)
+  const marginX: number = (Math.max(...cornerXs) - Math.min(...cornerXs)) * CARD_CODE_READING_MARGIN
+  const marginY: number = (Math.max(...cornerYs) - Math.min(...cornerYs)) * CARD_CODE_READING_MARGIN
+  const left: number = Math.max(0, Math.min(...cornerXs) - marginX)
+  const top: number = Math.max(0, Math.min(...cornerYs) - marginY)
+  const width: number = Math.min(video.videoWidth, Math.max(...cornerXs) + marginX) - left
+  const height: number = Math.min(video.videoHeight, Math.max(...cornerYs) + marginY) - top
+  const scale: number = Math.min(1, CARD_CODE_READING_MAX_EDGE / Math.max(width, height))
+  const canvas: HTMLCanvasElement = document.createElement('canvas')
+  canvas.width = Math.round(width * scale)
+  canvas.height = Math.round(height * scale)
+  const context: CanvasRenderingContext2D | null = canvas.getContext('2d')
+  if (!context) {
+    return null
+  }
+  context.drawImage(video, left, top, width, height, 0, 0, canvas.width, canvas.height)
+  const blob: Blob | null = await new Promise<Blob | null>((resolve): void => {
+    canvas.toBlob(resolve, 'image/jpeg', 0.9)
+  })
+  return blob ? new File([blob], `carte-${Date.now()}.jpg`, { type: 'image/jpeg' }) : null
+}
+
+/**
+ * Lit le code imprimé de la carte cadrée quand les empreintes ne la reconnaissent pas depuis un moment, puis l'affiche comme une reconnaissance.
+ * @returns {Promise<void>} Résolue une fois la lecture terminée.
+ */
+async function readStalledCardCode(): Promise<void> {
+  const quad: CardQuad | null = cardQuad.value
+  const now: number = Date.now()
+  if (
+    quad === null ||
+    cardInViewSince === null ||
+    now - cardInViewSince < CARD_CODE_READING_AFTER_MS ||
+    now - lastCardCodeReadingAt < CARD_CODE_READING_RETRY_MS ||
+    isReadingCardCode.value ||
+    uploading.value ||
+    autoScanPhase.value !== 'watching'
+  ) {
+    return
+  }
+
+  const readCardInViewSince: number = cardInViewSince
+  lastCardCodeReadingAt = now
+  isReadingCardCode.value = true
+  let card: ScanMatchDecision | null = null
+  try {
+    const photo: File | null = await captureFramedCard(quad)
+    card = photo ? await identifyCardPhoto(photo, scanCardLanguage.value) : null
+  } catch {
+    card = null
+  } finally {
+    isReadingCardCode.value = false
+  }
+  const isReadCardStillInView: boolean = cardInViewSince === readCardInViewSince
+  if (card && isReadCardStillInView && autoScanPhase.value === 'watching') {
+    showRecognizedCard(card)
+  }
+}
+
 // Scan sans contact : le worker vision suit la carte, DEUX matchers l'identifient
 // en parallèle — pHash (rapide, empreinte artwork) et embedding (robuste aux
-// holos sombres) — aucun envoi de photo automatique, tout se joue sur l'appareil.
+// holos sombres) — une photo ne part que pour lire le code d'une carte qu'ils ne départagent pas.
 const autoScanEnabled = computed(() => webcamActive.value && webcamReady.value && autoScan.value)
 const {
   phase: autoScanPhase,
@@ -2165,6 +2246,9 @@ const autoScanStatus = computed<{ label: string; color: 'primary' | 'success' | 
   if (uploading.value) {
     return { label: 'Envoi en cours…', color: 'primary' }
   }
+  if (isReadingCardCode.value) {
+    return { label: 'Lecture du numéro de la carte…', color: 'primary' }
+  }
   switch (autoScanPhase.value) {
     case 'watching':
       return { label: 'Centrez la carte dans le cadre', color: 'neutral' }
@@ -2204,6 +2288,19 @@ watch(
   },
   { immediate: true },
 )
+
+watch(cardQuad, (quad: CardQuad | null): void => {
+  if (quad === null) {
+    cardInViewSince = null
+  } else if (cardInViewSince === null) {
+    cardInViewSince = Date.now()
+  }
+})
+watch(autoScanPhase, (phase: AutoScanPhase): void => {
+  if (phase === 'watching') {
+    cardInViewSince = cardQuad.value === null ? null : Date.now()
+  }
+})
 
 // Sound / auto-scan toggles happen inside a tap: unlock audio right there so
 // the confirmation beep is audible on iOS (context stays suspended otherwise).

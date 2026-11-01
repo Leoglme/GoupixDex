@@ -1234,6 +1234,56 @@ async def undo_added_scan(*, user_id: int, event_id: str) -> dict[str, Any]:
     return cancelled_event
 
 
+async def identify_card_photo(*, image_bytes: bytes, filename: str, physical_language: str) -> dict[str, Any] | None:
+    """
+    Lit le code du set et le numéro imprimés sur une photo de carte et renvoie la carte, sans rien ajouter.
+
+    Recours du scanner quand ses empreintes ne départagent pas une carte (SR holo sombre parmi ses voisines). Sans
+    l'enrichissement PokéWallet (100 requêtes par heure) : le code et le numéro suffisent, le nom imprimé sert de repli.
+
+    Returns:
+        ``{"tcgdexCardId", "language", "name", "setId", "localId"}``, ou ``None`` si le texte ne désigne aucune carte.
+
+    Raises:
+        RuntimeError: La lecture Groq a échoué.
+        ValueError: Groq n'est pas configuré, ou l'image est illisible.
+    """
+    loop = asyncio.get_running_loop()
+    async with _groq_sem:
+        ocr_bytes = await loop.run_in_executor(None, lambda: enhance_for_ocr(image_bytes))
+        ocr_result = await loop.run_in_executor(
+            None, lambda: extract_card_from_bytes(ocr_bytes, filename, enrich_from_pokewallet=False)
+        )
+    ocr_payload = dict(ocr_result)
+    language = (
+        physical_language
+        if physical_language in SUPPORTED_LOCALES
+        else detect_physical_language_from_ocr(ocr_payload)
+    )
+    tcgdex_card_id = await loop.run_in_executor(
+        None,
+        lambda: resolve_tcgdex_card_id_from_ocr(
+            ocr_set_code=ocr_payload.get("set_code"),
+            ocr_card_number=ocr_payload.get("card_number"),
+            ocr_pokemon_name_english=ocr_payload.get("pokemon_name_english"),
+            ocr_pokemon_name=ocr_payload.get("pokemon_name"),
+            physical_language=language,
+            ocr_card_number_denominator=ocr_payload.get("card_number_denominator"),
+        ),
+    )
+    if not tcgdex_card_id:
+        return None
+    meta = await loop.run_in_executor(None, lambda: scanned_card_meta(tcgdex_card_id, language))
+    set_id, _, local_id = tcgdex_card_id.rpartition("-")
+    return {
+        "tcgdexCardId": tcgdex_card_id,
+        "language": language,
+        "name": meta.get("display_name") or tcgdex_card_id,
+        "setId": meta.get("tcgdex_set_id") or set_id,
+        "localId": local_id,
+    }
+
+
 def submit_scan(
     *,
     user_id: int,

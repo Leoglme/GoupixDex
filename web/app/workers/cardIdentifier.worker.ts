@@ -57,7 +57,26 @@ const NONE_RESULT = {
 
 let engine = null
 
-/** Décode un fichier index GPXE → { cards, vectors int8, scales f32, dim }. */
+/** Sets de Pokémon TCG Pocket que les index livrés tiennent de TCGdex : des cartes du jeu mobile, sans carte physique à scanner. */
+const TCG_POCKET_SET_IDS = new Set([
+  'A1',
+  'A1a',
+  'A2',
+  'A2a',
+  'A2b',
+  'A3',
+  'A3a',
+  'A3b',
+  'A4',
+  'A4a',
+  'B1',
+  'B1a',
+  'B2',
+  'B2a',
+  'P-A',
+])
+
+/** Décode un fichier index GPXE → { cards, vectors int8, scales f32, dim }, sans les cartes de TCG Pocket. */
 function parseIndex(binBuf, meta) {
   const view = new DataView(binBuf)
   const magicOk =
@@ -68,19 +87,22 @@ function parseIndex(binBuf, meta) {
     throw new Error('scan-embed: index binaire invalide')
   }
   const stride = dim + 4
-  const vectors = new Int8Array(count * dim)
-  const scales = new Float32Array(count)
+  const physicalRows = []
   for (let i = 0; i < count; i += 1) {
-    vectors.set(new Int8Array(binBuf, 16 + i * stride, dim), i * dim)
-    scales[i] = view.getFloat32(16 + i * stride + dim, true)
+    if (!TCG_POCKET_SET_IDS.has(meta.cards[i][3])) {
+      physicalRows.push(i)
+    }
   }
-  const cards = meta.cards.map(([tcgdexCardId, locale, name, setId, localId]) => ({
-    tcgdexCardId,
-    locale,
-    name,
-    setId,
-    localId,
-  }))
+  const vectors = new Int8Array(physicalRows.length * dim)
+  const scales = new Float32Array(physicalRows.length)
+  physicalRows.forEach((i, n) => {
+    vectors.set(new Int8Array(binBuf, 16 + i * stride, dim), n * dim)
+    scales[n] = view.getFloat32(16 + i * stride + dim, true)
+  })
+  const cards = physicalRows.map((i) => {
+    const [tcgdexCardId, locale, name, setId, localId] = meta.cards[i]
+    return { tcgdexCardId, locale, name, setId, localId }
+  })
   const localeRows = new Set(cards.map((c) => c.tcgdexCardId + '|' + c.locale))
   return { cards, vectors, scales, dim, localeRows }
 }
@@ -400,8 +422,8 @@ async function identify(bufs, sessionLanguage) {
   }
   const s0 = decideFromTop(engine.s0Index, bestS0, S0_MIN_SIM, S0_MIN_MARGIN, sessionLanguage)
   // Cluster JA indécidable : S0 voit une carte japonaise avec force mais ne
-  // peut pas la départager (les AR japonaises partagent leur style de cadre,
-  // et les prints JA récents manquent à l'index) — seul cas où v2 tranche.
+  // peut pas la départager (les AR japonaises partagent leur style de cadre)
+  // — seul cas où v2 tranche.
   // Le meilleur crop POUR S0 n'est pas le meilleur POUR v2 (le print occidental
   // ne domine avec marge que sur certains cadrages) : on essaie v2 sur TOUS les
   // crops et on garde son meilleur top-8. C'est ce qui débloque la Capidextre
@@ -410,7 +432,7 @@ async function identify(bufs, sessionLanguage) {
   const jaClusterBlocked = s0TopCard !== null && s0TopCard.locale === 'ja' && s0.topSim >= S0_MIN_SIM
   let decision = s0.decision
   // Candidat par défaut = celui de S0 (top-1 résolu). En cluster JA, on le
-  // remplace par le print occidental v2 (S0 ne le voit jamais).
+  // remplace par le print v2, seulement s'il est sûr.
   let candidate = s0.candidate
   let candidateSim = s0.candidateSim
   if (!s0.decision && jaClusterBlocked) {
@@ -423,10 +445,8 @@ async function identify(bufs, sessionLanguage) {
     }
     const mnet = decideFromTop(engine.mnetIndex, bestMnet, MNET_MIN_SIM, MNET_MIN_MARGIN, sessionLanguage)
     decision = mnet.decision
-    if (mnet.candidate) {
-      candidate = mnet.candidate
-      candidateSim = mnet.candidateSim
-    }
+    candidate = mnet.decision
+    candidateSim = mnet.decision ? mnet.candidateSim : 0
   }
   return {
     decision,

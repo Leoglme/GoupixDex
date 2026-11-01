@@ -5,6 +5,8 @@ real time.
 
 * ``POST /scan-stream/photo`` — multipart upload, returns ``{ event_id }``
   immediately while a background task does OCR + TCGdex lookup + insert.
+* ``POST /scan-stream/identify-photo`` — reads the printed set code and number
+  of a card the phone could not match, returns the card without adding it.
 * ``GET  /scan-stream/recent`` — backlog used by the page on mount so the
   user sees the last batch of scans without waiting for new ones.
 * ``WS   /ws/scan-stream`` — user-scoped channel; JWT in the ``token`` query
@@ -39,6 +41,7 @@ from models.user import User
 from services.scan_stream_hub import get_scan_stream_hub
 from services.scan_stream_service import (
     build_scanned_card_preview,
+    identify_card_photo,
     submit_matched_scan,
     submit_scan,
     undo_added_scan,
@@ -143,6 +146,37 @@ async def upload_scan_photo(
         "physical_language": physical_language,
         "direction": scan_direction,
     }
+
+
+@router.post("/scan-stream/identify-photo")
+async def identify_scan_photo(
+    _: Annotated[User, Depends(get_current_user)],
+    file: Annotated[UploadFile, File(description="Photo de la carte cadrée par le scanner (JPEG / PNG / WebP)")],
+    language: Annotated[str, Form(description="Langue physique : auto (détection OCR) | fr | en | ja")] = "auto",
+) -> dict[str, Any]:
+    """
+    Read the printed set code and number of a card the on-device matchers could not tell apart, and return it as
+    ``{ "card": { tcgdexCardId, language, name, setId, localId } }`` (``card`` is ``null`` when the text matches no
+    card). Nothing is added to the collection: the phone shows the card like a local match.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image trop volumineuse ({len(data) // 1024} ko, max {_MAX_UPLOAD_BYTES // 1024} ko).",
+        )
+    try:
+        card = await identify_card_photo(
+            image_bytes=data,
+            filename=file.filename or "scan.jpg",
+            physical_language=_clean_language(language),
+        )
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("scan-stream identify-photo failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Lecture de la carte indisponible.") from exc
+    return {"card": card}
 
 
 _TCGDEX_CARD_ID_RE = re.compile(r"^[A-Za-z0-9.]+-[A-Za-z0-9.]+$")

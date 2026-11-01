@@ -3,6 +3,7 @@ import type { AxiosInstance } from 'axios'
 import type { CollectionCard } from '~/composables/useCollection'
 import type { FillableBinderSlot } from '~/types/binders'
 import type { ScannedCardPreview } from '~/types/ScannedCardSheet'
+import type { ScanIdentifyPhotoResponse, ScanMatchDecision } from '~/types/ScanMatch'
 
 /**
  * Phase of a scan event in the real-time pipeline.
@@ -516,6 +517,24 @@ export function useScanStream() {
   }
 
   /**
+   * POST `/scan-stream/identify-photo` — lit le code du set et le numéro imprimés sur la carte cadrée, sans l'ajouter.
+   *
+   * @param {File} photo - Carte recadrée sur le cadre du scanner.
+   * @param {string} language - Langue de session (`auto` | `fr` | `en` | `ja`).
+   * @returns {Promise<ScanMatchDecision | null>} Carte lue, ou `null` si le texte ne désigne aucune carte.
+   */
+  async function identifyCardPhoto(photo: File, language: string): Promise<ScanMatchDecision | null> {
+    const fd = new FormData()
+    fd.append('file', photo)
+    fd.append('language', language)
+    const { data } = await $api.post<ScanIdentifyPhotoResponse>('/scan-stream/identify-photo', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 45_000,
+    })
+    return data.card
+  }
+
+  /**
    * Commit a card identified on-device by the visual match index — no photo,
    * no OCR: the server adds/removes it right away and emits the usual
    * `queued` → `added` / `removed` events over the WebSocket.
@@ -597,6 +616,7 @@ export function useScanStream() {
     refreshRecent,
     uploadPhoto,
     fetchScannedCardPreview,
+    identifyCardPhoto,
     commitMatchedScan,
     dismissEvent,
     undoScanEvent,
